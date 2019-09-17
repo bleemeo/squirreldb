@@ -6,6 +6,7 @@ import (
 	"hamsterdb/config"
 	"hamsterdb/prometheus"
 	"hamsterdb/store"
+	"hamsterdb/util"
 	"log"
 	"time"
 )
@@ -16,25 +17,29 @@ func main() {
 	myBatch := batch.NewBatch(myStore, myCassandra)
 	myPrometheus := prometheus.NewPrometheus(myCassandra, myBatch)
 
-	func(attempts int, timeout time.Duration) {
-		for i := attempts; i >= 0; i-- {
-			if err := myCassandra.InitSession("cassandra0:9042"); err != nil {
-				log.Printf("[cassandra] InitSession: Can't initialize session (%v)"+"\n", err)
-				log.Printf("|______________________  Retry in %v (remaining attempts: %d)", timeout, i)
-			} else {
-				log.Printf("[cassandra] InitSession: Session successfully initialized")
-				return
-			}
+	if retryErr := util.Retry(config.CassandraInitSessionAttempts, config.CassandraInitSessionTimeout*time.Second, func() error {
+		err := myCassandra.InitSession("cassandra0:9042")
 
-			time.Sleep(timeout)
+		if err != nil {
+			log.Printf("[cassandra] InitSession: Can't initialize session (%v)"+"\n", err)
 		}
 
+		return err
+	}); retryErr == nil {
+		log.Printf("[cassandra] InitSession: Session successfully initialized")
+	} else {
 		log.Fatalf("[cassandra] InitSession: Failed to initialize session")
-	}(config.CassandraInitSessionAttempts, config.CassandraInitSessionTimeout*time.Second)
+	}
+
+	stopChn := make(chan bool)
+
+	go myBatch.RunFlushChecker(stopChn)
 
 	if err := myPrometheus.InitServer(); err != nil {
 		log.Fatalf("[prometheus] InitServer: Can't listen and serve (%v)", err)
 	}
+
+	stopChn <- true
 
 	myCassandra.CloseSession()
 }
