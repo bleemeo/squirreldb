@@ -3,8 +3,9 @@ package main
 import (
 	"hamsterdb/batch"
 	"hamsterdb/cassandra"
+	"hamsterdb/config"
+	"hamsterdb/prometheus"
 	"hamsterdb/store"
-	"hamsterdb/types"
 	"log"
 	"time"
 )
@@ -13,60 +14,27 @@ func main() {
 	myStore := store.NewStore()
 	myCassandra := cassandra.NewCassandra()
 	myBatch := batch.NewBatch(myStore, myCassandra)
+	myPrometheus := prometheus.NewPrometheus(myCassandra, myBatch)
 
-	metrics1 := []types.MetricPoints{
-		{
-			Metric: types.Metric{Labels: map[string]string{
-				"__name__": "up",
-			}},
-			Points: []types.Point{
-				{
-					Time:  time.Now().Add(100 * time.Second),
-					Value: 100,
-				},
-				{
-					Time:  time.Now().Add(200 * time.Second),
-					Value: 200,
-				},
-				{
-					Time:  time.Now().Add(300 * time.Second),
-					Value: 300,
-				},
-				{
-					Time:  time.Now().Add(500 * time.Second),
-					Value: 500,
-				},
-			},
-		},
-	}
-	metrics2 := []types.MetricPoints{
-		{
-			Metric: types.Metric{Labels: map[string]string{
-				"__name__": "up",
-			}},
-			Points: []types.Point{
-				{
-					Time:  time.Now().Add(400 * time.Second),
-					Value: 400,
-				},
-				{
-					Time:  time.Now().Add(600 * time.Second),
-					Value: 600,
-				},
-				{
-					Time:  time.Now().Add(1000 * time.Second),
-					Value: 1000,
-				},
-			},
-		},
-	}
+	func(attempts int, timeout time.Duration) {
+		for i := attempts; i >= 0; i-- {
+			if err := myCassandra.InitSession("cassandra0:9042"); err != nil {
+				log.Printf("[cassandra] InitSession: Can't initialize session (%v)"+"\n", err)
+				log.Printf("|______________________  Retry in %v (remaining attempts: %d)", timeout, i)
+			} else {
+				log.Printf("[cassandra] InitSession: Session successfully initialized")
+				return
+			}
 
-	if err := myCassandra.InitSession("127.0.0.1:9042"); err != nil {
-		log.Fatalf("[cassandra] InitSession: Can't initialize session (%v)", err)
-	}
+			time.Sleep(timeout)
+		}
 
-	_ = myBatch.Write(metrics1)
-	_ = myBatch.Write(metrics2)
+		log.Fatalf("[cassandra] InitSession: Failed to initialize session")
+	}(config.CassandraInitSessionAttempts, config.CassandraInitSessionTimeout*time.Second)
+
+	if err := myPrometheus.InitServer(); err != nil {
+		log.Fatalf("[prometheus] InitServer: Can't listen and serve (%v)", err)
+	}
 
 	myCassandra.CloseSession()
 }

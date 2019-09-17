@@ -1,10 +1,13 @@
 package config
 
 const (
-	BatchDuration = 300
+	BatchDuration        = 300
+	BatchCheckerDuration = 60
 )
 
 const (
-	CassandraKeyspace     = "remote_storage"
-	CassandraMetricsTable = "metrics"
+	CassandraInitSessionAttempts = 10
+	CassandraInitSessionTimeout  = 10
+	CassandraKeyspace            = "remote_storage"
+	CassandraMetricsTable        = "metrics"
 )

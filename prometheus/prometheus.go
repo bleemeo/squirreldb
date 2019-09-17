@@ -2,7 +2,6 @@ package prometheus
 
 import (
 	"hamsterdb/types"
-	"log"
 	"net/http"
 )
 
@@ -18,12 +17,15 @@ func NewPrometheus(reader types.Reader, writer types.Writer) *Prometheus {
 	return &Prometheus{readPoints: readPoints, writePoints: writePoints}
 }
 
-func (prometheus *Prometheus) InitServer() {
+func (prometheus *Prometheus) InitServer() error {
 	// Register read and write handlers
 	http.HandleFunc("/read", prometheus.readPoints.ServeHTTP)
 	http.HandleFunc("/write", prometheus.writePoints.ServeHTTP)
 
 	// Listen and serve
-	log.Fatalf("[prometheus] InitServer: Can't listen and serve (%v)",
-		http.ListenAndServe(":1234", nil))
+	if err := http.ListenAndServe(":1234", nil); err != nil {
+		return err
+	}
+
+	return nil
 }

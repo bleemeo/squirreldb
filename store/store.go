@@ -16,6 +16,37 @@ func NewStore() *Store {
 	}
 }
 
+func (store *Store) Append(newMsPoints map[string]types.MetricPoints, currentMsPoints map[string]types.MetricPoints) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	for key, mPoints := range newMsPoints {
+		item, itemExists := store.msPoints[key]
+
+		if !itemExists {
+			item.Labels = mPoints.Labels
+		}
+
+		item.AddPoints(mPoints.Points)
+
+		store.msPoints[key] = item
+	}
+
+	for key, mPoints := range currentMsPoints {
+		item, itemExists := store.msPoints[key]
+
+		if !itemExists {
+			item.Labels = mPoints.Labels
+		}
+
+		item.AddPoints(mPoints.Points)
+
+		store.msPoints[key] = item
+	}
+
+	return nil
+}
+
 func (store *Store) Get(key string) (types.MetricPoints, error) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
@@ -30,27 +61,11 @@ func (store *Store) Set(newMsPoints map[string]types.MetricPoints, currentMsPoin
 	defer store.mutex.Unlock()
 
 	for key, mPoints := range newMsPoints {
-		item, itemExists := store.msPoints[key]
-
-		if !itemExists {
-			store.msPoints[key] = mPoints
-		} else {
-			item.AddPoints(mPoints.Points)
-
-			store.msPoints[key] = item
-		}
+		store.msPoints[key] = mPoints
 	}
 
 	for key, mPoints := range currentMsPoints {
-		item, itemExists := store.msPoints[key]
-
-		if !itemExists {
-			store.msPoints[key] = mPoints
-		} else {
-			item.AddPoints(mPoints.Points)
-
-			store.msPoints[key] = item
-		}
+		store.msPoints[key] = mPoints
 	}
 
 	return nil

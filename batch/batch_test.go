@@ -60,7 +60,9 @@ func TestBatch_Flush(t *testing.T) {
 		mutex             sync.Mutex
 	}
 	type args struct {
-		flushQueue map[string][]State
+		flushQueue    map[string][]State
+		currentTime   time.Time
+		batchDuration float64
 	}
 	tests := []struct {
 		name        string
@@ -77,7 +79,7 @@ func TestBatch_Flush(t *testing.T) {
 				persistentStorage: &mockPersistentStorage{},
 				states: map[string]State{
 					`__name__="testing"`: {
-						pointNumbers:   1,
+						pointCount:     1,
 						firstPointTime: time.Unix(0, 0),
 						lastPointTime:  time.Unix(100, 0),
 						flushDeadline:  time.Time{},
@@ -85,22 +87,26 @@ func TestBatch_Flush(t *testing.T) {
 				},
 				mutex: sync.Mutex{},
 			},
-			args: args{flushQueue: map[string][]State{
-				`__name__="testing"`: {
-					{
-						pointNumbers:   1,
-						firstPointTime: time.Unix(25, 0),
-						lastPointTime:  time.Unix(100, 0),
-						flushDeadline:  time.Time{},
-					},
-					{
-						pointNumbers:   1,
-						firstPointTime: time.Unix(200, 0),
-						lastPointTime:  time.Unix(275, 0),
-						flushDeadline:  time.Time{},
+			args: args{
+				flushQueue: map[string][]State{
+					`__name__="testing"`: {
+						{
+							pointCount:     1,
+							firstPointTime: time.Unix(25, 0),
+							lastPointTime:  time.Unix(100, 0),
+							flushDeadline:  time.Time{},
+						},
+						{
+							pointCount:     1,
+							firstPointTime: time.Unix(200, 0),
+							lastPointTime:  time.Unix(275, 0),
+							flushDeadline:  time.Time{},
+						},
 					},
 				},
-			}},
+				currentTime:   time.Unix(1000, 0),
+				batchDuration: 300,
+			},
 			newMsPoints: map[string]types.MetricPoints{
 				`__name__="testing"`: {
 					Metric: types.Metric{Labels: map[string]string{
@@ -182,7 +188,7 @@ func TestBatch_Flush(t *testing.T) {
 				mutex:             tt.fields.mutex,
 			}
 			_ = tt.fields.temporaryStorage.Set(tt.newMsPoints, nil)
-			if err := batch.Flush(tt.args.flushQueue); (err != nil) != tt.wantErr {
+			if err := batch.flush(tt.args.flushQueue, tt.args.currentTime, tt.args.batchDuration); (err != nil) != tt.wantErr {
 				t.Errorf("Flush() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(tt.fields.persistentStorage.got, tt.want) {
@@ -265,13 +271,13 @@ func TestBatch_Write(t *testing.T) {
 			},
 			want: map[string]State{
 				`name="testing1"`: {
-					pointNumbers:   1,
+					pointCount:     1,
 					firstPointTime: time.Unix(300, 0),
 					lastPointTime:  time.Unix(300, 0),
 					flushDeadline:  time.Unix(400, 0),
 				},
 				`name="testing2"`: {
-					pointNumbers:   2,
+					pointCount:     2,
 					firstPointTime: time.Unix(200, 0),
 					lastPointTime:  time.Unix(300, 0),
 					flushDeadline:  time.Unix(300, 0),
