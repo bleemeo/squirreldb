@@ -1,28 +1,24 @@
 package config
 
-// Seconds
 const (
-	BatchTimeLength = 60
-
-	BatchCheckerDelay = 5
-
-	BatchAppendAttempts = -1
-	BatchAppendTimeout  = 10
-
-	BatchGetAttempts = -1
-	BatchGetTimeout  = 10
-
-	BatchSetAttempts = -1
-	BatchSetTimeout  = 10
-
-	BatchWriteAttempts = -1
-	BatchWriteTimeout  = 10
+	BatchLength          = 300
+	BatchCheckerInterval = 60
+	BatchRetryDelay      = 10
 )
 
 const (
-	CassandraKeyspace     = "remote_storage"
-	CassandraMetricsTable = "metrics"
+	CassandraKeyspace          = "remote_storage"
+	CassandraReplicationFactor = 1
+	CassandraMetricsTable      = "metrics"
+	CassandraMetricRetention   = 397
+	CassandraRetryDelay        = 10
+)
 
-	CassandraInitSessionAttempts = 10
-	CassandraInitSessionTimeout  = 10
+const (
+	PartitionLength = 432000
+)
+
+const (
+	PrometheusAddress    = ":1234"
+	PrometheusRetryDelay = 10
 )

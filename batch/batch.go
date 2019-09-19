@@ -1,213 +1,187 @@
 package batch
 
 import (
+	"context"
 	"hamsterdb/config"
+	"hamsterdb/retry"
 	"hamsterdb/types"
-	"hamsterdb/util"
 	"log"
+	"os"
 	"sync"
 	"time"
 )
 
-type Storer interface {
-	Append(newMsPoints map[string]types.MetricPoints, currentMsPoints map[string]types.MetricPoints) error
-	Get(key string) (types.MetricPoints, error)
-	Set(newMsPoints map[string]types.MetricPoints, currentMsPoints map[string]types.MetricPoints) error
+var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
+
+type MetricStorer interface {
+	Append(newPoints, existingPoints map[string][]types.Point) error
+	Get(key string) ([]types.Point, error)
+	Set(newPoints, existingPoints map[string][]types.Point) error
 }
 
 type state struct {
+	types.Metric
 	pointCount     int
 	firstPointTime time.Time
 	lastPointTime  time.Time
 	flushDeadline  time.Time
 }
 
-type batch struct {
-	temporaryStorage  Storer
-	persistentStorage types.Writer
+type Batch struct {
+	temporaryStorage  MetricStorer
+	persistentStorage types.MetricWriter
 
 	states map[string]state
 	mutex  sync.Mutex
 }
 
-func NewBatch(temporaryStorage Storer, persistentStorage types.Writer) *batch {
-	return &batch{
+func NewBatch(temporaryStorage MetricStorer, persistentStorage types.MetricWriter) *Batch {
+	return &Batch{
 		temporaryStorage:  temporaryStorage,
 		persistentStorage: persistentStorage,
 		states:            make(map[string]state),
 	}
 }
 
-func (b *batch) RunFlushChecker(stopChn chan bool) {
-	ticker := time.NewTicker(config.BatchCheckerDelay * time.Second)
+func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(config.BatchCheckerInterval * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			_ = b.flushCheck(time.Now())
-		case <-stopChn:
-			ticker.Stop()
+			_ = b.check(time.Now(), config.BatchLength, false)
+		case <-ctx.Done():
+			logger.Printf("RunChecker: Stopping...")
+			_ = b.check(time.Now(), config.BatchLength, true)
+			logger.Printf("RunChecker: Stopped")
+			wg.Done()
 			return
 		}
 	}
 }
 
-func (b *batch) flush(flushQueue map[string][]state, currentTime time.Time, batchTimeLength float64) error {
-	// Create the list of metrics to be written
+func (b *Batch) Write(msPoints []types.MetricPoints) error {
+	return b.write(msPoints, time.Now(), config.BatchLength)
+}
+
+func (b *Batch) check(now time.Time, batchLength time.Duration, flushAll bool) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	stateQueue := make(map[string][]state)
+
+	for key, state := range b.states {
+		if state.flushDeadline.Before(now) || flushAll {
+			stateQueue[key] = append(stateQueue[key], state)
+		}
+	}
+
+	if len(stateQueue) != 0 {
+		_ = b.flush(stateQueue, now, batchLength)
+	}
+
+	return nil
+}
+
+func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength time.Duration) error {
 	var msPointsToWrite []types.MetricPoints
-	// Create the list of metrics to be set
-	msPointsToSet := make(map[string]types.MetricPoints)
+	msPointsToSet := make(map[string][]types.Point)
 
-	// Iteration on each metric state
-	for key, states := range flushQueue {
-		var mPoints types.MetricPoints
+	batchLength *= time.Second
 
-		if retryErr := util.Retry(config.BatchGetAttempts, config.BatchGetTimeout*time.Second, func() error {
+	for key, states := range stateQueue {
+		var points []types.Point
+
+		retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
 			var err error
-			mPoints, err = b.temporaryStorage.Get(key)
+			points, err = b.temporaryStorage.Get(key)
 
 			if err != nil {
-				log.Printf("[batch] Flush: Can't get metric points from temporaryStorage (%v)", err)
+				logger.Printf("flush: Can't get points from temporaryStorage (%v)"+"\n", err)
 			}
 
 			return err
-		}); retryErr != nil {
-			return retryErr
-		}
+		}, logger)
 
-		// Iteration on each state of a metric
 		for _, state := range states {
-			// Created a metric with the points to be written
 			mPointsToWrite := types.MetricPoints{
-				Metric: mPoints.Metric,
+				Metric: state.Metric,
+				Points: nil,
 			}
 
-			// Iteration on each point of a metric
-			for _, point := range mPoints.Points {
-				//  Checks if the point is between the time of the first point and the last point of the state
-				if util.TimeBetween(point.Time, state.firstPointTime, state.lastPointTime) {
+			for _, point := range points {
+				if !point.Time.Before(state.firstPointTime) && !point.Time.After(state.lastPointTime) {
 					mPointsToWrite.Points = append(mPointsToWrite.Points, point)
 				}
 			}
 
-			// Adds the metric to be written to the list of metrics to be written
 			msPointsToWrite = append(msPointsToWrite, mPointsToWrite)
 		}
 
-		// Lists the points to be deleted
-		cutoff := currentTime.Add(time.Duration(-batchTimeLength) * time.Second)
 		currentState := b.states[key]
-		var pointsTimeToDelete []time.Time
+		cutoff := now.Add(batchLength)
+		var pointsToSet []types.Point
 
-		// Iteration on each point of a metric
-		for _, point := range mPoints.Points {
-			// Checks whether or not the point time is before the cut-off time or
-			// whether or not it is before the time of the first point of the metric ongoing state
-			if point.Time.Before(cutoff) && point.Time.Before(currentState.firstPointTime) {
-				pointsTimeToDelete = append(pointsTimeToDelete, point.Time)
+		for _, point := range points {
+			if !point.Time.Before(cutoff) || !point.Time.Before(currentState.firstPointTime) {
+				pointsToSet = append(pointsToSet, point)
 			}
 		}
 
-		// Deletes expired points from their time
-		mPoints.RemovePoints(pointsTimeToDelete)
-
-		// Adds the metric to the list of metrics to be set
-		msPointsToSet[key] = mPoints
+		msPointsToSet[key] = pointsToSet
 	}
 
-	// Write the list of metrics to be written
-	if retryErr := util.Retry(config.BatchWriteAttempts, config.BatchWriteTimeout*time.Second, func() error {
+	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
 		err := b.persistentStorage.Write(msPointsToWrite)
 
 		if err != nil {
-			log.Printf("[batch] Flush: Can't write in persistentStorage (%v)", err)
+			logger.Printf("flush: Can't write metrics points to persistentStorage (%v)"+"\n", err)
 		}
 
 		return err
-	}); retryErr != nil {
-		return retryErr
-	}
+	}, logger)
 
-	// Define the list of metrics to be defined
-	if retryErr := util.Retry(config.BatchSetAttempts, config.BatchSetTimeout*time.Second, func() error {
+	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
 		err := b.temporaryStorage.Set(nil, msPointsToSet)
 
 		if err != nil {
-			log.Printf("[batch] Flush: Can't set metrics points in temporaryStorage (%v)", err)
+			logger.Printf("flush: Can't set metrics points to temporaryStorage (%v)"+"\n", err)
 		}
 
 		return err
-	}); retryErr != nil {
-		return retryErr
-	}
+	}, logger)
 
 	return nil
 }
 
-func (b *batch) flushCheck(currentTime time.Time) error {
+func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength time.Duration) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	flushQueue := make(map[string][]state)
+	newPoints := make(map[string][]types.Point)
+	existingPoints := make(map[string][]types.Point)
+	stateQueue := make(map[string][]state)
 
-	// Iteration on each ongoing state
-	for key, state := range b.states {
-		// Checks if the deadline time is before or not the current time
-		if state.flushDeadline.Before(currentTime) {
-			// Adds the state to the flush queue and remove it from ongoing states
-			flushQueue[key] = append(flushQueue[key], state)
-			delete(b.states, key)
-		}
-	}
+	batchLength *= time.Second
 
-	// Check if there are any points to flush and do it if this is the case
-	if len(flushQueue) != 0 {
-		if err := b.flush(flushQueue, time.Now(), config.BatchTimeLength); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (b *batch) Write(msPoints []types.MetricPoints) error {
-	return b.write(msPoints, time.Now(), config.BatchTimeLength)
-}
-
-func (b *batch) write(msPoints []types.MetricPoints, currentTime time.Time, batchTimeLength float64) error {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-
-	currentMsPoints := make(map[string]types.MetricPoints)
-	newMsPoints := make(map[string]types.MetricPoints)
-	flushQueue := make(map[string][]state)
-
-	// Iterate on each MetricPoints
 	for _, mPoints := range msPoints {
 		key := mPoints.CanonicalLabels()
 
-		// Iterate on each point of a MetricPoint
 		for _, point := range mPoints.Points {
-			currentState, stateExists := b.states[key]
+			currentState, exists := b.states[key]
 
-			// Checks whether the state exists or not
-			if !stateExists {
-				// Create a new state
+			if !exists {
 				currentState = state{
+					Metric:         mPoints.Metric,
 					pointCount:     1,
 					firstPointTime: point.Time,
 					lastPointTime:  point.Time,
-					flushDeadline:  point.Time.Add(time.Duration(batchTimeLength) * time.Second),
+					flushDeadline:  now.Add(batchLength),
 				}
-
-				// Adds the point in the new points map
-				newMPoints := newMsPoints[key]
-				newMPoints.Labels = mPoints.Labels
-				newMPoints.Points = append(newMPoints.Points, point)
-				newMsPoints[key] = newMPoints
 			} else {
-				// Search for a time before the first point or after the last point
-				nextFirstPointTime, nextLastPointTime := currentState.firstPointTime, currentState.lastPointTime
+				nextFirstPointTime := currentState.firstPointTime
+				nextLastPointTime := currentState.lastPointTime
 
 				if point.Time.Before(nextFirstPointTime) {
 					nextFirstPointTime = point.Time
@@ -217,59 +191,49 @@ func (b *batch) write(msPoints []types.MetricPoints, currentTime time.Time, batc
 					nextLastPointTime = point.Time
 				}
 
-				// Checks the delta duration between the first and last point
 				nextDeltaDuration := nextLastPointTime.Sub(nextFirstPointTime)
 
-				// Checks whether the deadline date has expired or not and
-				// whether the delta duration calculated is either less or more than the duration of a batch
-				if currentState.flushDeadline.Before(currentTime) || (nextDeltaDuration.Seconds() >= batchTimeLength) {
-					// Adds the state to the flush queue and remove it from ongoing states
-					flushQueue[key] = append(flushQueue[key], currentState)
+				if currentState.flushDeadline.Before(now) || (nextDeltaDuration.Seconds() >= batchLength.Seconds()) {
+					stateQueue[key] = append(stateQueue[key], currentState)
+					exists = false
 					delete(b.states, key)
 
 					currentState = state{
+						Metric:         mPoints.Metric,
 						pointCount:     1,
 						firstPointTime: point.Time,
 						lastPointTime:  point.Time,
-						flushDeadline:  point.Time.Add(time.Duration(batchTimeLength) * time.Second),
+						flushDeadline:  now.Add(batchLength),
 					}
 				} else {
-					// Increases the point count and assigns the new times
 					currentState.pointCount += 1
 					currentState.firstPointTime = nextFirstPointTime
 					currentState.lastPointTime = nextLastPointTime
-
-					// Adds the point to the current point map
-					currentMPoints := currentMsPoints[key]
-					currentMPoints.Labels = mPoints.Labels
-					currentMPoints.Points = append(currentMPoints.Points, point)
-					currentMsPoints[key] = currentMPoints
 				}
 			}
 
-			// Adds it to the state map
 			b.states[key] = currentState
+
+			if !exists {
+				newPoints[key] = append(newPoints[key], point)
+			} else {
+				existingPoints[key] = append(existingPoints[key], point)
+			}
 		}
 	}
 
-	// Append the points in the temporary store
-	if retryErr := util.Retry(config.BatchAppendAttempts, config.BatchAppendTimeout*time.Second, func() error {
-		err := b.temporaryStorage.Append(newMsPoints, currentMsPoints)
+	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
+		err := b.temporaryStorage.Append(newPoints, existingPoints)
 
 		if err != nil {
-			log.Printf("[batch] Write: Can't append metrics points in temporaryStorage (%v)", err)
+			logger.Printf("write: Can't append metrics points to temporaryStorage (%v)"+"\n", err)
 		}
 
 		return err
-	}); retryErr != nil {
-		return retryErr
-	}
+	}, logger)
 
-	// Check if there are any points to flush and do it if this is the case
-	if len(flushQueue) != 0 {
-		if err := b.flush(flushQueue, currentTime, batchTimeLength); err != nil {
-			return err
-		}
+	if len(stateQueue) != 0 {
+		_ = b.flush(stateQueue, now, config.BatchLength)
 	}
 
 	return nil

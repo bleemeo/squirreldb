@@ -1,45 +1,63 @@
 package main
 
 import (
+	"context"
 	"hamsterdb/batch"
 	"hamsterdb/cassandra"
 	"hamsterdb/config"
 	"hamsterdb/prometheus"
+	"hamsterdb/retry"
 	"hamsterdb/store"
-	"hamsterdb/util"
 	"log"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 )
 
 func main() {
+	logger := log.New(os.Stdout, "[main] ", log.LstdFlags)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	signals := make(chan os.Signal)
+	defer close(signals)
+
 	myStore := store.NewStore()
 	myCassandra := cassandra.NewCassandra()
 	myBatch := batch.NewBatch(myStore, myCassandra)
 	myPrometheus := prometheus.NewPrometheus(myCassandra, myBatch)
 
-	if retryErr := util.Retry(config.CassandraInitSessionAttempts, config.CassandraInitSessionTimeout*time.Second, func() error {
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+
+	retry.Endlessly(config.CassandraRetryDelay*time.Second, func() error {
 		err := myCassandra.InitSession("cassandra0:9042")
 
 		if err != nil {
-			log.Printf("[cassandra] InitSession: Can't initialize session (%v)"+"\n", err)
+			logger.Printf("Can't init Cassandra session (%v)"+"\n", err)
 		}
 
 		return err
-	}); retryErr == nil {
-		log.Printf("[cassandra] InitSession: Session successfully initialized")
-	} else {
-		log.Fatalf("[cassandra] InitSession: Failed to initialize session")
-	}
+	}, logger)
 
-	stopChn := make(chan bool)
+	wg.Add(1)
+	go myPrometheus.RunServer(ctx, &wg)
 
-	go myBatch.RunFlushChecker(stopChn)
+	wg.Add(1)
+	go myBatch.RunChecker(ctx, &wg)
 
-	if err := myPrometheus.InitServer(); err != nil {
-		log.Fatalf("[prometheus] InitServer: Can't listen and serve (%v)", err)
-	}
+	logger.Println("Hamster ready")
 
-	stopChn <- true
+	<-signals
+
+	logger.Println("Stopping...")
+
+	cancel()
+
+	wg.Wait()
 
 	myCassandra.CloseSession()
+
+	logger.Println("Stopped")
 }

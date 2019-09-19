@@ -2,44 +2,53 @@ package cassandra
 
 import (
 	"fmt"
+	"hamsterdb/config"
 	"hamsterdb/types"
+	"strings"
 )
 
-func (cassandra *Cassandra) Write(msPoints []types.MetricPoints) error {
+func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 	for _, mPoints := range msPoints {
 		labels := mPoints.CanonicalLabels()
-		var timestamp int64
-		var values string
-		var valuesByte []byte
+		partsPoints := make(map[int64][]types.Point)
 
-		// Search the smallest timestamp
-		for i, point := range mPoints.Points {
-			if i == 0 {
-				timestamp = point.Time.Unix()
-			} else if pointTimestamp := point.Time.Unix(); pointTimestamp < timestamp {
-				timestamp = pointTimestamp
-			}
+		for _, point := range mPoints.Points {
+			timestamp := point.Time.Unix() - (point.Time.Unix() % config.PartitionLength)
+
+			partsPoints[timestamp] = append(partsPoints[timestamp], point)
 		}
 
-		// Canonicalize points
-		for i, point := range mPoints.Points {
-			if i == 0 {
-				values = fmt.Sprintf("%d=%f", point.Time.Unix()-timestamp, point.Value)
-			} else {
-				values = fmt.Sprintf("%s,%d=%f", values, point.Time.Unix()-timestamp, point.Value)
+		for timestamp, points := range partsPoints {
+			var smallestTimestamp int64
+
+			for i, point := range points {
+				if (i == 0) || (point.Time.Unix() < smallestTimestamp) {
+					smallestTimestamp = point.Time.Unix()
+				}
 			}
-		}
 
-		valuesByte = []byte(values)
+			offsetTimestamp := smallestTimestamp - timestamp
 
-		// Insert new entry in metrics table
-		insertQuery := cassandra.session.Query(
-			"INSERT INTO "+metricsTable+" (labels, timestamp, values)"+
-				"VALUES (?, ?, ?)",
-			labels, timestamp, valuesByte)
+			var elements []string
 
-		if err := insertQuery.Exec(); err != nil {
-			return err
+			for _, point := range points {
+				subOffsetTimestamp := point.Time.Unix() - timestamp - offsetTimestamp
+				element := fmt.Sprintf("%d=%f", subOffsetTimestamp, point.Value)
+
+				elements = append(elements, element)
+			}
+
+			values := []byte(strings.Join(elements, ","))
+
+			// TODO: Add TTL support
+			insert := c.session.Query(
+				"INSERT INTO "+metricsTable+" (labels, timestamp, offset_timestamp, insert_time, values)"+
+					"VALUES (?, ?, ?, now(), ?)",
+				labels, timestamp, offsetTimestamp, values)
+
+			if err := insert.Exec(); err != nil {
+				return err
+			}
 		}
 	}
 

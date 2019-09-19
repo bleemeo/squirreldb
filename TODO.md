@@ -1,10 +1,23 @@
-# TODO
+# hamsterdb
+## TODO
 
-## Batch
+### Batch
 
-- Replay lost data (via pointNumbers of the metric status)
-- Flush all temporaryStorage data when stopping the process
+- Replay lost data
 
-## Store (local)
+### Cassandra
+
+- Read system
+- Support TTL
+
+### Prometheus
+
+- Read system
+
+### Redis
+
+- Communication system (Append, Get, Set)
+
+### Store
 
 - Create an expiration system

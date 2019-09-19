@@ -9,33 +9,33 @@ import (
 	"time"
 )
 
-type mockPersistentStorage struct {
+type mockMetricWriter struct {
 	got []types.MetricPoints
 }
 
-func (mock *mockPersistentStorage) Write(msPoints []types.MetricPoints) error {
-	mock.got = msPoints
+func (m *mockMetricWriter) Write(msPoints []types.MetricPoints) error {
+	m.got = msPoints
 
 	return nil
 }
 
 func TestNewBatch(t *testing.T) {
 	type args struct {
-		temporaryStorage  Storer
-		persistentStorage types.Writer
+		temporaryStorage  MetricStorer
+		persistentStorage types.MetricWriter
 	}
 	tests := []struct {
 		name string
 		args args
-		want *batch
+		want *Batch
 	}{
 		{
-			name: "basic",
+			name: "new_batch",
 			args: args{
 				temporaryStorage:  nil,
 				persistentStorage: nil,
 			},
-			want: &batch{
+			want: &Batch{
 				temporaryStorage:  nil,
 				persistentStorage: nil,
 				states:            make(map[string]state),
@@ -52,65 +52,91 @@ func TestNewBatch(t *testing.T) {
 	}
 }
 
-func TestBatch_Flush(t *testing.T) {
+func TestBatch_check(t *testing.T) {
 	type fields struct {
-		temporaryStorage  Storer
-		persistentStorage *mockPersistentStorage
+		temporaryStorage  MetricStorer
+		persistentStorage mockMetricWriter
 		states            map[string]state
 		mutex             sync.Mutex
 	}
 	type args struct {
-		flushQueue      map[string][]state
-		currentTime     time.Time
-		batchTimeLength float64
+		now         time.Time
+		batchLength time.Duration
+		flushAll    bool
 	}
 	tests := []struct {
-		name        string
-		fields      fields
-		args        args
-		newMsPoints map[string]types.MetricPoints
-		want        []types.MetricPoints
-		wantErr     bool
+		name    string
+		fields  fields
+		args    args
+		want    []types.MetricPoints
+		wantErr bool
 	}{
 		{
-			name: "basic",
+			name: "check_simple",
 			fields: fields{
-				temporaryStorage:  store.NewStore(),
-				persistentStorage: &mockPersistentStorage{},
+				temporaryStorage: &store.Store{
+					Points: map[string][]types.Point{
+						`__name__="testing1"`: {
+							{
+								Time:  time.Unix(0, 0),
+								Value: 0,
+							},
+						},
+						`__name__="testing2"`: {
+							{
+								Time:  time.Unix(0, 0),
+								Value: 0,
+							},
+							{
+								Time:  time.Unix(25, 0),
+								Value: 25,
+							},
+						},
+					},
+				},
+				persistentStorage: mockMetricWriter{},
 				states: map[string]state{
-					`__name__="testing"`: {
+					`__name__="testing1"`: {
+						Metric: types.Metric{Labels: map[string]string{
+							"__name__": "testing1",
+						}},
 						pointCount:     1,
 						firstPointTime: time.Unix(0, 0),
-						lastPointTime:  time.Unix(100, 0),
-						flushDeadline:  time.Time{},
+						lastPointTime:  time.Unix(0, 0),
+						flushDeadline:  time.Unix(50, 0),
+					},
+					`__name__="testing2"`: {
+						Metric: types.Metric{Labels: map[string]string{
+							"__name__": "testing2",
+						}},
+						pointCount:     2,
+						firstPointTime: time.Unix(0, 0),
+						lastPointTime:  time.Unix(25, 0),
+						flushDeadline:  time.Unix(50, 0),
 					},
 				},
 				mutex: sync.Mutex{},
 			},
 			args: args{
-				flushQueue: map[string][]state{
-					`__name__="testing"`: {
+				now:         time.Unix(100, 0),
+				batchLength: 50,
+				flushAll:    false,
+			},
+			want: []types.MetricPoints{
+				{
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing1",
+					}},
+					Points: []types.Point{
 						{
-							pointCount:     1,
-							firstPointTime: time.Unix(25, 0),
-							lastPointTime:  time.Unix(100, 0),
-							flushDeadline:  time.Time{},
-						},
-						{
-							pointCount:     1,
-							firstPointTime: time.Unix(200, 0),
-							lastPointTime:  time.Unix(275, 0),
-							flushDeadline:  time.Time{},
+							Time:  time.Unix(0, 0),
+							Value: 0,
 						},
 					},
 				},
-				currentTime:     time.Unix(1000, 0),
-				batchTimeLength: 300,
-			},
-			newMsPoints: map[string]types.MetricPoints{
-				`__name__="testing"`: {
+				{
 					Metric: types.Metric{Labels: map[string]string{
-						"name": "testing",
+						"__name__": "testing2",
 					}},
 					Points: []types.Point{
 						{
@@ -118,42 +144,71 @@ func TestBatch_Flush(t *testing.T) {
 							Value: 0,
 						},
 						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
-						},
-						{
-							Time:  time.Unix(200, 0),
-							Value: 200,
-						},
-						{
-							Time:  time.Unix(250, 0),
-							Value: 250,
-						},
-						{
-							Time:  time.Unix(300, 0),
-							Value: 300,
+							Time:  time.Unix(25, 0),
+							Value: 25,
 						},
 					},
 				},
 			},
+			wantErr: false,
+		},
+		{
+			name: "check_flush_all",
+			fields: fields{
+				temporaryStorage: &store.Store{
+					Points: map[string][]types.Point{
+						`__name__="testing1"`: {
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
+						},
+						`__name__="testing2"`: {
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
+							{
+								Time:  time.Unix(125, 0),
+								Value: 125,
+							},
+						},
+					},
+				},
+				persistentStorage: mockMetricWriter{},
+				states: map[string]state{
+					`__name__="testing1"`: {
+						Metric: types.Metric{Labels: map[string]string{
+							"__name__": "testing1",
+						}},
+						pointCount:     1,
+						firstPointTime: time.Unix(100, 0),
+						lastPointTime:  time.Unix(100, 0),
+						flushDeadline:  time.Unix(150, 0),
+					},
+					`__name__="testing2"`: {
+						Metric: types.Metric{Labels: map[string]string{
+							"__name__": "testing2",
+						}},
+						pointCount:     2,
+						firstPointTime: time.Unix(100, 0),
+						lastPointTime:  time.Unix(125, 0),
+						flushDeadline:  time.Unix(150, 0),
+					},
+				},
+				mutex: sync.Mutex{},
+			},
+			args: args{
+				now:         time.Unix(100, 0),
+				batchLength: 50,
+				flushAll:    true,
+			},
 			want: []types.MetricPoints{
 				{
 					Metric: types.Metric{Labels: map[string]string{
-						"name": "testing",
+						"__name__": "testing1",
 					}},
 					Points: []types.Point{
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
 						{
 							Time:  time.Unix(100, 0),
 							Value: 100,
@@ -162,16 +217,16 @@ func TestBatch_Flush(t *testing.T) {
 				},
 				{
 					Metric: types.Metric{Labels: map[string]string{
-						"name": "testing",
+						"__name__": "testing2",
 					}},
 					Points: []types.Point{
 						{
-							Time:  time.Unix(200, 0),
-							Value: 200,
+							Time:  time.Unix(100, 0),
+							Value: 100,
 						},
 						{
-							Time:  time.Unix(250, 0),
-							Value: 250,
+							Time:  time.Unix(125, 0),
+							Value: 125,
 						},
 					},
 				},
@@ -181,34 +236,188 @@ func TestBatch_Flush(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			batch := &batch{
+			b := &Batch{
 				temporaryStorage:  tt.fields.temporaryStorage,
-				persistentStorage: tt.fields.persistentStorage,
+				persistentStorage: &tt.fields.persistentStorage,
 				states:            tt.fields.states,
 				mutex:             tt.fields.mutex,
 			}
-			_ = tt.fields.temporaryStorage.Set(tt.newMsPoints, nil)
-			if err := batch.flush(tt.args.flushQueue, tt.args.currentTime, tt.args.batchTimeLength); (err != nil) != tt.wantErr {
-				t.Errorf("Flush() error = %v, wantErr %v", err, tt.wantErr)
+			if err := b.check(tt.args.now, tt.args.batchLength, tt.args.flushAll); (err != nil) != tt.wantErr {
+				t.Errorf("check() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(tt.fields.persistentStorage.got, tt.want) {
-				t.Errorf("Flush() got = %v, want %v", tt.fields.persistentStorage.got, tt.want)
+				t.Errorf("write() persistentStorage.got = %v, want %v", tt.fields.persistentStorage.got, tt.want)
 			}
 		})
 	}
 }
 
-func TestBatch_Write(t *testing.T) {
+func TestBatch_flush(t *testing.T) {
 	type fields struct {
-		temporaryStorage  Storer
-		persistentStorage types.Writer
+		temporaryStorage  MetricStorer
+		persistentStorage mockMetricWriter
 		states            map[string]state
 		mutex             sync.Mutex
 	}
 	type args struct {
-		msPoints        []types.MetricPoints
-		currentTime     time.Time
-		batchTimeLength float64
+		stateQueue  map[string][]state
+		now         time.Time
+		batchLength time.Duration
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    []types.MetricPoints
+		wantErr bool
+	}{
+		{
+			name: "flush",
+			fields: fields{
+				temporaryStorage: &store.Store{
+					Points: map[string][]types.Point{
+						`__name__="testing1"`: {
+							{
+								Time:  time.Unix(0, 0),
+								Value: 0,
+							},
+							{
+								Time:  time.Unix(50, 0),
+								Value: 50,
+							},
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
+						},
+						`__name__="testing2"`: {
+							{
+								Time:  time.Unix(0, 0),
+								Value: 0,
+							},
+							{
+								Time:  time.Unix(25, 0),
+								Value: 25,
+							},
+							{
+								Time:  time.Unix(50, 0),
+								Value: 50,
+							},
+						},
+					},
+				},
+				persistentStorage: mockMetricWriter{},
+				states:            nil,
+				mutex:             sync.Mutex{},
+			},
+			args: args{
+				stateQueue: map[string][]state{
+					`__name__="testing1"`: {
+						{
+							Metric: types.Metric{Labels: map[string]string{
+								"__name__": "testing1",
+							}},
+							pointCount:     1,
+							firstPointTime: time.Unix(0, 0),
+							lastPointTime:  time.Unix(0, 0),
+							flushDeadline:  time.Unix(150, 0),
+						},
+						{
+							Metric: types.Metric{Labels: map[string]string{
+								"__name__": "testing1",
+							}},
+							pointCount:     1,
+							firstPointTime: time.Unix(50, 0),
+							lastPointTime:  time.Unix(50, 0),
+							flushDeadline:  time.Unix(150, 0),
+						},
+					},
+					`__name__="testing2"`: {
+						{
+							Metric: types.Metric{Labels: map[string]string{
+								"__name__": "testing2",
+							}},
+							pointCount:     2,
+							firstPointTime: time.Unix(0, 0),
+							lastPointTime:  time.Unix(25, 0),
+							flushDeadline:  time.Unix(150, 0),
+						},
+					},
+				},
+				now:         time.Unix(100, 0),
+				batchLength: 50,
+			},
+			want: []types.MetricPoints{
+				{
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing1",
+					}},
+					Points: []types.Point{
+						{
+							Time:  time.Unix(0, 0),
+							Value: 0,
+						},
+					},
+				},
+				{
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing1",
+					}},
+					Points: []types.Point{
+						{
+							Time:  time.Unix(50, 0),
+							Value: 50,
+						},
+					},
+				},
+				{
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing2",
+					}},
+					Points: []types.Point{
+						{
+							Time:  time.Unix(0, 0),
+							Value: 0,
+						},
+						{
+							Time:  time.Unix(25, 0),
+							Value: 25,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &Batch{
+				temporaryStorage:  tt.fields.temporaryStorage,
+				persistentStorage: &tt.fields.persistentStorage,
+				states:            tt.fields.states,
+				mutex:             tt.fields.mutex,
+			}
+			if err := b.flush(tt.args.stateQueue, tt.args.now, tt.args.batchLength); (err != nil) != tt.wantErr {
+				t.Errorf("flush() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(tt.fields.persistentStorage.got, tt.want) {
+				t.Errorf("flush() persistentStorage.got = %v, want %v", tt.fields.persistentStorage.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBatch_write(t *testing.T) {
+	type fields struct {
+		temporaryStorage  MetricStorer
+		persistentStorage types.MetricWriter
+		states            map[string]state
+		mutex             sync.Mutex
+	}
+	type args struct {
+		msPoints    []types.MetricPoints
+		now         time.Time
+		batchLength time.Duration
 	}
 	tests := []struct {
 		name    string
@@ -218,10 +427,10 @@ func TestBatch_Write(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "basic",
+			name: "write_no_state_simple",
 			fields: fields{
 				temporaryStorage:  store.NewStore(),
-				persistentStorage: &mockPersistentStorage{},
+				persistentStorage: &mockMetricWriter{},
 				states:            make(map[string]state),
 				mutex:             sync.Mutex{},
 			},
@@ -229,7 +438,7 @@ func TestBatch_Write(t *testing.T) {
 				msPoints: []types.MetricPoints{
 					{
 						Metric: types.Metric{Labels: map[string]string{
-							"name": "testing1",
+							"__name__": "testing1",
 						}},
 						Points: []types.Point{
 							{
@@ -237,18 +446,18 @@ func TestBatch_Write(t *testing.T) {
 								Value: 0,
 							},
 							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+								Time:  time.Unix(50, 0),
+								Value: 50,
 							},
 							{
-								Time:  time.Unix(300, 0),
-								Value: 300,
+								Time:  time.Unix(100, 0),
+								Value: 100,
 							},
 						},
 					},
 					{
 						Metric: types.Metric{Labels: map[string]string{
-							"name": "testing2",
+							"__name__": "testing2",
 						}},
 						Points: []types.Point{
 							{
@@ -256,31 +465,83 @@ func TestBatch_Write(t *testing.T) {
 								Value: 0,
 							},
 							{
-								Time:  time.Unix(250, 0),
-								Value: 250,
+								Time:  time.Unix(25, 0),
+								Value: 25,
 							},
 							{
-								Time:  time.Unix(300, 0),
-								Value: 300,
+								Time:  time.Unix(50, 0),
+								Value: 50,
 							},
 						},
 					},
 				},
-				currentTime:     time.Unix(300, 0),
-				batchTimeLength: 100,
+				now:         time.Unix(100, 0),
+				batchLength: 50,
 			},
 			want: map[string]state{
-				`name="testing1"`: {
+				`__name__="testing1"`: {
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing1",
+					}},
 					pointCount:     1,
-					firstPointTime: time.Unix(300, 0),
-					lastPointTime:  time.Unix(300, 0),
-					flushDeadline:  time.Unix(400, 0),
+					firstPointTime: time.Unix(100, 0),
+					lastPointTime:  time.Unix(100, 0),
+					flushDeadline:  time.Unix(150, 0),
 				},
-				`name="testing2"`: {
+				`__name__="testing2"`: {
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing2",
+					}},
+					pointCount:     1,
+					firstPointTime: time.Unix(50, 0),
+					lastPointTime:  time.Unix(50, 0),
+					flushDeadline:  time.Unix(150, 0),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "write_",
+			fields: fields{
+				temporaryStorage:  store.NewStore(),
+				persistentStorage: &mockMetricWriter{},
+				states:            make(map[string]state),
+				mutex:             sync.Mutex{},
+			},
+			args: args{
+				msPoints: []types.MetricPoints{
+					{
+						Metric: types.Metric{Labels: map[string]string{
+							"__name__": "testing1",
+						}},
+						Points: []types.Point{
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
+							{
+								Time:  time.Unix(50, 0),
+								Value: 50,
+							},
+							{
+								Time:  time.Unix(25, 0),
+								Value: 25,
+							},
+						},
+					},
+				},
+				now:         time.Unix(100, 0),
+				batchLength: 50,
+			},
+			want: map[string]state{
+				`__name__="testing1"`: {
+					Metric: types.Metric{Labels: map[string]string{
+						"__name__": "testing1",
+					}},
 					pointCount:     2,
-					firstPointTime: time.Unix(250, 0),
-					lastPointTime:  time.Unix(300, 0),
-					flushDeadline:  time.Unix(350, 0),
+					firstPointTime: time.Unix(25, 0),
+					lastPointTime:  time.Unix(50, 0),
+					flushDeadline:  time.Unix(150, 0),
 				},
 			},
 			wantErr: false,
@@ -288,17 +549,17 @@ func TestBatch_Write(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			batch := &batch{
+			b := &Batch{
 				temporaryStorage:  tt.fields.temporaryStorage,
 				persistentStorage: tt.fields.persistentStorage,
 				states:            tt.fields.states,
 				mutex:             tt.fields.mutex,
 			}
-			if err := batch.write(tt.args.msPoints, tt.args.currentTime, tt.args.batchTimeLength); (err != nil) != tt.wantErr {
+			if err := b.write(tt.args.msPoints, tt.args.now, tt.args.batchLength); (err != nil) != tt.wantErr {
 				t.Errorf("write() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(tt.fields.states, tt.want) {
-				t.Errorf("write() states = %v, want %v", tt.fields.states, tt.want)
+			if !reflect.DeepEqual(b.states, tt.want) {
+				t.Errorf("write() states = %v, want %v", b.states, tt.want)
 			}
 		})
 	}

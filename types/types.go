@@ -1,9 +1,9 @@
 package types
 
-type Reader interface {
+type MetricReader interface {
 	Read(mRequest MetricRequest) ([]MetricPoints, error)
 }
 
-type Writer interface {
+type MetricWriter interface {
 	Write(msPoints []MetricPoints) error
 }

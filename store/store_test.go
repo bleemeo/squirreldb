@@ -13,10 +13,13 @@ func TestNewStore(t *testing.T) {
 		name string
 		want *Store
 	}{
-		{"basic", &Store{
-			msPoints: make(map[string]types.MetricPoints),
-			mutex:    sync.Mutex{},
-		}},
+		{
+			name: "new",
+			want: &Store{
+				Points: make(map[string][]types.Point),
+				mutex:  sync.Mutex{},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -29,135 +32,133 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_Append(t *testing.T) {
 	type fields struct {
-		msPoints map[string]types.MetricPoints
-		mutex    sync.Mutex
+		Points map[string][]types.Point
+		mutex  sync.Mutex
 	}
 	type args struct {
-		newMsPoints     map[string]types.MetricPoints
-		currentMsPoints map[string]types.MetricPoints
+		newPoints      map[string][]types.Point
+		existingPoints map[string][]types.Point
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    Store
+		want    map[string][]types.Point
 		wantErr bool
 	}{
-		{ // <--- basic (start)
-			"basic",
-			fields{
-				msPoints: map[string]types.MetricPoints{
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
+		{
+			name: "store_with_points",
+			fields: fields{
+				Points: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
+						},
+					},
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
 						},
 					},
 				},
 				mutex: sync.Mutex{},
 			},
-			args{
-				newMsPoints: map[string]types.MetricPoints{
-					`__name__="new"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "new",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
+			args: args{
+				newPoints: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(101, 0),
+							Value: 101,
 						},
 					},
 				},
-				currentMsPoints: map[string]types.MetricPoints{
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
-							},
+				existingPoints: map[string][]types.Point{
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(201, 0),
+							Value: 201,
 						},
 					},
 				},
 			},
-			Store{
-				msPoints: map[string]types.MetricPoints{
-					`__name__="new"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "new",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
+			want: map[string][]types.Point{
+				`__name__="testing1"`: {
+					{
+						Time:  time.Unix(100, 0),
+						Value: 100,
 					},
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
-							},
+					{
+						Time:  time.Unix(101, 0),
+						Value: 101,
+					},
+				},
+				`__name__="testing2"`: {
+					{
+						Time:  time.Unix(200, 0),
+						Value: 200,
+					},
+					{
+						Time:  time.Unix(201, 0),
+						Value: 201,
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "store_without_points",
+			fields: fields{
+				Points: make(map[string][]types.Point),
+				mutex:  sync.Mutex{},
+			},
+			args: args{
+				newPoints: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
 						},
 					},
 				},
-				mutex: sync.Mutex{},
+				existingPoints: map[string][]types.Point{
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
+						},
+					},
+				},
 			},
-			false,
-		}, // <--- basic (end)
+			want: map[string][]types.Point{
+				`__name__="testing1"`: {
+					{
+						Time:  time.Unix(100, 0),
+						Value: 100,
+					},
+				},
+				`__name__="testing2"`: {
+					{
+						Time:  time.Unix(200, 0),
+						Value: 200,
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &Store{
-				msPoints: tt.fields.msPoints,
-				mutex:    tt.fields.mutex,
+			s := &Store{
+				Points: tt.fields.Points,
+				mutex:  tt.fields.mutex,
 			}
-			if err := store.Append(tt.args.newMsPoints, tt.args.currentMsPoints); (err != nil) != tt.wantErr {
+			if err := s.Append(tt.args.newPoints, tt.args.existingPoints); (err != nil) != tt.wantErr {
 				t.Errorf("Append() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(*store, tt.want) {
-				t.Errorf("Append() store = %v, want %v", *store, tt.want)
+			if !reflect.DeepEqual(s.Points, tt.want) {
+				t.Errorf("Append() s.Points = %v, want %v", s.Points, tt.want)
 			}
 		})
 	}
@@ -165,8 +166,8 @@ func TestStore_Append(t *testing.T) {
 
 func TestStore_Get(t *testing.T) {
 	type fields struct {
-		msPoints map[string]types.MetricPoints
-		mutex    sync.Mutex
+		Points map[string][]types.Point
+		mutex  sync.Mutex
 	}
 	type args struct {
 		key string
@@ -175,65 +176,47 @@ func TestStore_Get(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    types.MetricPoints
+		want    []types.Point
 		wantErr bool
 	}{
-		{ // <--- basic (start)
-			"basic",
-			fields{
-				msPoints: map[string]types.MetricPoints{
-					`__name__="testing"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "test",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
+		{
+			name: "store_with_points",
+			fields: fields{
+				Points: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
+						},
+					},
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
 						},
 					},
 				},
 				mutex: sync.Mutex{},
 			},
-			args{key: `__name__="testing"`},
-			types.MetricPoints{
-				Metric: types.Metric{Labels: map[string]string{
-					"__name__": "test",
-				}},
-				Points: []types.Point{
-					{
-						Time:  time.Unix(0, 0),
-						Value: 0,
-					},
-					{
-						Time:  time.Unix(50, 0),
-						Value: 50,
-					},
-					{
-						Time:  time.Unix(100, 0),
-						Value: 100,
-					},
+			args: args{
+				key: `__name__="testing1"`,
+			},
+			want: []types.Point{
+				{
+					Time:  time.Unix(100, 0),
+					Value: 100,
 				},
 			},
-			false,
-		}, // <-- basic (end)
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &Store{
-				msPoints: tt.fields.msPoints,
-				mutex:    tt.fields.mutex,
+			s := &Store{
+				Points: tt.fields.Points,
+				mutex:  tt.fields.mutex,
 			}
-			got, err := store.Get(tt.args.key)
+			got, err := s.Get(tt.args.key)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Get() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -247,127 +230,85 @@ func TestStore_Get(t *testing.T) {
 
 func TestStore_Set(t *testing.T) {
 	type fields struct {
-		msPoints map[string]types.MetricPoints
-		mutex    sync.Mutex
+		Points map[string][]types.Point
+		mutex  sync.Mutex
 	}
 	type args struct {
-		newMsPoints     map[string]types.MetricPoints
-		currentMsPoints map[string]types.MetricPoints
+		newPoints      map[string][]types.Point
+		existingPoints map[string][]types.Point
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    Store
+		want    map[string][]types.Point
 		wantErr bool
 	}{
-		{ // <--- basic (start)
-			"basic",
-			fields{
-				msPoints: map[string]types.MetricPoints{
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
+		{
+			name: "store_with_points",
+			fields: fields{
+				Points: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
+						},
+					},
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
 						},
 					},
 				},
 				mutex: sync.Mutex{},
 			},
-			args{
-				newMsPoints: map[string]types.MetricPoints{
-					`__name__="new"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "new",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
+			args: args{
+				newPoints: map[string][]types.Point{
+					`__name__="testing1"`: {
+						{
+							Time:  time.Unix(101, 0),
+							Value: 101,
 						},
 					},
 				},
-				currentMsPoints: map[string]types.MetricPoints{
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
-							},
+				existingPoints: map[string][]types.Point{
+					`__name__="testing2"`: {
+						{
+							Time:  time.Unix(201, 0),
+							Value: 201,
 						},
 					},
 				},
 			},
-			Store{
-				msPoints: map[string]types.MetricPoints{
-					`__name__="new"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "new",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-					},
-					`__name__="current"`: {
-						Metric: types.Metric{Labels: map[string]string{
-							"__name__": "current",
-						}},
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
-							},
-						},
+			want: map[string][]types.Point{
+				`__name__="testing1"`: {
+					{
+						Time:  time.Unix(101, 0),
+						Value: 101,
 					},
 				},
-				mutex: sync.Mutex{},
+				`__name__="testing2"`: {
+					{
+						Time:  time.Unix(201, 0),
+						Value: 201,
+					},
+				},
 			},
-			false,
-		}, // <--- basic (end)
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &Store{
-				msPoints: tt.fields.msPoints,
-				mutex:    tt.fields.mutex,
+			s := &Store{
+				Points: tt.fields.Points,
+				mutex:  tt.fields.mutex,
 			}
-			if err := store.Set(tt.args.newMsPoints, tt.args.currentMsPoints); (err != nil) != tt.wantErr {
+			if err := s.Set(tt.args.newPoints, tt.args.existingPoints); (err != nil) != tt.wantErr {
 				t.Errorf("Set() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(*store, tt.want) {
-				t.Errorf("Set() store = %v, want %v", *store, tt.want)
+			if !reflect.DeepEqual(s.Points, tt.want) {
+				t.Errorf("Set() s.Points = %v, want %v", s.Points, tt.want)
 			}
 		})
 	}

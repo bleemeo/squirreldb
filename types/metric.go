@@ -28,40 +28,24 @@ type MetricRequest struct {
 	Step     int64
 }
 
-func (metric *Metric) CanonicalLabels() string {
-	var canonicalLabels string
+func (m *Metric) CanonicalLabels() string {
 	var keys []string
+	var elements []string
 
-	for key := range metric.Labels {
+	for key := range m.Labels {
 		keys = append(keys, key)
 	}
 
 	sort.Strings(keys)
 
-	for i, key := range keys {
-		value := strings.Replace(metric.Labels[key], `"`, `\"`, -1)
+	for _, key := range keys {
+		value := strings.Replace(m.Labels[key], `"`, `\"`, -1)
+		element := fmt.Sprintf(`%s="%s"`, key, value)
 
-		if i == 0 {
-			canonicalLabels = fmt.Sprintf("%s=\"%s\"", key, value)
-		} else {
-			canonicalLabels = fmt.Sprintf("%s,%s=\"%s\"", canonicalLabels, key, value)
-		}
+		elements = append(elements, element)
 	}
 
-	return canonicalLabels
-}
+	canonical := strings.Join(elements, ",")
 
-func (mPoints *MetricPoints) AddPoints(points []Point) {
-	mPoints.Points = append(mPoints.Points, points...)
-}
-
-func (mPoints *MetricPoints) RemovePoints(pointsTime []time.Time) {
-	for _, pointTime := range pointsTime {
-		for i := 0; i < len(mPoints.Points); i++ {
-			if mPoints.Points[i].Time.Equal(pointTime) {
-				mPoints.Points = append(mPoints.Points[:i], mPoints.Points[i+1:]...)
-				i -= 1
-			}
-		}
-	}
+	return canonical
 }
