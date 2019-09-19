@@ -9,7 +9,6 @@ import (
 
 func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 	for _, mPoints := range msPoints {
-		labels := mPoints.CanonicalLabels()
 		partsPoints := make(map[int64][]types.Point)
 
 		for _, point := range mPoints.Points {
@@ -40,11 +39,10 @@ func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 
 			values := []byte(strings.Join(elements, ","))
 
-			// TODO: Add TTL support
 			insert := c.session.Query(
-				"INSERT INTO "+metricsTable+" (labels, timestamp, offset_timestamp, insert_time, values)"+
+				"INSERT INTO "+metricsTable+" (metric_uuid, timestamp, offset_timestamp, insert_time, values)"+
 					"VALUES (?, ?, ?, now(), ?)",
-				labels, timestamp, offsetTimestamp, values)
+				MetricUUID(&mPoints.Metric), timestamp, offsetTimestamp, values)
 
 			if err := insert.Exec(); err != nil {
 				return err

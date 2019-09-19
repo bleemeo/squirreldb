@@ -1,7 +1,7 @@
 package config
 
 const (
-	BatchLength          = 300
+	BatchLength          = 30
 	BatchCheckerInterval = 60
 	BatchRetryDelay      = 10
 )

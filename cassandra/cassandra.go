@@ -1,8 +1,11 @@
 package cassandra
 
 import (
+	"crypto/md5"
 	"github.com/gocql/gocql"
 	"hamsterdb/config"
+	"hamsterdb/types"
+	"log"
 	"strconv"
 )
 
@@ -41,12 +44,12 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 
 	createTable := session.Query(
 		"CREATE TABLE IF NOT EXISTS " + metricsTable + " (" +
-			"labels text," +
+			"metric_uuid uuid," +
 			"timestamp bigint," +
 			"offset_timestamp int," +
 			"insert_time timeuuid," +
 			"values blob," +
-			"PRIMARY KEY ((labels, timestamp), offset_timestamp, insert_time)) " +
+			"PRIMARY KEY ((metric_uuid, timestamp), offset_timestamp, insert_time)) " +
 			"WITH CLUSTERING ORDER BY (offset_timestamp DESC) " +
 			"AND compression = {" +
 			"'chunk_length_in_kb': '256'," +
@@ -70,4 +73,35 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 
 func (c *Cassandra) CloseSession() {
 	c.session.Close()
+}
+
+func MetricUUID(m *types.Metric) gocql.UUID {
+	var err error
+	var uuid gocql.UUID
+	var uuidBytes []byte
+	uuidString, exists := m.Labels["__uuid__"]
+
+	if !exists {
+		hash := md5.New()
+
+		hash.Write([]byte(m.CanonicalLabels()))
+
+		uuidBytes = hash.Sum(nil)
+
+		uuid, err = gocql.UUIDFromBytes(uuidBytes)
+
+		if err != nil {
+			log.Printf("MetricUUID: %v"+"\n", err)
+		}
+	} else {
+		uuid, err = gocql.ParseUUID(uuidString)
+
+		if err != nil {
+			log.Printf("MetricUUID: %v"+"\n", err)
+		}
+
+		delete(m.Labels, "__uuid__")
+	}
+
+	return uuid
 }
