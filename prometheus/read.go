@@ -14,18 +14,21 @@ type ReadPoints struct {
 	reader types.MetricReader
 }
 
-func toMetricRequest(labelMatchers []*prompb.LabelMatcher, hints *prompb.ReadHints) types.MetricRequest {
+func toMetricRequest(query *prompb.Query) types.MetricRequest {
 	labels := make(map[string]string)
 
-	for _, labelMatcher := range labelMatchers {
+	for _, labelMatcher := range query.Matchers {
 		labels[labelMatcher.Name] = labelMatcher.Value
 	}
 
 	mRequest := types.MetricRequest{
 		Metric:   types.Metric{Labels: labels},
-		FromTime: time.Unix(hints.StartMs/1000, 0),
-		ToTime:   time.Unix(hints.EndMs/1000, 0),
-		Step:     hints.StepMs / 1000,
+		FromTime: time.Unix(query.StartTimestampMs/1000, 0),
+		ToTime:   time.Unix(query.EndTimestampMs/1000, 0),
+	}
+
+	if query.Hints != nil {
+		mRequest.Step = query.Hints.StepMs / 1000
 	}
 
 	return mRequest
@@ -95,7 +98,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	var readResponse prompb.ReadResponse
 
 	for _, query := range readRequest.Queries {
-		mRequest := toMetricRequest(query.Matchers, query.Hints)
+		mRequest := toMetricRequest(query)
 		msPoints, _ := r.reader.Read(mRequest)
 		series := toTimeseries(msPoints)
 		queryResult := prompb.QueryResult{Timeseries: series}

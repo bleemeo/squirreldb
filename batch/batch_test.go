@@ -75,21 +75,25 @@ func TestBatch_check(t *testing.T) {
 			name: "check_simple",
 			fields: fields{
 				temporaryStorage: &store.Store{
-					Points: map[string][]types.Point{
+					Metrics: map[string]store.Data{
 						`__name__="testing1"`: {
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(0, 0),
+									Value: 0,
+								},
 							},
 						},
 						`__name__="testing2"`: {
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(25, 0),
-								Value: 25,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(0, 0),
+									Value: 0,
+								},
+								{
+									Time:  time.Unix(25, 0),
+									Value: 25,
+								},
 							},
 						},
 					},
@@ -156,21 +160,25 @@ func TestBatch_check(t *testing.T) {
 			name: "check_flush_all",
 			fields: fields{
 				temporaryStorage: &store.Store{
-					Points: map[string][]types.Point{
+					Metrics: map[string]store.Data{
 						`__name__="testing1"`: {
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(100, 0),
+									Value: 100,
+								},
 							},
 						},
 						`__name__="testing2"`: {
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(125, 0),
-								Value: 125,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(100, 0),
+									Value: 100,
+								},
+								{
+									Time:  time.Unix(125, 0),
+									Value: 125,
+								},
 							},
 						},
 					},
@@ -275,33 +283,37 @@ func TestBatch_flush(t *testing.T) {
 			name: "flush",
 			fields: fields{
 				temporaryStorage: &store.Store{
-					Points: map[string][]types.Point{
+					Metrics: map[string]store.Data{
 						`__name__="testing1"`: {
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(0, 0),
+									Value: 0,
+								},
+								{
+									Time:  time.Unix(50, 0),
+									Value: 50,
+								},
+								{
+									Time:  time.Unix(100, 0),
+									Value: 100,
+								},
 							},
 						},
 						`__name__="testing2"`: {
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(25, 0),
-								Value: 25,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
+							Points: []types.Point{
+								{
+									Time:  time.Unix(0, 0),
+									Value: 0,
+								},
+								{
+									Time:  time.Unix(25, 0),
+									Value: 25,
+								},
+								{
+									Time:  time.Unix(50, 0),
+									Value: 50,
+								},
 							},
 						},
 					},

@@ -8,7 +8,6 @@
 ### Cassandra
 
 - Read system
-- Support TTL
 
 ### Prometheus
 
@@ -17,7 +16,3 @@
 ### Redis
 
 - Communication system (Append, Get, Set)
-
-### Store
-
-- Create an expiration system

@@ -24,15 +24,15 @@ func main() {
 	signals := make(chan os.Signal)
 	defer close(signals)
 
-	myStore := store.NewStore()
-	myCassandra := cassandra.NewCassandra()
-	myBatch := batch.NewBatch(myStore, myCassandra)
-	myPrometheus := prometheus.NewPrometheus(myCassandra, myBatch)
+	hamsterStore := store.NewStore()
+	hamsterCassandra := cassandra.NewCassandra()
+	hamsterBatch := batch.NewBatch(hamsterStore, hamsterCassandra)
+	hamsterPrometheus := prometheus.NewPrometheus(hamsterCassandra, hamsterBatch)
 
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
 	retry.Endlessly(config.CassandraRetryDelay*time.Second, func() error {
-		err := myCassandra.InitSession("cassandra0:9042")
+		err := hamsterCassandra.InitSession("cassandra0:9042")
 
 		if err != nil {
 			logger.Printf("Can't init Cassandra session (%v)"+"\n", err)
@@ -42,10 +42,13 @@ func main() {
 	}, logger)
 
 	wg.Add(1)
-	go myPrometheus.RunServer(ctx, &wg)
+	go hamsterPrometheus.RunServer(ctx, &wg)
 
 	wg.Add(1)
-	go myBatch.RunChecker(ctx, &wg)
+	go hamsterStore.RunExpirator(ctx, &wg)
+
+	wg.Add(1)
+	go hamsterBatch.RunChecker(ctx, &wg)
 
 	logger.Println("Hamster ready")
 
@@ -57,7 +60,7 @@ func main() {
 
 	wg.Wait()
 
-	myCassandra.CloseSession()
+	hamsterCassandra.CloseSession()
 
 	logger.Println("Stopped")
 }

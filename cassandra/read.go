@@ -9,34 +9,32 @@ import (
 	"time"
 )
 
-func toMetricPoints(labels map[string]string, points []types.Point) types.MetricPoints {
-	mPoint := types.MetricPoints{
-		Metric: types.Metric{Labels: labels},
-		Points: points,
-	}
-
-	return mPoint
-}
-
 func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	var msPoints []types.MetricPoints
-	var points []types.Point
-	var timestamp int64
+	fromBaseTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % config.PartitionLength)
+	toBaseTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % config.PartitionLength)
+	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp
+	toOffsetTimestamp := mRequest.ToTime.Unix() - toBaseTimestamp
+
+	iterator := c.session.Query(
+		"SELECT metric_uuid, base_ts, offset_ts, values FROM "+metricsTable+" "+
+			"WHERE metric_uuid = ? AND base_ts IN (?, ?) AND offset_ts >= ? AND offset_ts <= ?",
+		MetricUUID(&mRequest.Metric), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+
+	var metricUUID string
+	var baseTimestamp int64
 	var offsetTimestamp int64
 	var valuesBlob []byte
+	result := make(map[string]types.MetricPoints)
 
-	fromTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % config.PartitionLength)
-	toTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % config.PartitionLength)
-	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromTimestamp
-	toOffsetTimestamp := mRequest.ToTime.Unix() - toTimestamp
+	for iterator.Scan(&metricUUID, &baseTimestamp, &offsetTimestamp, &valuesBlob) {
+		item, exists := result[metricUUID]
 
-	selectt := c.session.Query(
-		"SELECT timestamp, offset_timestamp, values FROM "+metricsTable+" "+
-			"WHERE metric_uuid = ? AND timestamp >= ? AND timestamp <= ? AND offset_timestamp >= ? AND offset_timestamp <= ? "+
-			"ALLOW FILTERING",
-		MetricUUID(&mRequest.Metric), fromTimestamp, toTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+		if !exists {
+			item = types.MetricPoints{
+				Metric: mRequest.Metric,
+			}
+		}
 
-	for selectt.Scan(&timestamp, &offsetTimestamp, &valuesBlob) {
 		for _, element := range strings.Split(string(valuesBlob), ",") {
 			regex := regexp.MustCompile(`([+-]?[0-9]+)=([+-]?[0-9]*[.]?[0-9]*)`)
 			regexMatches := regex.FindStringSubmatch(element)
@@ -47,7 +45,7 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 				return nil, err
 			}
 
-			pointTime := time.Unix(timestamp+offsetTimestamp+subOffsetTimestamp, 0)
+			pointTime := time.Unix(baseTimestamp+offsetTimestamp+subOffsetTimestamp, 0)
 
 			if (mRequest.Step == 0 || ((subOffsetTimestamp % mRequest.Step) == 0)) &&
 				!pointTime.Before(mRequest.FromTime) && !pointTime.After(mRequest.ToTime) {
@@ -62,17 +60,21 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 					Value: value,
 				}
 
-				points = append(points, point)
+				item.Points = append(item.Points, point)
 			}
 		}
 
-		mPoints := toMetricPoints(mRequest.Labels, points)
-
-		msPoints = append(msPoints, mPoints)
+		result[metricUUID] = item
 	}
 
-	if err := selectt.Close(); err != nil {
+	if err := iterator.Close(); err != nil {
 		return nil, err
+	}
+
+	var msPoints []types.MetricPoints
+
+	for _, value := range result {
+		msPoints = append(msPoints, value)
 	}
 
 	return msPoints, nil

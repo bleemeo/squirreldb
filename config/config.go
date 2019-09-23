@@ -10,7 +10,7 @@ const (
 	CassandraKeyspace          = "remote_storage"
 	CassandraReplicationFactor = 1
 	CassandraMetricsTable      = "metrics"
-	CassandraMetricRetention   = 397
+	CassandraMetricRetention   = 397 * 86400
 	CassandraRetryDelay        = 10
 )
 
@@ -21,4 +21,9 @@ const (
 const (
 	PrometheusAddress    = ":1234"
 	PrometheusRetryDelay = 10
+)
+
+const (
+	StoreExpiratorInterval = 60
+	StoreTimeToLive        = BatchLength*2 + 150
 )

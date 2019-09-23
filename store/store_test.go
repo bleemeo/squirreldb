@@ -16,8 +16,8 @@ func TestNewStore(t *testing.T) {
 		{
 			name: "new",
 			want: &Store{
-				Points: make(map[string][]types.Point),
-				mutex:  sync.Mutex{},
+				Metrics: make(map[string]Data),
+				mutex:   sync.Mutex{},
 			},
 		},
 	}
@@ -30,37 +30,45 @@ func TestNewStore(t *testing.T) {
 	}
 }
 
-func TestStore_Append(t *testing.T) {
+func TestStore_append(t *testing.T) {
 	type fields struct {
-		Points map[string][]types.Point
-		mutex  sync.Mutex
+		Metrics map[string]Data
+		mutex   sync.Mutex
 	}
 	type args struct {
 		newPoints      map[string][]types.Point
 		existingPoints map[string][]types.Point
+		timeToLive     time.Duration
+		now            time.Time
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[string][]types.Point
+		want    map[string]Data
 		wantErr bool
 	}{
 		{
 			name: "store_with_points",
 			fields: fields{
-				Points: map[string][]types.Point{
+				Metrics: map[string]Data{
 					`__name__="testing1"`: {
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
 						},
+						ExpirationDeadline: time.Unix(0, 0).Add(1 * time.Hour),
 					},
 					`__name__="testing2"`: {
-						{
-							Time:  time.Unix(200, 0),
-							Value: 200,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(200, 0),
+								Value: 200,
+							},
 						},
+						ExpirationDeadline: time.Unix(0, 0),
 					},
 				},
 				mutex: sync.Mutex{},
@@ -82,27 +90,35 @@ func TestStore_Append(t *testing.T) {
 						},
 					},
 				},
+				timeToLive: 3600,
+				now:        time.Unix(0, 0),
 			},
-			want: map[string][]types.Point{
+			want: map[string]Data{
 				`__name__="testing1"`: {
-					{
-						Time:  time.Unix(100, 0),
-						Value: 100,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
+						},
+						{
+							Time:  time.Unix(101, 0),
+							Value: 101,
+						},
 					},
-					{
-						Time:  time.Unix(101, 0),
-						Value: 101,
-					},
+					ExpirationDeadline: time.Unix(3600, 0),
 				},
 				`__name__="testing2"`: {
-					{
-						Time:  time.Unix(200, 0),
-						Value: 200,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
+						},
+						{
+							Time:  time.Unix(201, 0),
+							Value: 201,
+						},
 					},
-					{
-						Time:  time.Unix(201, 0),
-						Value: 201,
-					},
+					ExpirationDeadline: time.Unix(3600, 0),
 				},
 			},
 			wantErr: false,
@@ -110,8 +126,8 @@ func TestStore_Append(t *testing.T) {
 		{
 			name: "store_without_points",
 			fields: fields{
-				Points: make(map[string][]types.Point),
-				mutex:  sync.Mutex{},
+				Metrics: make(map[string]Data),
+				mutex:   sync.Mutex{},
 			},
 			args: args{
 				newPoints: map[string][]types.Point{
@@ -130,19 +146,27 @@ func TestStore_Append(t *testing.T) {
 						},
 					},
 				},
+				timeToLive: 3600,
+				now:        time.Unix(0, 0),
 			},
-			want: map[string][]types.Point{
+			want: map[string]Data{
 				`__name__="testing1"`: {
-					{
-						Time:  time.Unix(100, 0),
-						Value: 100,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(100, 0),
+							Value: 100,
+						},
 					},
+					ExpirationDeadline: time.Unix(3600, 0),
 				},
 				`__name__="testing2"`: {
-					{
-						Time:  time.Unix(200, 0),
-						Value: 200,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(200, 0),
+							Value: 200,
+						},
 					},
+					ExpirationDeadline: time.Unix(3600, 0),
 				},
 			},
 			wantErr: false,
@@ -151,14 +175,14 @@ func TestStore_Append(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Points: tt.fields.Points,
-				mutex:  tt.fields.mutex,
+				Metrics: tt.fields.Metrics,
+				mutex:   tt.fields.mutex,
 			}
-			if err := s.Append(tt.args.newPoints, tt.args.existingPoints); (err != nil) != tt.wantErr {
-				t.Errorf("Append() error = %v, wantErr %v", err, tt.wantErr)
+			if err := s.append(tt.args.newPoints, tt.args.existingPoints, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(s.Points, tt.want) {
-				t.Errorf("Append() s.Points = %v, want %v", s.Points, tt.want)
+			if !reflect.DeepEqual(s.Metrics, tt.want) {
+				t.Errorf("append() s.Metrics = %v, want %v", s.Metrics, tt.want)
 			}
 		})
 	}
@@ -166,8 +190,8 @@ func TestStore_Append(t *testing.T) {
 
 func TestStore_Get(t *testing.T) {
 	type fields struct {
-		Points map[string][]types.Point
-		mutex  sync.Mutex
+		Metrics map[string]Data
+		mutex   sync.Mutex
 	}
 	type args struct {
 		key string
@@ -182,17 +206,21 @@ func TestStore_Get(t *testing.T) {
 		{
 			name: "store_with_points",
 			fields: fields{
-				Points: map[string][]types.Point{
+				Metrics: map[string]Data{
 					`__name__="testing1"`: {
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
 						},
 					},
 					`__name__="testing2"`: {
-						{
-							Time:  time.Unix(200, 0),
-							Value: 200,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(200, 0),
+								Value: 200,
+							},
 						},
 					},
 				},
@@ -213,8 +241,8 @@ func TestStore_Get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Points: tt.fields.Points,
-				mutex:  tt.fields.mutex,
+				Metrics: tt.fields.Metrics,
+				mutex:   tt.fields.mutex,
 			}
 			got, err := s.Get(tt.args.key)
 			if (err != nil) != tt.wantErr {
@@ -228,36 +256,42 @@ func TestStore_Get(t *testing.T) {
 	}
 }
 
-func TestStore_Set(t *testing.T) {
+func TestStore_set(t *testing.T) {
 	type fields struct {
-		Points map[string][]types.Point
+		Points map[string]Data
 		mutex  sync.Mutex
 	}
 	type args struct {
 		newPoints      map[string][]types.Point
 		existingPoints map[string][]types.Point
+		timeToLive     time.Duration
+		now            time.Time
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[string][]types.Point
+		want    map[string]Data
 		wantErr bool
 	}{
 		{
 			name: "store_with_points",
 			fields: fields{
-				Points: map[string][]types.Point{
+				Points: map[string]Data{
 					`__name__="testing1"`: {
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(100, 0),
+								Value: 100,
+							},
 						},
 					},
 					`__name__="testing2"`: {
-						{
-							Time:  time.Unix(200, 0),
-							Value: 200,
+						Points: []types.Point{
+							{
+								Time:  time.Unix(200, 0),
+								Value: 200,
+							},
 						},
 					},
 				},
@@ -280,19 +314,27 @@ func TestStore_Set(t *testing.T) {
 						},
 					},
 				},
+				timeToLive: 1800,
+				now:        time.Unix(0, 0),
 			},
-			want: map[string][]types.Point{
+			want: map[string]Data{
 				`__name__="testing1"`: {
-					{
-						Time:  time.Unix(101, 0),
-						Value: 101,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(101, 0),
+							Value: 101,
+						},
 					},
+					ExpirationDeadline: time.Unix(1800, 0),
 				},
 				`__name__="testing2"`: {
-					{
-						Time:  time.Unix(201, 0),
-						Value: 201,
+					Points: []types.Point{
+						{
+							Time:  time.Unix(201, 0),
+							Value: 201,
+						},
 					},
+					ExpirationDeadline: time.Unix(1800, 0),
 				},
 			},
 			wantErr: false,
@@ -301,14 +343,14 @@ func TestStore_Set(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Points: tt.fields.Points,
-				mutex:  tt.fields.mutex,
+				Metrics: tt.fields.Points,
+				mutex:   tt.fields.mutex,
 			}
-			if err := s.Set(tt.args.newPoints, tt.args.existingPoints); (err != nil) != tt.wantErr {
-				t.Errorf("Set() error = %v, wantErr %v", err, tt.wantErr)
+			if err := s.set(tt.args.newPoints, tt.args.existingPoints, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(s.Points, tt.want) {
-				t.Errorf("Set() s.Points = %v, want %v", s.Points, tt.want)
+			if !reflect.DeepEqual(s.Metrics, tt.want) {
+				t.Errorf("set() s.Metrics = %v, want %v", s.Metrics, tt.want)
 			}
 		})
 	}
