@@ -1,11 +1,11 @@
 package cassandra
 
 import (
+	"bytes"
+	"encoding/binary"
 	"hamsterdb/config"
 	"hamsterdb/types"
-	"regexp"
-	"strconv"
-	"strings"
+	"io"
 	"time"
 )
 
@@ -23,10 +23,10 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 	var metricUUID string
 	var baseTimestamp int64
 	var offsetTimestamp int64
-	var valuesBlob []byte
+	var values []byte
 	result := make(map[string]types.MetricPoints)
 
-	for iterator.Scan(&metricUUID, &baseTimestamp, &offsetTimestamp, &valuesBlob) {
+	for iterator.Scan(&metricUUID, &baseTimestamp, &offsetTimestamp, &values) {
 		item, exists := result[metricUUID]
 
 		if !exists {
@@ -35,32 +35,32 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 			}
 		}
 
-		for _, element := range strings.Split(string(valuesBlob), ",") {
-			regex := regexp.MustCompile(`([+-]?[0-9]+)=([+-]?[0-9]*[.]?[0-9]*)`)
-			regexMatches := regex.FindStringSubmatch(element)
+		buffer := bytes.NewReader(values)
+		var err error
 
-			subOffsetTimestamp, err := strconv.ParseInt(regexMatches[1], 10, 64)
-
-			if err != nil {
-				return nil, err
+		for err != io.EOF {
+			var data struct {
+				PointTimestamp uint16
+				PointValue     float64
 			}
 
-			pointTime := time.Unix(baseTimestamp+offsetTimestamp+subOffsetTimestamp, 0)
+			err = binary.Read(buffer, binary.BigEndian, &data)
 
-			if (mRequest.Step == 0 || ((subOffsetTimestamp % mRequest.Step) == 0)) &&
-				!pointTime.Before(mRequest.FromTime) && !pointTime.After(mRequest.ToTime) {
-				value, err := strconv.ParseFloat(regexMatches[2], 64)
+			if err == nil {
+				pointTime := time.Unix(baseTimestamp+offsetTimestamp+int64(data.PointTimestamp), 0)
 
-				if err != nil {
-					return nil, err
+				if (mRequest.Step == 0 || ((int64(data.PointTimestamp) % mRequest.Step) == 0)) &&
+					!pointTime.Before(mRequest.FromTime) && !pointTime.After(mRequest.ToTime) {
+
+					point := types.Point{
+						Time:  pointTime,
+						Value: data.PointValue,
+					}
+
+					item.Points = append(item.Points, point)
 				}
-
-				point := types.Point{
-					Time:  pointTime,
-					Value: value,
-				}
-
-				item.Points = append(item.Points, point)
+			} else if err != io.EOF {
+				logger.Printf("Write: Can't read bytes (%v)"+"\n", err)
 			}
 		}
 

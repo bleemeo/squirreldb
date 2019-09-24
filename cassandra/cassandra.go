@@ -6,12 +6,14 @@ import (
 	"hamsterdb/config"
 	"hamsterdb/types"
 	"log"
+	"os"
 	"strconv"
 )
 
 var (
 	keyspace     = config.CassandraKeyspace
 	metricsTable = config.CassandraKeyspace + "." + config.CassandraMetricsTable
+	logger       = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 )
 
 type Cassandra struct {

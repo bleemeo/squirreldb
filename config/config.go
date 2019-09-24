@@ -7,7 +7,7 @@ const (
 )
 
 const (
-	CassandraKeyspace          = "remote_storage"
+	CassandraKeyspace          = "hamsterdb"
 	CassandraReplicationFactor = 1
 	CassandraMetricsTable      = "metrics"
 	CassandraMetricRetention   = 397 * 86400

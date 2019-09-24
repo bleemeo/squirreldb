@@ -1,10 +1,10 @@
 package cassandra
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/binary"
 	"hamsterdb/config"
 	"hamsterdb/types"
-	"strings"
 	"time"
 )
 
@@ -39,23 +39,27 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 			timeToLive := int64(config.CassandraMetricRetention)
 
 			if age < timeToLive {
-				var elements []string
 				offsetTimestamp := smallestTime.Unix() - baseTimestamp
+				buffer := new(bytes.Buffer)
 
 				for _, point := range points {
-					subOffsetTimestamp := point.Time.Unix() - baseTimestamp - offsetTimestamp
-					element := fmt.Sprintf("%d=%f", subOffsetTimestamp, point.Value)
+					data := []interface{}{
+						uint16(point.Time.Unix() - baseTimestamp - offsetTimestamp),
+						point.Value,
+					}
 
-					elements = append(elements, element)
+					for _, value := range data {
+						if err := binary.Write(buffer, binary.BigEndian, value); err != nil {
+							logger.Printf("Write: Can't write bytes (%v)"+"\n", err)
+						}
+					}
 				}
-
-				values := []byte(strings.Join(elements, ","))
 
 				insert := c.session.Query(
 					"INSERT INTO "+metricsTable+" (metric_uuid, base_ts, offset_ts, insert_time, values)"+
 						"VALUES (?, ?, ?, now(), ?) "+
 						"USING TTL ?",
-					MetricUUID(&mPoints.Metric), baseTimestamp, offsetTimestamp, values, timeToLive)
+					MetricUUID(&mPoints.Metric), baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLive)
 
 				if err := insert.Exec(); err != nil {
 					return err
