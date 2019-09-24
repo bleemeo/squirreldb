@@ -14,6 +14,7 @@ func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 
 func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 	for _, mPoints := range msPoints {
+		uuid := MetricUUID(&mPoints.Metric)
 		partsPoints := make(map[int64][]types.Point)
 
 		for _, point := range mPoints.Points {
@@ -59,7 +60,7 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 					"INSERT INTO "+metricsTable+" (metric_uuid, base_ts, offset_ts, insert_time, values)"+
 						"VALUES (?, ?, ?, now(), ?) "+
 						"USING TTL ?",
-					MetricUUID(&mPoints.Metric), baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLive)
+					uuid, baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLive)
 
 				if err := insert.Exec(); err != nil {
 					return err

@@ -101,8 +101,6 @@ func MetricUUID(m *types.Metric) gocql.UUID {
 		if err != nil {
 			log.Printf("MetricUUID: %v"+"\n", err)
 		}
-
-		delete(m.Labels, "__uuid__")
 	}
 
 	return uuid
