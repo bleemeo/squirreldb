@@ -6,14 +6,12 @@ import (
 	"hamsterdb/config"
 	"hamsterdb/types"
 	"log"
-	"os"
 	"strconv"
 )
 
 var (
 	keyspace     = config.CassandraKeyspace
 	metricsTable = config.CassandraKeyspace + "." + config.CassandraMetricsTable
-	logger       = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 )
 
 type Cassandra struct {
@@ -77,7 +75,7 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 	return nil
 }
 
-func MetricUUID(m *types.Metric) gocql.UUID {
+func metricUUID(m types.Metric) gocql.UUID {
 	var err error
 	var uuid gocql.UUID
 	var uuidBytes []byte
@@ -85,21 +83,22 @@ func MetricUUID(m *types.Metric) gocql.UUID {
 
 	if !exists {
 		hash := md5.New()
+		labels := m.CanonicalLabels()
 
-		hash.Write([]byte(m.CanonicalLabels()))
+		hash.Write([]byte(labels))
 
 		uuidBytes = hash.Sum(nil)
 
 		uuid, err = gocql.UUIDFromBytes(uuidBytes)
 
 		if err != nil {
-			log.Printf("MetricUUID: %v"+"\n", err)
+			log.Printf("metricUUID: Can't generate UUID from bytes (%v)"+"\n", err)
 		}
 	} else {
 		uuid, err = gocql.ParseUUID(uuidString)
 
 		if err != nil {
-			log.Printf("MetricUUID: %v"+"\n", err)
+			log.Printf("metricUUID: Can't generate UUID from string (%v)"+"\n", err)
 		}
 	}
 

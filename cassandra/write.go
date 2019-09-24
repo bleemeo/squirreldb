@@ -14,7 +14,7 @@ func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 
 func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 	for _, mPoints := range msPoints {
-		uuid := MetricUUID(&mPoints.Metric)
+		uuid := metricUUID(mPoints.Metric)
 		partsPoints := make(map[int64][]types.Point)
 
 		for _, point := range mPoints.Points {
@@ -44,14 +44,15 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 				buffer := new(bytes.Buffer)
 
 				for _, point := range points {
-					data := []interface{}{
+					pointData := []interface{}{
 						uint16(point.Time.Unix() - baseTimestamp - offsetTimestamp),
 						point.Value,
 					}
 
-					for _, value := range data {
-						if err := binary.Write(buffer, binary.BigEndian, value); err != nil {
-							logger.Printf("Write: Can't write bytes (%v)"+"\n", err)
+					for _, element := range pointData {
+						if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
+							// TODO: Handle error
+							return err
 						}
 					}
 				}

@@ -52,9 +52,9 @@ func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ticker.C:
 			_ = b.check(time.Now(), config.BatchLength, false)
 		case <-ctx.Done():
-			logger.Printf("RunChecker: Stopping...")
+			logger.Println("RunChecker: Stopping...")
 			_ = b.check(time.Now(), config.BatchLength, true)
-			logger.Printf("RunChecker: Stopped")
+			logger.Println("RunChecker: Stopped")
 			wg.Done()
 			return
 		}

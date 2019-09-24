@@ -29,7 +29,7 @@ func NewStore() *Store {
 }
 
 func (s *Store) Append(newPoints, existingPoints map[string][]types.Point) error {
-	return s.append(newPoints, existingPoints, time.Now(), config.StoreTimeToLive)
+	return s.append(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
 }
 
 func (s *Store) Get(key string) ([]types.Point, error) {
@@ -48,7 +48,7 @@ func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			logger.Printf("RunExpirator: Stopped")
+			logger.Println("RunExpirator: Stopped")
 			wg.Done()
 			return
 		}
@@ -56,7 +56,7 @@ func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (s *Store) Set(newPoints, existingPoints map[string][]types.Point) error {
-	return s.set(newPoints, existingPoints, time.Now(), config.StoreTimeToLive)
+	return s.set(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
 }
 
 func (s *Store) append(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {

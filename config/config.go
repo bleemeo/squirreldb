@@ -24,6 +24,9 @@ const (
 )
 
 const (
+	StorageTimeToLive = BatchLength*2 + 150
+)
+
+const (
 	StoreExpiratorInterval = 60
-	StoreTimeToLive        = BatchLength*2 + 150
 )

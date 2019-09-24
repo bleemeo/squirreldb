@@ -52,7 +52,7 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) error {
 
 	<-ctx.Done()
 
-	logger.Printf("RunServer: Stopping...")
+	logger.Println("RunServer: Stopping...")
 
 	subCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
