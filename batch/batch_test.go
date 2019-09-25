@@ -439,7 +439,7 @@ func TestBatch_write(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "write_no_state_simple",
+			name: "write_ordered_points",
 			fields: fields{
 				temporaryStorage:  store.NewStore(),
 				persistentStorage: &mockMetricWriter{},
@@ -513,7 +513,7 @@ func TestBatch_write(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "write_",
+			name: "write_unordered_points",
 			fields: fields{
 				temporaryStorage:  store.NewStore(),
 				persistentStorage: &mockMetricWriter{},
@@ -572,6 +572,144 @@ func TestBatch_write(t *testing.T) {
 			}
 			if !reflect.DeepEqual(b.states, tt.want) {
 				t.Errorf("write() states = %v, want %v", b.states, tt.want)
+			}
+		})
+	}
+}
+
+func Test_flushDeadline(t *testing.T) {
+	type args struct {
+		mPoints     types.MetricPoints
+		now         time.Time
+		batchLength time.Duration
+	}
+	tests := []struct {
+		name string
+		args args
+		want time.Time
+	}{
+		{
+			name: "metric_0_now_0",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "00000000000000000000000000000000",
+					}},
+				},
+				now:         time.Unix(0, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(300, 0),
+		},
+		{
+			name: "metric_0_now_150",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "00000000000000000000000000000000",
+					}},
+				},
+				now:         time.Unix(150, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(300, 0),
+		},
+		{
+			name: "metric_0_now_300",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "00000000000000000000000000000000",
+					}},
+				},
+				now:         time.Unix(300, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(600, 0),
+		},
+		{
+			name: "metric_10_now_0",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "0000000000000000000000000000000a",
+					}},
+				},
+				now:         time.Unix(0, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(290, 0),
+		},
+		{
+			name: "metric_10_now_150",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "0000000000000000000000000000000a",
+					}},
+				},
+				now:         time.Unix(150, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(290, 0),
+		},
+		{
+			name: "metric_10_now_300",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "0000000000000000000000000000000a",
+					}},
+				},
+				now:         time.Unix(300, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(590, 0),
+		},
+		{
+			name: "metric_spe_now_0",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "abcdef0123456789abcdef0123456789",
+					}},
+				},
+				now:         time.Unix(0, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(0, 0),
+		},
+		{
+			name: "metric_spe_now_150",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "abcdef0123456789abcdef0123456789",
+					}},
+				},
+				now:         time.Unix(150, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(0, 0),
+		},
+		{
+			name: "metric_spe_now_300",
+			args: args{
+				mPoints: types.MetricPoints{
+					Metric: types.Metric{Labels: map[string]string{
+						"__uuid__": "abcdef0123456789abcdef0123456789",
+					}},
+				},
+				now:         time.Unix(300, 0),
+				batchLength: 300,
+			},
+			want: time.Unix(0, 0),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := flushDeadline(tt.args.mPoints, tt.args.now, tt.args.batchLength); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("flushDeadline() = %v, want %v", got, tt.want)
 			}
 		})
 	}

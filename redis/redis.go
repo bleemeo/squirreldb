@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/go-redis/redis"
+	"hamsterdb/config"
 	"hamsterdb/types"
 	"io"
 	"time"
@@ -17,6 +18,14 @@ func NewRedis() *Redis {
 	return &Redis{}
 }
 
+func (r *Redis) Append(newPoints, existingPoints map[string][]types.Point) error {
+	return r.append(newPoints, existingPoints, config.StorageTimeToLive)
+}
+
+func (r *Redis) Get(key string) ([]types.Point, error) {
+	return r.get(key)
+}
+
 func (r *Redis) InitCluster(addresses ...string) error {
 	r.client = redis.NewClusterClient(&redis.ClusterOptions{
 		Addrs: addresses,
@@ -25,8 +34,12 @@ func (r *Redis) InitCluster(addresses ...string) error {
 	return nil
 }
 
+func (r *Redis) Set(newPoints, existingPoints map[string][]types.Point) error {
+	return r.set(newPoints, existingPoints, config.StorageTimeToLive)
+}
+
 func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
-	pipeliner := r.client.Pipeline()
+	pipe := r.client.Pipeline()
 
 	timeToLive *= time.Second
 
@@ -34,18 +47,18 @@ func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeT
 		// TODO: Handle error
 		data, _ := encode(points)
 
-		pipeliner.Append(key, data)
-		pipeliner.Expire(key, timeToLive)
+		pipe.Append(key, string(data))
+		pipe.Expire(key, timeToLive)
 	}
 
 	for key, points := range existingPoints {
 		// TODO: Handle error
 		data, _ := encode(points)
 
-		pipeliner.Append(key, data)
+		pipe.Append(key, string(data))
 	}
 
-	if _, err := pipeliner.Exec(); err != nil {
+	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
 
@@ -53,9 +66,9 @@ func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeT
 }
 
 func (r *Redis) get(key string) ([]types.Point, error) {
-	pipeliner := r.client.Pipeline()
+	pipe := r.client.Pipeline()
 
-	data, err := pipeliner.Get(key).Bytes()
+	data, err := pipe.Get(key).Bytes()
 
 	if err != nil {
 		return nil, err

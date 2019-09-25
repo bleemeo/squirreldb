@@ -2,11 +2,14 @@ package batch
 
 import (
 	"context"
+	"hamsterdb/cassandra"
 	"hamsterdb/config"
 	"hamsterdb/retry"
 	"hamsterdb/types"
 	"log"
+	"math/big"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -177,7 +180,7 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 					pointCount:     1,
 					firstPointTime: point.Time,
 					lastPointTime:  point.Time,
-					flushDeadline:  now.Add(batchLength),
+					flushDeadline:  flushDeadline(mPoints, now, batchLength/time.Second),
 				}
 			} else {
 				nextFirstPointTime := currentState.firstPointTime
@@ -237,4 +240,23 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 	}
 
 	return nil
+}
+
+func flushDeadline(mPoints types.MetricPoints, now time.Time, batchLength time.Duration) time.Time {
+	uuidString := cassandra.MetricUUID(mPoints.Metric).String()
+	uuidParsed := strings.Replace(uuidString, "-", "", -1)
+	uuidBigInt, _ := big.NewInt(0).SetString(uuidParsed, 16)
+
+	batchLength *= time.Second
+
+	batchBigInt := big.NewInt(int64(batchLength.Seconds()))
+	offsetBigInt := uuidBigInt.Mod(uuidBigInt, batchBigInt)
+
+	flushBatch := now.Add(batchLength).Unix()
+
+	flushBatch = flushBatch - ((flushBatch + offsetBigInt.Int64()) % batchBigInt.Int64())
+
+	flushDeadline := time.Unix(flushBatch, 0)
+
+	return flushDeadline
 }

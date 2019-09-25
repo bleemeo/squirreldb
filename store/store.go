@@ -33,10 +33,7 @@ func (s *Store) Append(newPoints, existingPoints map[string][]types.Point) error
 }
 
 func (s *Store) Get(key string) ([]types.Point, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	return s.Metrics[key].Points, nil
+	return s.get(key)
 }
 
 func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
@@ -103,6 +100,13 @@ func (s *Store) expire(now time.Time) {
 			delete(s.Metrics, key)
 		}
 	}
+}
+
+func (s *Store) get(key string) ([]types.Point, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.Metrics[key].Points, nil
 }
 
 func (s *Store) set(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {

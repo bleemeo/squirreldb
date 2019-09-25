@@ -10,7 +10,7 @@ import (
 )
 
 func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	uuid := metricUUID(mRequest.Metric)
+	uuid := MetricUUID(mRequest.Metric)
 	fromBaseTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % config.PartitionLength)
 	toBaseTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % config.PartitionLength)
 	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp

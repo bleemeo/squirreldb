@@ -75,11 +75,10 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 	return nil
 }
 
-func metricUUID(m types.Metric) gocql.UUID {
-	var err error
-	var uuid gocql.UUID
-	var uuidBytes []byte
+func MetricUUID(m types.Metric) gocql.UUID {
 	uuidString, exists := m.Labels["__uuid__"]
+	var uuid gocql.UUID
+	var err error
 
 	if !exists {
 		hash := md5.New()
@@ -87,18 +86,18 @@ func metricUUID(m types.Metric) gocql.UUID {
 
 		hash.Write([]byte(labels))
 
-		uuidBytes = hash.Sum(nil)
+		hashed := hash.Sum(nil)
 
-		uuid, err = gocql.UUIDFromBytes(uuidBytes)
+		uuid, err = gocql.UUIDFromBytes(hashed)
 
 		if err != nil {
-			log.Printf("metricUUID: Can't generate UUID from bytes (%v)"+"\n", err)
+			log.Printf("MetricUUID: Can't generate UUID from bytes (%v)"+"\n", err)
 		}
 	} else {
 		uuid, err = gocql.ParseUUID(uuidString)
 
 		if err != nil {
-			log.Printf("metricUUID: Can't generate UUID from string (%v)"+"\n", err)
+			log.Printf("MetricUUID: Can't generate UUID from string (%v)"+"\n", err)
 		}
 	}
 

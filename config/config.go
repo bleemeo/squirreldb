@@ -9,7 +9,7 @@ const (
 const (
 	CassandraKeyspace          = "hamsterdb"
 	CassandraReplicationFactor = 1
-	CassandraMetricsTable      = "metrics"
+	CassandraMetricsTable      = "data"
 	CassandraMetricRetention   = 397 * 86400
 	CassandraRetryDelay        = 10
 )

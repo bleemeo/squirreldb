@@ -14,7 +14,7 @@ func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 
 func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 	for _, mPoints := range msPoints {
-		uuid := metricUUID(mPoints.Metric)
+		uuid := MetricUUID(mPoints.Metric)
 		partsPoints := make(map[int64][]types.Point)
 
 		for _, point := range mPoints.Points {
