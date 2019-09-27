@@ -3,8 +3,9 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
-	"hamsterdb/config"
-	"hamsterdb/types"
+	"github.com/gocql/gocql"
+	"squirreldb/config"
+	"squirreldb/types"
 	"time"
 )
 
@@ -14,11 +15,14 @@ func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
 
 func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 	for _, mPoints := range msPoints {
-		uuid := MetricUUID(mPoints.Metric)
+		// TODO: Handle error
+		mUUID, _ := mPoints.UUID()
+		uuid := gocql.UUID(mUUID.UUID)
 		partsPoints := make(map[int64][]types.Point)
+		partitionLengthSecs := int64(config.PartitionLength.Seconds())
 
 		for _, point := range mPoints.Points {
-			baseTimestamp := point.Time.Unix() - (point.Time.Unix() % config.PartitionLength)
+			baseTimestamp := point.Time.Unix() - (point.Time.Unix() % partitionLengthSecs)
 
 			partsPoints[baseTimestamp] = append(partsPoints[baseTimestamp], point)
 		}
@@ -37,9 +41,9 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 			}
 
 			age := now.Unix() - biggestTime.Unix()
-			timeToLive := int64(config.CassandraMetricRetention)
+			timeToLiveSecs := int64(config.CassandraMetricRetention.Seconds())
 
-			if age < timeToLive {
+			if age < timeToLiveSecs {
 				offsetTimestamp := smallestTime.Unix() - baseTimestamp
 				buffer := new(bytes.Buffer)
 
@@ -51,7 +55,6 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 
 					for _, element := range pointData {
 						if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
-							// TODO: Handle error
 							return err
 						}
 					}
@@ -61,7 +64,7 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 					"INSERT INTO "+metricsTable+" (metric_uuid, base_ts, offset_ts, insert_time, values)"+
 						"VALUES (?, ?, ?, now(), ?) "+
 						"USING TTL ?",
-					uuid, baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLive)
+					uuid, baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLiveSecs)
 
 				if err := insert.Exec(); err != nil {
 					return err

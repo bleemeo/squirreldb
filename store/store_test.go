@@ -1,8 +1,8 @@
 package store
 
 import (
-	"hamsterdb/types"
 	"reflect"
+	"squirreldb/types"
 	"sync"
 	"testing"
 	"time"
@@ -90,7 +90,7 @@ func TestStore_append(t *testing.T) {
 						},
 					},
 				},
-				timeToLive: 3600,
+				timeToLive: 3600 * time.Second,
 				now:        time.Unix(0, 0),
 			},
 			want: map[string]Data{
@@ -146,7 +146,7 @@ func TestStore_append(t *testing.T) {
 						},
 					},
 				},
-				timeToLive: 3600,
+				timeToLive: 3600 * time.Second,
 				now:        time.Unix(0, 0),
 			},
 			want: map[string]Data{
@@ -314,7 +314,7 @@ func TestStore_set(t *testing.T) {
 						},
 					},
 				},
-				timeToLive: 1800,
+				timeToLive: 1800 * time.Second,
 				now:        time.Unix(0, 0),
 			},
 			want: map[string]Data{

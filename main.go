@@ -2,18 +2,17 @@ package main
 
 import (
 	"context"
-	"hamsterdb/batch"
-	"hamsterdb/cassandra"
-	"hamsterdb/config"
-	"hamsterdb/prometheus"
-	"hamsterdb/retry"
-	"hamsterdb/store"
 	"log"
 	"os"
 	"os/signal"
+	"squirreldb/batch"
+	"squirreldb/cassandra"
+	"squirreldb/config"
+	"squirreldb/prometheus"
+	"squirreldb/retry"
+	"squirreldb/store"
 	"sync"
 	"syscall"
-	"time"
 )
 
 func main() {
@@ -21,18 +20,18 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	signals := make(chan os.Signal)
+	signals := make(chan os.Signal, 1)
 	defer close(signals)
 
-	hamsterStore := store.NewStore()
-	hamsterCassandra := cassandra.NewCassandra()
-	hamsterBatch := batch.NewBatch(hamsterStore, hamsterCassandra)
-	hamsterPrometheus := prometheus.NewPrometheus(hamsterCassandra, hamsterBatch)
+	squirrelStore := store.NewStore()
+	squirrelCassandra := cassandra.NewCassandra()
+	squirrelBatch := batch.NewBatch(squirrelStore, squirrelCassandra, squirrelCassandra)
+	squirrelPrometheus := prometheus.NewPrometheus(squirrelBatch, squirrelBatch)
 
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
-	retry.Endlessly(config.CassandraRetryDelay*time.Second, func() error {
-		err := hamsterCassandra.InitSession("cassandra0:9042")
+	retry.Endlessly(config.CassandraRetryDelay, func() error {
+		err := squirrelCassandra.InitSession("cassandra0:9042")
 
 		if err != nil {
 			logger.Printf("Can't init Cassandra session (%v)"+"\n", err)
@@ -42,15 +41,15 @@ func main() {
 	}, logger)
 
 	wg.Add(1)
-	go hamsterPrometheus.RunServer(ctx, &wg)
+	go squirrelPrometheus.RunServer(ctx, &wg)
 
 	wg.Add(1)
-	go hamsterStore.RunExpirator(ctx, &wg)
+	go squirrelStore.RunExpirator(ctx, &wg)
 
 	wg.Add(1)
-	go hamsterBatch.RunChecker(ctx, &wg)
+	go squirrelBatch.RunChecker(ctx, &wg)
 
-	logger.Println("Hamster ready")
+	logger.Println("SquirrelDB ready")
 
 	<-signals
 
@@ -60,7 +59,7 @@ func main() {
 
 	wg.Wait()
 
-	hamsterCassandra.CloseSession()
+	squirrelCassandra.CloseSession()
 
 	logger.Println("Stopped")
 }

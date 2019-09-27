@@ -1,32 +1,34 @@
 package config
 
+import "time"
+
 const (
-	BatchLength          = 300
-	BatchCheckerInterval = 60
-	BatchRetryDelay      = 10
+	BatchLength          = 300 * time.Second
+	BatchCheckerInterval = 60 * time.Second
+	BatchRetryDelay      = 10 * time.Second
 )
 
 const (
-	CassandraKeyspace          = "hamsterdb"
+	CassandraKeyspace          = "squirreldb"
 	CassandraReplicationFactor = 1
 	CassandraMetricsTable      = "data"
-	CassandraMetricRetention   = 397 * 86400
-	CassandraRetryDelay        = 10
+	CassandraMetricRetention   = 397 * 24 * time.Hour
+	CassandraRetryDelay        = 10 * time.Second
 )
 
 const (
-	PartitionLength = 432000
+	PartitionLength = 5 * 24 * time.Hour
 )
 
 const (
 	PrometheusAddress    = ":1234"
-	PrometheusRetryDelay = 10
+	PrometheusRetryDelay = 10 * time.Second
 )
 
 const (
-	StorageTimeToLive = BatchLength*2 + 150
+	StorageTimeToLive = (BatchLength * 2) + (150 * time.Second)
 )
 
 const (
-	StoreExpiratorInterval = 60
+	StoreExpiratorInterval = 60 * time.Second
 )

@@ -1,4 +1,4 @@
-# hamsterdb
+# squirreldb
 ## TODO
 
 ### Batch

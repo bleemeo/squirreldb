@@ -4,9 +4,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
-	"hamsterdb/types"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/types"
 	"time"
 )
 

@@ -4,9 +4,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
-	"hamsterdb/types"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/types"
 	"time"
 )
 
@@ -99,6 +99,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 	for _, query := range readRequest.Queries {
 		mRequest := toMetricRequest(query)
+		// TODO: Handle error
 		msPoints, _ := r.reader.Read(mRequest)
 		series := toTimeseries(msPoints)
 		queryResult := prompb.QueryResult{Timeseries: series}

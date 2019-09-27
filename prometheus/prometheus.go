@@ -2,12 +2,12 @@ package prometheus
 
 import (
 	"context"
-	"hamsterdb/config"
-	"hamsterdb/retry"
-	"hamsterdb/types"
 	"log"
 	"net/http"
 	"os"
+	"squirreldb/config"
+	"squirreldb/retry"
+	"squirreldb/types"
 	"sync"
 	"time"
 )
@@ -28,7 +28,7 @@ func NewPrometheus(reader types.MetricReader, writer types.MetricWriter) *Promet
 	}
 }
 
-func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) error {
+func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
 	router := http.NewServeMux()
 	server := http.Server{
 		Addr:    config.PrometheusAddress,
@@ -38,7 +38,7 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) error {
 	router.HandleFunc("/read", p.readPoints.ServeHTTP)
 	router.HandleFunc("/write", p.writePoints.ServeHTTP)
 
-	go retry.Endlessly(config.PrometheusRetryDelay*time.Second, func() error {
+	go retry.Endlessly(config.PrometheusRetryDelay, func() error {
 		err := server.ListenAndServe()
 
 		if err != http.ErrServerClosed {
@@ -63,6 +63,4 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) error {
 
 	logger.Println("RunServer: Stopped")
 	wg.Done()
-
-	return nil
 }

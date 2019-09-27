@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/go-redis/redis"
-	"hamsterdb/config"
-	"hamsterdb/types"
 	"io"
+	"squirreldb/config"
+	"squirreldb/types"
 	"time"
 )
 
@@ -40,8 +40,6 @@ func (r *Redis) Set(newPoints, existingPoints map[string][]types.Point) error {
 
 func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
 	pipe := r.client.Pipeline()
-
-	timeToLive *= time.Second
 
 	for key, points := range newPoints {
 		// TODO: Handle error
@@ -81,25 +79,23 @@ func (r *Redis) get(key string) ([]types.Point, error) {
 }
 
 func (r *Redis) set(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
-	pipeliner := r.client.Pipeline()
-
-	timeToLive *= time.Second
+	pipe := r.client.Pipeline()
 
 	for key, points := range newPoints {
 		// TODO: Handle error
 		data, _ := encode(points)
 
-		pipeliner.Set(key, data, timeToLive)
+		pipe.Set(key, data, timeToLive)
 	}
 
 	for key, points := range existingPoints {
 		// TODO: Handle error
 		data, _ := encode(points)
 
-		pipeliner.Set(key, data, timeToLive)
+		pipe.Set(key, data, timeToLive)
 	}
 
-	if _, err := pipeliner.Exec(); err != nil {
+	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
 

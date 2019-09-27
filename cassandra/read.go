@@ -3,17 +3,21 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
-	"hamsterdb/config"
-	"hamsterdb/types"
+	"github.com/gocql/gocql"
 	"io"
+	"squirreldb/config"
+	"squirreldb/types"
 	"time"
 )
 
 func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	uuid := MetricUUID(mRequest.Metric)
-	fromBaseTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % config.PartitionLength)
-	toBaseTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % config.PartitionLength)
-	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp
+	// TODO: Handle error
+	mUUID, _ := mRequest.UUID()
+	uuid := gocql.UUID(mUUID.UUID)
+	partitionLengthSecs := int64(config.PartitionLength.Seconds())
+	fromBaseTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % partitionLengthSecs)
+	toBaseTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % partitionLengthSecs)
+	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp - int64(config.BatchLength.Seconds())
 	toOffsetTimestamp := mRequest.ToTime.Unix() - toBaseTimestamp
 
 	iterator := c.session.Query(
@@ -25,10 +29,10 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 	var baseTimestamp int64
 	var offsetTimestamp int64
 	var values []byte
-	result := make(map[string]types.MetricPoints)
+	results := make(map[string]types.MetricPoints)
 
 	for iterator.Scan(&metricUUID, &baseTimestamp, &offsetTimestamp, &values) {
-		item, exists := result[metricUUID]
+		item, exists := results[metricUUID]
 
 		if !exists {
 			item = types.MetricPoints{
@@ -60,14 +64,13 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 					item.Points = append(item.Points, point)
 				}
 			} else if err != io.EOF {
-				// TODO: Handle error
 				return nil, err
 			} else {
 				break
 			}
 		}
 
-		result[metricUUID] = item
+		results[metricUUID] = item
 	}
 
 	if err := iterator.Close(); err != nil {
@@ -76,8 +79,8 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 
 	var msPoints []types.MetricPoints
 
-	for _, value := range result {
-		msPoints = append(msPoints, value)
+	for _, mPoint := range results {
+		msPoints = append(msPoints, mPoint)
 	}
 
 	return msPoints, nil

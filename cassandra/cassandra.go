@@ -1,11 +1,8 @@
 package cassandra
 
 import (
-	"crypto/md5"
 	"github.com/gocql/gocql"
-	"hamsterdb/config"
-	"hamsterdb/types"
-	"log"
+	"squirreldb/config"
 	"strconv"
 )
 
@@ -46,6 +43,8 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 		return err
 	}
 
+	timeToLiveSecs := int64(config.CassandraMetricRetention.Seconds())
+
 	createTable := session.Query(
 		"CREATE TABLE IF NOT EXISTS " + metricsTable + " (" +
 			"metric_uuid uuid," +
@@ -62,7 +61,7 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 			"'class': 'TimeWindowCompactionStrategy'," +
 			"'compaction_window_unit': 'DAYS'," +
 			"'compaction_window_size': 6} " +
-			"AND default_time_to_live = " + strconv.FormatInt(config.CassandraMetricRetention, 10),
+			"AND default_time_to_live = " + strconv.FormatInt(timeToLiveSecs, 10),
 	)
 
 	if err := createTable.Exec(); err != nil {
@@ -73,33 +72,4 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 	c.session = session
 
 	return nil
-}
-
-func MetricUUID(m types.Metric) gocql.UUID {
-	uuidString, exists := m.Labels["__uuid__"]
-	var uuid gocql.UUID
-	var err error
-
-	if !exists {
-		hash := md5.New()
-		labels := m.CanonicalLabels()
-
-		hash.Write([]byte(labels))
-
-		hashed := hash.Sum(nil)
-
-		uuid, err = gocql.UUIDFromBytes(hashed)
-
-		if err != nil {
-			log.Printf("MetricUUID: Can't generate UUID from bytes (%v)"+"\n", err)
-		}
-	} else {
-		uuid, err = gocql.ParseUUID(uuidString)
-
-		if err != nil {
-			log.Printf("MetricUUID: Can't generate UUID from string (%v)"+"\n", err)
-		}
-	}
-
-	return uuid
 }

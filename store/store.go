@@ -2,10 +2,10 @@ package store
 
 import (
 	"context"
-	"hamsterdb/config"
-	"hamsterdb/types"
 	"log"
 	"os"
+	"squirreldb/config"
+	"squirreldb/types"
 	"sync"
 	"time"
 )
@@ -29,15 +29,21 @@ func NewStore() *Store {
 }
 
 func (s *Store) Append(newPoints, existingPoints map[string][]types.Point) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	return s.append(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
 }
 
 func (s *Store) Get(key string) ([]types.Point, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	return s.get(key)
 }
 
 func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(config.StoreExpiratorInterval * time.Second)
+	ticker := time.NewTicker(config.StoreExpiratorInterval)
 	defer ticker.Stop()
 
 	for {
@@ -53,15 +59,13 @@ func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (s *Store) Set(newPoints, existingPoints map[string][]types.Point) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	return s.set(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
 }
 
 func (s *Store) append(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	timeToLive *= time.Second
-
 	for key, points := range newPoints {
 		item, exists := s.Metrics[key]
 
@@ -103,18 +107,10 @@ func (s *Store) expire(now time.Time) {
 }
 
 func (s *Store) get(key string) ([]types.Point, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	return s.Metrics[key].Points, nil
 }
 
 func (s *Store) set(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	timeToLive *= time.Second
-
 	for key, points := range newPoints {
 		item := Data{
 			Points:             points,

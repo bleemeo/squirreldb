@@ -1,1 +1,1 @@
-# hamsterdb
+# squirreldb

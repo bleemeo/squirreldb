@@ -2,14 +2,11 @@ package batch
 
 import (
 	"context"
-	"hamsterdb/cassandra"
-	"hamsterdb/config"
-	"hamsterdb/retry"
-	"hamsterdb/types"
 	"log"
-	"math/big"
 	"os"
-	"strings"
+	"squirreldb/config"
+	"squirreldb/retry"
+	"squirreldb/types"
 	"sync"
 	"time"
 )
@@ -31,23 +28,25 @@ type state struct {
 }
 
 type Batch struct {
-	temporaryStorage  MetricStorer
-	persistentStorage types.MetricWriter
+	temporaryStorage   MetricStorer
+	persistentStorageR types.MetricReader
+	persistentStorageW types.MetricWriter
 
 	states map[string]state
 	mutex  sync.Mutex
 }
 
-func NewBatch(temporaryStorage MetricStorer, persistentStorage types.MetricWriter) *Batch {
+func NewBatch(temporaryStorage MetricStorer, persistentStorageR types.MetricReader, persistentStorageW types.MetricWriter) *Batch {
 	return &Batch{
-		temporaryStorage:  temporaryStorage,
-		persistentStorage: persistentStorage,
-		states:            make(map[string]state),
+		temporaryStorage:   temporaryStorage,
+		persistentStorageR: persistentStorageR,
+		persistentStorageW: persistentStorageW,
+		states:             make(map[string]state),
 	}
 }
 
 func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(config.BatchCheckerInterval * time.Second)
+	ticker := time.NewTicker(config.BatchCheckerInterval)
 	defer ticker.Stop()
 
 	for {
@@ -62,6 +61,10 @@ func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 			return
 		}
 	}
+}
+
+func (b *Batch) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
+	return b.read(mRequest)
 }
 
 func (b *Batch) Write(msPoints []types.MetricPoints) error {
@@ -91,12 +94,10 @@ func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength 
 	var msPointsToWrite []types.MetricPoints
 	msPointsToSet := make(map[string][]types.Point)
 
-	batchLength *= time.Second
-
 	for key, states := range stateQueue {
 		var points []types.Point
 
-		retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
+		retry.Endlessly(config.BatchRetryDelay, func() error {
 			var err error
 			points, err = b.temporaryStorage.Get(key)
 
@@ -135,8 +136,8 @@ func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength 
 		msPointsToSet[key] = pointsToSet
 	}
 
-	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
-		err := b.persistentStorage.Write(msPointsToWrite)
+	retry.Endlessly(config.BatchRetryDelay, func() error {
+		err := b.persistentStorageW.Write(msPointsToWrite)
 
 		if err != nil {
 			logger.Printf("flush: Can't write metrics points to persistentStorage (%v)"+"\n", err)
@@ -145,7 +146,7 @@ func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength 
 		return err
 	}, logger)
 
-	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
+	retry.Endlessly(config.BatchRetryDelay, func() error {
 		err := b.temporaryStorage.Set(nil, msPointsToSet)
 
 		if err != nil {
@@ -158,6 +159,55 @@ func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength 
 	return nil
 }
 
+func (b *Batch) read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
+	// TODO: Handle error
+	mUUID, _ := mRequest.UUID()
+	key := mUUID.String()
+	points, _ := b.temporaryStorage.Get(key)
+	var temporaryPoints []types.Point
+
+	for _, point := range points {
+		if !point.Time.Before(mRequest.FromTime) && !point.Time.After(mRequest.ToTime) {
+			temporaryPoints = append(temporaryPoints, point)
+		}
+	}
+
+	results := make(map[string]types.MetricPoints)
+
+	temporaryMPoints := types.MetricPoints{
+		Metric: mRequest.Metric,
+		Points: temporaryPoints,
+	}
+
+	results[key] = temporaryMPoints
+
+	// TODO: Handle error
+	persistentMsPoints, _ := b.persistentStorageR.Read(mRequest)
+
+	for _, persistentMPoint := range persistentMsPoints {
+		// TODO: Handle error
+		mUUID, _ := persistentMPoint.UUID()
+		key := mUUID.String()
+		mPoints, exists := results[key]
+
+		if !exists {
+			mPoints = persistentMPoint
+		} else {
+			mPoints.Points = append(mPoints.Points, persistentMPoint.Points...)
+		}
+
+		results[key] = mPoints
+	}
+
+	var msPoints []types.MetricPoints
+
+	for _, mPoint := range results {
+		msPoints = append(msPoints, mPoint)
+	}
+
+	return msPoints, nil
+}
+
 func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength time.Duration) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -166,10 +216,10 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 	existingPoints := make(map[string][]types.Point)
 	stateQueue := make(map[string][]state)
 
-	batchLength *= time.Second
-
 	for _, mPoints := range msPoints {
-		key := mPoints.CanonicalLabels()
+		// TODO: Handle error
+		mUUID, _ := mPoints.UUID()
+		key := mUUID.String()
 
 		for _, point := range mPoints.Points {
 			currentState, exists := b.states[key]
@@ -180,7 +230,7 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 					pointCount:     1,
 					firstPointTime: point.Time,
 					lastPointTime:  point.Time,
-					flushDeadline:  flushDeadline(mPoints, now, batchLength/time.Second),
+					flushDeadline:  flushDeadline(mPoints.Metric, now, batchLength),
 				}
 			} else {
 				nextFirstPointTime := currentState.firstPointTime
@@ -225,7 +275,7 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 		}
 	}
 
-	retry.Endlessly(config.BatchRetryDelay*time.Second, func() error {
+	retry.Endlessly(config.BatchRetryDelay, func() error {
 		err := b.temporaryStorage.Append(newPoints, existingPoints)
 
 		if err != nil {
@@ -242,21 +292,16 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 	return nil
 }
 
-func flushDeadline(mPoints types.MetricPoints, now time.Time, batchLength time.Duration) time.Time {
-	uuidString := cassandra.MetricUUID(mPoints.Metric).String()
-	uuidParsed := strings.Replace(uuidString, "-", "", -1)
-	uuidBigInt, _ := big.NewInt(0).SetString(uuidParsed, 16)
+func flushDeadline(metric types.Metric, now time.Time, batchLength time.Duration) time.Time {
+	// TODO: Handle error
+	mUUID, _ := metric.UUID()
+	flush := now.Add(batchLength).Unix()
 
-	batchLength *= time.Second
+	offset := mUUID.Int64() % int64(batchLength.Seconds())
 
-	batchBigInt := big.NewInt(int64(batchLength.Seconds()))
-	offsetBigInt := uuidBigInt.Mod(uuidBigInt, batchBigInt)
+	flush = flush - ((flush + offset) % int64(batchLength.Seconds()))
 
-	flushBatch := now.Add(batchLength).Unix()
-
-	flushBatch = flushBatch - ((flushBatch + offsetBigInt.Int64()) % batchBigInt.Int64())
-
-	flushDeadline := time.Unix(flushBatch, 0)
+	flushDeadline := time.Unix(flush, 0)
 
 	return flushDeadline
 }
