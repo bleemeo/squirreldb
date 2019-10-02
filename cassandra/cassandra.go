@@ -1,28 +1,41 @@
 package cassandra
 
 import (
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"squirreldb/config"
 	"strconv"
+	"time"
 )
 
 var (
-	keyspace     = config.CassandraKeyspace
-	metricsTable = config.CassandraKeyspace + "." + config.CassandraMetricsTable
+	keyspace           = config.CassandraKeyspace
+	metricsTable       = config.CassandraKeyspace + "." + config.CassandraMetricsTable
+	exponentialBackOff = &backoff.ExponentialBackOff{
+		InitialInterval:     backoff.DefaultInitialInterval,
+		RandomizationFactor: 0.5,
+		Multiplier:          2,
+		MaxInterval:         30 * time.Second,
+		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
+		Clock:               backoff.SystemClock,
+	}
 )
 
 type Cassandra struct {
 	session *gocql.Session
 }
 
+// NewCassandra creates a new Cassandra object
 func NewCassandra() *Cassandra {
 	return &Cassandra{}
 }
 
+// CloseSession closes Cassandra's session
 func (c *Cassandra) CloseSession() {
 	c.session.Close()
 }
 
+// InitSession initializes Cassandra's session and create keyspace and metrics table
 func (c *Cassandra) InitSession(hosts ...string) error {
 	cluster := gocql.NewCluster(hosts...)
 	session, err := cluster.CreateSession()

@@ -14,6 +14,7 @@ type ReadPoints struct {
 	reader types.MetricReader
 }
 
+// Convert Prometheus Query to MetricRequest
 func toMetricRequest(query *prompb.Query) types.MetricRequest {
 	labels := make(map[string]string)
 
@@ -34,6 +35,7 @@ func toMetricRequest(query *prompb.Query) types.MetricRequest {
 	return mRequest
 }
 
+// Convert MetricPoints list to Prometheus TimeSeries list
 func toTimeseries(msPoints []types.MetricPoints) []*prompb.TimeSeries {
 	var timeseries []*prompb.TimeSeries
 
@@ -70,6 +72,9 @@ func toTimeseries(msPoints []types.MetricPoints) []*prompb.TimeSeries {
 	return timeseries
 }
 
+// Serve the read handler
+// Decodes the request and transforms it into MetricRequests. Retrieves points via MetricRequests.
+// Generates and returns a response containing the requested data
 func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	body, err := ioutil.ReadAll(request.Body)
 

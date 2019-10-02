@@ -14,6 +14,7 @@ type WritePoints struct {
 	writer types.MetricWriter
 }
 
+// Convert Prometheus TimeSeries to MetricPoints
 func toMetricPoints(series *prompb.TimeSeries) types.MetricPoints {
 	labels := make(map[string]string)
 	var points []types.Point
@@ -39,6 +40,9 @@ func toMetricPoints(series *prompb.TimeSeries) types.MetricPoints {
 	return mPoints
 }
 
+// Serve the write handler
+// Decodes the request and transforms it into MetricRequests. Transforms the request into MetricPoints.
+// Sends the MetricPoints to storage.
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	body, err := ioutil.ReadAll(request.Body)
 

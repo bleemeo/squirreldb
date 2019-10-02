@@ -3,6 +3,7 @@ module squirreldb
 go 1.12
 
 require (
+	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/go-redis/redis v6.15.5+incompatible
 	github.com/gocql/gocql v0.0.0-20190910075112-d63913db787c
 	github.com/gofrs/uuid v3.2.0+incompatible

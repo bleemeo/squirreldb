@@ -3,6 +3,7 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/config"
@@ -10,24 +11,27 @@ import (
 	"time"
 )
 
+// Returns the list of points meeting the conditions of the request
 func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	// TODO: Handle error
-	mUUID, _ := mRequest.UUID()
-	uuid := gocql.UUID(mUUID.UUID)
+	var mUUID types.MetricUUID
+
+	_ = backoff.Retry(func() error {
+		var err error
+		mUUID, err = mRequest.UUID()
+
+		return err
+	}, exponentialBackOff)
+
 	partitionLengthSecs := int64(config.PartitionLength.Seconds())
 	fromBaseTimestamp := mRequest.FromTime.Unix() - (mRequest.FromTime.Unix() % partitionLengthSecs)
 	toBaseTimestamp := mRequest.ToTime.Unix() - (mRequest.ToTime.Unix() % partitionLengthSecs)
-	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp - int64(config.BatchLength.Seconds())
+	fromOffsetTimestamp := mRequest.FromTime.Unix() - fromBaseTimestamp - int64(config.BatchDuration.Seconds())
 	toOffsetTimestamp := mRequest.ToTime.Unix() - toBaseTimestamp
 
-	iterator := c.session.Query(
-		"SELECT metric_uuid, base_ts, offset_ts, values FROM "+metricsTable+" "+
-			"WHERE metric_uuid = ? AND base_ts IN (?, ?) AND offset_ts >= ? AND offset_ts <= ?",
-		uuid, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+	iterator := c.readSQL(gocql.UUID(mUUID.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 
 	var metricUUID string
-	var baseTimestamp int64
-	var offsetTimestamp int64
+	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	results := make(map[string]types.MetricPoints)
 
@@ -84,4 +88,14 @@ func (c *Cassandra) Read(mRequest types.MetricRequest) ([]types.MetricPoints, er
 	}
 
 	return msPoints, nil
+}
+
+// Returns an interpreter according to the parameters
+func (c *Cassandra) readSQL(uuid gocql.UUID, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	iterator := c.session.Query(
+		"SELECT metric_uuid, base_ts, offset_ts, values FROM "+metricsTable+" "+
+			"WHERE metric_uuid = ? AND base_ts IN (?, ?) AND offset_ts >= ? AND offset_ts <= ?",
+		uuid, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+
+	return iterator
 }

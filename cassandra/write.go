@@ -3,31 +3,36 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"squirreldb/config"
 	"squirreldb/types"
 	"time"
 )
 
+// Write the points in the database
 func (c *Cassandra) Write(msPoints []types.MetricPoints) error {
-	return c.write(msPoints, time.Now())
-}
-
-func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 	for _, mPoints := range msPoints {
-		// TODO: Handle error
-		mUUID, _ := mPoints.UUID()
-		uuid := gocql.UUID(mUUID.UUID)
-		partsPoints := make(map[int64][]types.Point)
+		var mUUID types.MetricUUID
+
+		_ = backoff.Retry(func() error {
+			var err error
+			mUUID, err = mPoints.UUID()
+
+			return err
+		}, exponentialBackOff)
+
+		// Sort points by partition
+		tsPoints := make(map[int64][]types.Point)
 		partitionLengthSecs := int64(config.PartitionLength.Seconds())
 
 		for _, point := range mPoints.Points {
 			baseTimestamp := point.Time.Unix() - (point.Time.Unix() % partitionLengthSecs)
 
-			partsPoints[baseTimestamp] = append(partsPoints[baseTimestamp], point)
+			tsPoints[baseTimestamp] = append(tsPoints[baseTimestamp], point)
 		}
 
-		for baseTimestamp, points := range partsPoints {
+		for baseTimestamp, points := range tsPoints {
 			var smallestTime time.Time
 			var biggestTime time.Time
 
@@ -40,7 +45,7 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 				}
 			}
 
-			age := now.Unix() - biggestTime.Unix()
+			age := time.Now().Unix() - biggestTime.Unix()
 			timeToLiveSecs := int64(config.CassandraMetricRetention.Seconds())
 
 			if age < timeToLiveSecs {
@@ -60,17 +65,26 @@ func (c *Cassandra) write(msPoints []types.MetricPoints, now time.Time) error {
 					}
 				}
 
-				insert := c.session.Query(
-					"INSERT INTO "+metricsTable+" (metric_uuid, base_ts, offset_ts, insert_time, values)"+
-						"VALUES (?, ?, ?, now(), ?) "+
-						"USING TTL ?",
-					uuid, baseTimestamp, offsetTimestamp, buffer.Bytes(), timeToLiveSecs)
-
-				if err := insert.Exec(); err != nil {
+				if err := c.writeSQL(gocql.UUID(mUUID.UUID), baseTimestamp, offsetTimestamp, timeToLiveSecs, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+// Insert in the database according to the parameters
+func (c *Cassandra) writeSQL(uuid gocql.UUID, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) error {
+	insert := c.session.Query(
+		"INSERT INTO "+metricsTable+" (metric_uuid, base_ts, offset_ts, insert_time, values)"+
+			"VALUES (?, ?, ?, now(), ?) "+
+			"USING TTL ?",
+		uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
+
+	if err := insert.Exec(); err != nil {
+		return err
 	}
 
 	return nil

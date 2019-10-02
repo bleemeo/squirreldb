@@ -2,57 +2,60 @@ package main
 
 import (
 	"context"
+	"github.com/cenkalti/backoff"
 	"log"
 	"os"
 	"os/signal"
 	"squirreldb/batch"
 	"squirreldb/cassandra"
-	"squirreldb/config"
 	"squirreldb/prometheus"
-	"squirreldb/retry"
 	"squirreldb/store"
 	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
 	logger := log.New(os.Stdout, "[main] ", log.LstdFlags)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	signals := make(chan os.Signal, 1)
-	defer close(signals)
 
 	squirrelStore := store.NewStore()
 	squirrelCassandra := cassandra.NewCassandra()
 	squirrelBatch := batch.NewBatch(squirrelStore, squirrelCassandra, squirrelCassandra)
 	squirrelPrometheus := prometheus.NewPrometheus(squirrelBatch, squirrelBatch)
 
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	defer close(signals)
+
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
-	retry.Endlessly(config.CassandraRetryDelay, func() error {
-		err := squirrelCassandra.InitSession("cassandra0:9042")
+	_ = backoff.Retry(func() error {
+		return squirrelCassandra.InitSession("cassandra0:9042")
+	},
+		&backoff.ExponentialBackOff{
+			InitialInterval:     backoff.DefaultInitialInterval,
+			RandomizationFactor: 0.5,
+			Multiplier:          2,
+			MaxInterval:         30 * time.Second,
+			MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
+			Clock:               backoff.SystemClock,
+		})
 
-		if err != nil {
-			logger.Printf("Can't init Cassandra session (%v)"+"\n", err)
-		}
-
-		return err
-	}, logger)
-
+	// Run services
 	wg.Add(1)
 	go squirrelPrometheus.RunServer(ctx, &wg)
-
+	wg.Add(1)
+	go squirrelBatch.RunChecker(ctx, &wg)
 	wg.Add(1)
 	go squirrelStore.RunExpirator(ctx, &wg)
 
-	wg.Add(1)
-	go squirrelBatch.RunChecker(ctx, &wg)
-
 	logger.Println("SquirrelDB ready")
 
+	// Wait to receive a stop signal
 	<-signals
 
+	// Stop services
 	logger.Println("Stopping...")
 
 	cancel()

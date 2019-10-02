@@ -2,20 +2,30 @@ package batch
 
 import (
 	"context"
+	"github.com/cenkalti/backoff"
 	"log"
 	"os"
 	"squirreldb/config"
-	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"time"
 )
 
-var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
+var (
+	logger             = log.New(os.Stdout, "[batch] ", log.LstdFlags)
+	exponentialBackOff = backoff.ExponentialBackOff{
+		InitialInterval:     backoff.DefaultInitialInterval,
+		RandomizationFactor: 0.5,
+		Multiplier:          2,
+		MaxInterval:         30 * time.Second,
+		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
+		Clock:               backoff.SystemClock,
+	}
+)
 
 type MetricStorer interface {
 	Append(newPoints, existingPoints map[string][]types.Point) error
-	Get(key string) ([]types.Point, error)
+	Get(keys []string) (map[string][]types.Point, error)
 	Set(newPoints, existingPoints map[string][]types.Point) error
 }
 
@@ -36,6 +46,7 @@ type Batch struct {
 	mutex  sync.Mutex
 }
 
+// NewBatch creates a new Batch object
 func NewBatch(temporaryStorage MetricStorer, persistentStorageR types.MetricReader, persistentStorageW types.MetricWriter) *Batch {
 	return &Batch{
 		temporaryStorage:   temporaryStorage,
@@ -45,6 +56,13 @@ func NewBatch(temporaryStorage MetricStorer, persistentStorageR types.MetricRead
 	}
 }
 
+// Read() is the public function of read()
+func (b *Batch) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
+	return b.read(mRequest)
+}
+
+// RunChecker calls check() every BatchCheckerInterval seconds
+// If the context receives a stop signal, a last check is made before stopping the service
 func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(config.BatchCheckerInterval)
 	defer ticker.Stop()
@@ -52,10 +70,9 @@ func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ticker.C:
-			_ = b.check(time.Now(), config.BatchLength, false)
+			b.check(time.Now(), config.BatchDuration, false)
 		case <-ctx.Done():
-			logger.Println("RunChecker: Stopping...")
-			_ = b.check(time.Now(), config.BatchLength, true)
+			b.check(time.Now(), config.BatchDuration, true)
 			logger.Println("RunChecker: Stopped")
 			wg.Done()
 			return
@@ -63,15 +80,16 @@ func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-func (b *Batch) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	return b.read(mRequest)
-}
-
+// Write is the public function of write()
 func (b *Batch) Write(msPoints []types.MetricPoints) error {
-	return b.write(msPoints, time.Now(), config.BatchLength)
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	return b.write(msPoints, time.Now(), config.BatchDuration)
 }
 
-func (b *Batch) check(now time.Time, batchLength time.Duration, flushAll bool) error {
+// Checks all current states and adds states whose deadlines are passed in a waiting list in order to flush them
+func (b *Batch) check(now time.Time, batchDuration time.Duration, flushAll bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -84,37 +102,40 @@ func (b *Batch) check(now time.Time, batchLength time.Duration, flushAll bool) e
 	}
 
 	if len(stateQueue) != 0 {
-		_ = b.flush(stateQueue, now, batchLength)
+		b.flush(stateQueue, now, batchDuration)
 	}
-
-	return nil
 }
 
-func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength time.Duration) error {
+// Transfers all points that comply with the properties of the state queue from the temporary storage to
+// the persistent storage
+func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchDuration time.Duration) {
+	keysPointsToSet := make(map[string][]types.Point)
+
+	keys := make([]string, 0, len(stateQueue))
+
+	for key := range stateQueue {
+		keys = append(keys, key)
+	}
+
+	var temporaryKeysPoints map[string][]types.Point
+
+	_ = backoff.Retry(func() error {
+		var err error
+		temporaryKeysPoints, err = b.temporaryStorage.Get(keys)
+
+		return err
+	}, &exponentialBackOff)
+
 	var msPointsToWrite []types.MetricPoints
-	msPointsToSet := make(map[string][]types.Point)
 
-	for key, states := range stateQueue {
-		var points []types.Point
-
-		retry.Endlessly(config.BatchRetryDelay, func() error {
-			var err error
-			points, err = b.temporaryStorage.Get(key)
-
-			if err != nil {
-				logger.Printf("flush: Can't get points from temporaryStorage (%v)"+"\n", err)
-			}
-
-			return err
-		}, logger)
-
-		for _, state := range states {
+	for key, metricStates := range stateQueue {
+		for _, state := range metricStates {
 			mPointsToWrite := types.MetricPoints{
 				Metric: state.Metric,
 				Points: nil,
 			}
 
-			for _, point := range points {
+			for _, point := range temporaryKeysPoints[key] {
 				if !point.Time.Before(state.firstPointTime) && !point.Time.After(state.lastPointTime) {
 					mPointsToWrite.Points = append(mPointsToWrite.Points, point)
 				}
@@ -124,69 +145,91 @@ func (b *Batch) flush(stateQueue map[string][]state, now time.Time, batchLength 
 		}
 
 		currentState := b.states[key]
-		cutoff := now.Add(batchLength)
+		cutoff := now.Add(batchDuration)
 		var pointsToSet []types.Point
 
-		for _, point := range points {
+		for _, point := range temporaryKeysPoints[key] {
 			if !point.Time.Before(cutoff) || !point.Time.Before(currentState.firstPointTime) {
 				pointsToSet = append(pointsToSet, point)
 			}
 		}
 
-		msPointsToSet[key] = pointsToSet
+		keysPointsToSet[key] = pointsToSet
 	}
 
-	retry.Endlessly(config.BatchRetryDelay, func() error {
-		err := b.persistentStorageW.Write(msPointsToWrite)
+	_ = backoff.Retry(func() error {
+		return b.persistentStorageW.Write(msPointsToWrite)
+	}, &exponentialBackOff)
 
-		if err != nil {
-			logger.Printf("flush: Can't write metrics points to persistentStorage (%v)"+"\n", err)
-		}
-
-		return err
-	}, logger)
-
-	retry.Endlessly(config.BatchRetryDelay, func() error {
-		err := b.temporaryStorage.Set(nil, msPointsToSet)
-
-		if err != nil {
-			logger.Printf("flush: Can't set metrics points to temporaryStorage (%v)"+"\n", err)
-		}
-
-		return err
-	}, logger)
-
-	return nil
+	_ = backoff.Retry(func() error {
+		return b.temporaryStorage.Set(nil, keysPointsToSet)
+	}, &exponentialBackOff)
 }
 
+// Retrieves points from temporary and permanent storage that comply with the request and returns
+// a list of MetricPoints
 func (b *Batch) read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
-	// TODO: Handle error
-	mUUID, _ := mRequest.UUID()
-	key := mUUID.String()
-	points, _ := b.temporaryStorage.Get(key)
-	var temporaryPoints []types.Point
-
-	for _, point := range points {
-		if !point.Time.Before(mRequest.FromTime) && !point.Time.After(mRequest.ToTime) {
-			temporaryPoints = append(temporaryPoints, point)
-		}
-	}
-
 	results := make(map[string]types.MetricPoints)
+	var mUUID types.MetricUUID
 
-	temporaryMPoints := types.MetricPoints{
-		Metric: mRequest.Metric,
-		Points: temporaryPoints,
+	_ = backoff.Retry(func() error {
+		var err error
+		mUUID, err = mRequest.UUID()
+
+		return err
+	}, &exponentialBackOff)
+
+	keys := []string{mUUID.String()}
+
+	// Retrieves the points from the temporary storage, filters them according to the request and
+	// generates a MetricPoints
+	var temporaryKeysPoints map[string][]types.Point
+
+	_ = backoff.Retry(func() error {
+		var err error
+		temporaryKeysPoints, err = b.temporaryStorage.Get(keys)
+
+		return err
+	}, &exponentialBackOff)
+
+	for key, points := range temporaryKeysPoints {
+		var temporaryPoints []types.Point
+
+		for _, point := range points {
+			if !point.Time.Before(mRequest.FromTime) && !point.Time.After(mRequest.ToTime) {
+				temporaryPoints = append(temporaryPoints, point)
+			}
+		}
+
+		temporaryMPoints := types.MetricPoints{
+			Metric: mRequest.Metric,
+			Points: temporaryPoints,
+		}
+
+		results[key] = temporaryMPoints
 	}
 
-	results[key] = temporaryMPoints
+	// Retrieves the pre-filtered MetricPoints from the persistent storage, and add them to the result map or
+	// appends their points if a MetricPoints already exists for the metric in the result map
+	var persistentMsPoints []types.MetricPoints
 
-	// TODO: Handle error
-	persistentMsPoints, _ := b.persistentStorageR.Read(mRequest)
+	_ = backoff.Retry(func() error {
+		var err error
+		persistentMsPoints, err = b.persistentStorageR.Read(mRequest)
+
+		return err
+	}, &exponentialBackOff)
 
 	for _, persistentMPoint := range persistentMsPoints {
-		// TODO: Handle error
-		mUUID, _ := persistentMPoint.UUID()
+		var mUUID types.MetricUUID
+
+		_ = backoff.Retry(func() error {
+			var err error
+			mUUID, err = mRequest.UUID()
+
+			return err
+		}, &exponentialBackOff)
+
 		key := mUUID.String()
 		mPoints, exists := results[key]
 
@@ -208,17 +251,24 @@ func (b *Batch) read(mRequest types.MetricRequest) ([]types.MetricPoints, error)
 	return msPoints, nil
 }
 
-func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength time.Duration) error {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-
+// Retrieves the points to be written and stores them in the temporary storage
+// Each metric will have a current state that will allow to know if the size of a batch, or the deadline is reached.
+// When one of these cases occurs, the current state is added to the waiting list and flush() is called
+func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchDuration time.Duration) error {
 	newPoints := make(map[string][]types.Point)
 	existingPoints := make(map[string][]types.Point)
 	stateQueue := make(map[string][]state)
 
 	for _, mPoints := range msPoints {
-		// TODO: Handle error
-		mUUID, _ := mPoints.UUID()
+		var mUUID types.MetricUUID
+
+		_ = backoff.Retry(func() error {
+			var err error
+			mUUID, err = mPoints.UUID()
+
+			return err
+		}, &exponentialBackOff)
+
 		key := mUUID.String()
 
 		for _, point := range mPoints.Points {
@@ -230,7 +280,7 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 					pointCount:     1,
 					firstPointTime: point.Time,
 					lastPointTime:  point.Time,
-					flushDeadline:  flushDeadline(mPoints.Metric, now, batchLength),
+					flushDeadline:  flushDeadline(mPoints.Metric, now, batchDuration),
 				}
 			} else {
 				nextFirstPointTime := currentState.firstPointTime
@@ -246,7 +296,12 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 
 				nextDeltaDuration := nextLastPointTime.Sub(nextFirstPointTime)
 
-				if currentState.flushDeadline.Before(now) || (nextDeltaDuration.Seconds() >= batchLength.Seconds()) {
+				// If the flush date of the current state is exceeded or the time between the smallest and
+				// largest time exceeds the size of a batch, then we add the current state to the list of states
+				// from metrical to flush and recreate a current state for the iterated point.
+				// If this is not the case, the times of the first and last point of the current state
+				// are redefined and the point counter is increased
+				if currentState.flushDeadline.Before(now) || (nextDeltaDuration.Seconds() >= batchDuration.Seconds()) {
 					stateQueue[key] = append(stateQueue[key], currentState)
 					exists = false
 					delete(b.states, key)
@@ -256,10 +311,10 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 						pointCount:     1,
 						firstPointTime: point.Time,
 						lastPointTime:  point.Time,
-						flushDeadline:  now.Add(batchLength),
+						flushDeadline:  now.Add(batchDuration),
 					}
 				} else {
-					currentState.pointCount += 1
+					currentState.pointCount++
 					currentState.firstPointTime = nextFirstPointTime
 					currentState.lastPointTime = nextLastPointTime
 				}
@@ -275,31 +330,37 @@ func (b *Batch) write(msPoints []types.MetricPoints, now time.Time, batchLength 
 		}
 	}
 
-	retry.Endlessly(config.BatchRetryDelay, func() error {
-		err := b.temporaryStorage.Append(newPoints, existingPoints)
-
-		if err != nil {
-			logger.Printf("write: Can't append metrics points to temporaryStorage (%v)"+"\n", err)
-		}
-
-		return err
-	}, logger)
+	_ = backoff.Retry(func() error {
+		return b.temporaryStorage.Append(newPoints, existingPoints)
+	}, &exponentialBackOff)
 
 	if len(stateQueue) != 0 {
-		_ = b.flush(stateQueue, now, config.BatchLength)
+		b.flush(stateQueue, now, config.BatchDuration)
 	}
 
 	return nil
 }
 
-func flushDeadline(metric types.Metric, now time.Time, batchLength time.Duration) time.Time {
-	// TODO: Handle error
-	mUUID, _ := metric.UUID()
-	flush := now.Add(batchLength).Unix()
+// Generates and returns a flush deadline.
+// It allows to generate a flush period for each metric state every batchDuration seconds and to shift them
+// among themselves thanks to the value of the uuid of the metrics
+//
+// It follows the formula:
+// deadline = (now + batchDuration) - (now + batchDuration + (uuid.int % batchDuration)) % batchDuration
+func flushDeadline(metric types.Metric, now time.Time, batchDuration time.Duration) time.Time {
+	var mUUID types.MetricUUID
 
-	offset := mUUID.Int64() % int64(batchLength.Seconds())
+	_ = backoff.Retry(func() error {
+		var err error
+		mUUID, err = metric.UUID()
 
-	flush = flush - ((flush + offset) % int64(batchLength.Seconds()))
+		return err
+	}, &exponentialBackOff)
+
+	flush := now.Add(batchDuration).Unix()
+	offset := mUUID.Int64() % int64(batchDuration.Seconds())
+
+	flush = flush - (flush+offset)%int64(batchDuration.Seconds())
 
 	flushDeadline := time.Unix(flush, 0)
 

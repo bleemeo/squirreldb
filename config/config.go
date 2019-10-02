@@ -3,9 +3,8 @@ package config
 import "time"
 
 const (
-	BatchLength          = 300 * time.Second
+	BatchDuration        = 300 * time.Second
 	BatchCheckerInterval = 60 * time.Second
-	BatchRetryDelay      = 10 * time.Second
 )
 
 const (
@@ -13,7 +12,6 @@ const (
 	CassandraReplicationFactor = 1
 	CassandraMetricsTable      = "data"
 	CassandraMetricRetention   = 397 * 24 * time.Hour
-	CassandraRetryDelay        = 10 * time.Second
 )
 
 const (
@@ -21,12 +19,11 @@ const (
 )
 
 const (
-	PrometheusAddress    = ":1234"
-	PrometheusRetryDelay = 10 * time.Second
+	PrometheusAddress = ":1234"
 )
 
 const (
-	StorageTimeToLive = (BatchLength * 2) + (150 * time.Second)
+	StorageTimeToLive = (BatchDuration * 2) + (150 * time.Second)
 )
 
 const (

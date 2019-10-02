@@ -11,7 +11,7 @@ import (
 )
 
 type Redis struct {
-	client *redis.ClusterClient
+	client *redis.Client
 }
 
 func NewRedis() *Redis {
@@ -22,16 +22,14 @@ func (r *Redis) Append(newPoints, existingPoints map[string][]types.Point) error
 	return r.append(newPoints, existingPoints, config.StorageTimeToLive)
 }
 
-func (r *Redis) Get(key string) ([]types.Point, error) {
-	return r.get(key)
+func (r *Redis) Get(keys []string) (map[string][]types.Point, error) {
+	return r.get(keys)
 }
 
-func (r *Redis) InitCluster(addresses ...string) error {
-	r.client = redis.NewClusterClient(&redis.ClusterOptions{
-		Addrs: addresses,
+func (r *Redis) InitClient(address string) {
+	r.client = redis.NewClient(&redis.Options{
+		Addr: address,
 	})
-
-	return nil
 }
 
 func (r *Redis) Set(newPoints, existingPoints map[string][]types.Point) error {
@@ -42,16 +40,22 @@ func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeT
 	pipe := r.client.Pipeline()
 
 	for key, points := range newPoints {
-		// TODO: Handle error
-		data, _ := encode(points)
+		data, err := encode(points)
+
+		if err != nil {
+			return err
+		}
 
 		pipe.Append(key, string(data))
 		pipe.Expire(key, timeToLive)
 	}
 
 	for key, points := range existingPoints {
-		// TODO: Handle error
-		data, _ := encode(points)
+		data, err := encode(points)
+
+		if err != nil {
+			return err
+		}
 
 		pipe.Append(key, string(data))
 	}
@@ -63,34 +67,52 @@ func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeT
 	return nil
 }
 
-func (r *Redis) get(key string) ([]types.Point, error) {
+func (r *Redis) get(keys []string) (map[string][]types.Point, error) {
+	keysPoints := make(map[string][]types.Point)
 	pipe := r.client.Pipeline()
 
-	data, err := pipe.Get(key).Bytes()
+	for _, key := range keys {
+		data, err := pipe.Get(key).Bytes()
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := pipe.Exec(); err != nil {
+			return nil, err
+		}
+
+		points, err := decode(data)
+
+		if err != nil {
+			return nil, err
+		}
+
+		keysPoints[key] = points
 	}
 
-	// TODO: Handle error
-	points, _ := decode(data)
-
-	return points, nil
+	return keysPoints, nil
 }
 
 func (r *Redis) set(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
 	pipe := r.client.Pipeline()
 
 	for key, points := range newPoints {
-		// TODO: Handle error
-		data, _ := encode(points)
+		data, err := encode(points)
+
+		if err != nil {
+			return err
+		}
 
 		pipe.Set(key, data, timeToLive)
 	}
 
 	for key, points := range existingPoints {
-		// TODO: Handle error
-		data, _ := encode(points)
+		data, err := encode(points)
+
+		if err != nil {
+			return err
+		}
 
 		pipe.Set(key, data, timeToLive)
 	}
