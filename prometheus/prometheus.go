@@ -34,7 +34,7 @@ func NewPrometheus(reader types.MetricReader, writer types.MetricWriter) *Promet
 func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
 	router := http.NewServeMux()
 	server := http.Server{
-		Addr:    config.PrometheusAddress,
+		Addr:    config.C.String("prometheus.address"),
 		Handler: router,
 	}
 
@@ -46,6 +46,7 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
 			err := server.ListenAndServe()
 
 			if err != http.ErrServerClosed {
+				logger.Println("RunServer: Can't listen and serve the server (", err, ")")
 				return err
 			}
 

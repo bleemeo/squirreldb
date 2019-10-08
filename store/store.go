@@ -34,7 +34,7 @@ func (s *Store) Append(newPoints, existingPoints map[string][]types.Point) error
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.append(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
+	return s.append(newPoints, existingPoints, time.Now(), config.C.Duration("store.time_to_live")*time.Second)
 }
 
 // Get is the public function of get()
@@ -48,7 +48,7 @@ func (s *Store) Get(keys []string) (map[string][]types.Point, error) {
 // RunExpirator calls expire() every StoreExpiratorInterval seconds
 // If the context receives a stop signal, the service is stopped
 func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(config.StoreExpiratorInterval)
+	ticker := time.NewTicker(config.C.Duration("store.expirator_interval") * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -68,7 +68,7 @@ func (s *Store) Set(newPoints, existingPoints map[string][]types.Point) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(newPoints, existingPoints, time.Now(), config.StorageTimeToLive)
+	return s.set(newPoints, existingPoints, time.Now(), config.C.Duration("store.time_to_live")*time.Second)
 }
 
 // Appends points to existing items and update expiration deadline

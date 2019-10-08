@@ -9,14 +9,11 @@
 ### Cassandra
 
 - Read system with generic labels
-- Pre-aggregated data
 
 ### Redis
 
 - Communication system (Append, Get, Set) \[WIP\]
 
-### General
+### Invalid cases
 
-- Environment support
-- Flags support
-- YAML configuration file
+- Bad values

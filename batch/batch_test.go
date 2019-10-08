@@ -20,9 +20,9 @@ type mockMetricWriter struct {
 	got []types.MetricPoints
 }
 
-func (m *mockMetricReader) Read(request types.MetricRequest) ([]types.MetricPoints, error) {
+func (m *mockMetricReader) Read(mRequest types.MetricRequest) ([]types.MetricPoints, error) {
 	var msPoints []types.MetricPoints
-	canonical := request.CanonicalLabels()
+	canonical := mRequest.CanonicalLabels()
 
 	for _, mPoints := range m.msPoints {
 		if mPoints.CanonicalLabels() == canonical {
@@ -126,9 +126,9 @@ func TestBatch_check(t *testing.T) {
 		mutex              sync.Mutex
 	}
 	type args struct {
-		now           time.Time
-		batchDuration time.Duration
-		flushAll      bool
+		now       time.Time
+		batchSize time.Duration
+		flushAll  bool
 	}
 	tests := []struct {
 		name   string
@@ -171,9 +171,9 @@ func TestBatch_check(t *testing.T) {
 				mutex: sync.Mutex{},
 			},
 			args: args{
-				now:           time.Unix(300, 0),
-				batchDuration: 300 * time.Second,
-				flushAll:      false,
+				now:       time.Unix(300, 0),
+				batchSize: 300 * time.Second,
+				flushAll:  false,
 			},
 			want: nil,
 		},
@@ -216,9 +216,9 @@ func TestBatch_check(t *testing.T) {
 				mutex: sync.Mutex{},
 			},
 			args: args{
-				now:           time.Unix(600, 0),
-				batchDuration: 300 * time.Second,
-				flushAll:      false,
+				now:       time.Unix(600, 0),
+				batchSize: 300 * time.Second,
+				flushAll:  false,
 			},
 			want: []types.MetricPoints{
 				{
@@ -277,9 +277,9 @@ func TestBatch_check(t *testing.T) {
 				mutex: sync.Mutex{},
 			},
 			args: args{
-				now:           time.Unix(300, 0),
-				batchDuration: 300 * time.Second,
-				flushAll:      true,
+				now:       time.Unix(300, 0),
+				batchSize: 300 * time.Second,
+				flushAll:  true,
 			},
 			want: []types.MetricPoints{
 				{
@@ -313,7 +313,7 @@ func TestBatch_check(t *testing.T) {
 				states:             tt.fields.states,
 				mutex:              tt.fields.mutex,
 			}
-			b.check(tt.args.now, tt.args.batchDuration, tt.args.flushAll)
+			b.check(tt.args.now, tt.args.batchSize, tt.args.flushAll)
 			got := tt.fields.persistentStorageW.got
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("check() got = %v, want %v", got, tt.want)
@@ -331,9 +331,9 @@ func TestBatch_flush(t *testing.T) {
 		mutex              sync.Mutex
 	}
 	type args struct {
-		stateQueue    map[string][]state
-		now           time.Time
-		batchDuration time.Duration
+		stateQueue map[string][]state
+		now        time.Time
+		batchSize  time.Duration
 	}
 	tests := []struct {
 		name   string
@@ -389,8 +389,8 @@ func TestBatch_flush(t *testing.T) {
 						},
 					},
 				},
-				now:           time.Unix(300, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(300, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: []types.MetricPoints{
 				{
@@ -420,7 +420,7 @@ func TestBatch_flush(t *testing.T) {
 				states:             tt.fields.states,
 				mutex:              tt.fields.mutex,
 			}
-			b.flush(tt.args.stateQueue, tt.args.now, tt.args.batchDuration)
+			b.flush(tt.args.stateQueue, tt.args.now, tt.args.batchSize)
 			got := tt.fields.persistentStorageW.got
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("flush() got = %v, want %v", got, tt.want)
@@ -688,9 +688,9 @@ func TestBatch_write(t *testing.T) {
 		mutex              sync.Mutex
 	}
 	type args struct {
-		msPoints      []types.MetricPoints
-		now           time.Time
-		batchDuration time.Duration
+		msPoints  []types.MetricPoints
+		now       time.Time
+		batchSize time.Duration
 	}
 	tests := []struct {
 		name    string
@@ -730,8 +730,8 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:           time.Unix(100, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(100, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: map[string]state{
 				"00000000-0000-0000-0000-000000000000": {
@@ -777,8 +777,8 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:           time.Unix(300, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(300, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: map[string]state{
 				"00000000-0000-0000-0000-000000000000": {
@@ -824,8 +824,8 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:           time.Unix(100, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(100, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: map[string]state{
 				"00000000-0000-0000-0000-000000000000": {
@@ -850,7 +850,7 @@ func TestBatch_write(t *testing.T) {
 				states:             tt.fields.states,
 				mutex:              tt.fields.mutex,
 			}
-			if err := b.write(tt.args.msPoints, tt.args.now, tt.args.batchDuration); (err != nil) != tt.wantErr {
+			if err := b.write(tt.args.msPoints, tt.args.now, tt.args.batchSize); (err != nil) != tt.wantErr {
 				t.Errorf("write() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(tt.fields.states, tt.want) {
@@ -862,9 +862,9 @@ func TestBatch_write(t *testing.T) {
 
 func Test_flushDeadline(t *testing.T) {
 	type args struct {
-		metric        types.Metric
-		now           time.Time
-		batchDuration time.Duration
+		metric    types.Metric
+		now       time.Time
+		batchSize time.Duration
 	}
 	tests := []struct {
 		name string
@@ -877,8 +877,8 @@ func Test_flushDeadline(t *testing.T) {
 				metric: types.Metric{Labels: map[string]string{
 					"__uuid__": "00000000-0000-0000-0000-000000000000",
 				}},
-				now:           time.Unix(0, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(0, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: time.Unix(300, 0),
 		},
@@ -888,15 +888,15 @@ func Test_flushDeadline(t *testing.T) {
 				metric: types.Metric{Labels: map[string]string{
 					"__uuid__": "00000000-0000-0000-0000-0000000006ab",
 				}},
-				now:           time.Unix(0, 0),
-				batchDuration: 300 * time.Second,
+				now:       time.Unix(0, 0),
+				batchSize: 300 * time.Second,
 			},
 			want: time.Unix(93, 0),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := flushDeadline(tt.args.metric, tt.args.now, tt.args.batchDuration); !reflect.DeepEqual(got, tt.want) {
+			if got := flushDeadline(tt.args.metric, tt.args.now, tt.args.batchSize); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("flushDeadline() = %v, want %v", got, tt.want)
 			}
 		})

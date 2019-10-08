@@ -19,7 +19,7 @@ func NewRedis() *Redis {
 }
 
 func (r *Redis) Append(newPoints, existingPoints map[string][]types.Point) error {
-	return r.append(newPoints, existingPoints, config.StorageTimeToLive)
+	return r.append(newPoints, existingPoints, config.C.Duration("store.time_to_live")*time.Second)
 }
 
 func (r *Redis) Get(keys []string) (map[string][]types.Point, error) {
@@ -33,7 +33,7 @@ func (r *Redis) InitClient(address string) {
 }
 
 func (r *Redis) Set(newPoints, existingPoints map[string][]types.Point) error {
-	return r.set(newPoints, existingPoints, config.StorageTimeToLive)
+	return r.set(newPoints, existingPoints, config.C.Duration("store.time_to_live")*time.Second)
 }
 
 func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
