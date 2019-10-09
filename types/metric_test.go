@@ -6,89 +6,105 @@ import (
 	"testing"
 )
 
-func TestMetric_CanonicalLabels(t *testing.T) {
-	type fields struct {
-		Labels map[string]string
-	}
+func TestMetricLabels_Canonical(t *testing.T) {
 	tests := []struct {
-		name   string
-		fields fields
-		want   string
+		name string
+		m    MetricLabels
+		want string
 	}{
 		{
-			name: "test_labels_without_quotes",
-			fields: fields{Labels: map[string]string{
+			name: "no_label_quote",
+			m: MetricLabels{
 				"__name__": "testing",
-				"job":      "testing_job",
-				"monitor":  "testing_monitor",
-			}},
-			want: `__name__="testing",job="testing_job",monitor="testing_monitor"`,
+				"job":      "job_testing",
+				"monitor":  "monitor_testing",
+			},
+			want: `__name__="testing",job="job_testing",monitor="monitor_testing"`,
 		},
 		{
-			name: "test_labels_with_quotes",
-			fields: fields{Labels: map[string]string{
-				"__name__": "test\"ing",
-				"job":      "testing\"job",
-				"monitor":  "testing\"monitor",
-			}},
-			want: `__name__="test\"ing",job="testing\"job",monitor="testing\"monitor"`,
+			name: "label_quotes",
+			m: MetricLabels{
+				"__name__": `test"ing`,
+				"job":      `job_test"ing`,
+				"monitor":  `monitor_test"ing`,
+			},
+			want: `__name__="test\"ing",job="job_test\"ing",monitor="monitor_test\"ing"`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &Metric{
-				Labels: tt.fields.Labels,
-			}
-			if got := m.CanonicalLabels(); got != tt.want {
-				t.Errorf("CanonicalLabels() = %v, want %v", got, tt.want)
+			if got := tt.m.Canonical(); got != tt.want {
+				t.Errorf("Canonical() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMetric_UUID(t *testing.T) {
-	type fields struct {
-		Labels map[string]string
-	}
+func TestMetricLabels_UUID(t *testing.T) {
 	tests := []struct {
-		name    string
-		fields  fields
-		want    MetricUUID
-		wantErr bool
+		name string
+		m    MetricLabels
+		want MetricUUID
 	}{
 		{
-			name: "test_uuid_label",
-			fields: fields{Labels: map[string]string{
+			name: "valid_uuid",
+			m: MetricLabels{
 				"__uuid__": "abcdef01-2345-6789-abcd-ef0123456789",
-			}},
+			},
 			want: MetricUUID{
 				UUID: uuid.FromStringOrNil("abcdef01-2345-6789-abcd-ef0123456789"),
 			},
-			wantErr: false,
 		},
 		{
-			name: "test_invalid_uuid",
-			fields: fields{Labels: map[string]string{
-				"__uuid__": "invalid_uuid",
-			}},
+			name: "invalid_uuid",
+			m: MetricLabels{
+				"__uuid__": "i-am-an-invalid-uuid",
+			},
 			want: MetricUUID{
 				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
 			},
-			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &Metric{
-				Labels: tt.fields.Labels,
+			if got := tt.m.UUID(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("UUID() = %v, want %v", got, tt.want)
 			}
-			got, err := m.UUID()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UUID() error = %v, wantErr %v", err, tt.wantErr)
-				return
+		})
+	}
+}
+
+func TestMetricUUID_Uint64(t *testing.T) {
+	type fields struct {
+		UUID uuid.UUID
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   uint64
+	}{
+		{
+			name: "uuid_0",
+			fields: fields{
+				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
+			},
+			want: 0,
+		},
+		{
+			name: "uuid_10",
+			fields: fields{
+				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+			},
+			want: 10,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &MetricUUID{
+				UUID: tt.fields.UUID,
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UUID() got = %v, want %v", got, tt.want)
+			if got := m.Uint64(); got != tt.want {
+				t.Errorf("Int64() = %v, want %v", got, tt.want)
 			}
 		})
 	}

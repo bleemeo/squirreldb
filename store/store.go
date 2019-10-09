@@ -1,152 +1,125 @@
 package store
 
 import (
-	"context"
-	"log"
-	"os"
-	"squirreldb/config"
 	"squirreldb/types"
 	"sync"
 	"time"
 )
 
-var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
-
-type Data struct {
-	Points             []types.Point
-	ExpirationDeadline time.Time
+type metric struct {
+	Data                types.MetricData
+	ExpirationTimestamp int64
 }
 
 type Store struct {
-	metrics map[string]Data
+	Metrics map[types.MetricUUID]metric
 	mutex   sync.Mutex
 }
 
 // NewStore creates a new Store object
 func NewStore() *Store {
 	return &Store{
-		metrics: make(map[string]Data),
+		Metrics: make(map[types.MetricUUID]metric),
 	}
 }
 
 // Append is the public function of append()
-func (s *Store) Append(newPoints, existingPoints map[string][]types.Point) error {
+func (s *Store) Append(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.append(newPoints, existingPoints, time.Now(), config.C.Duration("store.time_to_live")*time.Second)
+	// TODO: Time to live from config
+	return s.append(newMetrics, actualMetrics, time.Now(), 750)
 }
 
 // Get is the public function of get()
-func (s *Store) Get(keys []string) (map[string][]types.Point, error) {
+func (s *Store) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.get(keys)
-}
-
-// RunExpirator calls expire() every StoreExpiratorInterval seconds
-// If the context receives a stop signal, the service is stopped
-func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(config.C.Duration("store.expirator_interval") * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			s.expire(time.Now())
-		case <-ctx.Done():
-			logger.Println("RunExpirator: Stopped")
-			wg.Done()
-			return
-		}
-	}
+	return s.get(uuids)
 }
 
 // Set is the public function of set()
-func (s *Store) Set(newPoints, existingPoints map[string][]types.Point) error {
+func (s *Store) Set(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(newPoints, existingPoints, time.Now(), config.C.Duration("store.time_to_live")*time.Second)
+	// TODO: Time to live from config
+	return s.set(newMetrics, actualMetrics, time.Now(), 750)
 }
 
-// Appends points to existing items and update expiration deadline
-func (s *Store) append(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {
-	for key, points := range newPoints {
-		item, exists := s.metrics[key]
+// Appends metrics to existing items and update expiration
+func (s *Store) append(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData, now time.Time, timeToLive int64) error {
+	expirationTimestamp := now.Unix() + timeToLive
 
-		if !exists {
-			item.Points = points
-		} else {
-			item.Points = append(item.Points, points...)
-		}
+	for uuid, data := range newMetrics {
+		metric := s.Metrics[uuid]
 
-		item.ExpirationDeadline = now.Add(timeToLive)
-		s.metrics[key] = item
+		metric.Data.Points = append(metric.Data.Points, data.Points...)
+		metric.ExpirationTimestamp = expirationTimestamp
+
+		s.Metrics[uuid] = metric
 	}
 
-	for key, points := range existingPoints {
-		item, exists := s.metrics[key]
+	for uuid, data := range actualMetrics {
+		metric := s.Metrics[uuid]
 
-		if !exists {
-			item.Points = points
-		} else {
-			item.Points = append(item.Points, points...)
-		}
+		metric.Data.Points = append(metric.Data.Points, data.Points...)
+		metric.ExpirationTimestamp = expirationTimestamp
 
-		item.ExpirationDeadline = now.Add(timeToLive)
-		s.metrics[key] = item
+		s.Metrics[uuid] = metric
 	}
 
 	return nil
 }
 
-// Checks each batch of metric point likely to expire and deletes them if it is the case
+// Checks each item likely to expire and deletes them if it is the case
 func (s *Store) expire(now time.Time) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	nowUnix := now.Unix()
 
-	for key, metric := range s.metrics {
-		if metric.ExpirationDeadline.Before(now) {
-			delete(s.metrics, key)
+	for uuid, metric := range s.Metrics {
+		if metric.ExpirationTimestamp < nowUnix {
+			delete(s.Metrics, uuid)
 		}
 	}
 }
 
-// Returns requested points
-func (s *Store) get(keys []string) (map[string][]types.Point, error) {
-	keysPoints := make(map[string][]types.Point)
+// Returns requested metrics
+func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+	metrics := make(map[types.MetricUUID]types.MetricData)
 
-	for key, data := range s.metrics {
-		for i := range keys {
-			if keys[i] == key {
-				keysPoints[key] = data.Points
-			}
+	for _, uuid := range uuids {
+		metric, exists := s.Metrics[uuid]
+
+		if exists {
+			metrics[uuid] = metric.Data
 		}
 	}
 
-	return keysPoints, nil
+	return metrics, nil
 }
 
-// Set points (overwrite existing items) and set expiration deadline
-func (s *Store) set(newPoints, existingPoints map[string][]types.Point, now time.Time, timeToLive time.Duration) error {
-	for key, points := range newPoints {
-		item := Data{
-			Points:             points,
-			ExpirationDeadline: now.Add(timeToLive),
-		}
+// Set metrics (overwrite existing items) and expiration
+func (s *Store) set(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData, now time.Time, timeToLive int64) error {
+	expirationTimestamp := now.Unix() + timeToLive
 
-		s.metrics[key] = item
+	for uuid, data := range newMetrics {
+		metric := s.Metrics[uuid]
+
+		metric.Data = data
+		metric.ExpirationTimestamp = expirationTimestamp
+
+		s.Metrics[uuid] = metric
 	}
 
-	for key, points := range existingPoints {
-		item := Data{
-			Points:             points,
-			ExpirationDeadline: now.Add(timeToLive),
-		}
+	for uuid, data := range actualMetrics {
+		metric := s.Metrics[uuid]
 
-		s.metrics[key] = item
+		metric.Data = data
+		metric.ExpirationTimestamp = expirationTimestamp
+
+		s.Metrics[uuid] = metric
 	}
 
 	return nil

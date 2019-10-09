@@ -14,10 +14,9 @@ func TestNewStore(t *testing.T) {
 		want *Store
 	}{
 		{
-			name: "test_new",
+			name: "new",
 			want: &Store{
-				metrics: make(map[string]Data),
-				mutex:   sync.Mutex{},
+				Metrics: make(map[types.MetricUUID]metric),
 			},
 		},
 	}
@@ -32,189 +31,234 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_append(t *testing.T) {
 	type fields struct {
-		metrics map[string]Data
+		Metrics map[types.MetricUUID]metric
 		mutex   sync.Mutex
 	}
 	type args struct {
-		newPoints      map[string][]types.Point
-		existingPoints map[string][]types.Point
-		now            time.Time
-		timeToLive     time.Duration
+		newMetrics    map[types.MetricUUID]types.MetricData
+		actualMetrics map[types.MetricUUID]types.MetricData
+		now           time.Time
+		timeToLive    int64
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[string]Data
+		want    map[types.MetricUUID]metric
 		wantErr bool
 	}{
 		{
-			name: "test_empty_store",
+			name: "empty_store",
 			fields: fields{
-				metrics: make(map[string]Data),
-				mutex:   sync.Mutex{},
+				Metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
-				newPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000000": {
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
-					},
-				},
-				existingPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000001": {
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
 				},
-				now:        time.Unix(300, 0),
-				timeToLive: 300 * time.Second,
+				actualMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000001",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
+						},
+					},
+				},
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000000": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
+			want: map[types.MetricUUID]metric{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000001",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "test_filled_store",
+			name: "filled_store",
 			fields: fields{
-				metrics: map[string]Data{
-					"00000000-0000-0000-0000-000000000000": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-						ExpirationDeadline: time.Unix(0, 0),
-					},
-					"00000000-0000-0000-0000-000000000001": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+				Metrics: map[types.MetricUUID]metric{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Data: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 25,
+									Value:     25,
+								},
+								{
+									Timestamp: 75,
+									Value:     75,
+								},
 							},
 						},
-						ExpirationDeadline: time.Unix(0, 0),
+						ExpirationTimestamp: 0,
 					},
 				},
-				mutex: sync.Mutex{},
 			},
 			args: args{
-				newPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000000": {
-						{
-							Time:  time.Unix(25, 0),
-							Value: 25,
-						},
-						{
-							Time:  time.Unix(75, 0),
-							Value: 75,
-						},
-					},
-				},
-				existingPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000001": {
-						{
-							Time:  time.Unix(125, 0),
-							Value: 125,
-						},
-						{
-							Time:  time.Unix(175, 0),
-							Value: 175,
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
 				},
-				now:        time.Unix(300, 0),
-				timeToLive: 300 * time.Second,
+				actualMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000001",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
+						},
+					},
+				},
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000000": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
-						{
-							Time:  time.Unix(25, 0),
-							Value: 25,
-						},
-						{
-							Time:  time.Unix(75, 0),
-							Value: 75,
+			want: map[types.MetricUUID]metric{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 25,
+								Value:     25,
+							},
+							{
+								Timestamp: 75,
+								Value:     75,
+							},
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
-						},
-						{
-							Time:  time.Unix(125, 0),
-							Value: 125,
-						},
-						{
-							Time:  time.Unix(175, 0),
-							Value: 175,
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000001",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
 			},
 			wantErr: false,
@@ -223,11 +267,14 @@ func TestStore_append(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				Metrics: tt.fields.Metrics,
 				mutex:   tt.fields.mutex,
 			}
-			if err := s.append(tt.args.newPoints, tt.args.existingPoints, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(s.Metrics, tt.want) {
+				t.Errorf("append() s.Metrics = %v, want %v", s.Metrics, tt.want)
 			}
 		})
 	}
@@ -235,7 +282,7 @@ func TestStore_append(t *testing.T) {
 
 func TestStore_expire(t *testing.T) {
 	type fields struct {
-		metrics map[string]Data
+		Metrics map[types.MetricUUID]metric
 		mutex   sync.Mutex
 	}
 	type args struct {
@@ -245,217 +292,188 @@ func TestStore_expire(t *testing.T) {
 		name   string
 		fields fields
 		args   args
-		want   map[string]Data
+		want   map[types.MetricUUID]metric
 	}{
 		{
-			name: "test_no_expiration",
+			name: "no_expiration",
 			fields: fields{
-				metrics: map[string]Data{
-					"00000000-0000-0000-0000-000000000000": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-						ExpirationDeadline: time.Unix(300, 0),
-					},
-					"00000000-0000-0000-0000-000000000001": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+				Metrics: map[types.MetricUUID]metric{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Data: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     0,
+								},
+								{
+									Timestamp: 50,
+									Value:     50,
+								},
+								{
+									Timestamp: 100,
+									Value:     100,
+								},
 							},
 						},
-						ExpirationDeadline: time.Unix(600, 0),
+						ExpirationTimestamp: 300,
 					},
 				},
 				mutex: sync.Mutex{},
 			},
-			args: args{now: time.Unix(300, 0)},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000000": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
-					},
-					ExpirationDeadline: time.Unix(300, 0),
-				},
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
+			args: args{
+				now: time.Unix(0, 0),
+			},
+			want: map[types.MetricUUID]metric{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
 			},
 		},
 		{
-			name: "test_no_expiration",
+			name: "expiration",
 			fields: fields{
-				metrics: map[string]Data{
-					"00000000-0000-0000-0000-000000000000": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-						ExpirationDeadline: time.Unix(300, 0),
-					},
-					"00000000-0000-0000-0000-000000000001": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+				Metrics: map[types.MetricUUID]metric{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Data: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     0,
+								},
+								{
+									Timestamp: 50,
+									Value:     50,
+								},
+								{
+									Timestamp: 100,
+									Value:     100,
+								},
 							},
 						},
-						ExpirationDeadline: time.Unix(600, 0),
+						ExpirationTimestamp: 300,
 					},
 				},
 				mutex: sync.Mutex{},
 			},
-			args: args{now: time.Unix(600, 0)},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
-						},
-					},
-					ExpirationDeadline: time.Unix(600, 0),
-				},
+			args: args{
+				now: time.Unix(600, 0),
 			},
+			want: make(map[types.MetricUUID]metric),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				Metrics: tt.fields.Metrics,
 				mutex:   tt.fields.mutex,
 			}
 			s.expire(tt.args.now)
+			if !reflect.DeepEqual(s.Metrics, tt.want) {
+				t.Errorf("expire() s.Metrics = %v, want %v", s.Metrics, tt.want)
+			}
 		})
 	}
 }
 
 func TestStore_get(t *testing.T) {
 	type fields struct {
-		metrics map[string]Data
+		Metrics map[types.MetricUUID]metric
 		mutex   sync.Mutex
 	}
 	type args struct {
-		keys []string
+		uuids []types.MetricUUID
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[string][]types.Point
+		want    map[types.MetricUUID]types.MetricData
 		wantErr bool
 	}{
 		{
-			name: "test_empty_store",
+			name: "empty_store",
 			fields: fields{
-				metrics: make(map[string]Data),
-				mutex:   sync.Mutex{},
+				Metrics: make(map[types.MetricUUID]metric),
 			},
-			args: args{keys: []string{
-				"00000000-0000-0000-0000-000000000000",
-				"00000000-0000-0000-0000-000000000001",
+			args: args{uuids: []types.MetricUUID{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(),
 			}},
-			want:    make(map[string][]types.Point),
+			want:    make(map[types.MetricUUID]types.MetricData),
 			wantErr: false,
 		},
 		{
-			name: "test_filled_store",
+			name: "filled_store",
 			fields: fields{
-				metrics: map[string]Data{
-					"00000000-0000-0000-0000-000000000000": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-						ExpirationDeadline: time.Unix(0, 0),
-					},
-					"00000000-0000-0000-0000-000000000001": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+				Metrics: map[types.MetricUUID]metric{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Data: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     0,
+								},
+								{
+									Timestamp: 50,
+									Value:     50,
+								},
+								{
+									Timestamp: 100,
+									Value:     100,
+								},
 							},
 						},
-						ExpirationDeadline: time.Unix(0, 0),
+						ExpirationTimestamp: 300,
 					},
 				},
-				mutex: sync.Mutex{},
 			},
-			args: args{keys: []string{
-				"00000000-0000-0000-0000-000000000000",
-				"00000000-0000-0000-0000-000000000001",
+			args: args{uuids: []types.MetricUUID{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(),
 			}},
-			want: map[string][]types.Point{
-				"00000000-0000-0000-0000-000000000000": {
-					{
-						Time:  time.Unix(0, 0),
-						Value: 0,
-					},
-					{
-						Time:  time.Unix(50, 0),
-						Value: 50,
-					},
-				},
-				"00000000-0000-0000-0000-000000000001": {
-					{
-						Time:  time.Unix(100, 0),
-						Value: 100,
-					},
-					{
-						Time:  time.Unix(150, 0),
-						Value: 150,
+			want: map[types.MetricUUID]types.MetricData{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 0,
+							Value:     0,
+						},
+						{
+							Timestamp: 50,
+							Value:     50,
+						},
+						{
+							Timestamp: 100,
+							Value:     100,
+						},
 					},
 				},
 			},
@@ -465,10 +483,10 @@ func TestStore_get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				Metrics: tt.fields.Metrics,
 				mutex:   tt.fields.mutex,
 			}
-			got, err := s.get(tt.args.keys)
+			got, err := s.get(tt.args.uuids)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("get() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -482,173 +500,226 @@ func TestStore_get(t *testing.T) {
 
 func TestStore_set(t *testing.T) {
 	type fields struct {
-		metrics map[string]Data
+		Metrics map[types.MetricUUID]metric
 		mutex   sync.Mutex
 	}
 	type args struct {
-		newPoints      map[string][]types.Point
-		existingPoints map[string][]types.Point
-		now            time.Time
-		timeToLive     time.Duration
+		newMetrics    map[types.MetricUUID]types.MetricData
+		actualMetrics map[types.MetricUUID]types.MetricData
+		now           time.Time
+		timeToLive    int64
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[string]Data
+		want    map[types.MetricUUID]metric
 		wantErr bool
 	}{
 		{
-			name: "test_empty_store",
+			name: "empty_store",
 			fields: fields{
-				metrics: make(map[string]Data),
-				mutex:   sync.Mutex{},
+				Metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
-				newPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000000": {
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
-						},
-					},
-				},
-				existingPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000001": {
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
 				},
-				now:        time.Unix(300, 0),
-				timeToLive: 300 * time.Second,
+				actualMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000001",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
+						},
+					},
+				},
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000000": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(0, 0),
-							Value: 0,
-						},
-						{
-							Time:  time.Unix(50, 0),
-							Value: 50,
+			want: map[types.MetricUUID]metric{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(100, 0),
-							Value: 100,
-						},
-						{
-							Time:  time.Unix(150, 0),
-							Value: 150,
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000001",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "test_filled_store",
+			name: "filled_store",
 			fields: fields{
-				metrics: map[string]Data{
-					"00000000-0000-0000-0000-000000000000": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(0, 0),
-								Value: 0,
-							},
-							{
-								Time:  time.Unix(50, 0),
-								Value: 50,
-							},
-						},
-						ExpirationDeadline: time.Unix(0, 0),
-					},
-					"00000000-0000-0000-0000-000000000001": {
-						Points: []types.Point{
-							{
-								Time:  time.Unix(100, 0),
-								Value: 100,
-							},
-							{
-								Time:  time.Unix(150, 0),
-								Value: 150,
+				Metrics: map[types.MetricUUID]metric{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Data: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 25,
+									Value:     25,
+								},
+								{
+									Timestamp: 75,
+									Value:     75,
+								},
 							},
 						},
-						ExpirationDeadline: time.Unix(0, 0),
+						ExpirationTimestamp: 0,
 					},
 				},
-				mutex: sync.Mutex{},
 			},
 			args: args{
-				newPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000000": {
-						{
-							Time:  time.Unix(25, 0),
-							Value: 25,
-						},
-						{
-							Time:  time.Unix(75, 0),
-							Value: 75,
-						},
-					},
-				},
-				existingPoints: map[string][]types.Point{
-					"00000000-0000-0000-0000-000000000001": {
-						{
-							Time:  time.Unix(125, 0),
-							Value: 125,
-						},
-						{
-							Time:  time.Unix(175, 0),
-							Value: 175,
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000000",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
 				},
-				now:        time.Unix(300, 0),
-				timeToLive: 300 * time.Second,
+				actualMetrics: map[types.MetricUUID]types.MetricData{
+					types.MetricLabels{
+						"__uuid__": "00000000-0000-0000-0000-000000000001",
+					}.UUID(): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
+						},
+					},
+				},
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
-			want: map[string]Data{
-				"00000000-0000-0000-0000-000000000000": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(25, 0),
-							Value: 25,
-						},
-						{
-							Time:  time.Unix(75, 0),
-							Value: 75,
+			want: map[types.MetricUUID]metric{
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000000",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
-				"00000000-0000-0000-0000-000000000001": {
-					Points: []types.Point{
-						{
-							Time:  time.Unix(125, 0),
-							Value: 125,
-						},
-						{
-							Time:  time.Unix(175, 0),
-							Value: 175,
+				types.MetricLabels{
+					"__uuid__": "00000000-0000-0000-0000-000000000001",
+				}.UUID(): {
+					Data: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 200,
+								Value:     200,
+							},
+							{
+								Timestamp: 250,
+								Value:     250,
+							},
 						},
 					},
-					ExpirationDeadline: time.Unix(600, 0),
+					ExpirationTimestamp: 300,
 				},
 			},
 			wantErr: false,
@@ -657,10 +728,10 @@ func TestStore_set(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				Metrics: tt.fields.Metrics,
 				mutex:   tt.fields.mutex,
 			}
-			if err := s.set(tt.args.newPoints, tt.args.existingPoints, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

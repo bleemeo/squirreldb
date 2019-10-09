@@ -2,52 +2,50 @@ package types
 
 import (
 	"crypto/md5"
-	"fmt"
 	"github.com/gofrs/uuid"
 	"math/big"
 	"sort"
 	"strings"
-	"time"
 )
 
-type Metric struct {
-	Labels map[string]string
+type MetricPoint struct {
+	Timestamp int64
+	Value     float64
 }
 
-type Point struct {
-	Time  time.Time
-	Value float64
+type MetricData struct {
+	Points []MetricPoint
 }
 
-type MetricPoints struct {
-	Metric
-	Points []Point
-}
-
-type MetricRequest struct {
-	Metric
-	FromTime time.Time
-	ToTime   time.Time
-	Step     int64
-}
+type MetricLabels map[string]string
 
 type MetricUUID struct {
 	uuid.UUID
 }
 
-func (m *Metric) CanonicalLabels() string {
-	var keys []string
-	var elements []string
+type MetricRequest struct {
+	UUIDs         []MetricUUID
+	FromTimestamp int64
+	ToTimestamp   int64
+	Step          int64
+}
 
-	for key := range m.Labels {
+// Canonical returns string from labels
+func (m MetricLabels) Canonical() string {
+	count := len(m)
+	keys := make([]string, 0, count)
+
+	for key := range m {
 		keys = append(keys, key)
 	}
 
 	sort.Strings(keys)
 
+	elements := make([]string, 0, count)
+
 	for _, key := range keys {
-		value := strings.ReplaceAll(m.Labels[key], `"`, `\"`)
-		element := fmt.Sprintf(`%s="%s"`, key, value)
+		value := strings.ReplaceAll(m[key], `"`, `\"`)
+		element := key + `="` + value + `"`
 
 		elements = append(elements, element)
 	}
@@ -57,44 +55,28 @@ func (m *Metric) CanonicalLabels() string {
 	return canonical
 }
 
-func (m *Metric) UUID() (MetricUUID, error) {
+// UUID returns generated UUID from labels
+// If a UUID label is specified, the UUID will be generated from its value
+func (m MetricLabels) UUID() MetricUUID {
+	value, exists := m["__uuid__"]
 	var mUUID MetricUUID
-	var err error
-	uuidLabel, exists := m.Labels["__uuid__"]
 
-	if !exists {
-		hash := md5.New()
-		canonical := m.CanonicalLabels()
-
-		_, err := hash.Write([]byte(canonical))
-
-		if err != nil {
-			return mUUID, err
-		}
-
-		hashed := hash.Sum(nil)
-
-		mUUID.UUID, err = uuid.FromBytes(hashed)
-
-		if err != nil {
-			return mUUID, err
-		}
+	if exists {
+		mUUID.UUID = uuid.FromStringOrNil(value)
 	} else {
-		mUUID.UUID, err = uuid.FromString(uuidLabel)
+		canonical := m.Canonical()
 
-		if err != nil {
-			return mUUID, err
-		}
+		mUUID.UUID = md5.Sum([]byte(canonical))
 	}
 
-	return mUUID, nil
+	return mUUID
 }
 
-func (m *MetricUUID) Int64() int64 {
+// Uint64 returns uint64 from the UUID value
+func (m *MetricUUID) Uint64() uint64 {
 	bigInt := big.NewInt(0).SetBytes(m.Bytes())
 
-	bigInt.SetInt64(bigInt.Int64())
-	bigInt.Abs(bigInt)
+	mUint64 := bigInt.Uint64()
 
-	return bigInt.Int64()
+	return mUint64
 }
