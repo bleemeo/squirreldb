@@ -105,10 +105,10 @@ func TestNewBatch(t *testing.T) {
 				persistentWriter: nil,
 			},
 			want: &Batch{
-				temporaryStorer:  nil,
-				persistentReader: nil,
-				persistentWriter: nil,
-				states:           make(map[types.MetricUUID]state),
+				storer: nil,
+				reader: nil,
+				writer: nil,
+				states: make(map[types.MetricUUID]state),
 			},
 		},
 	}
@@ -311,11 +311,11 @@ func TestBatch_check(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				temporaryStorer:  &tt.fields.temporaryStorer,
-				persistentReader: tt.fields.persistentReader,
-				persistentWriter: &tt.fields.persistentWriter,
-				states:           tt.fields.states,
-				mutex:            tt.fields.mutex,
+				storer: &tt.fields.temporaryStorer,
+				reader: tt.fields.persistentReader,
+				writer: &tt.fields.persistentWriter,
+				states: tt.fields.states,
+				mutex:  tt.fields.mutex,
 			}
 			b.check(tt.args.now, tt.args.batchSize, tt.args.flushAll)
 		})
@@ -455,11 +455,11 @@ func TestBatch_flush(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				temporaryStorer:  &tt.fields.temporaryStorer,
-				persistentReader: tt.fields.persistentReader,
-				persistentWriter: &tt.fields.persistentWriter,
-				states:           tt.fields.states,
-				mutex:            tt.fields.mutex,
+				storer: &tt.fields.temporaryStorer,
+				reader: tt.fields.persistentReader,
+				writer: &tt.fields.persistentWriter,
+				states: tt.fields.states,
+				mutex:  tt.fields.mutex,
 			}
 			b.flush(tt.args.flushQueue, tt.args.now, tt.args.batchSize)
 			if !reflect.DeepEqual(tt.fields.persistentWriter.got, tt.want) {
@@ -667,11 +667,11 @@ func TestBatch_read(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				temporaryStorer:  &tt.fields.temporaryStorer,
-				persistentReader: &tt.fields.persistentReader,
-				persistentWriter: tt.fields.persistentWriter,
-				states:           tt.fields.states,
-				mutex:            tt.fields.mutex,
+				storer: &tt.fields.temporaryStorer,
+				reader: &tt.fields.persistentReader,
+				writer: tt.fields.persistentWriter,
+				states: tt.fields.states,
+				mutex:  tt.fields.mutex,
 			}
 			got, err := b.read(tt.args.request)
 			if (err != nil) != tt.wantErr {
@@ -841,11 +841,11 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				temporaryStorer:  &tt.fields.temporaryStorer,
-				persistentReader: tt.fields.persistentReader,
-				persistentWriter: &tt.fields.persistentWriter,
-				states:           tt.fields.states,
-				mutex:            tt.fields.mutex,
+				storer: &tt.fields.temporaryStorer,
+				reader: tt.fields.persistentReader,
+				writer: &tt.fields.persistentWriter,
+				states: tt.fields.states,
+				mutex:  tt.fields.mutex,
 			}
 			if err := b.write(tt.args.metrics, tt.args.now, tt.args.batchSize); (err != nil) != tt.wantErr {
 				t.Errorf("write() error = %v, wantErr %v", err, tt.wantErr)

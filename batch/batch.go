@@ -35,9 +35,9 @@ type state struct {
 }
 
 type Batch struct {
-	temporaryStorer  Storer
-	persistentReader types.MetricReader
-	persistentWriter types.MetricWriter
+	storer Storer
+	reader types.MetricReader
+	writer types.MetricWriter
 
 	states map[types.MetricUUID]state
 	mutex  sync.Mutex
@@ -46,10 +46,10 @@ type Batch struct {
 // NewBatch creates a new Batch object
 func NewBatch(temporaryStorer Storer, persistentReader types.MetricReader, persistentWriter types.MetricWriter) *Batch {
 	return &Batch{
-		temporaryStorer:  temporaryStorer,
-		persistentReader: persistentReader,
-		persistentWriter: persistentWriter,
-		states:           make(map[types.MetricUUID]state),
+		storer: temporaryStorer,
+		reader: persistentReader,
+		writer: persistentWriter,
+		states: make(map[types.MetricUUID]state),
 	}
 }
 
@@ -98,7 +98,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 
 	_ = backoff.Retry(func() error {
 		var err error
-		temporaryMetrics, err = b.temporaryStorer.Get(uuids)
+		temporaryMetrics, err = b.storer.Get(uuids)
 
 		if err != nil {
 			logger.Println("flush: Can't get points from the temporary storage (", err, ")")
@@ -137,7 +137,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 	}
 
 	_ = backoff.Retry(func() error {
-		err := b.temporaryStorer.Set(nil, metricsToSet)
+		err := b.storer.Set(nil, metricsToSet)
 
 		if err != nil {
 			logger.Println("flush: Can't set points to the temporary storage (", err, ")")
@@ -147,7 +147,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 	}, &backOff)
 
 	_ = backoff.Retry(func() error {
-		err := b.persistentWriter.Write(metricsToWrite)
+		err := b.writer.Write(metricsToWrite)
 
 		if err != nil {
 			logger.Println("flush: Can't write points to the persistent storage (", err, ")")
@@ -166,7 +166,7 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 	_ = backoff.Retry(func() error {
 		var err error
-		temporaryMetrics, err = b.temporaryStorer.Get(request.UUIDs)
+		temporaryMetrics, err = b.storer.Get(request.UUIDs)
 
 		if err != nil {
 			logger.Println("flush: Can't get points from the temporary storage (", err, ")")
@@ -192,7 +192,7 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 	_ = backoff.Retry(func() error {
 		var err error
-		persistentMetrics, err = b.persistentReader.Read(request)
+		persistentMetrics, err = b.reader.Read(request)
 
 		if err != nil {
 			logger.Println("read: Can't read points from the persistent storage (", err, ")")
@@ -290,7 +290,7 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 	}
 
 	_ = backoff.Retry(func() error {
-		err := b.temporaryStorer.Append(newMetrics, actualMetrics)
+		err := b.storer.Append(newMetrics, actualMetrics)
 
 		if err != nil {
 			logger.Println("write: Can't append points in the temporary storage (", err, ")")
