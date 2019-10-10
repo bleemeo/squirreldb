@@ -5,7 +5,15 @@ import (
 	"github.com/gofrs/uuid"
 	"math/big"
 	"sort"
+	"squirreldb/config"
 	"strings"
+)
+
+const (
+	MetricLabelTypeEq  = 0
+	MetricLabelTypeNeq = 1
+	MetricLabelTypeRe  = 2
+	MetricLabelTypeNre = 3
 )
 
 type MetricPoint struct {
@@ -13,41 +21,45 @@ type MetricPoint struct {
 	Value     float64
 }
 
-type MetricData struct {
-	Points []MetricPoint
+type MetricPoints []MetricPoint
+
+type MetricLabel struct {
+	Name  string
+	Value string
+	Type  uint8
 }
 
-type MetricLabels map[string]string
+type MetricLabels []MetricLabel
 
 type MetricUUID struct {
 	uuid.UUID
 }
+
+type Metrics map[MetricUUID]MetricPoints
 
 type MetricRequest struct {
 	UUIDs         []MetricUUID
 	FromTimestamp int64
 	ToTimestamp   int64
 	Step          int64
+	Function      string
 }
 
 // Canonical returns string from labels
 func (m MetricLabels) Canonical() string {
-	count := len(m)
-	keys := make([]string, 0, count)
+	sort.Slice(m, func(i, j int) bool {
+		return m[i].Name < m[j].Name
+	})
 
-	for key := range m {
-		keys = append(keys, key)
-	}
+	elements := make([]string, 0, len(m))
 
-	sort.Strings(keys)
+	for _, label := range m {
+		if !strings.HasPrefix(label.Name, config.LabelSpecialPrefix) {
+			value := strings.ReplaceAll(label.Value, `"`, `\"`)
+			element := label.Name + `="` + value + `"`
 
-	elements := make([]string, 0, count)
-
-	for _, key := range keys {
-		value := strings.ReplaceAll(m[key], `"`, `\"`)
-		element := key + `="` + value + `"`
-
-		elements = append(elements, element)
+			elements = append(elements, element)
+		}
 	}
 
 	canonical := strings.Join(elements, ",")
@@ -55,10 +67,21 @@ func (m MetricLabels) Canonical() string {
 	return canonical
 }
 
+// Value returns value corresponding to specified label name
+func (m MetricLabels) Value(name string) (string, bool) {
+	for _, label := range m {
+		if label.Name == name {
+			return label.Value, true
+		}
+	}
+
+	return "", false
+}
+
 // UUID returns generated UUID from labels
 // If a UUID label is specified, the UUID will be generated from its value
 func (m MetricLabels) UUID() MetricUUID {
-	value, exists := m["__uuid__"]
+	value, exists := m.Value("__bleemeo_uuid__")
 	var mUUID MetricUUID
 
 	if exists {

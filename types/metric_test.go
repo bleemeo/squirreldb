@@ -13,20 +13,56 @@ func TestMetricLabels_Canonical(t *testing.T) {
 		want string
 	}{
 		{
-			name: "no_label_quote",
+			name: "ordered",
 			m: MetricLabels{
-				"__name__": "testing",
-				"job":      "job_testing",
-				"monitor":  "monitor_testing",
+				{
+					Name:  "__name__",
+					Value: "testing",
+				},
+				{
+					Name:  "job",
+					Value: "job_testing",
+				},
+				{
+					Name:  "monitor",
+					Value: "monitor_testing",
+				},
 			},
 			want: `__name__="testing",job="job_testing",monitor="monitor_testing"`,
 		},
 		{
-			name: "label_quotes",
+			name: "unordered",
 			m: MetricLabels{
-				"__name__": `test"ing`,
-				"job":      `job_test"ing`,
-				"monitor":  `monitor_test"ing`,
+				{
+					Name:  "job",
+					Value: "job_testing",
+				},
+				{
+					Name:  "__name__",
+					Value: "testing",
+				},
+				{
+					Name:  "monitor",
+					Value: "monitor_testing",
+				},
+			},
+			want: `__name__="testing",job="job_testing",monitor="monitor_testing"`,
+		},
+		{
+			name: "quotes",
+			m: MetricLabels{
+				{
+					Name:  "__name__",
+					Value: "test\"ing",
+				},
+				{
+					Name:  "job",
+					Value: "job_test\"ing",
+				},
+				{
+					Name:  "monitor",
+					Value: "monitor_test\"ing",
+				},
 			},
 			want: `__name__="test\"ing",job="job_test\"ing",monitor="monitor_test\"ing"`,
 		},
@@ -49,7 +85,10 @@ func TestMetricLabels_UUID(t *testing.T) {
 		{
 			name: "valid_uuid",
 			m: MetricLabels{
-				"__uuid__": "abcdef01-2345-6789-abcd-ef0123456789",
+				{
+					Name:  "__bleemeo_uuid__",
+					Value: "abcdef01-2345-6789-abcd-ef0123456789",
+				},
 			},
 			want: MetricUUID{
 				UUID: uuid.FromStringOrNil("abcdef01-2345-6789-abcd-ef0123456789"),
@@ -58,7 +97,10 @@ func TestMetricLabels_UUID(t *testing.T) {
 		{
 			name: "invalid_uuid",
 			m: MetricLabels{
-				"__uuid__": "i-am-an-invalid-uuid",
+				{
+					Name:  "__bleemeo_uuid__",
+					Value: "i-am-an-invalid-uuid",
+				},
 			},
 			want: MetricUUID{
 				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),

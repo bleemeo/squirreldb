@@ -1,38 +1,31 @@
 package cassandra
 
 import (
-	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"squirreldb/config"
-	"time"
 )
 
 var (
 	keyspace            = config.CassandraKeyspace
 	dataTable           = config.CassandraKeyspace + "." + config.CassandraDataTable
 	aggregatedDataTable = config.CassandraKeyspace + "." + config.CassandraAggregatedDataTable
-	backOff             = &backoff.ExponentialBackOff{
-		InitialInterval:     backoff.DefaultInitialInterval,
-		RandomizationFactor: 0.5,
-		Multiplier:          2,
-		MaxInterval:         30 * time.Second,
-		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
-		Clock:               backoff.SystemClock,
-	}
 )
 
 type Cassandra struct {
 	session *gocql.Session
 }
 
+// NewCassandra creates a new Cassandra object
 func NewCassandra() *Cassandra {
 	return &Cassandra{}
 }
 
+// CloseSession closes Cassandra's session
 func (c *Cassandra) CloseSession() {
 	c.session.Close()
 }
 
+// InitSession initializes Cassandra's session and create keyspace, data and aggregated data tables
 func (c *Cassandra) InitSession(hosts ...string) error {
 	cluster := gocql.NewCluster(hosts...)
 	session, err := cluster.CreateSession()
@@ -41,17 +34,21 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 		return err
 	}
 
+	replicationFactor := config.C.String("cassandra.replication_factor")
+
 	createKeyspace := session.Query(
 		"CREATE KEYSPACE IF NOT EXISTS " + keyspace + " " +
 			"WITH REPLICATION = {" +
 			"'class' : 'SimpleStrategy'," +
-			"'replication_factor' : " + "1" + "};", // TODO: Replication factor from config
+			"'replication_factor' : " + replicationFactor + "};",
 	)
 
 	if err := createKeyspace.Exec(); err != nil {
 		session.Close()
 		return err
 	}
+
+	defaultTimeToLive := config.C.String("cassandra.default_time_to_live")
 
 	createDataTable := session.Query(
 		"CREATE TABLE IF NOT EXISTS " + dataTable + " (" +
@@ -69,7 +66,7 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 			"'class': 'TimeWindowCompactionStrategy'," +
 			"'compaction_window_unit': 'DAYS'," +
 			"'compaction_window_size': 6} " +
-			"AND default_time_to_live = " + "31536000", // TODO: Time to live from config
+			"AND default_time_to_live = " + defaultTimeToLive,
 	)
 
 	if err := createDataTable.Exec(); err != nil {
@@ -93,7 +90,7 @@ func (c *Cassandra) InitSession(hosts ...string) error {
 			"'class': 'TimeWindowCompactionStrategy'," +
 			"'compaction_window_unit': 'DAYS'," +
 			"'compaction_window_size': 90} " +
-			"AND default_time_to_live = " + "31536000", // TODO: Time to live from config
+			"AND default_time_to_live = " + defaultTimeToLive,
 	)
 
 	if err := createAggregatedDataTable.Exec(); err != nil {

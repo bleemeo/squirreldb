@@ -1,9 +1,14 @@
 package types
 
+type MetricMatcher interface {
+	Match(labels MetricLabels) (MetricUUID, error)
+	Matches(labels MetricLabels) ([]MetricUUID, error)
+}
+
 type MetricReader interface {
-	Read(request MetricRequest) (map[MetricUUID]MetricData, error)
+	Read(request MetricRequest) (Metrics, error)
 }
 
 type MetricWriter interface {
-	Write(metrics map[MetricUUID]MetricData) error
+	Write(metrics Metrics) error
 }

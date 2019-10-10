@@ -5,24 +5,27 @@ import (
 	"encoding/binary"
 	"github.com/gocql/gocql"
 	"io"
+	"squirreldb/config"
 	"squirreldb/types"
 )
 
-func (c *Cassandra) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+// Read returns metrics according to the request
+func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	var fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64
 
-	aggregated := false
+	aggregateStep := config.C.Int64("aggregate.step")
+	aggregated := request.Step >= aggregateStep
 
 	if aggregated {
-		aggregateSize := int64(86400)
-		partitionSize := int64(6912000)
+		aggregateSize := config.C.Int64("aggregate.size")
+		partitionSize := config.C.Int64("cassandra.partition_size.aggregated")
 		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
 		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
 		fromOffsetTimestamp = request.FromTimestamp - fromBaseTimestamp - aggregateSize
 		toOffsetTimestamp = request.ToTimestamp - toBaseTimestamp
 	} else {
-		batchSize := int64(300)
-		partitionSize := int64(432000)
+		batchSize := config.C.Int64("batch.size")
+		partitionSize := config.C.Int64("cassandra.partition_size.raw")
 		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
 		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
 		fromOffsetTimestamp = request.FromTimestamp - fromBaseTimestamp - batchSize
@@ -30,13 +33,14 @@ func (c *Cassandra) Read(request types.MetricRequest) (map[types.MetricUUID]type
 	}
 
 	var iterator *gocql.Iter
-	metrics := make(map[types.MetricUUID]types.MetricData)
+	metrics := make(types.Metrics)
 
 	for _, uuid := range request.UUIDs {
 		var err error
 
 		if aggregated {
 			iterator = c.readSQL(aggregatedDataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+			metrics[uuid], err = readAggregatedData(request, iterator)
 		} else {
 			iterator = c.readSQL(dataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 			metrics[uuid], err = readData(request, iterator)
@@ -50,6 +54,7 @@ func (c *Cassandra) Read(request types.MetricRequest) (map[types.MetricUUID]type
 	return metrics, nil
 }
 
+// Returns an iterator from the specified table according to the parameters
 func (c *Cassandra) readSQL(table string, uuid gocql.UUID, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
 	iterator := c.session.Query(
 		"SELECT base_ts, offset_ts, values FROM "+table+" "+
@@ -59,10 +64,11 @@ func (c *Cassandra) readSQL(table string, uuid gocql.UUID, fromBaseTimestamp, to
 	return iterator
 }
 
-func readData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricData, error) {
+// TODO: Comment
+func readData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
-	var data types.MetricData
+	var points types.MetricPoints
 
 	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &values) {
 		buffer := bytes.NewReader(values)
@@ -86,15 +92,71 @@ func readData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricDa
 						Value:     pointData.Value,
 					}
 
-					data.Points = append(data.Points, point)
+					points = append(points, point)
 				}
 			case io.EOF:
 				break forLoop
 			default:
-				return types.MetricData{}, err
+				return types.MetricPoints{}, err
 			}
 		}
 	}
 
-	return data, nil
+	return points, nil
+}
+
+// TODO: Comment
+func readAggregatedData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricPoints, error) {
+	var baseTimestamp, offsetTimestamp int64
+	var values []byte
+	var points types.MetricPoints
+
+	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &values) {
+		buffer := bytes.NewReader(values)
+
+	forLoop:
+		for {
+			var pointData struct {
+				Timestamp uint16
+				Min       float64
+				Max       float64
+				Average   float64
+				Count     uint16
+			}
+
+			err := binary.Read(buffer, binary.BigEndian, &pointData)
+
+			switch err {
+			case nil:
+				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
+
+				if (timestamp >= request.FromTimestamp) && (timestamp <= request.ToTimestamp) {
+					point := types.MetricPoint{
+						Timestamp: timestamp,
+					}
+
+					switch request.Function {
+					case "min":
+						point.Value = pointData.Min
+					case "max":
+						point.Value = pointData.Max
+					case "average":
+						point.Value = pointData.Average
+					case "count":
+						point.Value = float64(pointData.Count)
+					default:
+						point.Value = pointData.Average
+					}
+
+					points = append(points, point)
+				}
+			case io.EOF:
+				break forLoop
+			default:
+				return types.MetricPoints{}, err
+			}
+		}
+	}
+
+	return points, nil
 }

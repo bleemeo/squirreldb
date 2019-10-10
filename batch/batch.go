@@ -1,9 +1,11 @@
 package batch
 
 import (
+	"context"
 	"github.com/cenkalti/backoff"
 	"log"
 	"os"
+	"squirreldb/config"
 	"squirreldb/types"
 	"sync"
 	"time"
@@ -22,9 +24,9 @@ var (
 )
 
 type Storer interface {
-	Append(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData) error
-	Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error)
-	Set(newMetrics, actualMetrics map[types.MetricUUID]types.MetricData) error
+	Append(newMetrics, actualMetrics types.Metrics) error
+	Get(uuids []types.MetricUUID) (types.Metrics, error)
+	Set(newMetrics, actualMetrics types.Metrics) error
 }
 
 type state struct {
@@ -54,16 +56,39 @@ func NewBatch(temporaryStorer Storer, persistentReader types.MetricReader, persi
 }
 
 // Read() is the public function of read()
-func (b *Batch) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+func (b *Batch) Read(request types.MetricRequest) (types.Metrics, error) {
 	return b.read(request)
 }
 
 // Write is the public function of write()
-func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) error {
+func (b *Batch) Write(metrics types.Metrics) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	return b.write(metrics, time.Now(), 300) // TODO: Batch size from config
+	batchSize := config.C.Int64("batch.size")
+
+	return b.write(metrics, time.Now(), batchSize)
+}
+
+// RunChecker calls check() every checker interval seconds
+// If the context receives a stop signal, a last check is made before stopping the service
+func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(config.BatchCheckerInterval * time.Second)
+	defer ticker.Stop()
+
+	batchSize := config.C.Int64("batch.size")
+
+	for {
+		select {
+		case <-ticker.C:
+			b.check(time.Now(), batchSize, false)
+		case <-ctx.Done():
+			b.check(time.Now(), batchSize, true)
+			logger.Println("RunChecker: Stopped")
+			wg.Done()
+			return
+		}
+	}
 }
 
 // Checks all current states and adds states whose deadlines are passed in the flush queue
@@ -75,7 +100,7 @@ func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
 	flushQueue := make(map[types.MetricUUID][]state)
 
 	for uuid, state := range b.states {
-		if state.flushDeadline < nowUnix {
+		if (state.flushDeadline < nowUnix) || flushAll {
 			flushQueue[uuid] = append(flushQueue[uuid], state)
 		}
 	}
@@ -94,7 +119,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 		uuids = append(uuids, uuid)
 	}
 
-	var temporaryMetrics map[types.MetricUUID]types.MetricData
+	var temporaryMetrics types.Metrics
 
 	_ = backoff.Retry(func() error {
 		var err error
@@ -108,31 +133,31 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 	}, &backOff)
 
 	cutoff := now.Unix() + batchSize
-	metricsToSet := make(map[types.MetricUUID]types.MetricData)
-	metricsToWrite := make(map[types.MetricUUID]types.MetricData)
+	metricsToSet := make(types.Metrics)
+	metricsToWrite := make(types.Metrics)
 
 	for uuid, states := range flushQueue {
 		currentState := b.states[uuid]
-		var data types.MetricData
+		var points types.MetricPoints
 
-		for _, point := range temporaryMetrics[uuid].Points {
-			if (point.Timestamp >= cutoff) && (point.Timestamp <= currentState.lastPointTimestamp) {
-				data.Points = append(data.Points, point)
+		for _, point := range temporaryMetrics[uuid] {
+			if (point.Timestamp >= cutoff) || (point.Timestamp >= currentState.firstPointTimestamp) {
+				points = append(points, point)
 			}
 		}
 
-		metricsToSet[uuid] = data
+		metricsToSet[uuid] = points
 
 		for _, state := range states {
-			var data types.MetricData
+			var points types.MetricPoints
 
-			for _, point := range temporaryMetrics[uuid].Points {
+			for _, point := range temporaryMetrics[uuid] {
 				if (point.Timestamp >= state.firstPointTimestamp) && (point.Timestamp <= state.lastPointTimestamp) {
-					data.Points = append(data.Points, point)
+					points = append(points, point)
 				}
 			}
 
-			metricsToWrite[uuid] = data
+			metricsToWrite[uuid] = points
 		}
 	}
 
@@ -158,11 +183,11 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 }
 
 // Returns metrics from temporary and permanent storage that comply with the request
-func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
-	metrics := make(map[types.MetricUUID]types.MetricData)
+func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
+	metrics := make(types.Metrics)
 
-	// Retrieves metrics from the temporary storage that comply with the request
-	var temporaryMetrics map[types.MetricUUID]types.MetricData
+	// Retrieves metrics from the temporary storage according to the request
+	var temporaryMetrics types.Metrics
 
 	_ = backoff.Retry(func() error {
 		var err error
@@ -175,20 +200,20 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		return err
 	}, &backOff)
 
-	for uuid, tData := range temporaryMetrics {
-		var data types.MetricData
+	for uuid, temporaryPoints := range temporaryMetrics {
+		var points types.MetricPoints
 
-		for _, point := range tData.Points {
+		for _, point := range temporaryPoints {
 			if point.Timestamp >= request.FromTimestamp && point.Timestamp <= request.ToTimestamp {
-				data.Points = append(data.Points, point)
+				points = append(points, point)
 			}
 		}
 
-		metrics[uuid] = data
+		metrics[uuid] = points
 	}
 
-	// Retrieves pre-filtered metrics from the persistent storage
-	var persistentMetrics map[types.MetricUUID]types.MetricData
+	// Retrieves metrics from the persistent storage
+	var persistentMetrics types.Metrics
 
 	_ = backoff.Retry(func() error {
 		var err error
@@ -201,19 +226,8 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		return err
 	}, &backOff)
 
-	for uuid, tData := range persistentMetrics {
-		var data types.MetricData
-		item := metrics[uuid]
-
-		for _, point := range tData.Points {
-			if point.Timestamp >= request.FromTimestamp && point.Timestamp <= request.ToTimestamp {
-				data.Points = append(data.Points, point)
-			}
-		}
-
-		item.Points = append(item.Points, data.Points...)
-
-		metrics[uuid] = item
+	for uuid, persistentPoints := range persistentMetrics {
+		metrics[uuid] = append(metrics[uuid], persistentPoints...)
 	}
 
 	return metrics, nil
@@ -222,14 +236,14 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 // Writes metrics in the temporary storage
 // Each metric will have a current state that will allow to know if the size of a batch, or the deadline is reached
 // When one of these cases occurs, the current state is added to the flush queue
-func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Time, batchSize int64) error {
+func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) error {
 	nowUnix := now.Unix()
-	newMetrics := make(map[types.MetricUUID]types.MetricData)
-	actualMetrics := make(map[types.MetricUUID]types.MetricData)
+	newMetrics := make(types.Metrics)
+	actualMetrics := make(types.Metrics)
 	flushQueue := make(map[types.MetricUUID][]state)
 
-	for uuid, data := range metrics {
-		for _, point := range data.Points {
+	for uuid, points := range metrics {
+		for _, point := range points {
 			currentState, exists := b.states[uuid]
 
 			if !exists {
@@ -274,17 +288,9 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 			b.states[uuid] = currentState
 
 			if !exists {
-				item := newMetrics[uuid]
-
-				item.Points = append(item.Points, point)
-
-				newMetrics[uuid] = item
+				newMetrics[uuid] = append(newMetrics[uuid], point)
 			} else {
-				item := actualMetrics[uuid]
-
-				item.Points = append(item.Points, point)
-
-				actualMetrics[uuid] = item
+				actualMetrics[uuid] = append(actualMetrics[uuid], point)
 			}
 		}
 	}
