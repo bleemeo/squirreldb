@@ -25,8 +25,8 @@ func (c *Cassandra) CloseSession() {
 	c.session.Close()
 }
 
-// InitSession initializes Cassandra's session and create keyspace, data and aggregated data tables
-func (c *Cassandra) InitSession(hosts ...string) error {
+// Init initializes session and create keyspace, data and aggregated data tables
+func (c *Cassandra) Init(hosts ...string) error {
 	cluster := gocql.NewCluster(hosts...)
 	session, err := cluster.CreateSession()
 

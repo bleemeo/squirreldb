@@ -48,7 +48,13 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 	for _, query := range readRequest.Queries {
 		labels := pbMatchersToLabels(query.Matchers)
-		uuids, _ := r.matcher.Matches(labels)
+		matchers := r.matcher.UUIDs(labels)
+		var uuids []types.MetricUUID
+
+		for uuid := range matchers {
+			uuids = append(uuids, uuid)
+		}
+
 		request := toMetricRequest(uuids, query)
 		var metrics types.Metrics
 
@@ -63,8 +69,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 			return err
 		}, &backOff)
 
-		pbLabels := labelsToPbLabels(labels)
-		queryResult := toQueryResult(pbLabels, metrics)
+		queryResult := toQueryResult(matchers, metrics)
 
 		readResponse.Results = append(readResponse.Results, &queryResult)
 	}
@@ -138,10 +143,13 @@ func toMetricRequest(uuids []types.MetricUUID, query *prompb.Query) types.Metric
 }
 
 // Generate Prometheus QueryResult
-func toQueryResult(pbLabels []*prompb.Label, metrics types.Metrics) prompb.QueryResult {
+func toQueryResult(matchers map[types.MetricUUID]types.MetricLabels, metrics types.Metrics) prompb.QueryResult {
 	var queryResult prompb.QueryResult
 
-	for _, points := range metrics {
+	for uuid, points := range metrics {
+		labels := matchers[uuid]
+		pbLabels := labelsToPbLabels(labels)
+
 		series := prompb.TimeSeries{
 			Labels: pbLabels,
 		}

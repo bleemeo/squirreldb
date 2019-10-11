@@ -45,12 +45,12 @@ func (m *mockMetricReader) Read(request types.MetricRequest) (types.Metrics, err
 	return metrics, nil
 }
 
-func (m *mockStorer) Append(newPoints, existingPoints types.Metrics) error {
-	for uuid, points := range newPoints {
+func (m *mockStorer) Append(newMetrics, actualMetrics types.Metrics) error {
+	for uuid, points := range newMetrics {
 		m.metrics[uuid] = append(m.metrics[uuid], points...)
 	}
 
-	for uuid, points := range existingPoints {
+	for uuid, points := range actualMetrics {
 		m.metrics[uuid] = append(m.metrics[uuid], points...)
 	}
 
@@ -71,12 +71,12 @@ func (m *mockStorer) Get(uuids []types.MetricUUID) (types.Metrics, error) {
 	return metrics, nil
 }
 
-func (m *mockStorer) Set(newPoints, existingPoints types.Metrics) error {
-	for uuid, data := range newPoints {
+func (m *mockStorer) Set(newMetrics, actualMetrics types.Metrics) error {
+	for uuid, data := range newMetrics {
 		m.metrics[uuid] = data
 	}
 
-	for uuid, data := range existingPoints {
+	for uuid, data := range actualMetrics {
 		m.metrics[uuid] = data
 	}
 

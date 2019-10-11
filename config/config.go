@@ -28,23 +28,20 @@ type Config struct {
 	FlagSet *pflag.FlagSet
 }
 
+// NewConfig creates a new Config object
 func NewConfig() *Config {
 	return &Config{
 		Koanf: koanf.New(configDelimiter),
 	}
 }
 
-func (c *Config) Setup() error {
-	configPaths, err := findConfigPaths(configFolderRoot)
+// Init initializes config system with file, environment and flags support
+func (c *Config) Init() error {
+	// Initializes config file support
+	configPaths, err := findConfigPaths(configFolderRoot, configFileExtensions)
 
 	if err != nil {
 		return nil
-	}
-
-	c.FlagSet = toFlagSet(flags)
-
-	if err := c.FlagSet.Parse(os.Args); err != nil {
-		return err
 	}
 
 	for _, path := range configPaths {
@@ -55,11 +52,19 @@ func (c *Config) Setup() error {
 		}
 	}
 
+	// Initializes environment support
 	err = c.Load(env.Provider(configEnvPrefix, configDelimiter, func(s string) string {
 		return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, configEnvPrefix)), "_", configDelimiter)
 	}), nil)
 
 	if err != nil {
+		return err
+	}
+
+	// Initializes flags support
+	c.FlagSet = flagsToFlagSet(configFlags)
+
+	if err := c.FlagSet.Parse(os.Args); err != nil {
 		return err
 	}
 
@@ -72,7 +77,31 @@ func (c *Config) Setup() error {
 	return nil
 }
 
-func toFlagSet(flags []flag) *pflag.FlagSet {
+// Returns every config files in the root folder matching with the specified extensions
+func findConfigPaths(root string, extensions []string) ([]string, error) {
+	var configPaths []string
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		for _, extension := range extensions {
+			if filepath.Ext(path) == extension {
+				configPaths = append(configPaths, path)
+			}
+		}
+
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(configPaths)
+
+	return configPaths, nil
+}
+
+// Convert flags to spf13 FlagSet
+func flagsToFlagSet(flags []flag) *pflag.FlagSet {
 	flagSet := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 
 	for _, flag := range flags {
@@ -99,26 +128,4 @@ func toFlagSet(flags []flag) *pflag.FlagSet {
 	}
 
 	return flagSet
-}
-
-func findConfigPaths(root string) ([]string, error) {
-	var configPaths []string
-
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		for _, fileExtension := range configFileExtensions {
-			if filepath.Ext(path) == fileExtension {
-				configPaths = append(configPaths, path)
-			}
-		}
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	sort.Strings(configPaths)
-
-	return configPaths, nil
 }

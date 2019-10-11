@@ -1,8 +1,8 @@
 package types
 
 type MetricMatcher interface {
-	Match(labels MetricLabels) (MetricUUID, error)
-	Matches(labels MetricLabels) ([]MetricUUID, error)
+	UUID(labels MetricLabels) MetricUUID
+	UUIDs(labels MetricLabels) map[MetricUUID]MetricLabels
 }
 
 type MetricReader interface {

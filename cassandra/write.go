@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/gocql/gocql"
+	"squirreldb/config"
 	"squirreldb/types"
 	"time"
 )
 
-// Write writes metrics
+// Write writes metrics in the data table
 func (c *Cassandra) Write(metrics types.Metrics) error {
-	partitionSize := int64(432000)
+	partitionSize := config.C.Int64("cassandra.partition_size.raw")
 	nowUnix := time.Now().Unix()
-	timestampToLive := int64(31536000)
+	timestampToLive := config.C.Int64("cassandra.default_time_to_live") // TODO: Support Time to live label
 
 	for uuid, points := range metrics {
 		baseTimestampPoints := make(map[int64]types.MetricPoints)

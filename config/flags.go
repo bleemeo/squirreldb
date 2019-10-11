@@ -1,6 +1,6 @@
 package config
 
-var flags = []flag{
+var configFlags = []flag{
 	{
 		name:  "help",
 		short: "h",
@@ -23,7 +23,7 @@ var flags = []flag{
 		name:   "test",
 		short:  "",
 		value:  false,
-		usage:  "",
+		usage:  "Display config file and flags variables and values (only for testing)",
 		hidden: true,
 	},
 }

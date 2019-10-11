@@ -91,7 +91,7 @@ func (b *Batch) RunChecker(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-// Checks all current states and adds states whose deadlines are passed in the flush queue
+// Checks all current states and adds states, whose deadlines are exceeded, in the flush queue
 func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -110,7 +110,7 @@ func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
 	}
 }
 
-// Transfers all metrics that comply with the states in the flush queue from the temporary storage to
+// Transfers all metrics according to the states in the flush queue from the temporary storage to
 // the persistent storage
 func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, batchSize int64) {
 	uuids := make([]types.MetricUUID, 0, len(flushQueue))
@@ -126,7 +126,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 		temporaryMetrics, err = b.storer.Get(uuids)
 
 		if err != nil {
-			logger.Println("flush: Can't get points from the temporary storage (", err, ")")
+			logger.Println("flush: Can't get metrics from the temporary storage (", err, ")")
 		}
 
 		return err
@@ -165,7 +165,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 		err := b.storer.Set(nil, metricsToSet)
 
 		if err != nil {
-			logger.Println("flush: Can't set points to the temporary storage (", err, ")")
+			logger.Println("flush: Can't set metrics in the temporary storage (", err, ")")
 		}
 
 		return err
@@ -175,14 +175,14 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 		err := b.writer.Write(metricsToWrite)
 
 		if err != nil {
-			logger.Println("flush: Can't write points to the persistent storage (", err, ")")
+			logger.Println("flush: Can't write metrics in the persistent storage (", err, ")")
 		}
 
 		return err
 	}, &backOff)
 }
 
-// Returns metrics from temporary and permanent storage that comply with the request
+// Returns metrics from the temporary and permanent storages according to the request
 func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
@@ -194,7 +194,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		temporaryMetrics, err = b.storer.Get(request.UUIDs)
 
 		if err != nil {
-			logger.Println("flush: Can't get points from the temporary storage (", err, ")")
+			logger.Println("flush: Can't get metrics from the temporary storage (", err, ")")
 		}
 
 		return err
@@ -220,7 +220,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		persistentMetrics, err = b.reader.Read(request)
 
 		if err != nil {
-			logger.Println("read: Can't read points from the persistent storage (", err, ")")
+			logger.Println("read: Can't read metrics from the persistent storage (", err, ")")
 		}
 
 		return err
@@ -238,9 +238,9 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 // When one of these cases occurs, the current state is added to the flush queue
 func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) error {
 	nowUnix := now.Unix()
+	flushQueue := make(map[types.MetricUUID][]state)
 	newMetrics := make(types.Metrics)
 	actualMetrics := make(types.Metrics)
-	flushQueue := make(map[types.MetricUUID][]state)
 
 	for uuid, points := range metrics {
 		for _, point := range points {
@@ -299,7 +299,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 		err := b.storer.Append(newMetrics, actualMetrics)
 
 		if err != nil {
-			logger.Println("write: Can't append points in the temporary storage (", err, ")")
+			logger.Println("write: Can't metrics points in the temporary storage (", err, ")")
 		}
 
 		return err

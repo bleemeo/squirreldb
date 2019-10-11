@@ -3,44 +3,33 @@ package match
 import "squirreldb/types"
 
 type Match struct {
-	UUIDLabels map[types.MetricUUID]types.MetricLabels
+	Matchers map[types.MetricUUID]types.MetricLabels
 }
 
 func NewMatch() *Match {
-	return &Match{}
+	return &Match{
+		Matchers: make(map[types.MetricUUID]types.MetricLabels),
+	}
 }
 
-// Match ...
-func (m *Match) Match(labels types.MetricLabels) (types.MetricUUID, error) {
+// UUID returns UUID generated from the labels and save the match
+func (m *Match) UUID(labels types.MetricLabels) types.MetricUUID {
 	uuid := labels.UUID()
 
-	m.UUIDLabels[uuid] = labels
+	m.Matchers[uuid] = labels
 
-	return uuid, nil
+	return uuid
 }
 
-// Matches ...
-func (m *Match) Matches(searchLabels types.MetricLabels) ([]types.MetricUUID, error) {
-	var uuids []types.MetricUUID
+// UUIDs returns UUIDs that matches with the label set
+func (m *Match) UUIDs(labelSet types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
+	matchers := make(map[types.MetricUUID]types.MetricLabels)
 
-forLoop:
-	for uuid, labels := range m.UUIDLabels {
-		for _, label := range searchLabels {
-			_, contains := labels.Value(label.Name)
+	if len(matchers) == 0 {
+		uuid := labelSet.UUID()
 
-			if !contains {
-				continue forLoop
-			}
-		}
-
-		uuids = append(uuids, uuid)
+		matchers[uuid] = labelSet
 	}
 
-	if len(uuids) == 0 {
-		uuid := searchLabels.UUID()
-
-		uuids = append(uuids, uuid)
-	}
-
-	return uuids, nil
+	return matchers
 }

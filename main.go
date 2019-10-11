@@ -35,10 +35,10 @@ func main() {
 	config.C = config.NewConfig()
 
 	_ = backoff.Retry(func() error {
-		err := config.C.Setup()
+		err := config.C.Init()
 
 		if err != nil {
-			logger.Println("config: Setup: Can't setup config (", err, ")")
+			logger.Println("config: Init: Can't setup config (", err, ")")
 		}
 
 		return err
@@ -72,10 +72,10 @@ func main() {
 	cassandraAddresses := config.C.Strings("cassandra.addresses")
 
 	_ = backoff.Retry(func() error {
-		err := squirrelCassandra.InitSession(cassandraAddresses...)
+		err := squirrelCassandra.Init(cassandraAddresses...)
 
 		if err != nil {
-			logger.Println("cassandra: InitSession: Can't initialize the session (", err, ")")
+			logger.Println("cassandra: Init: Can't initialize the session (", err, ")")
 		}
 
 		return err

@@ -13,11 +13,11 @@ import (
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	var fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64
 
-	aggregateStep := config.C.Int64("aggregate.step")
+	aggregateStep := config.C.Int64("cassandra.aggregate.step")
 	aggregated := request.Step >= aggregateStep
 
 	if aggregated {
-		aggregateSize := config.C.Int64("aggregate.size")
+		aggregateSize := config.C.Int64("cassandra.aggregate.size")
 		partitionSize := config.C.Int64("cassandra.partition_size.aggregated")
 		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
 		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
@@ -40,10 +40,10 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 		if aggregated {
 			iterator = c.readSQL(aggregatedDataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-			metrics[uuid], err = readAggregatedData(request, iterator)
+			metrics[uuid], err = readAggregatedData(iterator, request)
 		} else {
 			iterator = c.readSQL(dataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-			metrics[uuid], err = readData(request, iterator)
+			metrics[uuid], err = readData(iterator, request)
 		}
 
 		if err != nil {
@@ -64,8 +64,8 @@ func (c *Cassandra) readSQL(table string, uuid gocql.UUID, fromBaseTimestamp, to
 	return iterator
 }
 
-// TODO: Comment
-func readData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricPoints, error) {
+// Returns metrics
+func readData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
@@ -105,8 +105,8 @@ func readData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricPo
 	return points, nil
 }
 
-// TODO: Comment
-func readAggregatedData(request types.MetricRequest, iterator *gocql.Iter) (types.MetricPoints, error) {
+// Returns aggregated metrics
+func readAggregatedData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
@@ -121,7 +121,7 @@ func readAggregatedData(request types.MetricRequest, iterator *gocql.Iter) (type
 				Min       float64
 				Max       float64
 				Average   float64
-				Count     uint16
+				Count     float64
 			}
 
 			err := binary.Read(buffer, binary.BigEndian, &pointData)
@@ -140,10 +140,10 @@ func readAggregatedData(request types.MetricRequest, iterator *gocql.Iter) (type
 						point.Value = pointData.Min
 					case "max":
 						point.Value = pointData.Max
-					case "average":
+					case "avg":
 						point.Value = pointData.Average
 					case "count":
-						point.Value = float64(pointData.Count)
+						point.Value = pointData.Count
 					default:
 						point.Value = pointData.Average
 					}

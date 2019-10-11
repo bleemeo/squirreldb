@@ -47,18 +47,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	for _, series := range writeRequest.Timeseries {
 		labels := pbLabelsToLabels(series.Labels)
-		var uuid types.MetricUUID
-
-		_ = backoff.Retry(func() error {
-			var err error
-			uuid, err = w.matcher.Match(labels)
-
-			if err != nil {
-				logger.Println("WritePoints: Can't match labels with a uuid (", err, ")")
-			}
-
-			return err
-		}, &backOff)
+		uuid := w.matcher.UUID(labels)
 
 		metrics[uuid] = toMetricPoints(series)
 	}
