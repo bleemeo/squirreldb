@@ -83,6 +83,8 @@ func main() {
 
 	// Run services
 	wg.Add(1)
+	go squirrelCassandra.RunAggregator(ctx, &wg)
+	wg.Add(1)
 	go squirrelPrometheus.RunServer(ctx, &wg)
 	wg.Add(1)
 	go squirrelBatch.RunChecker(ctx, &wg)

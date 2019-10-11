@@ -2,19 +2,85 @@ package cassandra
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"io"
+	"log"
+	"os"
 	"squirreldb/aggregate"
 	"squirreldb/config"
 	"squirreldb/types"
+	"sync"
 	"time"
 )
 
-func (c *Cassandra) aggregate(aggregateStep, aggregateSize, aggregateOffset int64, now time.Time) {
+var (
+	logger  = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
+	backOff = backoff.ExponentialBackOff{
+		InitialInterval:     backoff.DefaultInitialInterval,
+		RandomizationFactor: 0.5,
+		Multiplier:          2,
+		MaxInterval:         30 * time.Second,
+		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
+		Clock:               backoff.SystemClock,
+	}
+)
+
+func (c *Cassandra) RunAggregator(ctx context.Context, wg *sync.WaitGroup) {
+	nowUnix := time.Now().Unix()
+	startOffset := config.C.Int64("cassandra.aggregate.start_offset")
+	dayStartTimestamp := nowUnix - (nowUnix % 86400) + startOffset
+	waitTimestamp := dayStartTimestamp - nowUnix
+
+	if waitTimestamp < 0 {
+		waitTimestamp += 86400
+	}
+
+	logger.Println("RunAggregator: Start in", waitTimestamp, "seconds...") // TODO: Debug
+
+	select {
+	case <-time.After(time.Duration(waitTimestamp) * time.Second):
+	case <-ctx.Done():
+		logger.Println("RunAggregator: Stopped")
+		wg.Done()
+		return
+	}
+
+	logger.Println("RunAggregator: Start") // TODO: Debug
+
+	aggregateStep := config.C.Int64("cassandra.aggregate.step")
+	aggregateSize := config.C.Int64("cassandra.aggregate.size")
+
+	tickerInit := false
+	ticker := time.NewTicker(10)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if !tickerInit {
+				ticker.Stop()
+				ticker = time.NewTicker(time.Duration(aggregateSize) * time.Second)
+				tickerInit = true
+			}
+
+			c.aggregate(aggregateStep, aggregateSize, time.Now())
+		case <-ctx.Done():
+			logger.Println("RunAggregator: Stopped")
+			wg.Done()
+			return
+		}
+	}
+}
+
+func (c *Cassandra) aggregate(aggregateStep, aggregateSize int64, now time.Time) {
 	nowUnix := now.Unix()
-	toTimestamp := nowUnix - (nowUnix % aggregateSize) + aggregateOffset
+	toTimestamp := nowUnix - (nowUnix % aggregateSize)
 	fromTimestamp := toTimestamp - aggregateSize
+
+	logger.Println("aggregate: fromTimestamp:", fromTimestamp, "| toTimestamp:", toTimestamp) // TODO: Debug
 
 	batchSize := config.C.Int64("batch.size")
 	partitionSize := config.C.Int64("cassandra.partition_size.raw")
@@ -23,20 +89,45 @@ func (c *Cassandra) aggregate(aggregateStep, aggregateSize, aggregateOffset int6
 	fromOffsetTimestamp := fromTimestamp - fromBaseTimestamp - batchSize
 	toOffsetTimestamp := toTimestamp - toBaseTimestamp
 
+	logger.Println("aggregate: fromBaseTimestamp:", fromBaseTimestamp, "| toBaseTimestamp:", toBaseTimestamp,
+		"| fromOffsetTimestamp:", fromOffsetTimestamp, "| toOffsetTimestamp:", toOffsetTimestamp) // TODO: Debug
+
 	iterator := c.readRangeSQL(fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	var metrics types.Metrics
 
-	metrics, _ := readRangeData(iterator, fromTimestamp, toTimestamp) // TODO: Handle error
+	_ = backoff.Retry(func() error {
+		var err error
+		metrics, err = readRangeData(iterator, fromTimestamp, toTimestamp)
 
-	aggregatedMetrics := toAggregatedMetrics(metrics, fromTimestamp, toTimestamp, aggregateStep)
+		if err != nil {
+			logger.Println("aggregate: Can't read metrics (", err, ")") // TODO: Debug
+		}
 
-	_ = c.writeAggregated(aggregatedMetrics) // TODO: Handle error
+		return err
+	}, &backOff)
+
+	logger.Println("aggregate: metrics:", metrics) // TODO: Debug
+
+	aggregatedMetrics := toAggregated(metrics, fromTimestamp, toTimestamp, aggregateStep)
+
+	logger.Println("aggregate: aggregatedMetrics:", aggregatedMetrics)
+
+	_ = backoff.Retry(func() error {
+		err := c.writeAggregated(aggregatedMetrics)
+
+		if err != nil {
+			logger.Println("aggregate: Can't read metrics (", err, ")") // TODO: Debug
+		}
+
+		return err
+	}, &backOff)
 }
 
 // Returns an iterator of all metrics from the data table according to the parameters
 func (c *Cassandra) readRangeSQL(fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
 	iterator := c.session.Query(
 		"SELECT metric_uuid, base_ts, offset_ts, values FROM "+dataTable+" "+
-			"WHERE base_ts IN (?, ?) AND offset_ts >= ? AND offset_ts <= ? "+
+			"WHERE base_ts >= ? AND base_ts <= ? AND offset_ts >= ? AND offset_ts <= ? "+
 			"ALLOW FILTERING", // ! For development only
 		fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
 
@@ -149,7 +240,7 @@ func readRangeData(iterator *gocql.Iter, fromTimestamp, toTimestamp int64) (type
 }
 
 // Convert Metrics to AggregatedMetrics
-func toAggregatedMetrics(metrics types.Metrics, fromTimestamp, toTimestamp, step int64) map[types.MetricUUID][]aggregate.AggregatedPoint {
+func toAggregated(metrics types.Metrics, fromTimestamp, toTimestamp, step int64) map[types.MetricUUID][]aggregate.AggregatedPoint {
 	aggregatedMetrics := make(map[types.MetricUUID][]aggregate.AggregatedPoint)
 
 	for i := fromTimestamp; i < toTimestamp; i += step {
