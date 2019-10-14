@@ -7,11 +7,13 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/retry"
 	"squirreldb/types"
+	"time"
 )
 
 type ReadPoints struct {
-	matcher types.MetricMatcher
+	indexer types.MetricIndexer
 	reader  types.MetricReader
 }
 
@@ -48,7 +50,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 	for _, query := range readRequest.Queries {
 		labels := pbMatchersToLabels(query.Matchers)
-		matchers := r.matcher.UUIDs(labels)
+		matchers := r.indexer.UUIDs(labels)
 		var uuids []types.MetricUUID
 
 		for uuid := range matchers {
@@ -67,7 +69,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 			}
 
 			return err
-		}, &backOff)
+		}, retry.NewBackOff(30*time.Second))
 
 		queryResult := toQueryResult(matchers, metrics)
 

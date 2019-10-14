@@ -7,21 +7,13 @@ import (
 	"net/http"
 	"os"
 	"squirreldb/config"
+	"squirreldb/retry"
 	"squirreldb/types"
-	"sync"
 	"time"
 )
 
 var (
-	logger  = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
-	backOff = backoff.ExponentialBackOff{
-		InitialInterval:     backoff.DefaultInitialInterval,
-		RandomizationFactor: 0.5,
-		Multiplier:          2,
-		MaxInterval:         30 * time.Second,
-		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
-		Clock:               backoff.SystemClock,
-	}
+	logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
 )
 
 type Prometheus struct {
@@ -29,15 +21,15 @@ type Prometheus struct {
 	writePoints WritePoints
 }
 
-// NewPrometheus creates a new Prometheus object
-func NewPrometheus(matcher types.MetricMatcher, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
+// New creates a new Prometheus object
+func New(matcher types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
 	return &Prometheus{
 		readPoints: ReadPoints{
-			matcher: matcher,
+			indexer: matcher,
 			reader:  reader,
 		},
 		writePoints: WritePoints{
-			matcher: matcher,
+			indexer: matcher,
 			writer:  writer,
 		},
 	}
@@ -45,7 +37,7 @@ func NewPrometheus(matcher types.MetricMatcher, reader types.MetricReader, write
 
 // RunServer run the server to receive write and read requests
 // If the context receives a stop signal, the server is stopped
-func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
+func (p *Prometheus) RunServer(ctx context.Context) {
 	router := http.NewServeMux()
 	listenAddress := config.C.String("prometheus.listen_address")
 	server := http.Server{
@@ -66,7 +58,7 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
 			}
 
 			return nil
-		}, &backOff)
+		}, retry.NewBackOff(30*time.Second))
 	}()
 
 	// Wait to receive a stop signal
@@ -82,5 +74,4 @@ func (p *Prometheus) RunServer(ctx context.Context, wg *sync.WaitGroup) {
 	}
 
 	logger.Println("RunServer: Stopped")
-	wg.Done()
 }

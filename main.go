@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 	"github.com/cenkalti/backoff"
-	"github.com/golang/glog"
 	"log"
 	"os"
 	"os/signal"
 	"squirreldb/batch"
 	"squirreldb/cassandra"
 	"squirreldb/config"
-	"squirreldb/match"
+	"squirreldb/index"
 	"squirreldb/prometheus"
+	"squirreldb/retry"
 	"squirreldb/store"
 	"sync"
 	"syscall"
@@ -20,29 +20,21 @@ import (
 )
 
 var (
-	logger  = log.New(os.Stdout, "[main] ", log.LstdFlags)
-	backOff = backoff.ExponentialBackOff{
-		InitialInterval:     backoff.DefaultInitialInterval,
-		RandomizationFactor: 0.5,
-		Multiplier:          2,
-		MaxInterval:         30 * time.Second,
-		MaxElapsedTime:      backoff.DefaultMaxElapsedTime,
-		Clock:               backoff.SystemClock,
-	}
+	logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 )
 
 func main() {
-	config.C = config.NewConfig()
+	config.C = config.New()
 
 	_ = backoff.Retry(func() error {
 		err := config.C.Init()
 
 		if err != nil {
-			logger.Println("config: Init: Can't setup config (", err, ")")
+			logger.Println("config: Init: Can't initialize config (", err, ")")
 		}
 
 		return err
-	}, &backOff)
+	}, retry.NewBackOff(30*time.Second))
 
 	if config.C.Bool("help") {
 		config.C.FlagSet.PrintDefaults()
@@ -63,11 +55,11 @@ func main() {
 
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
-	squirrelStore := store.NewStore()
-	squirrelMatch := match.NewMatch()
-	squirrelCassandra := cassandra.NewCassandra()
-	squirrelBatch := batch.NewBatch(squirrelStore, squirrelCassandra, squirrelCassandra)
-	squirrelPrometheus := prometheus.NewPrometheus(squirrelMatch, squirrelBatch, squirrelBatch)
+	squirrelStore := store.New()
+	squirrelIndex := index.New()
+	squirrelCassandra := cassandra.New()
+	squirrelBatch := batch.New(squirrelStore, squirrelCassandra, squirrelCassandra)
+	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
 
 	cassandraAddresses := config.C.Strings("cassandra.addresses")
 
@@ -79,17 +71,32 @@ func main() {
 		}
 
 		return err
-	}, &backOff)
+	}, retry.NewBackOff(30*time.Second))
 
 	// Run services
 	wg.Add(1)
-	go squirrelCassandra.RunAggregator(ctx, &wg)
+	go func() {
+		defer wg.Done()
+		squirrelCassandra.RunAggregator(ctx)
+	}()
+
 	wg.Add(1)
-	go squirrelPrometheus.RunServer(ctx, &wg)
+	go func() {
+		defer wg.Done()
+		squirrelPrometheus.RunServer(ctx)
+	}()
+
 	wg.Add(1)
-	go squirrelBatch.RunChecker(ctx, &wg)
+	go func() {
+		defer wg.Done()
+		squirrelBatch.RunChecker(ctx)
+	}()
+
 	wg.Add(1)
-	go squirrelStore.RunExpirator(ctx, &wg)
+	go func() {
+		defer wg.Done()
+		squirrelStore.RunExpirator(ctx)
+	}()
 
 	logger.Println("SquirrelDB ready")
 
@@ -101,9 +108,7 @@ func main() {
 
 	cancel()
 	wg.Wait()
-	squirrelCassandra.CloseSession()
+	squirrelCassandra.Close()
 
 	logger.Println("Stopped")
-
-	glog.Flush()
 }

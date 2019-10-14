@@ -108,7 +108,7 @@ func TestNewBatch(t *testing.T) {
 				persistentWriter: nil,
 			},
 			want: &Batch{
-				storer: nil,
+				store:  nil,
 				reader: nil,
 				writer: nil,
 				states: make(map[types.MetricUUID]state),
@@ -117,8 +117,8 @@ func TestNewBatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewBatch(tt.args.temporaryStorer, tt.args.persistentReader, tt.args.persistentWriter); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewBatch() = %v, want %v", got, tt.want)
+			if got := New(tt.args.temporaryStorer, tt.args.persistentReader, tt.args.persistentWriter); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -288,7 +288,7 @@ func TestBatch_check(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				storer: &tt.fields.temporaryStorer,
+				store:  &tt.fields.temporaryStorer,
 				reader: tt.fields.persistentReader,
 				writer: &tt.fields.persistentWriter,
 				states: tt.fields.states,
@@ -414,7 +414,7 @@ func TestBatch_flush(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				storer: &tt.fields.temporaryStorer,
+				store:  &tt.fields.temporaryStorer,
 				reader: tt.fields.persistentReader,
 				writer: &tt.fields.persistentWriter,
 				states: tt.fields.states,
@@ -592,7 +592,7 @@ func TestBatch_read(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				storer: &tt.fields.temporaryStorer,
+				store:  &tt.fields.temporaryStorer,
 				reader: &tt.fields.persistentReader,
 				writer: tt.fields.persistentWriter,
 				states: tt.fields.states,
@@ -748,7 +748,7 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				storer: &tt.fields.temporaryStorer,
+				store:  &tt.fields.temporaryStorer,
 				reader: tt.fields.persistentReader,
 				writer: &tt.fields.persistentWriter,
 				states: tt.fields.states,

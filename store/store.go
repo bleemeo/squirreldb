@@ -22,8 +22,8 @@ type Store struct {
 	mutex   sync.Mutex
 }
 
-// NewStore creates a new Store object
-func NewStore() *Store {
+// New creates a new Store object
+func New() *Store {
 	return &Store{
 		Metrics: make(map[types.MetricUUID]metric),
 	}
@@ -59,7 +59,7 @@ func (s *Store) Set(newMetrics, actualMetrics types.Metrics) error {
 
 // RunExpirator calls expire() every expirator interval seconds
 // If the context receives a stop signal, the service is stopped
-func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
+func (s *Store) RunExpirator(ctx context.Context) {
 	ticker := time.NewTicker(config.StoreExpiratorInterval * time.Second)
 	defer ticker.Stop()
 
@@ -69,7 +69,6 @@ func (s *Store) RunExpirator(ctx context.Context, wg *sync.WaitGroup) {
 			s.expire(time.Now())
 		case <-ctx.Done():
 			logger.Println("RunExpirator: Stopped")
-			wg.Done()
 			return
 		}
 	}

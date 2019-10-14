@@ -7,11 +7,13 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/retry"
 	"squirreldb/types"
+	"time"
 )
 
 type WritePoints struct {
-	matcher types.MetricMatcher
+	indexer types.MetricIndexer
 	writer  types.MetricWriter
 }
 
@@ -47,7 +49,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	for _, series := range writeRequest.Timeseries {
 		labels := pbLabelsToLabels(series.Labels)
-		uuid := w.matcher.UUID(labels)
+		uuid := w.indexer.UUID(labels)
 
 		metrics[uuid] = toMetricPoints(series)
 	}
@@ -60,7 +62,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		}
 
 		return err
-	}, &backOff)
+	}, retry.NewBackOff(30*time.Second))
 }
 
 // Convert Prometheus Labels to MetricLabels

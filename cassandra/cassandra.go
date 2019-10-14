@@ -3,6 +3,7 @@ package cassandra
 import (
 	"github.com/gocql/gocql"
 	"squirreldb/config"
+	"strings"
 )
 
 var (
@@ -15,13 +16,13 @@ type Cassandra struct {
 	session *gocql.Session
 }
 
-// NewCassandra creates a new Cassandra object
-func NewCassandra() *Cassandra {
+// New creates a new Cassandra object
+func New() *Cassandra {
 	return &Cassandra{}
 }
 
-// CloseSession closes Cassandra's session
-func (c *Cassandra) CloseSession() {
+// Close closes Cassandra
+func (c *Cassandra) Close() {
 	c.session.Close()
 }
 
@@ -35,13 +36,14 @@ func (c *Cassandra) Init(hosts ...string) error {
 	}
 
 	replicationFactor := config.C.String("cassandra.replication_factor")
-
-	createKeyspace := session.Query(
-		"CREATE KEYSPACE IF NOT EXISTS " + keyspace + " " +
-			"WITH REPLICATION = {" +
-			"'class' : 'SimpleStrategy'," +
-			"'replication_factor' : " + replicationFactor + "};",
-	)
+	createKeyspaceReplacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
+	createKeyspace := session.Query(createKeyspaceReplacer.Replace(`
+		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE_NAME
+		WITH REPLICATION = {
+			'class': 'SimpleStrategy',
+			'replication_factor': $REPLICATION_FACTOR
+		};
+	`))
 
 	if err := createKeyspace.Exec(); err != nil {
 		session.Close()
@@ -49,49 +51,56 @@ func (c *Cassandra) Init(hosts ...string) error {
 	}
 
 	defaultTimeToLive := config.C.String("cassandra.default_time_to_live")
-
-	createDataTable := session.Query(
-		"CREATE TABLE IF NOT EXISTS " + dataTable + " (" +
-			"metric_uuid uuid," +
-			"base_ts bigint," +
-			"offset_ts int," +
-			"insert_time timeuuid," +
-			"values blob," +
-			"PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)) " +
-			"WITH CLUSTERING ORDER BY (offset_ts DESC) " +
-			"AND compression = {" +
-			"'chunk_length_in_kb': '256'," +
-			"'class': 'org.apache.cassandra.io.compress.DeflateCompressor'} " +
-			"AND compaction = {" +
-			"'class': 'TimeWindowCompactionStrategy'," +
-			"'compaction_window_unit': 'DAYS'," +
-			"'compaction_window_size': 6} " +
-			"AND default_time_to_live = " + defaultTimeToLive,
-	)
+	createDataTableReplacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+	createDataTable := session.Query(createDataTableReplacer.Replace(`
+        CREATE TABLE IF NOT EXISTS $DATA_TABLE (
+			metric_uuid uuid,
+			base_ts bigint,
+			offset_ts int,
+			insert_time timeuuid,
+			values blob,
+			PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)
+		)
+		WITH CLUSTERING ORDER BY (offset_ts DESC)
+		AND COMPRESSION = {
+			'chunk_length_in_kb': '256',
+			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'
+		}
+		AND COMPACTION = {
+			'class': 'TimeWindowCompactionStrategy',
+			'compaction_window_unit': 'DAYS',
+			'compaction_window_size': 6
+		}
+		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
+	`))
 
 	if err := createDataTable.Exec(); err != nil {
 		session.Close()
 		return err
 	}
 
-	createAggregatedDataTable := session.Query(
-		"CREATE TABLE IF NOT EXISTS " + aggregatedDataTable + " (" +
-			"metric_uuid uuid," +
-			"base_ts bigint," +
-			"offset_ts int," +
-			"insert_time timeuuid," +
-			"values blob," +
-			"PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)) " +
-			"WITH CLUSTERING ORDER BY (offset_ts DESC) " +
-			"AND compression = {" +
-			"'chunk_length_in_kb': '256'," +
-			"'class': 'org.apache.cassandra.io.compress.DeflateCompressor'} " +
-			"AND compaction = {" +
-			"'class': 'TimeWindowCompactionStrategy'," +
-			"'compaction_window_unit': 'DAYS'," +
-			"'compaction_window_size': 90} " +
-			"AND default_time_to_live = " + defaultTimeToLive,
-	)
+	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregatedDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+	createAggregatedDataTable := session.Query(createAggregatedDataTableReplacer.Replace(`
+        CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
+			metric_uuid uuid,
+			base_ts bigint,
+			offset_ts int,
+			insert_time timeuuid,
+			values blob,
+			PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)
+		)
+		WITH CLUSTERING ORDER BY (offset_ts DESC)
+		AND COMPRESSION = {
+			'chunk_length_in_kb': '256',
+			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'
+		}
+		AND COMPACTION = {
+			'class': 'TimeWindowCompactionStrategy',
+			'compaction_window_unit': 'DAYS',
+			'compaction_window_size': 6
+		}
+		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
+	`))
 
 	if err := createAggregatedDataTable.Exec(); err != nil {
 		session.Close()

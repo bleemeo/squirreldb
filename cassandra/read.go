@@ -6,48 +6,55 @@ import (
 	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/config"
+	"squirreldb/math"
 	"squirreldb/types"
+	"strings"
 )
 
 // Read returns metrics according to the request
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
-	var fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64
-
 	aggregateStep := config.C.Int64("cassandra.aggregate.step")
 	aggregated := request.Step >= aggregateStep
+	var rowSize, partitionSize, fromBaseTimestamp, toBaseTimestamp int64
 
 	if aggregated {
-		aggregateSize := config.C.Int64("cassandra.aggregate.size")
-		partitionSize := config.C.Int64("cassandra.partition_size.aggregated")
+		rowSize = config.C.Int64("cassandra.aggregate.size")
+		partitionSize = config.C.Int64("cassandra.partition_size.aggregated")
 		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
 		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
-		fromOffsetTimestamp = request.FromTimestamp - fromBaseTimestamp - aggregateSize
-		toOffsetTimestamp = request.ToTimestamp - toBaseTimestamp
 	} else {
-		batchSize := config.C.Int64("batch.size")
-		partitionSize := config.C.Int64("cassandra.partition_size.raw")
+		rowSize = config.C.Int64("batch.size")
+		partitionSize = config.C.Int64("cassandra.partition_size.raw")
 		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
 		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
-		fromOffsetTimestamp = request.FromTimestamp - fromBaseTimestamp - batchSize
-		toOffsetTimestamp = request.ToTimestamp - toBaseTimestamp
 	}
 
-	var iterator *gocql.Iter
 	metrics := make(types.Metrics)
 
-	for _, uuid := range request.UUIDs {
-		var err error
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += partitionSize {
+		fromOffsetTimestamp := math.Int64Max(request.FromTimestamp-baseTimestamp-rowSize, 0)
+		toOffsetTimestamp := math.Int64Min(request.ToTimestamp-baseTimestamp, partitionSize)
 
-		if aggregated {
-			iterator = c.readSQL(aggregatedDataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-			metrics[uuid], err = readAggregatedData(iterator, request)
-		} else {
-			iterator = c.readSQL(dataTable, gocql.UUID(uuid.UUID), fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-			metrics[uuid], err = readData(iterator, request)
-		}
+		for _, uuid := range request.UUIDs {
+			var iterator *gocql.Iter
+			var points types.MetricPoints
+			var err error
 
-		if err != nil {
-			return nil, err
+			if aggregated {
+				iterator = c.readDatabase(aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+				points, err = readAggregatedData(iterator, request)
+			} else {
+				iterator = c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+				points, err = readData(iterator, request)
+			}
+
+			_ = iterator.Close() // TODO: Handle error
+
+			if err != nil {
+				return nil, err
+			}
+
+			metrics[uuid] = append(metrics[uuid], points...)
 		}
 	}
 
@@ -55,11 +62,12 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 }
 
 // Returns an iterator from the specified table according to the parameters
-func (c *Cassandra) readSQL(table string, uuid gocql.UUID, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
-	iterator := c.session.Query(
-		"SELECT base_ts, offset_ts, values FROM "+table+" "+
-			"WHERE metric_uuid = ? AND base_ts IN (?, ?) AND offset_ts >= ? AND offset_ts <= ?",
-		uuid, fromBaseTimestamp, toBaseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	iteratorReplacer := strings.NewReplacer("$TABLE", table)
+	iterator := c.session.Query(iteratorReplacer.Replace(`
+		SELECT base_ts, offset_ts, values FROM $TABLE
+		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
+	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
 
 	return iterator
 }

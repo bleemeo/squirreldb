@@ -1,19 +1,19 @@
-package match
+package index
 
 import "squirreldb/types"
 
-type Match struct {
+type Index struct {
 	Matchers map[types.MetricUUID]types.MetricLabels
 }
 
-func NewMatch() *Match {
-	return &Match{
+func New() *Index {
+	return &Index{
 		Matchers: make(map[types.MetricUUID]types.MetricLabels),
 	}
 }
 
-// UUID returns UUID generated from the labels and save the match
-func (m *Match) UUID(labels types.MetricLabels) types.MetricUUID {
+// UUID returns UUID generated from the labels and save the index
+func (m *Index) UUID(labels types.MetricLabels) types.MetricUUID {
 	uuid := labels.UUID()
 
 	m.Matchers[uuid] = labels
@@ -22,7 +22,7 @@ func (m *Match) UUID(labels types.MetricLabels) types.MetricUUID {
 }
 
 // UUIDs returns UUIDs that matches with the label set
-func (m *Match) UUIDs(labelSet types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
+func (m *Index) UUIDs(labelSet types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
 	matchers := make(map[types.MetricUUID]types.MetricLabels)
 
 	if len(matchers) == 0 {

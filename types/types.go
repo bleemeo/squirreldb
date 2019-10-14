@@ -1,6 +1,6 @@
 package types
 
-type MetricMatcher interface {
+type MetricIndexer interface {
 	UUID(labels MetricLabels) MetricUUID
 	UUIDs(labels MetricLabels) map[MetricUUID]MetricLabels
 }

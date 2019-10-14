@@ -28,8 +28,8 @@ type Config struct {
 	FlagSet *pflag.FlagSet
 }
 
-// NewConfig creates a new Config object
-func NewConfig() *Config {
+// New creates a new Config object
+func New() *Config {
 	return &Config{
 		Koanf: koanf.New(configDelimiter),
 	}
