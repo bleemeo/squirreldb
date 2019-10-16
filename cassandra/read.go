@@ -3,7 +3,6 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"io"
@@ -15,15 +14,13 @@ import (
 	"time"
 )
 
-var forceNonAggregated = false // TODO: Debug var
-
 // Read returns metrics according to the request
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	aggregateStep := config.C.Int64("cassandra.aggregate.step")
 	aggregated := request.Step >= aggregateStep
 	var rowSize, partitionSize int64
 
-	if aggregated && !forceNonAggregated {
+	if aggregated {
 		rowSize = config.C.Int64("cassandra.aggregate.size")
 		partitionSize = config.C.Int64("cassandra.partition_size.aggregated")
 	} else {
@@ -45,20 +42,9 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			var points types.MetricPoints
 			var err error
 
-			if aggregated && !forceNonAggregated {
+			if aggregated {
 				iterator = c.readDatabase(aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 				points, err = readAggregatedData(iterator, request)
-
-				// TODO: Debug information
-				fmt.Println("rowSize:", rowSize)
-				fmt.Println("partitionSize:", partitionSize)
-				fmt.Println("fromBaseTimestamp:", fromBaseTimestamp)
-				fmt.Println("toBaseTimestamp:", toBaseTimestamp)
-				fmt.Println("baseTimestamp:", baseTimestamp)
-				fmt.Println("fromOffsetTimestamp:", fromOffsetTimestamp)
-				fmt.Println("toOffsetTimestamp:", toOffsetTimestamp)
-				fmt.Println("UUID:", uuid)
-				fmt.Println("Points:", points)
 			} else {
 				iterator = c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 				points, err = readData(iterator, request)

@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -22,6 +23,8 @@ type ReadPoints struct {
 // Retrieves metrics via MetricRequests
 // Generates and returns a response containing the requested data
 func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	perfReadResponseTime := time.Now() // TODO: Performance
+
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -93,6 +96,8 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
 		return
 	}
+
+	fmt.Println("Send response in:", time.Now().Sub(perfReadResponseTime)) // TODO: Performance
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels

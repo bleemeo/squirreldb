@@ -26,15 +26,9 @@ var (
 func main() {
 	config.C = config.New()
 
-	_ = backoff.Retry(func() error {
-		err := config.C.Init()
-
-		if err != nil {
-			logger.Println("config: Init: Can't initialize config (", err, ")")
-		}
-
-		return err
-	}, retry.NewBackOff(30*time.Second))
+	if err := config.C.Init(); err != nil {
+		logger.Fatalln("config: Init: Can't initialize config (", err, ")")
+	}
 
 	if config.C.Bool("help") {
 		config.C.FlagSet.PrintDefaults()
@@ -51,7 +45,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	signals := make(chan os.Signal, 1)
-	defer close(signals)
 
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
@@ -77,25 +70,25 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		squirrelCassandra.RunAggregator(ctx)
+		squirrelCassandra.Run(ctx)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		squirrelPrometheus.RunServer(ctx)
+		squirrelPrometheus.Run(ctx)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		squirrelBatch.RunChecker(ctx)
+		squirrelBatch.Run(ctx)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		squirrelStore.RunExpirator(ctx)
+		squirrelStore.Run(ctx)
 	}()
 
 	logger.Println("SquirrelDB ready")
@@ -108,7 +101,11 @@ func main() {
 
 	cancel()
 	wg.Wait()
+
 	squirrelCassandra.Close()
+
+	signal.Stop(signals)
+	close(signals)
 
 	logger.Println("Stopped")
 }

@@ -35,9 +35,9 @@ func New(matcher types.MetricIndexer, reader types.MetricReader, writer types.Me
 	}
 }
 
-// RunServer run the server to receive write and read requests
+// Run run the server to receive write and read requests
 // If the context receives a stop signal, the server is stopped
-func (p *Prometheus) RunServer(ctx context.Context) {
+func (p *Prometheus) Run(ctx context.Context) {
 	router := http.NewServeMux()
 	listenAddress := config.C.String("prometheus.listen_address")
 	server := http.Server{
@@ -53,7 +53,7 @@ func (p *Prometheus) RunServer(ctx context.Context) {
 			err := server.ListenAndServe()
 
 			if err != http.ErrServerClosed {
-				logger.Println("RunServer: Can't listen and serve the server (", err, ")")
+				logger.Println("Run: Can't listen and serve the server (", err, ")")
 				return err
 			}
 
@@ -70,8 +70,8 @@ func (p *Prometheus) RunServer(ctx context.Context) {
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Println("RunServer: Error while stopping server (", err, ")")
+		logger.Println("Run: Error while stopping server (", err, ")")
 	}
 
-	logger.Println("RunServer: Stopped")
+	logger.Println("Run: Stopped")
 }

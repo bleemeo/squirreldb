@@ -15,39 +15,44 @@ import (
 )
 
 // TODO: Comment
-func (c *Cassandra) RunAggregator(ctx context.Context) {
+func (c *Cassandra) Run(ctx context.Context) {
 	nowUnix := time.Now().Unix()
 	aggregateSize := config.C.Int64("cassandra.aggregate.size")
-	startOffset := config.C.Int64("cassandra.aggregate.start_offset")
-	startTimestamp := nowUnix - (nowUnix % aggregateSize) + startOffset
-	waitTimestamp := startTimestamp - nowUnix
+	aggregateTimestamp := nowUnix - (nowUnix % aggregateSize)
+	waitTimestamp := aggregateTimestamp - nowUnix
 
 	if waitTimestamp < 0 {
 		waitTimestamp += aggregateSize
 	}
 
-	logger.Println("RunAggregator: Start in", waitTimestamp, "seconds...") // TODO: Debug
+	startOffset := config.C.Int64("cassandra.aggregate.start_offset")
+
+	waitTimestamp += startOffset
+
+	logger.Println("Run: Start in", waitTimestamp, "seconds...") // TODO: Debug
 
 	select {
 	case <-time.After(time.Duration(waitTimestamp) * time.Second):
 	case <-ctx.Done():
-		logger.Println("RunAggregator: Stopped")
+		logger.Println("Run: Stopped")
 		return
 	}
 
+	aggregateTime := time.Unix(aggregateTimestamp, 0)
 	aggregateStep := config.C.Int64("cassandra.aggregate.step")
 	ticker := time.NewTicker(time.Duration(aggregateSize) * time.Second)
 	defer ticker.Stop()
 
 	for {
-		c.aggregate(time.Now(), aggregateStep, aggregateSize)
+		c.aggregate(aggregateTime, aggregateStep, aggregateSize)
+		aggregateTime = aggregateTime.Add(time.Duration(aggregateSize) * time.Second)
 
-		logger.Println("RunAggregator: Aggregated") // TODO: Debug
+		logger.Println("Run: Aggregate") // TODO: Debug
 
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			logger.Println("RunAggregator: Stopped")
+			logger.Println("Run: Stopped")
 			return
 		}
 	}
@@ -55,19 +60,20 @@ func (c *Cassandra) RunAggregator(ctx context.Context) {
 
 func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64) {
 	nowUnix := now.Unix()
-	request := types.MetricRequest{
-		FromTimestamp: nowUnix - (nowUnix % aggregateSize) - aggregateSize,
-		ToTimestamp:   nowUnix - (nowUnix % aggregateSize),
-	}
+	toTimestamp := nowUnix - (nowUnix % aggregateSize)
+	fromTimestamp := toTimestamp - aggregateSize
 
 	rowSize := config.C.Int64("batch.size")
 	partitionSize := config.C.Int64("cassandra.partition_size.raw")
-	fromBaseTimestamp := request.FromTimestamp - (request.FromTimestamp % partitionSize)
-	toBaseTimestamp := request.ToTimestamp - (request.ToTimestamp % partitionSize)
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % partitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % partitionSize)
+	var uuids []types.MetricUUID
+
+	perfGettingUUIDsTime := time.Now() // TODO: Performance
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += partitionSize {
-		fromOffsetTimestamp := math.Int64Max(request.FromTimestamp-baseTimestamp-rowSize, 0)
-		toOffsetTimestamp := math.Int64Min(request.ToTimestamp-baseTimestamp, partitionSize)
+		fromOffsetTimestamp := math.Int64Max(fromTimestamp-baseTimestamp-rowSize, 0)
+		toOffsetTimestamp := math.Int64Min(toTimestamp-baseTimestamp, partitionSize)
 
 		iterator := c.uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 		var metricUUID string
@@ -76,7 +82,7 @@ func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64)
 			cqlUUID, _ := gocql.ParseUUID(metricUUID)
 			uuid := types.MetricUUID{UUID: [16]byte(cqlUUID)}
 
-			request.UUIDs = append(request.UUIDs, uuid)
+			uuids = append(uuids, uuid)
 		}
 
 		_ = backoff.Retry(func() error {
@@ -90,32 +96,48 @@ func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64)
 		}, retry.NewBackOff(30*time.Second))
 	}
 
-	var metrics types.Metrics
+	fmt.Println("Gettings all UUIDs in:", time.Now().Sub(perfGettingUUIDsTime)) // TODO: Performance
 
-	_ = backoff.Retry(func() error {
-		var err error
-		metrics, err = c.Read(request)
+	perfAggregateAllMetricsTime := time.Now() // TODO: Performance
 
-		if err != nil {
-			logger.Println("read: Can't read metrics (", err, ")")
+	for _, uuid := range uuids {
+		perfAggregateMetricTime := time.Now() // TODO: Performance
+
+		request := types.MetricRequest{
+			UUIDs:         []types.MetricUUID{uuid},
+			FromTimestamp: nowUnix - (nowUnix % aggregateSize) - aggregateSize,
+			ToTimestamp:   nowUnix - (nowUnix % aggregateSize),
 		}
 
-		return err
-	}, retry.NewBackOff(30*time.Second))
+		var metrics types.Metrics
 
-	aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, aggregateStep)
+		_ = backoff.Retry(func() error {
+			var err error
+			metrics, err = c.Read(request)
 
-	fmt.Println("aggregatedMetrics:", aggregatedMetrics) // TODO: Debug
+			if err != nil {
+				logger.Println("read: Can't read metrics (", err, ")")
+			}
 
-	_ = backoff.Retry(func() error {
-		err := c.writeAggregated(aggregatedMetrics)
+			return err
+		}, retry.NewBackOff(30*time.Second))
 
-		if err != nil {
-			logger.Println("aggregate: Can't write aggregated metrics (", err, ")")
-		}
+		aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, aggregateStep)
 
-		return err
-	}, retry.NewBackOff(30*time.Second))
+		_ = backoff.Retry(func() error {
+			err := c.writeAggregated(aggregatedMetrics)
+
+			if err != nil {
+				logger.Println("aggregate: Can't write aggregated metrics (", err, ")")
+			}
+
+			return err
+		}, retry.NewBackOff(30*time.Second))
+
+		fmt.Println("Read, aggregate and write one metric in:", time.Now().Sub(perfAggregateMetricTime)) // TODO: Performance
+	}
+
+	fmt.Println("Read, aggregate and write all metrics in:", time.Now().Sub(perfAggregateAllMetricsTime)) // TODO: Performance
 }
 
 // Returns an iterator of all metrics from the data table according to the parameters

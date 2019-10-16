@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -21,6 +22,8 @@ type WritePoints struct {
 // Decodes the request and transforms it into Metrics
 // Sends the Metrics to storage
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	perfWriteRequestTime := time.Now() // TODO: Performance
+
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -63,6 +66,8 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		return err
 	}, retry.NewBackOff(30*time.Second))
+
+	fmt.Println("Write request in:", time.Now().Sub(perfWriteRequestTime)) // TODO: Performance
 }
 
 // Convert Prometheus Labels to MetricLabels

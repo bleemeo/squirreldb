@@ -57,9 +57,9 @@ func (s *Store) Set(newMetrics, actualMetrics types.Metrics) error {
 	return s.set(newMetrics, actualMetrics, time.Now(), batchSize*2+config.StoreTimeToLiveOffset)
 }
 
-// RunExpirator calls expire() every expirator interval seconds
+// Run calls expire() every expirator interval seconds
 // If the context receives a stop signal, the service is stopped
-func (s *Store) RunExpirator(ctx context.Context) {
+func (s *Store) Run(ctx context.Context) {
 	ticker := time.NewTicker(config.StoreExpiratorInterval * time.Second)
 	defer ticker.Stop()
 
@@ -68,7 +68,7 @@ func (s *Store) RunExpirator(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			logger.Println("RunExpirator: Stopped")
+			logger.Println("Run: Stopped")
 			return
 		}
 	}

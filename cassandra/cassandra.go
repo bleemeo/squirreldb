@@ -12,7 +12,7 @@ var (
 	keyspace            = config.CassandraKeyspace
 	dataTable           = config.CassandraKeyspace + "." + config.CassandraDataTable
 	aggregatedDataTable = config.CassandraKeyspace + "." + config.CassandraAggregatedDataTable
-	logger              = log.New(os.Stdout, "[store] ", log.LstdFlags)
+	logger              = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 )
 
 type Cassandra struct {

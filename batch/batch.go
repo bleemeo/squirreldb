@@ -63,9 +63,9 @@ func (b *Batch) Write(metrics types.Metrics) error {
 	return b.write(metrics, time.Now(), batchSize)
 }
 
-// RunChecker calls check() every checker interval seconds
+// Run calls check() every checker interval seconds
 // If the context receives a stop signal, a last check is made before stopping the service
-func (b *Batch) RunChecker(ctx context.Context) {
+func (b *Batch) Run(ctx context.Context) {
 	ticker := time.NewTicker(config.BatchCheckerInterval * time.Second)
 	defer ticker.Stop()
 
@@ -77,7 +77,7 @@ func (b *Batch) RunChecker(ctx context.Context) {
 			b.check(time.Now(), batchSize, false)
 		case <-ctx.Done():
 			b.check(time.Now(), batchSize, true)
-			logger.Println("RunChecker: Stopped")
+			logger.Println("Run: Stopped")
 			return
 		}
 	}
