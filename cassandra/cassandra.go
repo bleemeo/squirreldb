@@ -2,6 +2,8 @@ package cassandra
 
 import (
 	"github.com/gocql/gocql"
+	"log"
+	"os"
 	"squirreldb/config"
 	"strings"
 )
@@ -10,6 +12,7 @@ var (
 	keyspace            = config.CassandraKeyspace
 	dataTable           = config.CassandraKeyspace + "." + config.CassandraDataTable
 	aggregatedDataTable = config.CassandraKeyspace + "." + config.CassandraAggregatedDataTable
+	logger              = log.New(os.Stdout, "[store] ", log.LstdFlags)
 )
 
 type Cassandra struct {

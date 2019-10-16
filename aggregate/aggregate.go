@@ -41,9 +41,11 @@ func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, step in
 			}
 		}
 
-		aggregatedPoint := aggregate(timestamp, stepPoints)
+		if len(stepPoints) != 0 {
+			aggregatedPoint := aggregate(timestamp, stepPoints)
 
-		aggregatedPoints = append(aggregatedPoints, aggregatedPoint)
+			aggregatedPoints = append(aggregatedPoints, aggregatedPoint)
+		}
 	}
 
 	return aggregatedPoints

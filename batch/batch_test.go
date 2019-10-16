@@ -169,7 +169,7 @@ func TestBatch_check(t *testing.T) {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
-						flushDeadline:       300,
+						flushTimestamp:      300,
 					},
 				},
 			},
@@ -206,7 +206,7 @@ func TestBatch_check(t *testing.T) {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
-						flushDeadline:       300,
+						flushTimestamp:      300,
 					},
 				},
 			},
@@ -258,7 +258,7 @@ func TestBatch_check(t *testing.T) {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
-						flushDeadline:       300,
+						flushTimestamp:      300,
 					},
 				},
 			},
@@ -344,7 +344,7 @@ func TestBatch_flush(t *testing.T) {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
-						flushDeadline:       300,
+						flushTimestamp:      300,
 					},
 				},
 			},
@@ -379,7 +379,7 @@ func TestBatch_flush(t *testing.T) {
 						pointCount:          1,
 						firstPointTimestamp: 300,
 						lastPointTimestamp:  300,
-						flushDeadline:       600,
+						flushTimestamp:      600,
 					},
 				},
 			},
@@ -390,7 +390,7 @@ func TestBatch_flush(t *testing.T) {
 							pointCount:          2,
 							firstPointTimestamp: 0,
 							lastPointTimestamp:  150,
-							flushDeadline:       300,
+							flushTimestamp:      300,
 						},
 					},
 				},
@@ -663,7 +663,7 @@ func TestBatch_write(t *testing.T) {
 					pointCount:          3,
 					firstPointTimestamp: 0,
 					lastPointTimestamp:  100,
-					flushDeadline:       300,
+					flushTimestamp:      300,
 				},
 			},
 			wantErr: false,
@@ -701,7 +701,7 @@ func TestBatch_write(t *testing.T) {
 					pointCount:          1,
 					firstPointTimestamp: 300,
 					lastPointTimestamp:  300,
-					flushDeadline:       600,
+					flushTimestamp:      600,
 				},
 			},
 			wantErr: false,
@@ -739,7 +739,7 @@ func TestBatch_write(t *testing.T) {
 					pointCount:          3,
 					firstPointTimestamp: 0,
 					lastPointTimestamp:  100,
-					flushDeadline:       300,
+					flushTimestamp:      300,
 				},
 			},
 			wantErr: false,
@@ -764,7 +764,7 @@ func TestBatch_write(t *testing.T) {
 	}
 }
 
-func Test_flushDeadline(t *testing.T) {
+func Test_flushTimestamp(t *testing.T) {
 	type args struct {
 		uuid      types.MetricUUID
 		now       time.Time
@@ -796,8 +796,8 @@ func Test_flushDeadline(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := flushDeadline(tt.args.uuid, tt.args.now, tt.args.batchSize); got != tt.want {
-				t.Errorf("flushDeadline() = %v, want %v", got, tt.want)
+			if got := flushTimestamp(tt.args.uuid, tt.args.now, tt.args.batchSize); got != tt.want {
+				t.Errorf("flushTimestamp() = %v, want %v", got, tt.want)
 			}
 		})
 	}

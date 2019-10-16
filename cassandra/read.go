@@ -3,31 +3,36 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/config"
 	"squirreldb/math"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
+	"time"
 )
+
+var forceNonAggregated = false // TODO: Debug var
 
 // Read returns metrics according to the request
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	aggregateStep := config.C.Int64("cassandra.aggregate.step")
 	aggregated := request.Step >= aggregateStep
-	var rowSize, partitionSize, fromBaseTimestamp, toBaseTimestamp int64
+	var rowSize, partitionSize int64
 
-	if aggregated {
+	if aggregated && !forceNonAggregated {
 		rowSize = config.C.Int64("cassandra.aggregate.size")
 		partitionSize = config.C.Int64("cassandra.partition_size.aggregated")
-		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
-		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
 	} else {
 		rowSize = config.C.Int64("batch.size")
 		partitionSize = config.C.Int64("cassandra.partition_size.raw")
-		fromBaseTimestamp = request.FromTimestamp - (request.FromTimestamp % partitionSize)
-		toBaseTimestamp = request.ToTimestamp - (request.ToTimestamp % partitionSize)
 	}
+
+	fromBaseTimestamp := request.FromTimestamp - (request.FromTimestamp % partitionSize)
+	toBaseTimestamp := request.ToTimestamp - (request.ToTimestamp % partitionSize)
 
 	metrics := make(types.Metrics)
 
@@ -40,15 +45,34 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			var points types.MetricPoints
 			var err error
 
-			if aggregated {
+			if aggregated && !forceNonAggregated {
 				iterator = c.readDatabase(aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 				points, err = readAggregatedData(iterator, request)
+
+				// TODO: Debug information
+				fmt.Println("rowSize:", rowSize)
+				fmt.Println("partitionSize:", partitionSize)
+				fmt.Println("fromBaseTimestamp:", fromBaseTimestamp)
+				fmt.Println("toBaseTimestamp:", toBaseTimestamp)
+				fmt.Println("baseTimestamp:", baseTimestamp)
+				fmt.Println("fromOffsetTimestamp:", fromOffsetTimestamp)
+				fmt.Println("toOffsetTimestamp:", toOffsetTimestamp)
+				fmt.Println("UUID:", uuid)
+				fmt.Println("Points:", points)
 			} else {
 				iterator = c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 				points, err = readData(iterator, request)
 			}
 
-			_ = iterator.Close() // TODO: Handle error
+			_ = backoff.Retry(func() error {
+				err := iterator.Close()
+
+				if err != nil {
+					logger.Println("aggregate: Can't close iterator (", err, ")")
+				}
+
+				return err
+			}, retry.NewBackOff(30*time.Second))
 
 			if err != nil {
 				return nil, err

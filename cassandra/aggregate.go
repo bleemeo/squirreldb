@@ -2,30 +2,28 @@ package cassandra
 
 import (
 	"context"
+	"fmt"
+	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
-	"log"
-	"os"
 	"squirreldb/aggregate"
 	"squirreldb/config"
 	"squirreldb/math"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
 	"time"
 )
 
-var (
-	logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
-)
-
 // TODO: Comment
 func (c *Cassandra) RunAggregator(ctx context.Context) {
 	nowUnix := time.Now().Unix()
+	aggregateSize := config.C.Int64("cassandra.aggregate.size")
 	startOffset := config.C.Int64("cassandra.aggregate.start_offset")
-	dayStartTimestamp := nowUnix - (nowUnix % 86400) + startOffset
-	waitTimestamp := dayStartTimestamp - nowUnix
+	startTimestamp := nowUnix - (nowUnix % aggregateSize) + startOffset
+	waitTimestamp := startTimestamp - nowUnix
 
 	if waitTimestamp < 0 {
-		waitTimestamp += 86400
+		waitTimestamp += aggregateSize
 	}
 
 	logger.Println("RunAggregator: Start in", waitTimestamp, "seconds...") // TODO: Debug
@@ -37,15 +35,14 @@ func (c *Cassandra) RunAggregator(ctx context.Context) {
 		return
 	}
 
-	logger.Println("RunAggregator: Start") // TODO: Debug
-
 	aggregateStep := config.C.Int64("cassandra.aggregate.step")
-	aggregateSize := config.C.Int64("cassandra.aggregate.size")
 	ticker := time.NewTicker(time.Duration(aggregateSize) * time.Second)
 	defer ticker.Stop()
 
 	for {
-		c.aggregate(aggregateStep, aggregateSize, time.Now())
+		c.aggregate(time.Now(), aggregateStep, aggregateSize)
+
+		logger.Println("RunAggregator: Aggregated") // TODO: Debug
 
 		select {
 		case <-ticker.C:
@@ -56,11 +53,11 @@ func (c *Cassandra) RunAggregator(ctx context.Context) {
 	}
 }
 
-func (c *Cassandra) aggregate(aggregateStep, aggregateSize int64, now time.Time) {
+func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64) {
 	nowUnix := now.Unix()
 	request := types.MetricRequest{
-		FromTimestamp: nowUnix - (nowUnix % aggregateSize),
-		ToTimestamp:   nowUnix - (nowUnix % aggregateSize) - aggregateSize,
+		FromTimestamp: nowUnix - (nowUnix % aggregateSize) - aggregateSize,
+		ToTimestamp:   nowUnix - (nowUnix % aggregateSize),
 	}
 
 	rowSize := config.C.Int64("batch.size")
@@ -82,22 +79,52 @@ func (c *Cassandra) aggregate(aggregateStep, aggregateSize int64, now time.Time)
 			request.UUIDs = append(request.UUIDs, uuid)
 		}
 
-		_ = iterator.Close() // TODO: Handle error
+		_ = backoff.Retry(func() error {
+			err := iterator.Close()
+
+			if err != nil {
+				logger.Println("aggregate: Can't close iterator (", err, ")")
+			}
+
+			return err
+		}, retry.NewBackOff(30*time.Second))
 	}
 
-	metrics, _ := c.Read(request) // TODO: Handle error
+	var metrics types.Metrics
+
+	_ = backoff.Retry(func() error {
+		var err error
+		metrics, err = c.Read(request)
+
+		if err != nil {
+			logger.Println("read: Can't read metrics (", err, ")")
+		}
+
+		return err
+	}, retry.NewBackOff(30*time.Second))
 
 	aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, aggregateStep)
 
-	_ = c.writeAggregated(aggregatedMetrics) // TODO: Handle error
+	fmt.Println("aggregatedMetrics:", aggregatedMetrics) // TODO: Debug
+
+	_ = backoff.Retry(func() error {
+		err := c.writeAggregated(aggregatedMetrics)
+
+		if err != nil {
+			logger.Println("aggregate: Can't write aggregated metrics (", err, ")")
+		}
+
+		return err
+	}, retry.NewBackOff(30*time.Second))
 }
 
 // Returns an iterator of all metrics from the data table according to the parameters
 func (c *Cassandra) uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
 	iteratorReplacer := strings.NewReplacer("$DATA_TABLE", dataTable)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
-		SELECT base_ts, offset_ts, values FROM $DATA_TABLE
-		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
+		SELECT metric_uuid FROM $DATA_TABLE
+		WHERE base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
+		ALLOW FILTERING
 	`), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
 
 	return iterator

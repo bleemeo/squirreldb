@@ -26,7 +26,7 @@ type state struct {
 	pointCount          int
 	firstPointTimestamp int64
 	lastPointTimestamp  int64
-	flushDeadline       int64
+	flushTimestamp      int64
 }
 
 type Batch struct {
@@ -92,7 +92,7 @@ func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
 	flushQueue := make(map[types.MetricUUID][]state)
 
 	for uuid, state := range b.states {
-		if (state.flushDeadline < nowUnix) || flushAll {
+		if (state.flushTimestamp < nowUnix) || flushAll {
 			flushQueue[uuid] = append(flushQueue[uuid], state)
 		}
 	}
@@ -243,7 +243,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 					pointCount:          1,
 					firstPointTimestamp: point.Timestamp,
 					lastPointTimestamp:  point.Timestamp,
-					flushDeadline:       flushDeadline(uuid, now, batchSize),
+					flushTimestamp:      flushTimestamp(uuid, now, batchSize),
 				}
 			} else {
 				nextFirstPointTimestamp := currentState.firstPointTimestamp
@@ -259,7 +259,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 
 				nextDelta := nextLastPointTimestamp - nextFirstPointTimestamp
 
-				if (currentState.flushDeadline < nowUnix) || (nextDelta >= batchSize) {
+				if (currentState.flushTimestamp < nowUnix) || (nextDelta >= batchSize) {
 					flushQueue[uuid] = append(flushQueue[uuid], currentState)
 					delete(b.states, uuid)
 					exists = false
@@ -268,7 +268,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 						pointCount:          1,
 						firstPointTimestamp: point.Timestamp,
 						lastPointTimestamp:  point.Timestamp,
-						flushDeadline:       flushDeadline(uuid, now, batchSize),
+						flushTimestamp:      flushTimestamp(uuid, now, batchSize),
 					}
 				} else {
 					currentState.pointCount++
@@ -305,11 +305,11 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 }
 
 // Returns a flush deadline
-// It generates a flush period for each metric state every batchSize seconds and shift them among themselves
+// It generates a flush date for each metric state every batchSize seconds and shift them among themselves
 //
 // It follows the formula:
 // deadline = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
-func flushDeadline(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
+func flushTimestamp(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
 	deadline := now.Unix() + batchSize
 	offset := int64(uuid.Uint64() % uint64(batchSize))
 
