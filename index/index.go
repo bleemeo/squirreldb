@@ -6,6 +6,7 @@ type Index struct {
 	Matchers map[types.MetricUUID]types.MetricLabels
 }
 
+// New creates a new Index object
 func New() *Index {
 	return &Index{
 		Matchers: make(map[types.MetricUUID]types.MetricLabels),

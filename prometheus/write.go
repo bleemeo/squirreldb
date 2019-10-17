@@ -67,7 +67,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	fmt.Println("Write request in:", time.Now().Sub(perfWriteRequestTime)) // TODO: Performance
+	fmt.Println("Write request in:", time.Since(perfWriteRequestTime)) // TODO: Performance
 }
 
 // Convert Prometheus Labels to MetricLabels

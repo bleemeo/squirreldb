@@ -4,10 +4,14 @@ import (
 	"context"
 	"log"
 	"os"
-	"squirreldb/config"
 	"squirreldb/types"
 	"sync"
 	"time"
+)
+
+const (
+	ExpiratorInterval = 60
+	TimeToLiveOffset  = 150
 )
 
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
@@ -18,14 +22,17 @@ type metric struct {
 }
 
 type Store struct {
+	timestampToLive int64
+
 	Metrics map[types.MetricUUID]metric
 	mutex   sync.Mutex
 }
 
 // New creates a new Store object
-func New() *Store {
+func New(batchSize int64, offset int64) *Store {
 	return &Store{
-		Metrics: make(map[types.MetricUUID]metric),
+		timestampToLive: (batchSize * 2) + offset,
+		Metrics:         make(map[types.MetricUUID]metric),
 	}
 }
 
@@ -34,9 +41,7 @@ func (s *Store) Append(newMetrics, actualMetrics types.Metrics) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	batchSize := config.C.Int64("batch.size")
-
-	return s.append(newMetrics, actualMetrics, time.Now(), batchSize*2+config.StoreTimeToLiveOffset)
+	return s.append(newMetrics, actualMetrics, time.Now())
 }
 
 // Get is the public function of get()
@@ -52,15 +57,13 @@ func (s *Store) Set(newMetrics, actualMetrics types.Metrics) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	batchSize := config.C.Int64("batch.size")
-
-	return s.set(newMetrics, actualMetrics, time.Now(), batchSize*2+config.StoreTimeToLiveOffset)
+	return s.set(newMetrics, actualMetrics, time.Now())
 }
 
 // Run calls expire() every expirator interval seconds
 // If the context receives a stop signal, the service is stopped
 func (s *Store) Run(ctx context.Context) {
-	ticker := time.NewTicker(config.StoreExpiratorInterval * time.Second)
+	ticker := time.NewTicker(ExpiratorInterval * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -75,8 +78,8 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 // Appends metrics to existing items and update expiration
-func (s *Store) append(newMetrics, actualMetrics types.Metrics, now time.Time, timestampToLive int64) error {
-	expirationTimestamp := now.Unix() + timestampToLive
+func (s *Store) append(newMetrics, actualMetrics types.Metrics, now time.Time) error {
+	expirationTimestamp := now.Unix() + +s.timestampToLive
 
 	for uuid, points := range newMetrics {
 		metric := s.Metrics[uuid]
@@ -129,8 +132,8 @@ func (s *Store) get(uuids []types.MetricUUID) (types.Metrics, error) {
 }
 
 // Set metrics (overwrite existing items) and expiration
-func (s *Store) set(newMetrics, actualMetrics types.Metrics, now time.Time, timestampToLive int64) error {
-	expirationTimestamp := now.Unix() + timestampToLive
+func (s *Store) set(newMetrics, actualMetrics types.Metrics, now time.Time) error {
+	expirationTimestamp := now.Unix() + s.timestampToLive
 
 	for uuid, data := range newMetrics {
 		metric := s.Metrics[uuid]

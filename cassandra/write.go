@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"github.com/gocql/gocql"
 	"squirreldb/aggregate"
-	"squirreldb/config"
 	"squirreldb/types"
 	"strings"
 	"time"
@@ -13,15 +12,13 @@ import (
 
 // Write writes metrics in the data table
 func (c *Cassandra) Write(metrics types.Metrics) error {
-	partitionSize := config.C.Int64("cassandra.partition_size.raw")
 	nowUnix := time.Now().Unix()
-	defaultTimestampToLive := config.C.Int64("cassandra.default_time_to_live")
 
 	for uuid, points := range metrics {
 		baseTimestampPoints := make(map[int64]types.MetricPoints)
 
 		for _, point := range points {
-			baseTimestamp := point.Timestamp - (point.Timestamp % partitionSize)
+			baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
 
 			baseTimestampPoints[baseTimestamp] = append(baseTimestampPoints[baseTimestamp], point)
 		}
@@ -41,7 +38,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 			}
 
 			age := nowUnix - biggestTimestamp
-			timestampToLive := defaultTimestampToLive - age // TODO: Time to live support
+			timestampToLive := c.options.DefaultTimeToLive - age // TODO: Time to live support
 
 			if timestampToLive > 0 {
 				offsetTimestamp := smallestTimestamp - baseTimestamp
@@ -72,15 +69,13 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 
 // Writes aggregated metrics in the data aggregated table
 func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
-	partitionSize := config.C.Int64("cassandra.partition_size.aggregated")
 	nowUnix := time.Now().Unix()
-	defaultTimestampToLive := config.C.Int64("cassandra.default_time_to_live")
 
 	for uuid, aggregatedPoints := range aggregatedMetrics {
 		baseTimestampPoints := make(map[int64][]aggregate.AggregatedPoint)
 
 		for _, point := range aggregatedPoints {
-			baseTimestamp := point.Timestamp - (point.Timestamp % partitionSize)
+			baseTimestamp := point.Timestamp - (point.Timestamp % c.options.AggregatePartitionSize)
 
 			baseTimestampPoints[baseTimestamp] = append(baseTimestampPoints[baseTimestamp], point)
 		}
@@ -100,7 +95,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 			}
 
 			age := nowUnix - biggestTimestamp
-			timestampToLive := defaultTimestampToLive - age // TODO: Time to live support
+			timestampToLive := c.options.DefaultTimeToLive - age // TODO: Time to live support
 
 			if timestampToLive > 0 {
 				offsetTimestamp := smallestTimestamp - baseTimestamp

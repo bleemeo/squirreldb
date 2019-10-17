@@ -4,41 +4,51 @@ import (
 	"github.com/gocql/gocql"
 	"log"
 	"os"
-	"squirreldb/config"
+	"strconv"
 	"strings"
 )
 
+const (
+	Keyspace            = "squirreldb"
+	DataTable           = "data"
+	AggregatedDataTable = "data_aggregated"
+)
+
 var (
-	keyspace            = config.CassandraKeyspace
-	dataTable           = config.CassandraKeyspace + "." + config.CassandraDataTable
-	aggregatedDataTable = config.CassandraKeyspace + "." + config.CassandraAggregatedDataTable
+	keyspace            = Keyspace
+	dataTable           = keyspace + "." + DataTable
+	aggregatedDataTable = keyspace + "." + AggregatedDataTable
 	logger              = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 )
 
+type Options struct {
+	Addresses              []string
+	ReplicationFactor      int
+	DefaultTimeToLive      int64
+	BatchSize              int64
+	RawPartitionSize       int64
+	AggregateResolution    int64
+	AggregateSize          int64
+	AggregateStartOffset   int64
+	AggregatePartitionSize int64
+}
+
 type Cassandra struct {
 	session *gocql.Session
+	options Options
 }
 
 // New creates a new Cassandra object
-func New() *Cassandra {
-	return &Cassandra{}
-}
-
-// Close closes Cassandra
-func (c *Cassandra) Close() {
-	c.session.Close()
-}
-
-// Init initializes session and create keyspace, data and aggregated data tables
-func (c *Cassandra) Init(hosts ...string) error {
-	cluster := gocql.NewCluster(hosts...)
+func New(options Options) (*Cassandra, error) {
+	cluster := gocql.NewCluster(options.Addresses...)
 	session, err := cluster.CreateSession()
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	replicationFactor := config.C.String("cassandra.replication_factor")
+	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
+
 	createKeyspaceReplacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	createKeyspace := session.Query(createKeyspaceReplacer.Replace(`
 		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE_NAME
@@ -50,10 +60,11 @@ func (c *Cassandra) Init(hosts ...string) error {
 
 	if err := createKeyspace.Exec(); err != nil {
 		session.Close()
-		return err
+		return nil, err
 	}
 
-	defaultTimeToLive := config.C.String("cassandra.default_time_to_live")
+	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
+
 	createDataTableReplacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	createDataTable := session.Query(createDataTableReplacer.Replace(`
         CREATE TABLE IF NOT EXISTS $DATA_TABLE (
@@ -79,7 +90,7 @@ func (c *Cassandra) Init(hosts ...string) error {
 
 	if err := createDataTable.Exec(); err != nil {
 		session.Close()
-		return err
+		return nil, err
 	}
 
 	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregatedDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
@@ -107,10 +118,18 @@ func (c *Cassandra) Init(hosts ...string) error {
 
 	if err := createAggregatedDataTable.Exec(); err != nil {
 		session.Close()
-		return err
+		return nil, err
 	}
 
-	c.session = session
+	cassandra := Cassandra{
+		session: session,
+		options: options,
+	}
 
-	return nil
+	return &cassandra, nil
+}
+
+// Close closes Cassandra
+func (c *Cassandra) Close() {
+	c.session.Close()
 }

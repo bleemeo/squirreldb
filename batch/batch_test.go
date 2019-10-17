@@ -3,7 +3,6 @@ package batch
 import (
 	"reflect"
 	"squirreldb/types"
-	"sync"
 	"testing"
 	"time"
 )
@@ -91,6 +90,7 @@ func (m *mockMetricWriter) Write(metrics types.Metrics) error {
 
 func TestNewBatch(t *testing.T) {
 	type args struct {
+		batchSize        int64
 		temporaryStorer  Storer
 		persistentReader types.MetricReader
 		persistentWriter types.MetricWriter
@@ -103,21 +103,23 @@ func TestNewBatch(t *testing.T) {
 		{
 			name: "new",
 			args: args{
+				batchSize:        300,
 				temporaryStorer:  nil,
 				persistentReader: nil,
 				persistentWriter: nil,
 			},
 			want: &Batch{
-				store:  nil,
-				reader: nil,
-				writer: nil,
-				states: make(map[types.MetricUUID]state),
+				batchSize: 300,
+				store:     nil,
+				reader:    nil,
+				writer:    nil,
+				states:    make(map[types.MetricUUID]state),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New(tt.args.temporaryStorer, tt.args.persistentReader, tt.args.persistentWriter); !reflect.DeepEqual(got, tt.want) {
+			if got := New(tt.args.batchSize, tt.args.temporaryStorer, tt.args.persistentReader, tt.args.persistentWriter); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
@@ -126,16 +128,15 @@ func TestNewBatch(t *testing.T) {
 
 func TestBatch_check(t *testing.T) {
 	type fields struct {
+		batchSize        int64
 		temporaryStorer  mockStorer
 		persistentReader types.MetricReader
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
-		mutex            sync.Mutex
 	}
 	type args struct {
-		now       time.Time
-		batchSize int64
-		flushAll  bool
+		now      time.Time
+		flushAll bool
 	}
 	tests := []struct {
 		name   string
@@ -146,8 +147,9 @@ func TestBatch_check(t *testing.T) {
 		{
 			name: "no_deadline",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -165,7 +167,7 @@ func TestBatch_check(t *testing.T) {
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
 				states: map[types.MetricUUID]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
@@ -174,17 +176,17 @@ func TestBatch_check(t *testing.T) {
 				},
 			},
 			args: args{
-				now:       time.Unix(0, 0),
-				batchSize: 300,
-				flushAll:  false,
+				now:      time.Unix(0, 0),
+				flushAll: false,
 			},
 			want: nil,
 		},
 		{
 			name: "deadline",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -202,7 +204,7 @@ func TestBatch_check(t *testing.T) {
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
 				states: map[types.MetricUUID]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
@@ -211,12 +213,11 @@ func TestBatch_check(t *testing.T) {
 				},
 			},
 			args: args{
-				now:       time.Unix(600, 0),
-				batchSize: 300,
-				flushAll:  false,
+				now:      time.Unix(600, 0),
+				flushAll: false,
 			},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 0,
 						Value:     0,
@@ -235,8 +236,9 @@ func TestBatch_check(t *testing.T) {
 		{
 			name: "flush_all",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -254,7 +256,7 @@ func TestBatch_check(t *testing.T) {
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
 				states: map[types.MetricUUID]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
@@ -263,12 +265,11 @@ func TestBatch_check(t *testing.T) {
 				},
 			},
 			args: args{
-				now:       time.Unix(0, 0),
-				batchSize: 300,
-				flushAll:  true,
+				now:      time.Unix(0, 0),
+				flushAll: true,
 			},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 0,
 						Value:     0,
@@ -288,29 +289,28 @@ func TestBatch_check(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				store:  &tt.fields.temporaryStorer,
-				reader: tt.fields.persistentReader,
-				writer: &tt.fields.persistentWriter,
-				states: tt.fields.states,
-				mutex:  tt.fields.mutex,
+				batchSize: tt.fields.batchSize,
+				store:     &tt.fields.temporaryStorer,
+				reader:    tt.fields.persistentReader,
+				writer:    &tt.fields.persistentWriter,
+				states:    tt.fields.states,
 			}
-			b.check(tt.args.now, tt.args.batchSize, tt.args.flushAll)
+			b.check(tt.args.now, tt.args.flushAll)
 		})
 	}
 }
 
 func TestBatch_flush(t *testing.T) {
 	type fields struct {
+		batchSize        int64
 		temporaryStorer  mockStorer
 		persistentReader types.MetricReader
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
-		mutex            sync.Mutex
 	}
 	type args struct {
 		flushQueue map[types.MetricUUID][]state
 		now        time.Time
-		batchSize  int64
 	}
 	tests := []struct {
 		name   string
@@ -321,8 +321,9 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "no_flush",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -340,7 +341,7 @@ func TestBatch_flush(t *testing.T) {
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
 				states: map[types.MetricUUID]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						pointCount:          3,
 						firstPointTimestamp: 0,
 						lastPointTimestamp:  100,
@@ -356,8 +357,9 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "flush",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -375,7 +377,7 @@ func TestBatch_flush(t *testing.T) {
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
 				states: map[types.MetricUUID]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						pointCount:          1,
 						firstPointTimestamp: 300,
 						lastPointTimestamp:  300,
@@ -385,7 +387,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				flushQueue: map[types.MetricUUID][]state{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							pointCount:          2,
 							firstPointTimestamp: 0,
@@ -394,11 +396,10 @@ func TestBatch_flush(t *testing.T) {
 						},
 					},
 				},
-				now:       time.Unix(300, 0),
-				batchSize: 300,
+				now: time.Unix(300, 0),
 			},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 0,
 						Value:     0,
@@ -414,13 +415,13 @@ func TestBatch_flush(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				store:  &tt.fields.temporaryStorer,
-				reader: tt.fields.persistentReader,
-				writer: &tt.fields.persistentWriter,
-				states: tt.fields.states,
-				mutex:  tt.fields.mutex,
+				batchSize: tt.fields.batchSize,
+				store:     &tt.fields.temporaryStorer,
+				reader:    tt.fields.persistentReader,
+				writer:    &tt.fields.persistentWriter,
+				states:    tt.fields.states,
 			}
-			b.flush(tt.args.flushQueue, tt.args.now, tt.args.batchSize)
+			b.flush(tt.args.flushQueue, tt.args.now)
 			if !reflect.DeepEqual(tt.fields.persistentWriter.got, tt.want) {
 				t.Errorf("flush() got = %v, want %v", tt.fields.persistentWriter.got, tt.want)
 			}
@@ -430,11 +431,11 @@ func TestBatch_flush(t *testing.T) {
 
 func TestBatch_read(t *testing.T) {
 	type fields struct {
+		batchSize        int64
 		temporaryStorer  mockStorer
 		persistentReader mockMetricReader
 		persistentWriter types.MetricWriter
 		states           map[types.MetricUUID]state
-		mutex            sync.Mutex
 	}
 	type args struct {
 		request types.MetricRequest
@@ -449,8 +450,9 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "filled_temporary",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -475,14 +477,14 @@ func TestBatch_read(t *testing.T) {
 			},
 			args: args{request: types.MetricRequest{
 				UUIDs: []types.MetricUUID{
-					uuidify("00000000-0000-0000-0000-000000000000"),
+					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,
 				ToTimestamp:   100,
 				Step:          0,
 			}},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 50,
 						Value:     50,
@@ -498,9 +500,10 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "filled_persistent",
 			fields: fields{
+				batchSize:       300,
 				temporaryStorer: mockStorer{},
 				persistentReader: mockMetricReader{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 50,
 							Value:     50,
@@ -516,14 +519,14 @@ func TestBatch_read(t *testing.T) {
 			},
 			args: args{request: types.MetricRequest{
 				UUIDs: []types.MetricUUID{
-					uuidify("00000000-0000-0000-0000-000000000000"),
+					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,
 				ToTimestamp:   100,
 				Step:          0,
 			}},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 50,
 						Value:     50,
@@ -539,8 +542,9 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "filled_temporary_and_persistent",
 			fields: fields{
+				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -556,7 +560,7 @@ func TestBatch_read(t *testing.T) {
 					},
 				}},
 				persistentReader: mockMetricReader{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 100,
 							Value:     100,
@@ -568,14 +572,14 @@ func TestBatch_read(t *testing.T) {
 			},
 			args: args{request: types.MetricRequest{
 				UUIDs: []types.MetricUUID{
-					uuidify("00000000-0000-0000-0000-000000000000"),
+					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,
 				ToTimestamp:   100,
 				Step:          0,
 			}},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 50,
 						Value:     50,
@@ -592,11 +596,11 @@ func TestBatch_read(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				store:  &tt.fields.temporaryStorer,
-				reader: &tt.fields.persistentReader,
-				writer: tt.fields.persistentWriter,
-				states: tt.fields.states,
-				mutex:  tt.fields.mutex,
+				batchSize: tt.fields.batchSize,
+				store:     &tt.fields.temporaryStorer,
+				reader:    &tt.fields.persistentReader,
+				writer:    tt.fields.persistentWriter,
+				states:    tt.fields.states,
 			}
 			got, err := b.read(tt.args.request)
 			if (err != nil) != tt.wantErr {
@@ -612,16 +616,15 @@ func TestBatch_read(t *testing.T) {
 
 func TestBatch_write(t *testing.T) {
 	type fields struct {
+		batchSize        int64
 		temporaryStorer  mockStorer
 		persistentReader types.MetricReader
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
-		mutex            sync.Mutex
 	}
 	type args struct {
-		metrics   types.Metrics
-		now       time.Time
-		batchSize int64
+		metrics types.Metrics
+		now     time.Time
 	}
 	tests := []struct {
 		name    string
@@ -633,6 +636,7 @@ func TestBatch_write(t *testing.T) {
 		{
 			name: "no_batch",
 			fields: fields{
+				batchSize:        300,
 				temporaryStorer:  mockStorer{metrics: make(types.Metrics)},
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
@@ -640,7 +644,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			args: args{
 				metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -655,15 +659,14 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:       time.Unix(100, 0),
-				batchSize: 300,
+				now: time.Unix(100, 0),
 			},
 			want: map[types.MetricUUID]state{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					pointCount:          3,
 					firstPointTimestamp: 0,
 					lastPointTimestamp:  100,
-					flushTimestamp:      300,
+					flushTimestamp:      299,
 				},
 			},
 			wantErr: false,
@@ -671,6 +674,7 @@ func TestBatch_write(t *testing.T) {
 		{
 			name: "batch",
 			fields: fields{
+				batchSize:        300,
 				temporaryStorer:  mockStorer{metrics: make(types.Metrics)},
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
@@ -678,7 +682,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			args: args{
 				metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -693,15 +697,14 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:       time.Unix(300, 0),
-				batchSize: 300,
+				now: time.Unix(300, 0),
 			},
 			want: map[types.MetricUUID]state{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					pointCount:          1,
 					firstPointTimestamp: 300,
 					lastPointTimestamp:  300,
-					flushTimestamp:      600,
+					flushTimestamp:      599,
 				},
 			},
 			wantErr: false,
@@ -709,6 +712,7 @@ func TestBatch_write(t *testing.T) {
 		{
 			name: "unordered_points",
 			fields: fields{
+				batchSize:        300,
 				temporaryStorer:  mockStorer{metrics: make(types.Metrics)},
 				persistentReader: nil,
 				persistentWriter: mockMetricWriter{},
@@ -716,7 +720,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			args: args{
 				metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -731,15 +735,14 @@ func TestBatch_write(t *testing.T) {
 						},
 					},
 				},
-				now:       time.Unix(100, 0),
-				batchSize: 300,
+				now: time.Unix(100, 0),
 			},
 			want: map[types.MetricUUID]state{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					pointCount:          3,
 					firstPointTimestamp: 0,
 					lastPointTimestamp:  100,
-					flushTimestamp:      300,
+					flushTimestamp:      299,
 				},
 			},
 			wantErr: false,
@@ -748,13 +751,13 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				store:  &tt.fields.temporaryStorer,
-				reader: tt.fields.persistentReader,
-				writer: &tt.fields.persistentWriter,
-				states: tt.fields.states,
-				mutex:  tt.fields.mutex,
+				batchSize: tt.fields.batchSize,
+				store:     &tt.fields.temporaryStorer,
+				reader:    tt.fields.persistentReader,
+				writer:    &tt.fields.persistentWriter,
+				states:    tt.fields.states,
 			}
-			if err := b.write(tt.args.metrics, tt.args.now, tt.args.batchSize); (err != nil) != tt.wantErr {
+			if err := b.write(tt.args.metrics, tt.args.now); (err != nil) != tt.wantErr {
 				t.Errorf("write() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(tt.fields.states, tt.want) {
@@ -778,11 +781,11 @@ func Test_flushTimestamp(t *testing.T) {
 		{
 			name: "uuid_0",
 			args: args{
-				uuid:      uuidify("00000000-0000-0000-0000-000000000000"),
+				uuid:      uuidify("00000000-0000-0000-0000-000000000001"),
 				now:       time.Unix(0, 0),
 				batchSize: 300,
 			},
-			want: 300,
+			want: 299,
 		},
 		{
 			name: "uuid_1707",

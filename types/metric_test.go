@@ -116,6 +116,59 @@ func TestMetricLabels_UUID(t *testing.T) {
 	}
 }
 
+func TestMetricLabels_Value(t *testing.T) {
+	type args struct {
+		name string
+	}
+	tests := []struct {
+		name  string
+		m     MetricLabels
+		args  args
+		want  string
+		want1 bool
+	}{
+		{
+			name: "existing_label",
+			m: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "testing",
+				},
+			},
+			args: args{
+				name: "__name__",
+			},
+			want:  "testing",
+			want1: true,
+		},
+		{
+			name: "non_existing_label",
+			m: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "testing",
+				},
+			},
+			args: args{
+				name: "non-existing",
+			},
+			want:  "",
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := tt.m.Value(tt.args.name)
+			if got != tt.want {
+				t.Errorf("Value() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("Value() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}
+
 func TestMetricUUID_Uint64(t *testing.T) {
 	type fields struct {
 		UUID uuid.UUID
@@ -128,9 +181,9 @@ func TestMetricUUID_Uint64(t *testing.T) {
 		{
 			name: "uuid_0",
 			fields: fields{
-				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
+				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 			},
-			want: 0,
+			want: 1,
 		},
 		{
 			name: "uuid_10",

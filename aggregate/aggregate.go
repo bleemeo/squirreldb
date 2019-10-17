@@ -1,7 +1,7 @@
 package aggregate
 
 import (
-	"squirreldb/math"
+	"math"
 	"squirreldb/types"
 )
 
@@ -17,32 +17,32 @@ type AggregatedPoints []AggregatedPoint
 
 type AggregatedMetrics map[types.MetricUUID]AggregatedPoints
 
-// TODO: Comment
-func Metrics(metrics types.Metrics, fromTimestamp, toTimestamp, step int64) AggregatedMetrics {
+// Metrics returns AggregatedMetrics according to the parameters
+func Metrics(metrics types.Metrics, fromTimestamp, toTimestamp, resolution int64) AggregatedMetrics {
 	aggregatedMetrics := make(AggregatedMetrics)
 
 	for uuid, points := range metrics {
-		aggregatedMetrics[uuid] = MetricPoints(points, fromTimestamp, toTimestamp, step)
+		aggregatedMetrics[uuid] = MetricPoints(points, fromTimestamp, toTimestamp, resolution)
 	}
 
 	return aggregatedMetrics
 }
 
-// TODO: Comment
-func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, step int64) AggregatedPoints {
+// MetricPoints returns AggregatedPoints according to the parameters
+func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, resolution int64) AggregatedPoints {
 	var aggregatedPoints AggregatedPoints
 
-	for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += step {
-		var stepPoints types.MetricPoints
+	for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += resolution {
+		var resolutionPoints types.MetricPoints
 
 		for _, point := range points {
-			if (point.Timestamp >= timestamp) && (point.Timestamp <= (timestamp + step)) {
-				stepPoints = append(stepPoints, point)
+			if (point.Timestamp >= timestamp) && (point.Timestamp < (timestamp + resolution)) {
+				resolutionPoints = append(resolutionPoints, point)
 			}
 		}
 
-		if len(stepPoints) != 0 {
-			aggregatedPoint := aggregate(timestamp, stepPoints)
+		if len(resolutionPoints) != 0 {
+			aggregatedPoint := aggregate(timestamp, resolutionPoints)
 
 			aggregatedPoints = append(aggregatedPoints, aggregatedPoint)
 		}
@@ -51,7 +51,8 @@ func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, step in
 	return aggregatedPoints
 }
 
-// TODO: Comment
+// Returns an AggregatedPoint from specified MetricPoints
+// Calculations are: minimum, maximum, average and count of points
 func aggregate(timestamp int64, points types.MetricPoints) AggregatedPoint {
 	aggregatedPoint := AggregatedPoint{
 		Timestamp: timestamp,
@@ -63,8 +64,8 @@ func aggregate(timestamp int64, points types.MetricPoints) AggregatedPoint {
 			aggregatedPoint.Min = point.Value
 			aggregatedPoint.Max = point.Value
 		} else {
-			aggregatedPoint.Min = math.Float64Min(point.Value, aggregatedPoint.Min)
-			aggregatedPoint.Max = math.Float64Max(point.Value, aggregatedPoint.Max)
+			aggregatedPoint.Min = math.Min(point.Value, aggregatedPoint.Min)
+			aggregatedPoint.Max = math.Max(point.Value, aggregatedPoint.Max)
 		}
 
 		aggregatedPoint.Average += point.Value

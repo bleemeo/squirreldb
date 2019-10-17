@@ -6,28 +6,25 @@ import (
 	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"squirreldb/aggregate"
-	"squirreldb/config"
-	"squirreldb/math"
+	"squirreldb/compare"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
 	"time"
 )
 
-// TODO: Comment
+// Run calls aggregate() every aggregate size seconds
+// If the context receives a stop signal, the service is stopped
 func (c *Cassandra) Run(ctx context.Context) {
 	nowUnix := time.Now().Unix()
-	aggregateSize := config.C.Int64("cassandra.aggregate.size")
-	aggregateTimestamp := nowUnix - (nowUnix % aggregateSize)
+	aggregateTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
 	waitTimestamp := aggregateTimestamp - nowUnix
 
 	if waitTimestamp < 0 {
-		waitTimestamp += aggregateSize
+		waitTimestamp += c.options.AggregateSize
 	}
 
-	startOffset := config.C.Int64("cassandra.aggregate.start_offset")
-
-	waitTimestamp += startOffset
+	waitTimestamp += c.options.AggregateStartOffset
 
 	logger.Println("Run: Start in", waitTimestamp, "seconds...") // TODO: Debug
 
@@ -39,13 +36,21 @@ func (c *Cassandra) Run(ctx context.Context) {
 	}
 
 	aggregateTime := time.Unix(aggregateTimestamp, 0)
-	aggregateStep := config.C.Int64("cassandra.aggregate.step")
-	ticker := time.NewTicker(time.Duration(aggregateSize) * time.Second)
+	ticker := time.NewTicker(time.Duration(c.options.AggregateSize) * time.Second)
 	defer ticker.Stop()
 
 	for {
-		c.aggregate(aggregateTime, aggregateStep, aggregateSize)
-		aggregateTime = aggregateTime.Add(time.Duration(aggregateSize) * time.Second)
+		_ = backoff.Retry(func() error {
+			err := c.aggregate(aggregateTime)
+
+			if err != nil {
+				logger.Println("aggregate: Can't aggregate (", err, ")")
+			}
+
+			return err
+		}, retry.NewBackOff(30*time.Second))
+
+		aggregateTime = aggregateTime.Add(time.Duration(c.options.AggregateSize) * time.Second)
 
 		logger.Println("Run: Aggregate") // TODO: Debug
 
@@ -58,22 +63,20 @@ func (c *Cassandra) Run(ctx context.Context) {
 	}
 }
 
-func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64) {
+func (c *Cassandra) aggregate(now time.Time) error {
 	nowUnix := now.Unix()
-	toTimestamp := nowUnix - (nowUnix % aggregateSize)
-	fromTimestamp := toTimestamp - aggregateSize
+	toTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
+	fromTimestamp := toTimestamp - c.options.AggregateSize
 
-	rowSize := config.C.Int64("batch.size")
-	partitionSize := config.C.Int64("cassandra.partition_size.raw")
-	fromBaseTimestamp := fromTimestamp - (fromTimestamp % partitionSize)
-	toBaseTimestamp := toTimestamp - (toTimestamp % partitionSize)
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.RawPartitionSize)
 	var uuids []types.MetricUUID
 
 	perfGettingUUIDsTime := time.Now() // TODO: Performance
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += partitionSize {
-		fromOffsetTimestamp := math.Int64Max(fromTimestamp-baseTimestamp-rowSize, 0)
-		toOffsetTimestamp := math.Int64Min(toTimestamp-baseTimestamp, partitionSize)
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.RawPartitionSize {
+		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-c.options.BatchSize, 0)
+		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, c.options.RawPartitionSize)
 
 		iterator := c.uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 		var metricUUID string
@@ -85,18 +88,12 @@ func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64)
 			uuids = append(uuids, uuid)
 		}
 
-		_ = backoff.Retry(func() error {
-			err := iterator.Close()
-
-			if err != nil {
-				logger.Println("aggregate: Can't close iterator (", err, ")")
-			}
-
+		if err := iterator.Close(); err != nil {
 			return err
-		}, retry.NewBackOff(30*time.Second))
+		}
 	}
 
-	fmt.Println("Gettings all UUIDs in:", time.Now().Sub(perfGettingUUIDsTime)) // TODO: Performance
+	fmt.Println("Gettings all UUIDs in:", time.Since(perfGettingUUIDsTime)) // TODO: Performance
 
 	perfAggregateAllMetricsTime := time.Now() // TODO: Performance
 
@@ -105,39 +102,28 @@ func (c *Cassandra) aggregate(now time.Time, aggregateStep, aggregateSize int64)
 
 		request := types.MetricRequest{
 			UUIDs:         []types.MetricUUID{uuid},
-			FromTimestamp: nowUnix - (nowUnix % aggregateSize) - aggregateSize,
-			ToTimestamp:   nowUnix - (nowUnix % aggregateSize),
+			FromTimestamp: nowUnix - (nowUnix % c.options.AggregateSize) - c.options.AggregateSize,
+			ToTimestamp:   nowUnix - (nowUnix % c.options.AggregateSize),
 		}
 
-		var metrics types.Metrics
+		metrics, err := c.Read(request)
 
-		_ = backoff.Retry(func() error {
-			var err error
-			metrics, err = c.Read(request)
-
-			if err != nil {
-				logger.Println("read: Can't read metrics (", err, ")")
-			}
-
+		if err != nil {
 			return err
-		}, retry.NewBackOff(30*time.Second))
+		}
 
-		aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, aggregateStep)
+		aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, c.options.AggregateResolution)
 
-		_ = backoff.Retry(func() error {
-			err := c.writeAggregated(aggregatedMetrics)
-
-			if err != nil {
-				logger.Println("aggregate: Can't write aggregated metrics (", err, ")")
-			}
-
+		if err := c.writeAggregated(aggregatedMetrics); err != nil {
 			return err
-		}, retry.NewBackOff(30*time.Second))
+		}
 
-		fmt.Println("Read, aggregate and write one metric in:", time.Now().Sub(perfAggregateMetricTime)) // TODO: Performance
+		fmt.Println("Read, aggregate and write one metric in:", time.Since(perfAggregateMetricTime)) // TODO: Performance
 	}
 
-	fmt.Println("Read, aggregate and write all metrics in:", time.Now().Sub(perfAggregateAllMetricsTime)) // TODO: Performance
+	fmt.Println("Read, aggregate and write all metrics in:", time.Since(perfAggregateAllMetricsTime)) // TODO: Performance
+
+	return nil
 }
 
 // Returns an iterator of all metrics from the data table according to the parameters

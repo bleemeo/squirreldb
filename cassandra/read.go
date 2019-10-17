@@ -3,29 +3,24 @@ package cassandra
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"io"
-	"squirreldb/config"
-	"squirreldb/math"
-	"squirreldb/retry"
+	"squirreldb/compare"
 	"squirreldb/types"
 	"strings"
-	"time"
 )
 
 // Read returns metrics according to the request
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
-	aggregateStep := config.C.Int64("cassandra.aggregate.step")
-	aggregated := request.Step >= aggregateStep
+	aggregated := request.Step >= c.options.AggregateResolution
 	var rowSize, partitionSize int64
 
 	if aggregated {
-		rowSize = config.C.Int64("cassandra.aggregate.size")
-		partitionSize = config.C.Int64("cassandra.partition_size.aggregated")
+		rowSize = c.options.AggregateSize
+		partitionSize = c.options.AggregatePartitionSize
 	} else {
-		rowSize = config.C.Int64("batch.size")
-		partitionSize = config.C.Int64("cassandra.partition_size.raw")
+		rowSize = c.options.BatchSize
+		partitionSize = c.options.RawPartitionSize
 	}
 
 	fromBaseTimestamp := request.FromTimestamp - (request.FromTimestamp % partitionSize)
@@ -34,8 +29,8 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += partitionSize {
-		fromOffsetTimestamp := math.Int64Max(request.FromTimestamp-baseTimestamp-rowSize, 0)
-		toOffsetTimestamp := math.Int64Min(request.ToTimestamp-baseTimestamp, partitionSize)
+		fromOffsetTimestamp := compare.Int64Max(request.FromTimestamp-baseTimestamp-rowSize, 0)
+		toOffsetTimestamp := compare.Int64Min(request.ToTimestamp-baseTimestamp, partitionSize)
 
 		for _, uuid := range request.UUIDs {
 			var iterator *gocql.Iter
@@ -50,17 +45,11 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 				points, err = readData(iterator, request)
 			}
 
-			_ = backoff.Retry(func() error {
-				err := iterator.Close()
-
-				if err != nil {
-					logger.Println("aggregate: Can't close iterator (", err, ")")
-				}
-
-				return err
-			}, retry.NewBackOff(30*time.Second))
-
 			if err != nil {
+				return nil, err
+			}
+
+			if err := iterator.Close(); err != nil {
 				return nil, err
 			}
 

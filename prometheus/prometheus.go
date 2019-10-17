@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"squirreldb/config"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -37,9 +36,8 @@ func New(matcher types.MetricIndexer, reader types.MetricReader, writer types.Me
 
 // Run run the server to receive write and read requests
 // If the context receives a stop signal, the server is stopped
-func (p *Prometheus) Run(ctx context.Context) {
+func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 	router := http.NewServeMux()
-	listenAddress := config.C.String("prometheus.listen_address")
 	server := http.Server{
 		Addr:    listenAddress,
 		Handler: router,

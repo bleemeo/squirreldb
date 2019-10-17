@@ -97,7 +97,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	fmt.Println("Send response in:", time.Now().Sub(perfReadResponseTime)) // TODO: Performance
+	fmt.Println("Send response in:", time.Since(perfReadResponseTime)) // TODO: Performance
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels

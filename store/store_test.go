@@ -3,7 +3,6 @@ package store
 import (
 	"reflect"
 	"squirreldb/types"
-	"sync"
 	"testing"
 	"time"
 )
@@ -20,20 +19,30 @@ func uuidify(value string) types.MetricUUID {
 }
 
 func TestNewStore(t *testing.T) {
+	type args struct {
+		batchSize int64
+		offset    int64
+	}
 	tests := []struct {
 		name string
+		args args
 		want *Store
 	}{
 		{
 			name: "new",
+			args: args{
+				batchSize: 300,
+				offset:    150,
+			},
 			want: &Store{
-				Metrics: make(map[types.MetricUUID]metric),
+				timestampToLive: 300*2 + 150,
+				Metrics:         make(map[types.MetricUUID]metric),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New(); !reflect.DeepEqual(got, tt.want) {
+			if got := New(tt.args.batchSize, tt.args.offset); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
@@ -42,14 +51,13 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_append(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
-		mutex   sync.Mutex
+		timestampToLive int64
+		Metrics         map[types.MetricUUID]metric
 	}
 	type args struct {
-		newMetrics      types.Metrics
-		actualMetrics   types.Metrics
-		now             time.Time
-		timestampToLive int64
+		newMetrics    types.Metrics
+		actualMetrics types.Metrics
+		now           time.Time
 	}
 	tests := []struct {
 		name    string
@@ -61,11 +69,12 @@ func TestStore_append(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				Metrics: make(map[types.MetricUUID]metric),
+				timestampToLive: 300,
+				Metrics:         make(map[types.MetricUUID]metric),
 			},
 			args: args{
 				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -81,7 +90,7 @@ func TestStore_append(t *testing.T) {
 					},
 				},
 				actualMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+					uuidify("00000000-0000-0000-0000-000000000002"): {
 						{
 							Timestamp: 150,
 							Value:     150,
@@ -96,11 +105,10 @@ func TestStore_append(t *testing.T) {
 						},
 					},
 				},
-				now:             time.Unix(0, 0),
-				timestampToLive: 300,
+				now: time.Unix(0, 0),
 			},
 			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 0,
@@ -117,7 +125,7 @@ func TestStore_append(t *testing.T) {
 					},
 					ExpirationTimestamp: 300,
 				},
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+				uuidify("00000000-0000-0000-0000-000000000002"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 150,
@@ -140,8 +148,9 @@ func TestStore_append(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
+				timestampToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
 								Timestamp: 25,
@@ -158,7 +167,7 @@ func TestStore_append(t *testing.T) {
 			},
 			args: args{
 				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -174,7 +183,7 @@ func TestStore_append(t *testing.T) {
 					},
 				},
 				actualMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+					uuidify("00000000-0000-0000-0000-000000000002"): {
 						{
 							Timestamp: 150,
 							Value:     150,
@@ -189,11 +198,10 @@ func TestStore_append(t *testing.T) {
 						},
 					},
 				},
-				now:             time.Unix(0, 0),
-				timestampToLive: 300,
+				now: time.Unix(0, 0),
 			},
 			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 25,
@@ -218,7 +226,7 @@ func TestStore_append(t *testing.T) {
 					},
 					ExpirationTimestamp: 300,
 				},
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+				uuidify("00000000-0000-0000-0000-000000000002"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 150,
@@ -242,10 +250,10 @@ func TestStore_append(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Metrics: tt.fields.Metrics,
-				mutex:   tt.fields.mutex,
+				timestampToLive: tt.fields.timestampToLive,
+				Metrics:         tt.fields.Metrics,
 			}
-			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timestampToLive); (err != nil) != tt.wantErr {
+			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now); (err != nil) != tt.wantErr {
 				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(s.Metrics, tt.want) {
@@ -257,8 +265,8 @@ func TestStore_append(t *testing.T) {
 
 func TestStore_expire(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
-		mutex   sync.Mutex
+		timestampToLive int64
+		Metrics         map[types.MetricUUID]metric
 	}
 	type args struct {
 		now time.Time
@@ -272,8 +280,9 @@ func TestStore_expire(t *testing.T) {
 		{
 			name: "no_expiration",
 			fields: fields{
+				timestampToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
 								Timestamp: 0,
@@ -291,13 +300,12 @@ func TestStore_expire(t *testing.T) {
 						ExpirationTimestamp: 300,
 					},
 				},
-				mutex: sync.Mutex{},
 			},
 			args: args{
 				now: time.Unix(0, 0),
 			},
 			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 0,
@@ -319,8 +327,9 @@ func TestStore_expire(t *testing.T) {
 		{
 			name: "expiration",
 			fields: fields{
+				timestampToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
 								Timestamp: 0,
@@ -338,7 +347,6 @@ func TestStore_expire(t *testing.T) {
 						ExpirationTimestamp: 300,
 					},
 				},
-				mutex: sync.Mutex{},
 			},
 			args: args{
 				now: time.Unix(600, 0),
@@ -349,8 +357,8 @@ func TestStore_expire(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Metrics: tt.fields.Metrics,
-				mutex:   tt.fields.mutex,
+				timestampToLive: tt.fields.timestampToLive,
+				Metrics:         tt.fields.Metrics,
 			}
 			s.expire(tt.args.now)
 			if !reflect.DeepEqual(s.Metrics, tt.want) {
@@ -362,8 +370,8 @@ func TestStore_expire(t *testing.T) {
 
 func TestStore_get(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
-		mutex   sync.Mutex
+		timestampToLive int64
+		Metrics         map[types.MetricUUID]metric
 	}
 	type args struct {
 		uuids []types.MetricUUID
@@ -378,10 +386,11 @@ func TestStore_get(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				Metrics: make(map[types.MetricUUID]metric),
+				timestampToLive: 300,
+				Metrics:         make(map[types.MetricUUID]metric),
 			},
 			args: args{uuids: []types.MetricUUID{
-				uuidify("00000000-0000-0000-0000-000000000000"),
+				uuidify("00000000-0000-0000-0000-000000000001"),
 			}},
 			want:    make(types.Metrics),
 			wantErr: false,
@@ -389,8 +398,9 @@ func TestStore_get(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
+				timestampToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
 								Timestamp: 0,
@@ -410,10 +420,10 @@ func TestStore_get(t *testing.T) {
 				},
 			},
 			args: args{uuids: []types.MetricUUID{
-				uuidify("00000000-0000-0000-0000-000000000000"),
+				uuidify("00000000-0000-0000-0000-000000000001"),
 			}},
 			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					{
 						Timestamp: 0,
 						Value:     0,
@@ -434,8 +444,8 @@ func TestStore_get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Metrics: tt.fields.Metrics,
-				mutex:   tt.fields.mutex,
+				timestampToLive: tt.fields.timestampToLive,
+				Metrics:         tt.fields.Metrics,
 			}
 			got, err := s.get(tt.args.uuids)
 			if (err != nil) != tt.wantErr {
@@ -451,14 +461,13 @@ func TestStore_get(t *testing.T) {
 
 func TestStore_set(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
-		mutex   sync.Mutex
+		timestampToLive int64
+		Metrics         map[types.MetricUUID]metric
 	}
 	type args struct {
-		newMetrics      types.Metrics
-		actualMetrics   types.Metrics
-		now             time.Time
-		timestampToLive int64
+		newMetrics    types.Metrics
+		actualMetrics types.Metrics
+		now           time.Time
 	}
 	tests := []struct {
 		name    string
@@ -470,11 +479,12 @@ func TestStore_set(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				Metrics: make(map[types.MetricUUID]metric),
+				timestampToLive: 300,
+				Metrics:         make(map[types.MetricUUID]metric),
 			},
 			args: args{
 				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -490,7 +500,7 @@ func TestStore_set(t *testing.T) {
 					},
 				},
 				actualMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+					uuidify("00000000-0000-0000-0000-000000000002"): {
 						{
 							Timestamp: 150,
 							Value:     150,
@@ -505,11 +515,10 @@ func TestStore_set(t *testing.T) {
 						},
 					},
 				},
-				now:             time.Unix(0, 0),
-				timestampToLive: 300,
+				now: time.Unix(0, 0),
 			},
 			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -526,7 +535,7 @@ func TestStore_set(t *testing.T) {
 					},
 					ExpirationTimestamp: 300,
 				},
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+				uuidify("00000000-0000-0000-0000-000000000002"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 150,
@@ -549,8 +558,9 @@ func TestStore_set(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
+				timestampToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
 								Timestamp: 25,
@@ -567,7 +577,7 @@ func TestStore_set(t *testing.T) {
 			},
 			args: args{
 				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000000"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -583,7 +593,7 @@ func TestStore_set(t *testing.T) {
 					},
 				},
 				actualMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+					uuidify("00000000-0000-0000-0000-000000000002"): {
 						{
 							Timestamp: 150,
 							Value:     150,
@@ -598,11 +608,10 @@ func TestStore_set(t *testing.T) {
 						},
 					},
 				},
-				now:             time.Unix(0, 0),
-				timestampToLive: 300,
+				now: time.Unix(0, 0),
 			},
 			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000000"): {
+				uuidify("00000000-0000-0000-0000-000000000001"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 0,
@@ -619,7 +628,7 @@ func TestStore_set(t *testing.T) {
 					},
 					ExpirationTimestamp: 300,
 				},
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+				uuidify("00000000-0000-0000-0000-000000000002"): {
 					Points: types.MetricPoints{
 						{
 							Timestamp: 150,
@@ -643,10 +652,10 @@ func TestStore_set(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				Metrics: tt.fields.Metrics,
-				mutex:   tt.fields.mutex,
+				timestampToLive: tt.fields.timestampToLive,
+				Metrics:         tt.fields.Metrics,
 			}
-			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timestampToLive); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TODO: Comment
+// NewBackOff create a new ExponentialBackOff with specified settings
 func NewBackOff(maxInterval time.Duration) backoff.BackOff {
 	exponentialBackOff := backoff.NewExponentialBackOff()
 

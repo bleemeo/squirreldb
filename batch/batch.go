@@ -5,11 +5,15 @@ import (
 	"github.com/cenkalti/backoff"
 	"log"
 	"os"
-	"squirreldb/config"
+	"squirreldb/compare"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"time"
+)
+
+const (
+	CheckerInterval = 60
 )
 
 var (
@@ -30,6 +34,8 @@ type state struct {
 }
 
 type Batch struct {
+	batchSize int64
+
 	store  Storer
 	reader types.MetricReader
 	writer types.MetricWriter
@@ -39,12 +45,13 @@ type Batch struct {
 }
 
 // New creates a new Batch object
-func New(temporaryStorer Storer, persistentReader types.MetricReader, persistentWriter types.MetricWriter) *Batch {
+func New(batchSize int64, temporaryStorer Storer, persistentReader types.MetricReader, persistentWriter types.MetricWriter) *Batch {
 	return &Batch{
-		store:  temporaryStorer,
-		reader: persistentReader,
-		writer: persistentWriter,
-		states: make(map[types.MetricUUID]state),
+		batchSize: batchSize,
+		store:     temporaryStorer,
+		reader:    persistentReader,
+		writer:    persistentWriter,
+		states:    make(map[types.MetricUUID]state),
 	}
 }
 
@@ -58,25 +65,21 @@ func (b *Batch) Write(metrics types.Metrics) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	batchSize := config.C.Int64("batch.size")
-
-	return b.write(metrics, time.Now(), batchSize)
+	return b.write(metrics, time.Now())
 }
 
 // Run calls check() every checker interval seconds
 // If the context receives a stop signal, a last check is made before stopping the service
 func (b *Batch) Run(ctx context.Context) {
-	ticker := time.NewTicker(config.BatchCheckerInterval * time.Second)
+	ticker := time.NewTicker(CheckerInterval * time.Second)
 	defer ticker.Stop()
-
-	batchSize := config.C.Int64("batch.size")
 
 	for {
 		select {
 		case <-ticker.C:
-			b.check(time.Now(), batchSize, false)
+			b.check(time.Now(), false)
 		case <-ctx.Done():
-			b.check(time.Now(), batchSize, true)
+			b.check(time.Now(), true)
 			logger.Println("Run: Stopped")
 			return
 		}
@@ -84,7 +87,7 @@ func (b *Batch) Run(ctx context.Context) {
 }
 
 // Checks all current states and adds states, whose deadlines are exceeded, in the flush queue
-func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
+func (b *Batch) check(now time.Time, flushAll bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -94,17 +97,18 @@ func (b *Batch) check(now time.Time, batchSize int64, flushAll bool) {
 	for uuid, state := range b.states {
 		if (state.flushTimestamp < nowUnix) || flushAll {
 			flushQueue[uuid] = append(flushQueue[uuid], state)
+			delete(b.states, uuid)
 		}
 	}
 
 	if len(flushQueue) != 0 {
-		b.flush(flushQueue, now, batchSize)
+		b.flush(flushQueue, now)
 	}
 }
 
 // Transfers all metrics according to the states in the flush queue from the temporary storage to
 // the persistent storage
-func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, batchSize int64) {
+func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	uuids := make([]types.MetricUUID, 0, len(flushQueue))
 
 	for uuid := range flushQueue {
@@ -124,7 +128,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time, ba
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	cutoff := now.Unix() + batchSize
+	cutoff := now.Unix() + b.batchSize
 	metricsToSet := make(types.Metrics)
 	metricsToWrite := make(types.Metrics)
 
@@ -228,7 +232,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 // Writes metrics in the temporary storage
 // Each metric will have a current state that will allow to know if the size of a batch, or the deadline is reached
 // When one of these cases occurs, the current state is added to the flush queue
-func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) error {
+func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 	nowUnix := now.Unix()
 	flushQueue := make(map[types.MetricUUID][]state)
 	newMetrics := make(types.Metrics)
@@ -243,23 +247,14 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 					pointCount:          1,
 					firstPointTimestamp: point.Timestamp,
 					lastPointTimestamp:  point.Timestamp,
-					flushTimestamp:      flushTimestamp(uuid, now, batchSize),
+					flushTimestamp:      flushTimestamp(uuid, now, b.batchSize),
 				}
 			} else {
-				nextFirstPointTimestamp := currentState.firstPointTimestamp
-				nextLastPointTimestamp := currentState.lastPointTimestamp
-
-				if point.Timestamp < currentState.firstPointTimestamp {
-					nextFirstPointTimestamp = point.Timestamp
-				}
-
-				if point.Timestamp > currentState.lastPointTimestamp {
-					nextLastPointTimestamp = point.Timestamp
-				}
-
+				nextFirstPointTimestamp := compare.Int64Min(currentState.firstPointTimestamp, point.Timestamp)
+				nextLastPointTimestamp := compare.Int64Max(currentState.lastPointTimestamp, point.Timestamp)
 				nextDelta := nextLastPointTimestamp - nextFirstPointTimestamp
 
-				if (currentState.flushTimestamp < nowUnix) || (nextDelta >= batchSize) {
+				if (currentState.flushTimestamp < nowUnix) || (nextDelta >= b.batchSize) {
 					flushQueue[uuid] = append(flushQueue[uuid], currentState)
 					delete(b.states, uuid)
 					exists = false
@@ -268,7 +263,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 						pointCount:          1,
 						firstPointTimestamp: point.Timestamp,
 						lastPointTimestamp:  point.Timestamp,
-						flushTimestamp:      flushTimestamp(uuid, now, batchSize),
+						flushTimestamp:      flushTimestamp(uuid, now, b.batchSize),
 					}
 				} else {
 					currentState.pointCount++
@@ -298,7 +293,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time, batchSize int64) err
 	}, retry.NewBackOff(30*time.Second))
 
 	if len(flushQueue) != 0 {
-		b.flush(flushQueue, now, batchSize)
+		b.flush(flushQueue, now)
 	}
 
 	return nil

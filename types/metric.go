@@ -5,15 +5,15 @@ import (
 	"github.com/gofrs/uuid"
 	"math/big"
 	"sort"
-	"squirreldb/config"
 	"strings"
 )
 
 const (
-	MetricLabelTypeEq  = 0
-	MetricLabelTypeNeq = 1
-	MetricLabelTypeRe  = 2
-	MetricLabelTypeNre = 3
+	LabelTypeEq        = 0
+	LabelTypeNeq       = 1
+	LabelTypeRe        = 2
+	LabelTypeNre       = 3
+	LabelPrefixSpecial = "__bleemeo_"
 )
 
 type MetricPoint struct {
@@ -54,7 +54,7 @@ func (m MetricLabels) Canonical() string {
 	elements := make([]string, 0, len(m))
 
 	for _, label := range m {
-		if !strings.HasPrefix(label.Name, config.LabelSpecialPrefix) {
+		if !strings.HasPrefix(label.Name, LabelPrefixSpecial) {
 			value := strings.ReplaceAll(label.Value, `"`, `\"`)
 			element := label.Name + `="` + value + `"`
 
@@ -65,17 +65,6 @@ func (m MetricLabels) Canonical() string {
 	canonical := strings.Join(elements, ",")
 
 	return canonical
-}
-
-// Value returns value corresponding to specified label name
-func (m MetricLabels) Value(name string) (string, bool) {
-	for _, label := range m {
-		if label.Name == name {
-			return label.Value, true
-		}
-	}
-
-	return "", false
 }
 
 // UUID returns generated UUID from labels
@@ -93,6 +82,17 @@ func (m MetricLabels) UUID() MetricUUID {
 	}
 
 	return mUUID
+}
+
+// Value returns value corresponding to specified label name
+func (m MetricLabels) Value(name string) (string, bool) {
+	for _, label := range m {
+		if label.Name == name {
+			return label.Value, true
+		}
+	}
+
+	return "", false
 }
 
 // Uint64 returns uint64 from the UUID value
