@@ -14,16 +14,12 @@ const (
 	AggregatedDataTable = "data_aggregated"
 )
 
-var (
-	keyspace            = Keyspace
-	dataTable           = keyspace + "." + DataTable
-	aggregatedDataTable = keyspace + "." + AggregatedDataTable
-	logger              = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
-)
+var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 
 type Options struct {
 	Addresses              []string
 	ReplicationFactor      int
+	Keyspace               string
 	DefaultTimeToLive      int64
 	BatchSize              int64
 	RawPartitionSize       int64
@@ -31,6 +27,8 @@ type Options struct {
 	AggregateSize          int64
 	AggregateStartOffset   int64
 	AggregatePartitionSize int64
+	dataTable              string
+	aggregatedDataTable    string
 }
 
 type Cassandra struct {
@@ -47,9 +45,12 @@ func New(options Options) (*Cassandra, error) {
 		return nil, err
 	}
 
+	options.dataTable = options.Keyspace + "." + DataTable
+	options.aggregatedDataTable = options.Keyspace + "." + AggregatedDataTable
+
 	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 
-	createKeyspaceReplacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
+	createKeyspaceReplacer := strings.NewReplacer("$KEYSPACE", options.Keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	createKeyspace := session.Query(createKeyspaceReplacer.Replace(`
 		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE_NAME
 		WITH REPLICATION = {
@@ -65,7 +66,7 @@ func New(options Options) (*Cassandra, error) {
 
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
 
-	createDataTableReplacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+	createDataTableReplacer := strings.NewReplacer("$DATA_TABLE", options.dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	createDataTable := session.Query(createDataTableReplacer.Replace(`
         CREATE TABLE IF NOT EXISTS $DATA_TABLE (
 			metric_uuid uuid,
@@ -93,7 +94,7 @@ func New(options Options) (*Cassandra, error) {
 		return nil, err
 	}
 
-	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregatedDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", options.aggregatedDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	createAggregatedDataTable := session.Query(createAggregatedDataTableReplacer.Replace(`
         CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
 			metric_uuid uuid,

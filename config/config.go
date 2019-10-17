@@ -3,14 +3,24 @@ package config
 import (
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/spf13/pflag"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+)
+
+var configFileExtensions = []string{".conf", ".yaml", ".yml"}
+
+const (
+	configFolderRoot = "."
+	configEnvPrefix  = "SQUIRRELDB_"
+	configDelimiter  = "."
 )
 
 type flag struct {
@@ -32,6 +42,14 @@ func New() (*Config, error) {
 		Koanf: koanf.New(configDelimiter),
 	}
 
+	// Initializes config default values
+	err := config.Koanf.Load(confmap.Provider(configDefault, configDelimiter), nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Initializes config file support
 	configPaths, err := findConfigPaths(configFolderRoot, configFileExtensions)
 
 	if err != nil {
@@ -74,19 +92,20 @@ func New() (*Config, error) {
 // Returns every config files in the root folder matching with the specified extensions
 func findConfigPaths(root string, extensions []string) ([]string, error) {
 	var configPaths []string
+	files, err := ioutil.ReadDir(root)
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	if err != nil {
+		return nil, err
+	}
+
+	for _, f := range files {
+		path := filepath.Join(root, f.Name())
+
 		for _, extension := range extensions {
 			if filepath.Ext(path) == extension {
 				configPaths = append(configPaths, path)
 			}
 		}
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
 	}
 
 	sort.Strings(configPaths)

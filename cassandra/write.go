@@ -57,7 +57,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 					}
 				}
 
-				if err := c.writeDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
+				if err := c.writeDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
@@ -117,7 +117,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 					}
 				}
 
-				if err := c.writeDatabase(aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
+				if err := c.writeDatabase(c.options.aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}

@@ -48,6 +48,7 @@ func main() {
 	cassandraOptions := cassandra.Options{
 		Addresses:              squirrelConfig.Strings("cassandra.addresses"),
 		ReplicationFactor:      squirrelConfig.Int("cassandra.replication_factor"),
+		Keyspace:               squirrelConfig.String("cassandra.keyspace"),
 		DefaultTimeToLive:      squirrelConfig.Int64("cassandra.default_time_to_live"),
 		BatchSize:              batchSize,
 		RawPartitionSize:       squirrelConfig.Int64("cassandra.partition_size.raw"),

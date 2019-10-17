@@ -128,7 +128,7 @@ func (c *Cassandra) aggregate(now time.Time) error {
 
 // Returns an iterator of all metrics from the data table according to the parameters
 func (c *Cassandra) uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
-	iteratorReplacer := strings.NewReplacer("$DATA_TABLE", dataTable)
+	iteratorReplacer := strings.NewReplacer("$DATA_TABLE", c.options.dataTable)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
 		SELECT metric_uuid FROM $DATA_TABLE
 		WHERE base_ts = ? AND offset_ts >= ? AND offset_ts <= ?

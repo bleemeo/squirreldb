@@ -38,11 +38,11 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			var err error
 
 			if aggregated {
-				iterator = c.readDatabase(aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-				points, err = readAggregatedData(iterator, request)
+				iterator = c.readDatabase(c.options.aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+				points, err = iterateAggregatedData(iterator, request)
 			} else {
-				iterator = c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-				points, err = readData(iterator, request)
+				iterator = c.readDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+				points, err = iterateData(iterator, request)
 			}
 
 			if err != nil {
@@ -51,6 +51,7 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 			if err := iterator.Close(); err != nil {
 				return nil, err
+
 			}
 
 			metrics[uuid] = append(metrics[uuid], points...)
@@ -72,7 +73,7 @@ func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, f
 }
 
 // Returns metrics
-func readData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
+func iterateData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
@@ -113,7 +114,7 @@ func readData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPo
 }
 
 // Returns aggregated metrics
-func readAggregatedData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
+func iterateAggregatedData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
