@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	Keyspace            = "squirreldb"
-	DataTable           = "data"
-	AggregatedDataTable = "data_aggregated"
+	Keyspace           = "squirreldb"
+	DataTable          = "data"
+	AggregateDataTable = "data_aggregated"
 )
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
@@ -28,7 +28,10 @@ type Options struct {
 	AggregateStartOffset   int64
 	AggregatePartitionSize int64
 	dataTable              string
-	aggregatedDataTable    string
+	aggregateDataTable     string
+
+	DebugAggregateForce bool
+	DebugAggregateSize  int64
 }
 
 type Cassandra struct {
@@ -46,13 +49,13 @@ func New(options Options) (*Cassandra, error) {
 	}
 
 	options.dataTable = options.Keyspace + "." + DataTable
-	options.aggregatedDataTable = options.Keyspace + "." + AggregatedDataTable
+	options.aggregateDataTable = options.Keyspace + "." + AggregateDataTable
 
 	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 
 	createKeyspaceReplacer := strings.NewReplacer("$KEYSPACE", options.Keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	createKeyspace := session.Query(createKeyspaceReplacer.Replace(`
-		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE_NAME
+		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE
 		WITH REPLICATION = {
 			'class': 'SimpleStrategy',
 			'replication_factor': $REPLICATION_FACTOR
@@ -94,7 +97,7 @@ func New(options Options) (*Cassandra, error) {
 		return nil, err
 	}
 
-	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", options.aggregatedDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+	createAggregatedDataTableReplacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", options.aggregateDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	createAggregatedDataTable := session.Query(createAggregatedDataTableReplacer.Replace(`
         CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
 			metric_uuid uuid,

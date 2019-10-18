@@ -1,13 +1,13 @@
 package prometheus
 
 import (
-	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -22,7 +22,7 @@ type WritePoints struct {
 // Decodes the request and transforms it into Metrics
 // Sends the Metrics to storage
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	perfWriteRequestTime := time.Now() // TODO: Performance
+	perfWriteRequest := debug.NewPerformance() // TODO: Performance
 
 	body, err := ioutil.ReadAll(request.Body)
 
@@ -67,7 +67,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	fmt.Println("Write request in:", time.Since(perfWriteRequestTime)) // TODO: Performance
+	perfWriteRequest.Duration("Write request in:")
 }
 
 // Convert Prometheus Labels to MetricLabels

@@ -224,6 +224,8 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 
 	for uuid, persistentPoints := range persistentMetrics {
 		metrics[uuid] = append(metrics[uuid], persistentPoints...)
+
+		metrics[uuid] = metrics[uuid].SortUnify()
 	}
 
 	return metrics, nil

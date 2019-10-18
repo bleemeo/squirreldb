@@ -45,6 +45,31 @@ type MetricRequest struct {
 	Function      string
 }
 
+func (m MetricPoints) SortUnify() MetricPoints {
+	if len(m) <= 0 {
+		return m
+	}
+
+	sort.Slice(m, func(i, j int) bool {
+		return m[i].Timestamp < m[j].Timestamp
+	})
+
+	i := 0
+
+	for j := 0; j < len(m); j++ {
+		if m[i].Timestamp == m[j].Timestamp {
+			continue
+		}
+
+		i++
+		m[i] = m[j]
+	}
+
+	result := m[:(i + 1)]
+
+	return result
+}
+
 // Canonical returns string from labels
 func (m MetricLabels) Canonical() string {
 	sort.Slice(m, func(i, j int) bool {

@@ -2,9 +2,9 @@ package cassandra
 
 import (
 	"context"
-	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
+	"github.com/gofrs/uuid"
 	"squirreldb/aggregate"
 	"squirreldb/compare"
 	"squirreldb/retry"
@@ -13,18 +13,16 @@ import (
 	"time"
 )
 
-// Run calls aggregate() every aggregate size seconds
-// If the context receives a stop signal, the service is stopped
 func (c *Cassandra) Run(ctx context.Context) {
 	nowUnix := time.Now().Unix()
-	aggregateTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
-	waitTimestamp := aggregateTimestamp - nowUnix
+	toTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
+	fromTimestamp := toTimestamp - c.options.AggregateSize
+	waitTimestamp := (nowUnix % c.options.AggregateSize) + c.options.AggregateStartOffset
 
-	if waitTimestamp < 0 {
-		waitTimestamp += c.options.AggregateSize
+	if c.options.DebugAggregateForce { // TODO: DEBUG
+		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
+		waitTimestamp = 5
 	}
-
-	waitTimestamp += c.options.AggregateStartOffset
 
 	logger.Println("Run: Start in", waitTimestamp, "seconds...") // TODO: Debug
 
@@ -35,13 +33,12 @@ func (c *Cassandra) Run(ctx context.Context) {
 		return
 	}
 
-	aggregateTime := time.Unix(aggregateTimestamp, 0)
 	ticker := time.NewTicker(time.Duration(c.options.AggregateSize) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		_ = backoff.Retry(func() error {
-			err := c.aggregate(aggregateTime)
+			err := c.aggregate(fromTimestamp, toTimestamp)
 
 			if err != nil {
 				logger.Println("aggregate: Can't aggregate (", err, ")")
@@ -50,7 +47,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 			return err
 		}, retry.NewBackOff(30*time.Second))
 
-		aggregateTime = aggregateTime.Add(time.Duration(c.options.AggregateSize) * time.Second)
+		toTimestamp += c.options.AggregateSize
 
 		logger.Println("Run: Aggregate") // TODO: Debug
 
@@ -63,47 +60,14 @@ func (c *Cassandra) Run(ctx context.Context) {
 	}
 }
 
-func (c *Cassandra) aggregate(now time.Time) error {
-	nowUnix := now.Unix()
-	toTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
-	fromTimestamp := toTimestamp - c.options.AggregateSize
+func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
+	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
 
-	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize)
-	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.RawPartitionSize)
-	var uuids []types.MetricUUID
-
-	perfGettingUUIDsTime := time.Now() // TODO: Performance
-
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.RawPartitionSize {
-		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-c.options.BatchSize, 0)
-		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, c.options.RawPartitionSize)
-
-		iterator := c.uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		var metricUUID string
-
-		for iterator.Scan(&metricUUID) {
-			cqlUUID, _ := gocql.ParseUUID(metricUUID)
-			uuid := types.MetricUUID{UUID: [16]byte(cqlUUID)}
-
-			uuids = append(uuids, uuid)
-		}
-
-		if err := iterator.Close(); err != nil {
-			return err
-		}
-	}
-
-	fmt.Println("Gettings all UUIDs in:", time.Since(perfGettingUUIDsTime)) // TODO: Performance
-
-	perfAggregateAllMetricsTime := time.Now() // TODO: Performance
-
-	for _, uuid := range uuids {
-		perfAggregateMetricTime := time.Now() // TODO: Performance
-
+	for _, mUUID := range uuids {
 		request := types.MetricRequest{
-			UUIDs:         []types.MetricUUID{uuid},
-			FromTimestamp: nowUnix - (nowUnix % c.options.AggregateSize) - c.options.AggregateSize,
-			ToTimestamp:   nowUnix - (nowUnix % c.options.AggregateSize),
+			UUIDs:         []types.MetricUUID{mUUID},
+			FromTimestamp: fromTimestamp,
+			ToTimestamp:   toTimestamp,
 		}
 
 		metrics, err := c.Read(request)
@@ -112,22 +76,55 @@ func (c *Cassandra) aggregate(now time.Time) error {
 			return err
 		}
 
-		aggregatedMetrics := aggregate.Metrics(metrics, request.FromTimestamp, request.ToTimestamp, c.options.AggregateResolution)
+		metrics[mUUID] = metrics[mUUID].SortUnify()
 
-		if err := c.writeAggregated(aggregatedMetrics); err != nil {
-			return err
+		for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += c.options.AggregateSize {
+			aggregatedMetrics := aggregate.Metrics(metrics, timestamp, timestamp+c.options.AggregateSize, c.options.AggregateResolution)
+
+			if err := c.writeAggregated(aggregatedMetrics); err != nil {
+				return err
+			}
 		}
-
-		fmt.Println("Read, aggregate and write one metric in:", time.Since(perfAggregateMetricTime)) // TODO: Performance
 	}
-
-	fmt.Println("Read, aggregate and write all metrics in:", time.Since(perfAggregateAllMetricsTime)) // TODO: Performance
 
 	return nil
 }
 
+func (c *Cassandra) readUUIDs(fromTimestamp, toTimestamp int64) []types.MetricUUID {
+	batchSize := c.options.BatchSize
+	rawPartitionSize := c.options.RawPartitionSize
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
+
+	uuidMap := make(map[types.MetricUUID]bool)
+
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
+		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
+		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
+
+		iterator := c.readDatabaseUUIDs(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+		var metricUUID string
+
+		for iterator.Scan(&metricUUID) {
+			uuidItem := types.MetricUUID{
+				UUID: uuid.FromStringOrNil(metricUUID),
+			}
+
+			uuidMap[uuidItem] = true
+		}
+	}
+
+	var uuids []types.MetricUUID
+
+	for uuidItem := range uuidMap {
+		uuids = append(uuids, uuidItem)
+	}
+
+	return uuids
+}
+
 // Returns an iterator of all metrics from the data table according to the parameters
-func (c *Cassandra) uuids(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+func (c *Cassandra) readDatabaseUUIDs(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
 	iteratorReplacer := strings.NewReplacer("$DATA_TABLE", c.options.dataTable)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
 		SELECT metric_uuid FROM $DATA_TABLE

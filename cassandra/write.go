@@ -117,7 +117,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 					}
 				}
 
-				if err := c.writeDatabase(c.options.aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
+				if err := c.writeDatabase(c.options.aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}

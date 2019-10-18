@@ -1,13 +1,13 @@
 package prometheus
 
 import (
-	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -23,7 +23,7 @@ type ReadPoints struct {
 // Retrieves metrics via MetricRequests
 // Generates and returns a response containing the requested data
 func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	perfReadResponseTime := time.Now() // TODO: Performance
+	perfReadResponse := debug.NewPerformance() // TODO: Performance
 
 	body, err := ioutil.ReadAll(request.Body)
 
@@ -97,7 +97,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	fmt.Println("Send response in:", time.Since(perfReadResponseTime)) // TODO: Performance
+	perfReadResponse.Duration("Send response in:")
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels

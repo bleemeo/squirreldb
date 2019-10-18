@@ -13,52 +13,92 @@ import (
 // Read returns metrics according to the request
 func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	aggregated := request.Step >= c.options.AggregateResolution
-	var rowSize, partitionSize int64
-
-	if aggregated {
-		rowSize = c.options.AggregateSize
-		partitionSize = c.options.AggregatePartitionSize
-	} else {
-		rowSize = c.options.BatchSize
-		partitionSize = c.options.RawPartitionSize
-	}
-
-	fromBaseTimestamp := request.FromTimestamp - (request.FromTimestamp % partitionSize)
-	toBaseTimestamp := request.ToTimestamp - (request.ToTimestamp % partitionSize)
 
 	metrics := make(types.Metrics)
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += partitionSize {
-		fromOffsetTimestamp := compare.Int64Max(request.FromTimestamp-baseTimestamp-rowSize, 0)
-		toOffsetTimestamp := compare.Int64Min(request.ToTimestamp-baseTimestamp, partitionSize)
+	for _, uuid := range request.UUIDs {
+		fromTimestamp := request.FromTimestamp
+		toTimestamp := request.ToTimestamp
+		var points types.MetricPoints
 
-		for _, uuid := range request.UUIDs {
-			var iterator *gocql.Iter
-			var points types.MetricPoints
-			var err error
-
-			if aggregated {
-				iterator = c.readDatabase(c.options.aggregatedDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-				points, err = iterateAggregatedData(iterator, request)
-			} else {
-				iterator = c.readDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-				points, err = iterateData(iterator, request)
-			}
+		if aggregated {
+			aggregatedPoints, err := c.readAggregatedData(uuid, fromTimestamp, toTimestamp, request.Function)
 
 			if err != nil {
 				return nil, err
 			}
 
-			if err := iterator.Close(); err != nil {
-				return nil, err
+			points = append(points, aggregatedPoints...)
 
+			if len(points) != 0 {
+				fromTimestamp = points[len(points)-1].Timestamp
+			}
+		} else { // TODO: Mask raw data if aggregated
+			rawPoints, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
+
+			if err != nil {
+				return nil, err
 			}
 
-			metrics[uuid] = append(metrics[uuid], points...)
+			points = append(points, rawPoints...)
+
+			metrics[uuid] = points
 		}
 	}
 
 	return metrics, nil
+}
+
+// RAW DATA
+func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
+	batchSize := c.options.BatchSize
+	rawPartitionSize := c.options.RawPartitionSize
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
+	dataTable := c.options.dataTable
+	var points types.MetricPoints
+
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
+		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
+		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
+
+		iterator := c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+		partitionPoints, err := iterateRawData(iterator, fromTimestamp, toTimestamp)
+
+		if err != nil {
+			return nil, err
+		}
+
+		points = append(points, partitionPoints...)
+	}
+
+	return points, nil
+}
+
+// AGGREGATED DATA
+func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
+	aggregateRowSize := c.options.AggregateSize
+	aggregatePartitionSize := c.options.AggregatePartitionSize
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % aggregatePartitionSize)
+	aggregateDataTable := c.options.aggregateDataTable
+	var points types.MetricPoints
+
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += aggregatePartitionSize {
+		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-aggregateRowSize, 0)
+		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, aggregatePartitionSize)
+
+		iterator := c.readDatabase(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+		partitionPoints, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function)
+
+		if err != nil {
+			return nil, err
+		}
+
+		points = append(points, partitionPoints...)
+	}
+
+	return points, nil
 }
 
 // Returns an iterator from the specified table according to the parameters
@@ -73,7 +113,7 @@ func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, f
 }
 
 // Returns metrics
-func iterateData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
+func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
@@ -94,7 +134,7 @@ func iterateData(iterator *gocql.Iter, request types.MetricRequest) (types.Metri
 			case nil:
 				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
 
-				if (timestamp >= request.FromTimestamp) && (timestamp <= request.ToTimestamp) {
+				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
 					point := types.MetricPoint{
 						Timestamp: timestamp,
 						Value:     pointData.Value,
@@ -114,7 +154,7 @@ func iterateData(iterator *gocql.Iter, request types.MetricRequest) (types.Metri
 }
 
 // Returns aggregated metrics
-func iterateAggregatedData(iterator *gocql.Iter, request types.MetricRequest) (types.MetricPoints, error) {
+func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
 	var baseTimestamp, offsetTimestamp int64
 	var values []byte
 	var points types.MetricPoints
@@ -138,12 +178,12 @@ func iterateAggregatedData(iterator *gocql.Iter, request types.MetricRequest) (t
 			case nil:
 				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
 
-				if (timestamp >= request.FromTimestamp) && (timestamp <= request.ToTimestamp) {
+				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
 					point := types.MetricPoint{
 						Timestamp: timestamp,
 					}
 
-					switch request.Function {
+					switch function {
 					case "min":
 						point.Value = pointData.Min
 					case "max":
