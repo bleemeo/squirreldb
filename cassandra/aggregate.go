@@ -7,6 +7,7 @@ import (
 	"github.com/gofrs/uuid"
 	"squirreldb/aggregate"
 	"squirreldb/compare"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
@@ -17,10 +18,10 @@ func (c *Cassandra) Run(ctx context.Context) {
 	nowUnix := time.Now().Unix()
 	toTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
 	fromTimestamp := toTimestamp - c.options.AggregateSize
-	waitTimestamp := (nowUnix % c.options.AggregateSize) + c.options.AggregateStartOffset
+	waitTimestamp := nowUnix - toTimestamp + c.options.AggregateStartOffset
 
 	if c.options.DebugAggregateForce { // TODO: DEBUG
-		toTimestamp = toTimestamp - c.options.AggregateStartOffset*2
+		toTimestamp = toTimestamp - c.options.AggregateStartOffset
 		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
 		waitTimestamp = 5
 	}
@@ -65,6 +66,8 @@ func (c *Cassandra) Run(ctx context.Context) {
 func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
 
+	perfDoneAll := debug.NewPerformance() // TODO: Performance
+
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
 			UUIDs:         []types.MetricUUID{mUUID},
@@ -78,16 +81,20 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 			return err
 		}
 
-		metrics[mUUID] = metrics[mUUID].SortUnify()
-
 		for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += c.options.AggregateSize {
+			perfAggregateMetricPoints := debug.NewPerformance() // TODO: Performance
+
 			aggregatedMetrics := aggregate.Metrics(metrics, timestamp, timestamp+c.options.AggregateSize, c.options.AggregateResolution)
+
+			perfAggregateMetricPoints.PrintValue("cassandra", "Aggregate", "point", float64(len(aggregatedMetrics))) // TODO: Performance
 
 			if err := c.writeAggregated(aggregatedMetrics); err != nil {
 				return err
 			}
 		}
 	}
+
+	perfDoneAll.PrintValue("cassandra", "Read, aggregate and write", "metric", float64(len(uuids))) // TODO: Performance
 
 	return nil
 }

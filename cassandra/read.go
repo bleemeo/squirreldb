@@ -6,6 +6,7 @@ import (
 	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/compare"
+	"squirreldb/debug"
 	"squirreldb/types"
 	"strings"
 )
@@ -16,7 +17,11 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 	metrics := make(types.Metrics)
 
+	perfReadMetrics := debug.NewPerformance() // TODO: Performance
+
 	for _, uuid := range request.UUIDs {
+		perfReadMetricPoints := debug.NewPerformance() // TODO: Performance
+
 		fromTimestamp := request.FromTimestamp
 		toTimestamp := request.ToTimestamp
 		var points types.MetricPoints
@@ -31,26 +36,29 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			points = append(points, aggregatedPoints...)
 
 			if len(points) != 0 {
-				fromTimestamp = points[len(points)-1].Timestamp + 1
+				fromTimestamp = points[len(points)-1].Timestamp + c.options.AggregateResolution
 			}
-		} else {
-			// TODO: Append raw points only if fromTimestamp > lastAggregateTimestamp
-			rawPoints, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
-
-			if err != nil {
-				return nil, err
-			}
-
-			points = append(points, rawPoints...)
 		}
+
+		rawPoints, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
+
+		if err != nil {
+			return nil, err
+		}
+
+		perfReadMetricPoints.PrintValue("cassandra", "Read", "point", float64(len(metrics))) // TODO: Performance
+
+		points = append(points, rawPoints...)
 
 		metrics[uuid] = points
 	}
 
+	perfReadMetrics.PrintValue("cassandra", "Read", "metric", float64(len(metrics))) // TODO: Performance
+
 	return metrics, nil
 }
 
-// RAW DATA
+// Reads raw data
 func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
 	batchSize := c.options.BatchSize
 	rawPartitionSize := c.options.RawPartitionSize
@@ -73,12 +81,16 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 		points = append(points, partitionPoints...)
 	}
 
+	perfSortMetricPoints := debug.NewPerformance() // TODO: Performance
+
 	points = points.SortUnify()
+
+	perfSortMetricPoints.PrintValue("cassandra", "Sort", "point", float64(len(points))) // TODO: Performance
 
 	return points, nil
 }
 
-// AGGREGATED DATA
+// Reads aggregated data
 func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
 	aggregateRowSize := c.options.AggregateSize
 	aggregatePartitionSize := c.options.AggregatePartitionSize
@@ -101,7 +113,11 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 		points = append(points, partitionPoints...)
 	}
 
+	perfSortMetricPoints := debug.NewPerformance() // TODO: Performance
+
 	points = points.SortUnify()
+
+	perfSortMetricPoints.PrintValue("cassandra", "Sort", "point", float64(len(points))) // TODO: Performance
 
 	return points, nil
 }

@@ -97,7 +97,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	perfReadResponse.Duration("Send response in:")
+	perfReadResponse.Print("prometheus", "Send", "ReadResponse")
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels
