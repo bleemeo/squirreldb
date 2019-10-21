@@ -31,9 +31,10 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			points = append(points, aggregatedPoints...)
 
 			if len(points) != 0 {
-				fromTimestamp = points[len(points)-1].Timestamp
+				fromTimestamp = points[len(points)-1].Timestamp + 1
 			}
-		} else { // TODO: Mask raw data if aggregated
+		} else {
+			// TODO: Append raw points only if fromTimestamp > lastAggregateTimestamp
 			rawPoints, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
 
 			if err != nil {
@@ -41,9 +42,9 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			}
 
 			points = append(points, rawPoints...)
-
-			metrics[uuid] = points
 		}
+
+		metrics[uuid] = points
 	}
 
 	return metrics, nil
@@ -72,6 +73,8 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 		points = append(points, partitionPoints...)
 	}
 
+	points = points.SortUnify()
+
 	return points, nil
 }
 
@@ -97,6 +100,8 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 
 		points = append(points, partitionPoints...)
 	}
+
+	points = points.SortUnify()
 
 	return points, nil
 }

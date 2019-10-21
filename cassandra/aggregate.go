@@ -20,6 +20,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 	waitTimestamp := (nowUnix % c.options.AggregateSize) + c.options.AggregateStartOffset
 
 	if c.options.DebugAggregateForce { // TODO: DEBUG
+		toTimestamp = toTimestamp - c.options.AggregateStartOffset*2
 		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
 		waitTimestamp = 5
 	}
@@ -47,6 +48,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 			return err
 		}, retry.NewBackOff(30*time.Second))
 
+		fromTimestamp = toTimestamp
 		toTimestamp += c.options.AggregateSize
 
 		logger.Println("Run: Aggregate") // TODO: Debug

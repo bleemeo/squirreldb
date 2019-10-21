@@ -205,7 +205,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 			}
 		}
 
-		metrics[uuid] = points
+		metrics[uuid] = points.SortUnify()
 	}
 
 	// Retrieves metrics from the persistent storage
@@ -223,9 +223,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	}, retry.NewBackOff(30*time.Second))
 
 	for uuid, persistentPoints := range persistentMetrics {
-		metrics[uuid] = append(metrics[uuid], persistentPoints...)
-
-		metrics[uuid] = metrics[uuid].SortUnify()
+		metrics[uuid] = append(persistentPoints, metrics[uuid]...)
 	}
 
 	return metrics, nil
