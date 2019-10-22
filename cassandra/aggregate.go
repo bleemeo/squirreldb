@@ -9,7 +9,6 @@ import (
 	"os"
 	"squirreldb/aggregate"
 	"squirreldb/compare"
-	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
@@ -67,13 +66,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
 
-	speedReadPoints := debug.NewSpeed()      // TODO: Speed
-	speedAggregatePoints := debug.NewSpeed() // TODO: Speed
-	speedWriteRows := debug.NewSpeed()       // TODO: Speed
-	speedWritePoints := debug.NewSpeed()     // TODO: Speed
-	speedAggregation := debug.NewSpeed()     // TODO: Speed
-
-	speedAggregation.Start() // TODO: Speed
+	processStartTime := time.Now()
 
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
@@ -82,26 +75,16 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 			ToTimestamp:   toTimestamp,
 		}
 
-		speedReadPoints.Start() // TODO: Speed
-
 		metrics, err := c.Read(request)
 
 		aggregateReadPointsTotal.Add(float64(len(metrics[mUUID])))
-		speedReadPoints.Stop(float64(len(metrics[mUUID]))) // TODO: Speed
 
 		if err != nil {
 			return err
 		}
 
 		for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += c.options.AggregateSize {
-			speedAggregatePoints.Start() // TODO: Speed
-
 			aggregatedMetrics := aggregate.Metrics(metrics, timestamp, timestamp+c.options.AggregateSize, c.options.AggregateResolution)
-
-			speedAggregatePoints.Stop(0) // TODO: Speed
-
-			speedWriteRows.Start()   // TODO: Speed
-			speedWritePoints.Start() // TODO: Speed
 
 			if err := c.writeAggregated(aggregatedMetrics); err != nil {
 				return err
@@ -109,32 +92,19 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 
 			aggregateWrotePointsTotal.Add(float64(len(aggregatedMetrics[mUUID])))
 			aggregateWroteRowsTotal.Inc()
-			speedWriteRows.Stop(1)                                        // TODO: Speed
-			speedWritePoints.Stop(float64(len(aggregatedMetrics[mUUID]))) // TODO: Speed
 		}
-
-		aggregateAggregatedPointsTotal.Add(float64(len(metrics[mUUID])))
-		speedAggregatePoints.Add(float64(len(metrics[mUUID]))) // TODO: Speed
 	}
 
-	speedAggregation.Stop(float64(len(uuids))) // TODO: Speed
-
-	aggregateReadPointsSecondsTotal.Add(speedReadPoints.Seconds())
-	aggregateAggregatePointsSecondsTotal.Add(speedAggregatePoints.Seconds())
-	aggregateWritePointsSecondsTotal.Add(speedWritePoints.Seconds())
-	aggregateWriteRowsSecondsTotal.Add(speedWriteRows.Seconds())
-	aggregateSecondsTotal.Add(speedAggregation.Seconds())
+	processDuration := time.Since(processStartTime)
+	aggregateSecondsTotal.Observe(processDuration.Seconds())
 
 	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags)
 
-	debugLog.Println("[cassandra] Aggregation debug:")
-	debugLog.Printf("[cassandra] fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
+	debugLog.Println("[cassandra] aggregate():")
+	debugLog.Printf("\t"+"|_ fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
 		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0))
-	speedReadPoints.Print("cassandra", "Read", "point")
-	speedAggregatePoints.Print("cassandra", "Aggregate", "point")
-	speedWritePoints.Print("cassandra", "Write", "point")
-	speedWriteRows.Print("cassandra", "Write", "row")
-	speedAggregation.Print("cassandra", "Read, aggregate and write", "metric")
+	debugLog.Printf("\t"+"|_ Process %d metric(s) in %v (%f metric(s)/s)",
+		len(uuids), processDuration, float64(len(uuids))/processDuration.Seconds())
 
 	return nil
 }

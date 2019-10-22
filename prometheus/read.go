@@ -7,7 +7,6 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
-	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -23,10 +22,6 @@ type ReadPoints struct {
 // Retrieves metrics via MetricRequests
 // Generates and returns a response containing the requested data
 func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	speedReadResponse := debug.NewSpeed() // TODO: Speed
-
-	speedReadResponse.Start()
-
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -98,9 +93,6 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
 		return
 	}
-
-	speedReadResponse.Stop(1)
-	// speedReadResponse.Print("prometheus", "Send", "ReadResponse")
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels

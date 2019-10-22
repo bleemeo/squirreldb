@@ -7,7 +7,6 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"io/ioutil"
 	"net/http"
-	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -22,10 +21,6 @@ type WritePoints struct {
 // Decodes the request and transforms it into Metrics
 // Sends the Metrics to storage
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	speedWriteRequest := debug.NewSpeed() // TODO: Speed
-
-	speedWriteRequest.Start()
-
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -68,9 +63,6 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		return err
 	}, retry.NewBackOff(30*time.Second))
-
-	speedWriteRequest.Stop(1)
-	// speedWriteRequest.Print("prometheus", "Process", "WriteRequest")
 }
 
 // Convert Prometheus Labels to MetricLabels
