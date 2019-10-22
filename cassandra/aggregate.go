@@ -23,8 +23,6 @@ func (c *Cassandra) Run(ctx context.Context) {
 	waitTimestamp := nowUnix - toTimestamp + c.options.AggregateStartOffset
 
 	if c.options.DebugAggregateForce { // TODO: DEBUG
-		toTimestamp = toTimestamp - c.options.AggregateStartOffset
-		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
 		waitTimestamp = 5
 	}
 
