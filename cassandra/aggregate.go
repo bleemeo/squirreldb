@@ -71,6 +71,9 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	speedAggregatePoints := debug.NewSpeed() // TODO: Speed
 	speedWriteRows := debug.NewSpeed()       // TODO: Speed
 	speedWritePoints := debug.NewSpeed()     // TODO: Speed
+	speedAggregation := debug.NewSpeed()     // TODO: Speed
+
+	speedAggregation.Start() // TODO: Speed
 
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
@@ -114,10 +117,13 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 		speedAggregatePoints.Add(float64(len(metrics[mUUID]))) // TODO: Speed
 	}
 
+	speedAggregation.Stop(float64(len(uuids))) // TODO: Speed
+
 	aggregateReadPointsSecondsTotal.Add(speedReadPoints.Seconds())
 	aggregateAggregatePointsSecondsTotal.Add(speedAggregatePoints.Seconds())
 	aggregateWritePointsSecondsTotal.Add(speedWritePoints.Seconds())
 	aggregateWriteRowsSecondsTotal.Add(speedWriteRows.Seconds())
+	aggregateSecondsTotal.Add(speedAggregation.Seconds())
 
 	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags)
 
@@ -128,6 +134,7 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	speedAggregatePoints.Print("cassandra", "Aggregate", "point")
 	speedWritePoints.Print("cassandra", "Write", "point")
 	speedWriteRows.Print("cassandra", "Write", "row")
+	speedAggregation.Print("cassandra", "Read, aggregate and write", "metric")
 
 	return nil
 }

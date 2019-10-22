@@ -6,6 +6,12 @@ import (
 )
 
 var (
+	aggregateSecondsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "cassandra",
+		Subsystem: "aggregate",
+		Name:      "seconds_total",
+		Help:      "Total seconds of aggregation (reading, aggregating, writing)",
+	})
 	aggregateReadPointsSecondsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "cassandra",
 		Subsystem: "aggregate",
