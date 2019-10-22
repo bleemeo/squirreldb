@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"github.com/cenkalti/backoff"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
 	"os"
@@ -45,6 +46,7 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 
 	router.HandleFunc("/read", p.readPoints.ServeHTTP)
 	router.HandleFunc("/write", p.writePoints.ServeHTTP)
+	router.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	go func() {
 		_ = backoff.Retry(func() error {

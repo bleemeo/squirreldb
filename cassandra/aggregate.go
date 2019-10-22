@@ -23,6 +23,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 	waitTimestamp := nowUnix - toTimestamp + c.options.AggregateStartOffset
 
 	if c.options.DebugAggregateForce { // TODO: DEBUG
+		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
 		waitTimestamp = 5
 	}
 
@@ -82,6 +83,7 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 
 		metrics, err := c.Read(request)
 
+		aggregateReadPointsTotal.Add(float64(len(metrics[mUUID])))
 		speedReadPoints.Stop(float64(len(metrics[mUUID]))) // TODO: Speed
 
 		if err != nil {
@@ -102,12 +104,20 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 				return err
 			}
 
+			aggregateWrotePointsTotal.Add(float64(len(aggregatedMetrics[mUUID])))
+			aggregateWroteRowsTotal.Inc()
 			speedWriteRows.Stop(1)                                        // TODO: Speed
 			speedWritePoints.Stop(float64(len(aggregatedMetrics[mUUID]))) // TODO: Speed
 		}
 
-		speedAggregatePoints.AddValue(float64(len(metrics[mUUID]))) // TODO: Speed
+		aggregateAggregatedPointsTotal.Add(float64(len(metrics[mUUID])))
+		speedAggregatePoints.Add(float64(len(metrics[mUUID]))) // TODO: Speed
 	}
+
+	aggregateReadPointsSecondsTotal.Add(speedReadPoints.Seconds())
+	aggregateAggregatePointsSecondsTotal.Add(speedAggregatePoints.Seconds())
+	aggregateWritePointsSecondsTotal.Add(speedWritePoints.Seconds())
+	aggregateWriteRowsSecondsTotal.Add(speedWriteRows.Seconds())
 
 	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags)
 

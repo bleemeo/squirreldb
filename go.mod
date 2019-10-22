@@ -10,6 +10,7 @@ require (
 	github.com/golang/snappy v0.0.1
 	github.com/grpc-ecosystem/grpc-gateway v1.11.3 // indirect
 	github.com/knadh/koanf v0.5.0
+	github.com/prometheus/client_golang v1.2.1
 	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/net v0.0.0-20191007182048-72f939374954 // indirect

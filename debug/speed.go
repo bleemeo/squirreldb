@@ -19,8 +19,12 @@ func NewSpeed() *Speed {
 	return &Speed{}
 }
 
-func (p *Speed) AddValue(value float64) {
+func (p *Speed) Add(value float64) {
 	p.values += value
+}
+
+func (p *Speed) Seconds() float64 {
+	return p.duration.Seconds()
 }
 
 func (p *Speed) Start() {
