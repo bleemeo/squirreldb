@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"github.com/gocql/gocql"
 	"squirreldb/aggregate"
-	"squirreldb/debug"
 	"squirreldb/types"
 	"strings"
 	"time"
@@ -15,11 +14,7 @@ import (
 func (c *Cassandra) Write(metrics types.Metrics) error {
 	nowUnix := time.Now().Unix()
 
-	perfWriteMetrics := debug.NewPerformance() // TODO: Performance
-
 	for uuid, points := range metrics {
-		perfWriteMetricPoints := debug.NewPerformance() // TODO: Performance
-
 		baseTimestampPoints := make(map[int64]types.MetricPoints)
 
 		for _, point := range points {
@@ -67,11 +62,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 				}
 			}
 		}
-
-		perfWriteMetricPoints.PrintValue("cassandra", "Write", "point", float64(len(points))) // TODO: Performance
 	}
-
-	perfWriteMetrics.PrintValue("cassandra", "Write", "metric", float64(len(metrics))) // TODO: Performance
 
 	return nil
 }
@@ -80,11 +71,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
 	nowUnix := time.Now().Unix()
 
-	perfWriteMetrics := debug.NewPerformance() // TODO: Performance
-
 	for uuid, aggregatedPoints := range aggregatedMetrics {
-		perfWriteMetricPoints := debug.NewPerformance() // TODO: Performance
-
 		baseTimestampPoints := make(map[int64][]aggregate.AggregatedPoint)
 
 		for _, point := range aggregatedPoints {
@@ -135,11 +122,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 				}
 			}
 		}
-
-		perfWriteMetricPoints.PrintValue("cassandra", "Write", "aggregated point", float64(len(aggregatedPoints))) // TODO: Performance
 	}
-
-	perfWriteMetrics.PrintValue("cassandra", "Write", "aggregated metric", float64(len(aggregatedMetrics))) // TODO: Performance
 
 	return nil
 }

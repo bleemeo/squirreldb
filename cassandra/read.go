@@ -6,7 +6,6 @@ import (
 	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/compare"
-	"squirreldb/debug"
 	"squirreldb/types"
 	"strings"
 )
@@ -17,11 +16,7 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 	metrics := make(types.Metrics)
 
-	perfReadMetrics := debug.NewPerformance() // TODO: Performance
-
 	for _, uuid := range request.UUIDs {
-		perfReadMetricPoints := debug.NewPerformance() // TODO: Performance
-
 		fromTimestamp := request.FromTimestamp
 		toTimestamp := request.ToTimestamp
 		var points types.MetricPoints
@@ -46,14 +41,10 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 			return nil, err
 		}
 
-		perfReadMetricPoints.PrintValue("cassandra", "Read", "point", float64(len(metrics))) // TODO: Performance
-
 		points = append(points, rawPoints...)
 
 		metrics[uuid] = points
 	}
-
-	perfReadMetrics.PrintValue("cassandra", "Read", "metric", float64(len(metrics))) // TODO: Performance
 
 	return metrics, nil
 }
@@ -81,11 +72,7 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 		points = append(points, partitionPoints...)
 	}
 
-	perfSortMetricPoints := debug.NewPerformance() // TODO: Performance
-
 	points = points.SortUnify()
-
-	perfSortMetricPoints.PrintValue("cassandra", "Sort", "point", float64(len(points))) // TODO: Performance
 
 	return points, nil
 }
@@ -113,11 +100,7 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 		points = append(points, partitionPoints...)
 	}
 
-	perfSortMetricPoints := debug.NewPerformance() // TODO: Performance
-
 	points = points.SortUnify()
-
-	perfSortMetricPoints.PrintValue("cassandra", "Sort", "point", float64(len(points))) // TODO: Performance
 
 	return points, nil
 }

@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	Keyspace           = "squirreldb"
 	DataTable          = "data"
 	AggregateDataTable = "data_aggregated"
 )
@@ -27,11 +26,12 @@ type Options struct {
 	AggregateSize          int64
 	AggregateStartOffset   int64
 	AggregatePartitionSize int64
-	dataTable              string
-	aggregateDataTable     string
 
 	DebugAggregateForce bool
 	DebugAggregateSize  int64
+
+	dataTable          string
+	aggregateDataTable string
 }
 
 type Cassandra struct {
@@ -47,6 +47,8 @@ func New(options Options) (*Cassandra, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	session.SetConsistency(gocql.LocalQuorum)
 
 	options.dataTable = options.Keyspace + "." + DataTable
 	options.aggregateDataTable = options.Keyspace + "." + AggregateDataTable
@@ -115,7 +117,7 @@ func New(options Options) (*Cassandra, error) {
 		AND COMPACTION = {
 			'class': 'TimeWindowCompactionStrategy',
 			'compaction_window_unit': 'DAYS',
-			'compaction_window_size': 6
+			'compaction_window_size': 90
 		}
 		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
 	`))

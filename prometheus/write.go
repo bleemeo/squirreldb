@@ -22,7 +22,9 @@ type WritePoints struct {
 // Decodes the request and transforms it into Metrics
 // Sends the Metrics to storage
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	perfWriteRequest := debug.NewPerformance() // TODO: Performance
+	speedWriteRequest := debug.NewSpeed() // TODO: Speed
+
+	speedWriteRequest.Start()
 
 	body, err := ioutil.ReadAll(request.Body)
 
@@ -67,7 +69,8 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	perfWriteRequest.Print("prometheus", "Process", "WriteRequest")
+	speedWriteRequest.Stop(1)
+	// speedWriteRequest.Print("prometheus", "Process", "WriteRequest")
 }
 
 // Convert Prometheus Labels to MetricLabels

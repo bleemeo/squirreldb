@@ -5,6 +5,8 @@ import (
 	"github.com/cenkalti/backoff"
 	"github.com/gocql/gocql"
 	"github.com/gofrs/uuid"
+	"log"
+	"os"
 	"squirreldb/aggregate"
 	"squirreldb/compare"
 	"squirreldb/debug"
@@ -66,7 +68,10 @@ func (c *Cassandra) Run(ctx context.Context) {
 func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
 
-	perfDoneAll := debug.NewPerformance() // TODO: Performance
+	speedReadPoints := debug.NewSpeed()      // TODO: Speed
+	speedAggregatePoints := debug.NewSpeed() // TODO: Speed
+	speedWriteRows := debug.NewSpeed()       // TODO: Speed
+	speedWritePoints := debug.NewSpeed()     // TODO: Speed
 
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
@@ -75,26 +80,46 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 			ToTimestamp:   toTimestamp,
 		}
 
+		speedReadPoints.Start() // TODO: Speed
+
 		metrics, err := c.Read(request)
+
+		speedReadPoints.Stop(float64(len(metrics[mUUID]))) // TODO: Speed
 
 		if err != nil {
 			return err
 		}
 
 		for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += c.options.AggregateSize {
-			perfAggregateMetricPoints := debug.NewPerformance() // TODO: Performance
+			speedAggregatePoints.Start() // TODO: Speed
 
 			aggregatedMetrics := aggregate.Metrics(metrics, timestamp, timestamp+c.options.AggregateSize, c.options.AggregateResolution)
 
-			perfAggregateMetricPoints.PrintValue("cassandra", "Aggregate", "point", float64(len(aggregatedMetrics))) // TODO: Performance
+			speedAggregatePoints.Stop(0) // TODO: Speed
+
+			speedWriteRows.Start()   // TODO: Speed
+			speedWritePoints.Start() // TODO: Speed
 
 			if err := c.writeAggregated(aggregatedMetrics); err != nil {
 				return err
 			}
+
+			speedWriteRows.Stop(1)                                        // TODO: Speed
+			speedWritePoints.Stop(float64(len(aggregatedMetrics[mUUID]))) // TODO: Speed
 		}
+
+		speedAggregatePoints.AddValue(float64(len(metrics[mUUID]))) // TODO: Speed
 	}
 
-	perfDoneAll.PrintValue("cassandra", "Read, aggregate and write", "metric", float64(len(uuids))) // TODO: Performance
+	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags)
+
+	debugLog.Println("[cassandra] Aggregation debug:")
+	debugLog.Printf("[cassandra] fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
+		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0))
+	speedReadPoints.Print("cassandra", "Read", "point")
+	speedAggregatePoints.Print("cassandra", "Aggregate", "point")
+	speedWritePoints.Print("cassandra", "Write", "point")
+	speedWriteRows.Print("cassandra", "Write", "row")
 
 	return nil
 }
