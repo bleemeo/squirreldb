@@ -148,7 +148,7 @@ func toMetricRequest(uuids []types.MetricUUID, query *prompb.Query) types.Metric
 func toQueryResult(matchers map[types.MetricUUID]types.MetricLabels, metrics types.Metrics) prompb.QueryResult {
 	var queryResult prompb.QueryResult
 
-	for uuid, points := range metrics {
+	for uuid, metricData := range metrics {
 		labels := matchers[uuid]
 		pbLabels := labelsToPbLabels(labels)
 
@@ -156,7 +156,7 @@ func toQueryResult(matchers map[types.MetricUUID]types.MetricLabels, metrics typ
 			Labels: pbLabels,
 		}
 
-		for _, point := range points {
+		for _, point := range metricData.Points {
 			sample := prompb.Sample{
 				Value:     point.Value,
 				Timestamp: point.Timestamp * 1000,

@@ -2,6 +2,7 @@ package batch
 
 import (
 	"reflect"
+	"squirreldb/compare"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -45,12 +46,22 @@ func (m *mockMetricReader) Read(request types.MetricRequest) (types.Metrics, err
 }
 
 func (m *mockStorer) Append(newMetrics, actualMetrics types.Metrics) error {
-	for uuid, points := range newMetrics {
-		m.metrics[uuid] = append(m.metrics[uuid], points...)
+	for uuid, metricData := range newMetrics {
+		metric := m.metrics[uuid]
+
+		metric.Points = append(metric.Points, metricData.Points...)
+		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
+
+		m.metrics[uuid] = metric
 	}
 
-	for uuid, points := range actualMetrics {
-		m.metrics[uuid] = append(m.metrics[uuid], points...)
+	for uuid, metricData := range actualMetrics {
+		metric := m.metrics[uuid]
+
+		metric.Points = append(metric.Points, metricData.Points...)
+		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
+
+		m.metrics[uuid] = metric
 	}
 
 	return nil
@@ -71,12 +82,12 @@ func (m *mockStorer) Get(uuids []types.MetricUUID) (types.Metrics, error) {
 }
 
 func (m *mockStorer) Set(newMetrics, actualMetrics types.Metrics) error {
-	for uuid, data := range newMetrics {
-		m.metrics[uuid] = data
+	for uuid, metricData := range newMetrics {
+		m.metrics[uuid] = metricData
 	}
 
-	for uuid, data := range actualMetrics {
-		m.metrics[uuid] = data
+	for uuid, metricData := range actualMetrics {
+		m.metrics[uuid] = metricData
 	}
 
 	return nil
@@ -150,18 +161,21 @@ func TestBatch_check(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentReader: nil,
@@ -187,18 +201,21 @@ func TestBatch_check(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentReader: nil,
@@ -218,27 +235,7 @@ func TestBatch_check(t *testing.T) {
 			},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 0,
-						Value:     0,
-					},
-					{
-						Timestamp: 50,
-						Value:     50,
-					},
-					{
-						Timestamp: 100,
-						Value:     100,
-					},
-				},
-			},
-		},
-		{
-			name: "flush_all",
-			fields: fields{
-				batchSize: 300,
-				temporaryStorer: mockStorer{metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+					Points: types.MetricPoints{
 						{
 							Timestamp: 0,
 							Value:     0,
@@ -251,6 +248,32 @@ func TestBatch_check(t *testing.T) {
 							Timestamp: 100,
 							Value:     100,
 						},
+					},
+					TimeToLive: 3600,
+				},
+			},
+		},
+		{
+			name: "flush_all",
+			fields: fields{
+				batchSize: 300,
+				temporaryStorer: mockStorer{metrics: types.Metrics{
+					uuidify("00000000-0000-0000-0000-000000000001"): {
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
+						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentReader: nil,
@@ -270,18 +293,21 @@ func TestBatch_check(t *testing.T) {
 			},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 0,
-						Value:     0,
+					Points: types.MetricPoints{
+						{
+							Timestamp: 0,
+							Value:     0,
+						},
+						{
+							Timestamp: 50,
+							Value:     50,
+						},
+						{
+							Timestamp: 100,
+							Value:     100,
+						},
 					},
-					{
-						Timestamp: 50,
-						Value:     50,
-					},
-					{
-						Timestamp: 100,
-						Value:     100,
-					},
+					TimeToLive: 3600,
 				},
 			},
 		},
@@ -324,18 +350,21 @@ func TestBatch_flush(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentReader: nil,
@@ -360,18 +389,21 @@ func TestBatch_flush(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 300,
+								Value:     300,
+							},
 						},
-						{
-							Timestamp: 150,
-							Value:     150,
-						},
-						{
-							Timestamp: 300,
-							Value:     300,
-						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentReader: nil,
@@ -400,14 +432,17 @@ func TestBatch_flush(t *testing.T) {
 			},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 0,
-						Value:     0,
+					Points: types.MetricPoints{
+						{
+							Timestamp: 0,
+							Value:     0,
+						},
+						{
+							Timestamp: 150,
+							Value:     150,
+						},
 					},
-					{
-						Timestamp: 150,
-						Value:     150,
-					},
+					TimeToLive: 3600,
 				},
 			},
 		},
@@ -453,21 +488,23 @@ func TestBatch_read(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
-						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
-						{
-							Timestamp: 150,
-							Value:     150,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
 						},
 					},
 				}},
@@ -485,13 +522,15 @@ func TestBatch_read(t *testing.T) {
 			}},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 50,
-						Value:     50,
-					},
-					{
-						Timestamp: 100,
-						Value:     100,
+					Points: types.MetricPoints{
+						{
+							Timestamp: 50,
+							Value:     50,
+						},
+						{
+							Timestamp: 100,
+							Value:     100,
+						},
 					},
 				},
 			},
@@ -504,13 +543,15 @@ func TestBatch_read(t *testing.T) {
 				temporaryStorer: mockStorer{},
 				persistentReader: mockMetricReader{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
 					},
 				}},
@@ -527,13 +568,15 @@ func TestBatch_read(t *testing.T) {
 			}},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 50,
-						Value:     50,
-					},
-					{
-						Timestamp: 100,
-						Value:     100,
+					Points: types.MetricPoints{
+						{
+							Timestamp: 50,
+							Value:     50,
+						},
+						{
+							Timestamp: 100,
+							Value:     100,
+						},
 					},
 				},
 			},
@@ -545,26 +588,31 @@ func TestBatch_read(t *testing.T) {
 				batchSize: 300,
 				temporaryStorer: mockStorer{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
-						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 150,
-							Value:     150,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
 						},
 					},
 				}},
 				persistentReader: mockMetricReader{metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 100,
-							Value:     100,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
 						},
+						TimeToLive: 3600,
 					},
 				}},
 				persistentWriter: nil,
@@ -580,13 +628,15 @@ func TestBatch_read(t *testing.T) {
 			}},
 			want: types.Metrics{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
-					{
-						Timestamp: 50,
-						Value:     50,
-					},
-					{
-						Timestamp: 100,
-						Value:     100,
+					Points: types.MetricPoints{
+						{
+							Timestamp: 50,
+							Value:     50,
+						},
+						{
+							Timestamp: 100,
+							Value:     100,
+						},
 					},
 				},
 			},
@@ -645,18 +695,21 @@ func TestBatch_write(t *testing.T) {
 			args: args{
 				metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
+						TimeToLive: 3600,
 					},
 				},
 				now: time.Unix(100, 0),
@@ -683,18 +736,21 @@ func TestBatch_write(t *testing.T) {
 			args: args{
 				metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 150,
+								Value:     150,
+							},
+							{
+								Timestamp: 300,
+								Value:     300,
+							},
 						},
-						{
-							Timestamp: 150,
-							Value:     150,
-						},
-						{
-							Timestamp: 300,
-							Value:     300,
-						},
+						TimeToLive: 3600,
 					},
 				},
 				now: time.Unix(300, 0),
@@ -721,18 +777,21 @@ func TestBatch_write(t *testing.T) {
 			args: args{
 				metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
-						{
-							Timestamp: 0,
-							Value:     0,
+						Points: types.MetricPoints{
+							{
+								Timestamp: 0,
+								Value:     0,
+							},
+							{
+								Timestamp: 50,
+								Value:     50,
+							},
+							{
+								Timestamp: 100,
+								Value:     100,
+							},
 						},
-						{
-							Timestamp: 50,
-							Value:     50,
-						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
+						TimeToLive: 3600,
 					},
 				},
 				now: time.Unix(100, 0),

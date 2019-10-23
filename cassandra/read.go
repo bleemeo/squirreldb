@@ -20,38 +20,42 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	for _, uuid := range request.UUIDs {
 		fromTimestamp := request.FromTimestamp
 		toTimestamp := request.ToTimestamp
-		var points types.MetricPoints
+		var metricData types.MetricData
 
 		if aggregated {
-			aggregatedPoints, err := c.readAggregatedData(uuid, fromTimestamp, toTimestamp, request.Function)
+			aggregatedMetricData, err := c.readAggregatedData(uuid, fromTimestamp, toTimestamp, request.Function)
 
 			if err != nil {
 				return nil, err
 			}
 
-			points = append(points, aggregatedPoints...)
+			metricData = aggregatedMetricData
 
-			if len(points) != 0 {
-				fromTimestamp = points[len(points)-1].Timestamp + c.options.AggregateResolution
+			length := len(metricData.Points)
+
+			if length != 0 {
+				lastPoint := metricData.Points[length-1]
+				fromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution
 			}
 		}
 
-		rawPoints, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
+		rawMetricData, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
 
 		if err != nil {
 			return nil, err
 		}
 
-		points = append(points, rawPoints...)
+		metricData.Points = append(metricData.Points, rawMetricData.Points...)
+		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, rawMetricData.TimeToLive)
 
-		metrics[uuid] = points
+		metrics[uuid] = metricData
 	}
 
 	return metrics, nil
 }
 
 // Reads raw data
-func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
+func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
 	startTime := time.Now()
 
 	batchSize := c.options.BatchSize
@@ -59,33 +63,34 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
 	dataTable := c.options.dataTable
-	var points types.MetricPoints
+	var metricData types.MetricData
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
 		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
 
 		iterator := c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		partitionPoints, err := iterateRawData(iterator, fromTimestamp, toTimestamp)
+		partitionMetricData, err := iterateRawData(iterator, fromTimestamp, toTimestamp)
 
 		if err != nil {
-			return nil, err
+			return types.MetricData{}, err
 		}
 
-		points = append(points, partitionPoints...)
+		metricData.Points = append(metricData.Points, partitionMetricData.Points...)
+		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
 	}
 
-	points = points.SortUnify()
+	metricData.Points = metricData.Points.SortUnify()
 
 	duration := time.Since(startTime)
 	readRawSecondsTotal.Observe(duration.Seconds())
-	readRawPointsTotal.Add(float64(len(points)))
+	readRawPointsTotal.Add(float64(len(metricData.Points)))
 
-	return points, nil
+	return metricData, nil
 }
 
 // Reads aggregated data
-func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
+func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
 	startTime := time.Now()
 
 	aggregateRowSize := c.options.AggregateSize
@@ -93,29 +98,30 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % aggregatePartitionSize)
 	aggregateDataTable := c.options.aggregateDataTable
-	var points types.MetricPoints
+	var metricData types.MetricData
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += aggregatePartitionSize {
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-aggregateRowSize, 0)
 		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, aggregatePartitionSize)
 
 		iterator := c.readDatabase(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		partitionPoints, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function)
+		partitionMetricData, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function)
 
 		if err != nil {
-			return nil, err
+			return types.MetricData{}, err
 		}
 
-		points = append(points, partitionPoints...)
+		metricData.Points = append(metricData.Points, partitionMetricData.Points...)
+		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
 	}
 
-	points = points.SortUnify()
+	metricData.Points = metricData.Points.SortUnify()
 
 	duration := time.Since(startTime)
 	readAggregatedSecondsTotal.Observe(duration.Seconds())
-	readAggregatedPointsTotal.Add(float64(len(points)))
+	readAggregatedPointsTotal.Add(float64(len(metricData.Points)))
 
-	return points, nil
+	return metricData, nil
 }
 
 // Returns an iterator from the specified table according to the parameters
@@ -124,7 +130,7 @@ func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, f
 
 	iteratorReplacer := strings.NewReplacer("$TABLE", table)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
-		SELECT base_ts, offset_ts, values FROM $TABLE
+		SELECT base_ts, offset_ts, TTL(values), values FROM $TABLE
 		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
 	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
 
@@ -135,12 +141,12 @@ func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, f
 }
 
 // Returns metrics
-func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
-	var baseTimestamp, offsetTimestamp int64
+func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
+	var baseTimestamp, offsetTimestamp, timeToLive int64
 	var values []byte
-	var points types.MetricPoints
+	var metricData types.MetricData
 
-	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &values) {
+	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
 		buffer := bytes.NewReader(values)
 
 	forLoop:
@@ -162,26 +168,28 @@ func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64
 						Value:     pointData.Value,
 					}
 
-					points = append(points, point)
+					metricData.Points = append(metricData.Points, point)
 				}
 			case io.EOF:
 				break forLoop
 			default:
-				return types.MetricPoints{}, err
+				return types.MetricData{}, err
 			}
 		}
+
+		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, timeToLive)
 	}
 
-	return points, nil
+	return metricData, nil
 }
 
 // Returns aggregated metrics
-func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
-	var baseTimestamp, offsetTimestamp int64
+func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
+	var baseTimestamp, offsetTimestamp, timeToLive int64
 	var values []byte
-	var points types.MetricPoints
+	var metricData types.MetricData
 
-	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &values) {
+	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
 		buffer := bytes.NewReader(values)
 
 	forLoop:
@@ -218,15 +226,17 @@ func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestam
 						point.Value = pointData.Average
 					}
 
-					points = append(points, point)
+					metricData.Points = append(metricData.Points, point)
 				}
 			case io.EOF:
 				break forLoop
 			default:
-				return types.MetricPoints{}, err
+				return types.MetricData{}, err
 			}
 		}
+
+		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, timeToLive)
 	}
 
-	return points, nil
+	return metricData, nil
 }

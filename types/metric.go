@@ -23,6 +23,11 @@ type MetricPoint struct {
 
 type MetricPoints []MetricPoint
 
+type MetricData struct {
+	Points     MetricPoints
+	TimeToLive int64
+}
+
 type MetricLabel struct {
 	Name  string
 	Value string
@@ -35,7 +40,7 @@ type MetricUUID struct {
 	uuid.UUID
 }
 
-type Metrics map[MetricUUID]MetricPoints
+type Metrics map[MetricUUID]MetricData
 
 type MetricRequest struct {
 	UUIDs         []MetricUUID
@@ -95,18 +100,18 @@ func (m MetricLabels) Canonical() string {
 // UUID returns generated UUID from labels
 // If a UUID label is specified, the UUID will be generated from its value
 func (m MetricLabels) UUID() MetricUUID {
-	value, exists := m.Value("__bleemeo_uuid__")
-	var mUUID MetricUUID
+	uuidString, exists := m.Value("__bleemeo_uuid__")
+	var metricUUID MetricUUID
 
 	if exists {
-		mUUID.UUID = uuid.FromStringOrNil(value)
+		metricUUID.UUID = uuid.FromStringOrNil(uuidString)
 	} else {
 		canonical := m.Canonical()
 
-		mUUID.UUID = md5.Sum([]byte(canonical))
+		metricUUID.UUID = md5.Sum([]byte(canonical))
 	}
 
-	return mUUID
+	return metricUUID
 }
 
 // Value returns value corresponding to specified label name
@@ -124,7 +129,7 @@ func (m MetricLabels) Value(name string) (string, bool) {
 func (m *MetricUUID) Uint64() uint64 {
 	bigInt := big.NewInt(0).SetBytes(m.Bytes())
 
-	mUint64 := bigInt.Uint64()
+	uuidUint64 := bigInt.Uint64()
 
-	return mUint64
+	return uuidUint64
 }

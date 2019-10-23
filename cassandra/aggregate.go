@@ -83,7 +83,7 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 
 		metrics, err := c.Read(request)
 
-		aggregateProcessedPointsTotal.Add(float64(len(metrics[mUUID])))
+		aggregateProcessedPointsTotal.Add(float64(len(metrics[mUUID].Points)))
 
 		if err != nil {
 			return err

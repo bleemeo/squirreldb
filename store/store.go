@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"squirreldb/compare"
 	"squirreldb/types"
 	"sync"
 	"time"
@@ -17,12 +18,12 @@ const (
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type metric struct {
-	Points              types.MetricPoints
+	types.MetricData
 	ExpirationTimestamp int64
 }
 
 type Store struct {
-	timestampToLive int64
+	timeToLive int64
 
 	Metrics map[types.MetricUUID]metric
 	mutex   sync.Mutex
@@ -31,8 +32,8 @@ type Store struct {
 // New creates a new Store object
 func New(batchSize int64, offset int64) *Store {
 	return &Store{
-		timestampToLive: (batchSize * 2) + offset,
-		Metrics:         make(map[types.MetricUUID]metric),
+		timeToLive: (batchSize * 2) + offset,
+		Metrics:    make(map[types.MetricUUID]metric),
 	}
 }
 
@@ -79,21 +80,23 @@ func (s *Store) Run(ctx context.Context) {
 
 // Appends metrics to existing items and update expiration
 func (s *Store) append(newMetrics, actualMetrics types.Metrics, now time.Time) error {
-	expirationTimestamp := now.Unix() + +s.timestampToLive
+	expirationTimestamp := now.Unix() + +s.timeToLive
 
-	for uuid, points := range newMetrics {
+	for uuid, metricData := range newMetrics {
 		metric := s.Metrics[uuid]
 
-		metric.Points = append(metric.Points, points...)
+		metric.Points = append(metric.Points, metricData.Points...)
+		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
 		metric.ExpirationTimestamp = expirationTimestamp
 
 		s.Metrics[uuid] = metric
 	}
 
-	for uuid, points := range actualMetrics {
+	for uuid, metricData := range actualMetrics {
 		metric := s.Metrics[uuid]
 
-		metric.Points = append(metric.Points, points...)
+		metric.Points = append(metric.Points, metricData.Points...)
+		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
 		metric.ExpirationTimestamp = expirationTimestamp
 
 		s.Metrics[uuid] = metric
@@ -124,7 +127,7 @@ func (s *Store) get(uuids []types.MetricUUID) (types.Metrics, error) {
 		metric, exists := s.Metrics[uuid]
 
 		if exists {
-			metrics[uuid] = metric.Points
+			metrics[uuid] = metric.MetricData
 		}
 	}
 
@@ -133,21 +136,21 @@ func (s *Store) get(uuids []types.MetricUUID) (types.Metrics, error) {
 
 // Set metrics (overwrite existing items) and expiration
 func (s *Store) set(newMetrics, actualMetrics types.Metrics, now time.Time) error {
-	expirationTimestamp := now.Unix() + s.timestampToLive
+	expirationTimestamp := now.Unix() + s.timeToLive
 
-	for uuid, data := range newMetrics {
+	for uuid, metricData := range newMetrics {
 		metric := s.Metrics[uuid]
 
-		metric.Points = data
+		metric.MetricData = metricData
 		metric.ExpirationTimestamp = expirationTimestamp
 
 		s.Metrics[uuid] = metric
 	}
 
-	for uuid, data := range actualMetrics {
+	for uuid, metricData := range actualMetrics {
 		metric := s.Metrics[uuid]
 
-		metric.Points = data
+		metric.MetricData = metricData
 		metric.ExpirationTimestamp = expirationTimestamp
 
 		s.Metrics[uuid] = metric

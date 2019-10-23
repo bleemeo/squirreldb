@@ -15,27 +15,34 @@ type AggregatedPoint struct {
 
 type AggregatedPoints []AggregatedPoint
 
-type AggregatedMetrics map[types.MetricUUID]AggregatedPoints
+type AggregatedData struct {
+	Points     AggregatedPoints
+	TimeToLive int64
+}
+
+type AggregatedMetrics map[types.MetricUUID]AggregatedData
 
 // Metrics returns AggregatedMetrics according to the parameters
 func Metrics(metrics types.Metrics, fromTimestamp, toTimestamp, resolution int64) AggregatedMetrics {
 	aggregatedMetrics := make(AggregatedMetrics)
 
-	for uuid, points := range metrics {
-		aggregatedMetrics[uuid] = MetricPoints(points, fromTimestamp, toTimestamp, resolution)
+	for uuid, metricData := range metrics {
+		aggregatedMetrics[uuid] = MetricData(metricData, fromTimestamp, toTimestamp, resolution)
 	}
 
 	return aggregatedMetrics
 }
 
 // MetricPoints returns AggregatedPoints according to the parameters
-func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, resolution int64) AggregatedPoints {
-	var aggregatedPoints AggregatedPoints
+func MetricData(metricData types.MetricData, fromTimestamp, toTimestamp, resolution int64) AggregatedData {
+	aggregatedData := AggregatedData{
+		TimeToLive: metricData.TimeToLive,
+	}
 
 	for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += resolution {
 		var resolutionPoints types.MetricPoints
 
-		for _, point := range points {
+		for _, point := range metricData.Points {
 			if (point.Timestamp >= timestamp) && (point.Timestamp < (timestamp + resolution)) {
 				resolutionPoints = append(resolutionPoints, point)
 			}
@@ -44,11 +51,11 @@ func MetricPoints(points types.MetricPoints, fromTimestamp, toTimestamp, resolut
 		if len(resolutionPoints) != 0 {
 			aggregatedPoint := aggregate(timestamp, resolutionPoints)
 
-			aggregatedPoints = append(aggregatedPoints, aggregatedPoint)
+			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
 		}
 	}
 
-	return aggregatedPoints
+	return aggregatedData
 }
 
 // Returns an AggregatedPoint from specified MetricPoints

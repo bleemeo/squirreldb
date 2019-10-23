@@ -17,10 +17,14 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 
 	nowUnix := time.Now().Unix()
 
-	for uuid, points := range metrics {
+	for uuid, metricData := range metrics {
 		baseTimestampPoints := make(map[int64]types.MetricPoints)
 
-		for _, point := range points {
+		if metricData.TimeToLive <= 0 {
+			metricData.TimeToLive = c.options.DefaultTimeToLive
+		}
+
+		for _, point := range metricData.Points {
 			baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
 
 			baseTimestampPoints[baseTimestamp] = append(baseTimestampPoints[baseTimestamp], point)
@@ -41,9 +45,9 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 			}
 
 			age := nowUnix - biggestTimestamp
-			timestampToLive := c.options.DefaultTimeToLive - age // TODO: Time to live support
+			timeToLive := metricData.TimeToLive - age
 
-			if timestampToLive > 0 {
+			if timeToLive > 0 {
 				offsetTimestamp := smallestTimestamp - baseTimestamp
 				buffer := new(bytes.Buffer)
 
@@ -60,13 +64,13 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 					}
 				}
 
-				if err := c.writeDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
+				if err := c.writeDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
 		}
 
-		totalPoints += float64(len(points))
+		totalPoints += float64(len(metricData.Points))
 	}
 
 	duration := time.Since(startTime)
@@ -83,10 +87,14 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 
 	nowUnix := time.Now().Unix()
 
-	for uuid, aggregatedPoints := range aggregatedMetrics {
+	for uuid, aggregatedData := range aggregatedMetrics {
 		baseTimestampPoints := make(map[int64][]aggregate.AggregatedPoint)
 
-		for _, point := range aggregatedPoints {
+		if aggregatedData.TimeToLive <= 0 {
+			aggregatedData.TimeToLive = c.options.DefaultTimeToLive
+		}
+
+		for _, point := range aggregatedData.Points {
 			baseTimestamp := point.Timestamp - (point.Timestamp % c.options.AggregatePartitionSize)
 
 			baseTimestampPoints[baseTimestamp] = append(baseTimestampPoints[baseTimestamp], point)
@@ -107,9 +115,9 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 			}
 
 			age := nowUnix - biggestTimestamp
-			timestampToLive := c.options.DefaultTimeToLive - age // TODO: Time to live support
+			timeToLive := aggregatedData.TimeToLive - age
 
-			if timestampToLive > 0 {
+			if timeToLive > 0 {
 				offsetTimestamp := smallestTimestamp - baseTimestamp
 				buffer := new(bytes.Buffer)
 
@@ -129,13 +137,13 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 					}
 				}
 
-				if err := c.writeDatabase(c.options.aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timestampToLive, buffer.Bytes()); err != nil {
+				if err := c.writeDatabase(c.options.aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
 		}
 
-		totalAggregatedPoints += float64(len(aggregatedPoints))
+		totalAggregatedPoints += float64(len(aggregatedData.Points))
 	}
 
 	duration := time.Since(startTime)

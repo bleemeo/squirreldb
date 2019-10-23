@@ -134,26 +134,35 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 	for uuid, states := range flushQueue {
 		currentState := b.states[uuid]
-		var points types.MetricPoints
+		temporaryMetricData := temporaryMetrics[uuid]
+		var pointsToSet types.MetricPoints
 
-		for _, point := range temporaryMetrics[uuid] {
+		for _, point := range temporaryMetricData.Points {
 			if (point.Timestamp >= cutoff) || (point.Timestamp >= currentState.firstPointTimestamp) {
-				points = append(points, point)
+				pointsToSet = append(pointsToSet, point)
 			}
 		}
 
-		metricsToSet[uuid] = points
+		data := types.MetricData{
+			Points:     pointsToSet,
+			TimeToLive: temporaryMetricData.TimeToLive,
+		}
+		metricsToSet[uuid] = data
 
 		for _, state := range states {
-			var points types.MetricPoints
+			var pointsToWrite types.MetricPoints
 
-			for _, point := range temporaryMetrics[uuid] {
+			for _, point := range temporaryMetricData.Points {
 				if (point.Timestamp >= state.firstPointTimestamp) && (point.Timestamp <= state.lastPointTimestamp) {
-					points = append(points, point)
+					pointsToWrite = append(pointsToWrite, point)
 				}
 			}
 
-			metricsToWrite[uuid] = points
+			data := types.MetricData{
+				Points:     pointsToWrite,
+				TimeToLive: temporaryMetricData.TimeToLive,
+			}
+			metricsToWrite[uuid] = data
 		}
 	}
 
@@ -196,16 +205,19 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	for uuid, temporaryPoints := range temporaryMetrics {
+	for uuid, temporaryMetricData := range temporaryMetrics {
 		var points types.MetricPoints
 
-		for _, point := range temporaryPoints {
+		for _, point := range temporaryMetricData.Points {
 			if point.Timestamp >= request.FromTimestamp && point.Timestamp <= request.ToTimestamp {
 				points = append(points, point)
 			}
 		}
 
-		metrics[uuid] = points.SortUnify()
+		data := types.MetricData{
+			Points: points.SortUnify(),
+		}
+		metrics[uuid] = data
 	}
 
 	// Retrieves metrics from the persistent storage
@@ -222,8 +234,11 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	for uuid, persistentPoints := range persistentMetrics {
-		metrics[uuid] = append(persistentPoints, metrics[uuid]...)
+	for uuid, persistentMetricData := range persistentMetrics {
+		data := types.MetricData{
+			Points: append(persistentMetricData.Points, metrics[uuid].Points...),
+		}
+		metrics[uuid] = data
 	}
 
 	return metrics, nil
@@ -238,8 +253,8 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 	newMetrics := make(types.Metrics)
 	actualMetrics := make(types.Metrics)
 
-	for uuid, points := range metrics {
-		for _, point := range points {
+	for uuid, metricData := range metrics {
+		for _, point := range metricData.Points {
 			currentState, exists := b.states[uuid]
 
 			if !exists {
@@ -274,10 +289,16 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 
 			b.states[uuid] = currentState
 
+			data := types.MetricData{
+				TimeToLive: metricData.TimeToLive,
+			}
+
 			if !exists {
-				newMetrics[uuid] = append(newMetrics[uuid], point)
+				data.Points = append(newMetrics[uuid].Points, point)
+				newMetrics[uuid] = data
 			} else {
-				actualMetrics[uuid] = append(actualMetrics[uuid], point)
+				data.Points = append(actualMetrics[uuid].Points, point)
+				actualMetrics[uuid] = data
 			}
 		}
 	}

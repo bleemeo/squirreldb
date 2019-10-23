@@ -3,13 +3,13 @@ package index
 import "squirreldb/types"
 
 type Index struct {
-	Matchers map[types.MetricUUID]types.MetricLabels
+	Pairs map[types.MetricUUID]types.MetricLabels
 }
 
 // New creates a new Index object
 func New() *Index {
 	return &Index{
-		Matchers: make(map[types.MetricUUID]types.MetricLabels),
+		Pairs: make(map[types.MetricUUID]types.MetricLabels),
 	}
 }
 
@@ -17,7 +17,7 @@ func New() *Index {
 func (m *Index) UUID(labels types.MetricLabels) types.MetricUUID {
 	uuid := labels.UUID()
 
-	m.Matchers[uuid] = labels
+	m.Pairs[uuid] = labels
 
 	return uuid
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"
+	"strconv"
 	"time"
 )
 
@@ -49,9 +50,10 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	for _, series := range writeRequest.Timeseries {
 		labels := pbLabelsToLabels(series.Labels)
+		timeToLive := timeToLive(labels)
 		uuid := w.indexer.UUID(labels)
 
-		metrics[uuid] = toMetricPoints(series)
+		metrics[uuid] = toMetricData(series, timeToLive)
 	}
 
 	_ = backoff.Retry(func() error {
@@ -81,8 +83,19 @@ func pbLabelsToLabels(pbLabels []*prompb.Label) types.MetricLabels {
 	return labels
 }
 
+func timeToLive(labels types.MetricLabels) int64 {
+	timeToLiveString, exists := labels.Value("__bleemeo_ttl__")
+	var timeToLive int64
+
+	if exists {
+		timeToLive, _ = strconv.ParseInt(timeToLiveString, 10, 64)
+	}
+
+	return timeToLive
+}
+
 // Generate MetricPoints
-func toMetricPoints(series *prompb.TimeSeries) types.MetricPoints {
+func toMetricData(series *prompb.TimeSeries, timeToLive int64) types.MetricData {
 	var points types.MetricPoints
 
 	for _, sample := range series.Samples {
@@ -94,5 +107,10 @@ func toMetricPoints(series *prompb.TimeSeries) types.MetricPoints {
 		points = append(points, point)
 	}
 
-	return points
+	metricData := types.MetricData{
+		Points:     points,
+		TimeToLive: timeToLive,
+	}
+
+	return metricData
 }

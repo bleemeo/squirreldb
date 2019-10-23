@@ -15,7 +15,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "new",
 			want: &Index{
-				Matchers: make(map[types.MetricUUID]types.MetricLabels),
+				Pairs: make(map[types.MetricUUID]types.MetricLabels),
 			},
 		},
 	}
@@ -62,7 +62,7 @@ func TestIndex_UUID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Index{
-				Matchers: tt.fields.Matchers,
+				Pairs: tt.fields.Matchers,
 			}
 			if got := m.UUID(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("UUID() = %v, want %v", got, tt.want)
