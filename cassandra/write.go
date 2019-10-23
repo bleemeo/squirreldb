@@ -12,6 +12,9 @@ import (
 
 // Write writes metrics in the data table
 func (c *Cassandra) Write(metrics types.Metrics) error {
+	startTime := time.Now()
+	var totalPoints float64
+
 	nowUnix := time.Now().Unix()
 
 	for uuid, points := range metrics {
@@ -62,13 +65,22 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 				}
 			}
 		}
+
+		totalPoints += float64(len(points))
 	}
+
+	duration := time.Since(startTime)
+	wroteRawSecondsTotal.Observe(duration.Seconds())
+	wroteRawPointsTotal.Add(totalPoints)
 
 	return nil
 }
 
 // Writes aggregated metrics in the data aggregated table
 func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
+	startTime := time.Now()
+	var totalAggregatedPoints float64
+
 	nowUnix := time.Now().Unix()
 
 	for uuid, aggregatedPoints := range aggregatedMetrics {
@@ -122,13 +134,21 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 				}
 			}
 		}
+
+		totalAggregatedPoints += float64(len(aggregatedPoints))
 	}
+
+	duration := time.Since(startTime)
+	wroteAggregatedSecondsTotal.Observe(duration.Seconds())
+	wroteAggregatedPointsTotal.Add(totalAggregatedPoints)
 
 	return nil
 }
 
 // Write in the specified table according to the parameters
 func (c *Cassandra) writeDatabase(table string, uuid gocql.UUID, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) error {
+	startTime := time.Now()
+
 	insertReplacer := strings.NewReplacer("$TABLE", table)
 	insert := c.session.Query(insertReplacer.Replace(`
 		INSERT INTO $TABLE (metric_uuid, base_ts, offset_ts, insert_time, values)
@@ -139,6 +159,9 @@ func (c *Cassandra) writeDatabase(table string, uuid gocql.UUID, baseTimestamp, 
 	if err := insert.Exec(); err != nil {
 		return err
 	}
+
+	duration := time.Since(startTime)
+	writeQueriesTotal.Observe(duration.Seconds())
 
 	return nil
 }

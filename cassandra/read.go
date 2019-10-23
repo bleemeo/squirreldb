@@ -8,6 +8,7 @@ import (
 	"squirreldb/compare"
 	"squirreldb/types"
 	"strings"
+	"time"
 )
 
 // Read returns metrics according to the request
@@ -51,6 +52,8 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 // Reads raw data
 func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricPoints, error) {
+	startTime := time.Now()
+
 	batchSize := c.options.BatchSize
 	rawPartitionSize := c.options.RawPartitionSize
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
@@ -74,11 +77,17 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 
 	points = points.SortUnify()
 
+	duration := time.Since(startTime)
+	readRawSecondsTotal.Observe(duration.Seconds())
+	readRawPointsTotal.Add(float64(len(points)))
+
 	return points, nil
 }
 
 // Reads aggregated data
 func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricPoints, error) {
+	startTime := time.Now()
+
 	aggregateRowSize := c.options.AggregateSize
 	aggregatePartitionSize := c.options.AggregatePartitionSize
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize)
@@ -102,16 +111,25 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 
 	points = points.SortUnify()
 
+	duration := time.Since(startTime)
+	readAggregatedSecondsTotal.Observe(duration.Seconds())
+	readAggregatedPointsTotal.Add(float64(len(points)))
+
 	return points, nil
 }
 
 // Returns an iterator from the specified table according to the parameters
 func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	startTime := time.Now()
+
 	iteratorReplacer := strings.NewReplacer("$TABLE", table)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
 		SELECT base_ts, offset_ts, values FROM $TABLE
 		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
 	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+
+	duration := time.Since(startTime)
+	readQueriesTotal.Observe(duration.Seconds())
 
 	return iterator
 }

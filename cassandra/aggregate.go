@@ -21,7 +21,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 	fromTimestamp := toTimestamp - c.options.AggregateSize
 	waitTimestamp := nowUnix - toTimestamp + c.options.AggregateStartOffset
 
-	if c.options.DebugAggregateForce { // TODO: DEBUG
+	if c.options.DebugAggregateForce { // TODO: Debug
 		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
 		waitTimestamp = 5
 	}
@@ -39,6 +39,9 @@ func (c *Cassandra) Run(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
+		nowUnix = time.Now().Unix()
+		aggregateNextTimestamp.Set(float64(nowUnix + c.options.AggregateSize))
+
 		_ = backoff.Retry(func() error {
 			err := c.aggregate(fromTimestamp, toTimestamp)
 
@@ -52,6 +55,9 @@ func (c *Cassandra) Run(ctx context.Context) {
 		fromTimestamp = toTimestamp
 		toTimestamp += c.options.AggregateSize
 
+		nowUnix = time.Now().Unix()
+		aggregateLastTimestamp.Set(float64(nowUnix))
+
 		logger.Println("Run: Aggregate") // TODO: Debug
 
 		select {
@@ -64,9 +70,9 @@ func (c *Cassandra) Run(ctx context.Context) {
 }
 
 func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
-	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
+	startTime := time.Now()
 
-	processStartTime := time.Now()
+	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
 
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
@@ -77,7 +83,7 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 
 		metrics, err := c.Read(request)
 
-		aggregateReadPointsTotal.Add(float64(len(metrics[mUUID])))
+		aggregateProcessedPointsTotal.Add(float64(len(metrics[mUUID])))
 
 		if err != nil {
 			return err
@@ -89,22 +95,18 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 			if err := c.writeAggregated(aggregatedMetrics); err != nil {
 				return err
 			}
-
-			aggregateWrotePointsTotal.Add(float64(len(aggregatedMetrics[mUUID])))
-			aggregateWroteRowsTotal.Inc()
 		}
 	}
 
-	processDuration := time.Since(processStartTime)
-	aggregateSecondsTotal.Observe(processDuration.Seconds())
+	duration := time.Since(startTime)
+	aggregateSecondsTotal.Add(duration.Seconds())
 
-	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags)
-
+	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags) // TODO: Debug
 	debugLog.Println("[cassandra] aggregate():")
 	debugLog.Printf("\t"+"|_ fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
 		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0))
 	debugLog.Printf("\t"+"|_ Process %d metric(s) in %v (%f metric(s)/s)",
-		len(uuids), processDuration, float64(len(uuids))/processDuration.Seconds())
+		len(uuids), duration, float64(len(uuids))/duration.Seconds())
 
 	return nil
 }

@@ -57,8 +57,8 @@ func main() {
 		AggregateStartOffset:   squirrelConfig.Int64("cassandra.aggregate.start_offset"),
 		AggregatePartitionSize: squirrelConfig.Int64("cassandra.partition_size.aggregate"),
 
-		DebugAggregateForce: squirrelConfig.Bool("debug.aggregate.force"), // TODO: Debug variable
-		DebugAggregateSize:  squirrelConfig.Int64("debug.aggregate.size"), // TODO: Debug variable
+		DebugAggregateForce: squirrelConfig.Bool("debug.aggregate.force"), // TODO: Debug
+		DebugAggregateSize:  squirrelConfig.Int64("debug.aggregate.size"), // TODO: Debug
 	}
 
 	var squirrelCassandra *cassandra.Cassandra
