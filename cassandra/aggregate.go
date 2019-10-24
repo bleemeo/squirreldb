@@ -40,7 +40,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 
 	for {
 		nowUnix = time.Now().Unix()
-		aggregateNextTimestamp.Set(float64(nowUnix + c.options.AggregateSize))
+		aggregateNextTimestamp.Set(float64(nowUnix+c.options.AggregateSize) * 1000)
 
 		_ = backoff.Retry(func() error {
 			err := c.aggregate(fromTimestamp, toTimestamp)
@@ -56,7 +56,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 		toTimestamp += c.options.AggregateSize
 
 		nowUnix = time.Now().Unix()
-		aggregateLastTimestamp.Set(float64(nowUnix))
+		aggregateLastTimestamp.Set(float64(nowUnix) * 1000)
 
 		logger.Println("Run: Aggregate") // TODO: Debug
 

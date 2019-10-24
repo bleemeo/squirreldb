@@ -162,7 +162,7 @@ func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64
 			case nil:
 				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
 
-				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
+				if (timestamp >= fromTimestamp) && (timestamp < toTimestamp) {
 					point := types.MetricPoint{
 						Timestamp: timestamp,
 						Value:     pointData.Value,
@@ -208,7 +208,7 @@ func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestam
 			case nil:
 				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
 
-				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
+				if (timestamp >= fromTimestamp) && (timestamp < toTimestamp) {
 					point := types.MetricPoint{
 						Timestamp: timestamp,
 					}
