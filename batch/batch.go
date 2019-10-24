@@ -209,7 +209,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		var points types.MetricPoints
 
 		for _, point := range temporaryMetricData.Points {
-			if point.Timestamp >= request.FromTimestamp && point.Timestamp < request.ToTimestamp {
+			if point.Timestamp >= request.FromTimestamp && point.Timestamp <= request.ToTimestamp {
 				points = append(points, point)
 			}
 		}
