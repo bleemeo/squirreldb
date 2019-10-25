@@ -495,7 +495,7 @@ func TestStore_get(t *testing.T) {
 		Metrics    map[types.MetricUUID]metric
 	}
 	type args struct {
-		uuids []types.MetricUUID
+		uuids types.MetricUUIDs
 	}
 	tests := []struct {
 		name    string
@@ -510,7 +510,7 @@ func TestStore_get(t *testing.T) {
 				timeToLive: 300,
 				Metrics:    make(map[types.MetricUUID]metric),
 			},
-			args: args{uuids: []types.MetricUUID{
+			args: args{uuids: types.MetricUUIDs{
 				uuidify("00000000-0000-0000-0000-000000000001"),
 			}},
 			want:    make(types.Metrics),
@@ -543,7 +543,7 @@ func TestStore_get(t *testing.T) {
 					},
 				},
 			},
-			args: args{uuids: []types.MetricUUID{
+			args: args{uuids: types.MetricUUIDs{
 				uuidify("00000000-0000-0000-0000-000000000001"),
 			}},
 			want: types.Metrics{

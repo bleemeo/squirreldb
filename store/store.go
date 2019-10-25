@@ -46,7 +46,7 @@ func (s *Store) Append(newMetrics, actualMetrics types.Metrics) error {
 }
 
 // Get is the public function of get()
-func (s *Store) Get(uuids []types.MetricUUID) (types.Metrics, error) {
+func (s *Store) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -120,7 +120,7 @@ func (s *Store) expire(now time.Time) {
 }
 
 // Returns requested metrics
-func (s *Store) get(uuids []types.MetricUUID) (types.Metrics, error) {
+func (s *Store) get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
 	for _, uuid := range uuids {

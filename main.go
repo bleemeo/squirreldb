@@ -74,9 +74,9 @@ func main() {
 		return err
 	}, retry.NewBackOff(30*time.Second))
 
-	squirrelIndex := index.New()
 	squirrelStore := store.New(batchSize, store.TimeToLiveOffset)
 	squirrelBatch := batch.New(batchSize, squirrelStore, squirrelCassandra, squirrelCassandra)
+	squirrelIndex := index.New(squirrelCassandra)
 	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
 
 	signalChan := make(chan os.Signal, 1)

@@ -74,7 +74,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 	}
 
 	duration := time.Since(startTime)
-	wroteRawSecondsTotal.Observe(duration.Seconds())
+	wroteRawSeconds.Observe(duration.Seconds())
 	wroteRawPointsTotal.Add(totalPoints)
 
 	return nil
@@ -147,7 +147,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 	}
 
 	duration := time.Since(startTime)
-	wroteAggregatedSecondsTotal.Observe(duration.Seconds())
+	wroteAggregatedSeconds.Observe(duration.Seconds())
 	wroteAggregatedPointsTotal.Add(totalAggregatedPoints)
 
 	return nil
@@ -169,7 +169,7 @@ func (c *Cassandra) writeDatabase(table string, uuid gocql.UUID, baseTimestamp, 
 	}
 
 	duration := time.Since(startTime)
-	writeQueriesTotal.Observe(duration.Seconds())
+	writeQueriesSeconds.Observe(duration.Seconds())
 
 	return nil
 }

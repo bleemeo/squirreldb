@@ -40,10 +40,12 @@ type MetricUUID struct {
 	uuid.UUID
 }
 
+type MetricUUIDs []MetricUUID
+
 type Metrics map[MetricUUID]MetricData
 
 type MetricRequest struct {
-	UUIDs         []MetricUUID
+	UUIDs         MetricUUIDs
 	FromTimestamp int64
 	ToTimestamp   int64
 	Step          int64
@@ -97,6 +99,16 @@ func (m MetricLabels) Canonical() string {
 	return canonical
 }
 
+func (m MetricLabels) Map() map[string]string {
+	res := make(map[string]string, len(m))
+
+	for _, label := range m {
+		res[label.Name] = label.Value
+	}
+
+	return res
+}
+
 // UUID returns generated UUID from labels
 // If a UUID label is specified, the UUID will be generated from its value
 func (m MetricLabels) UUID() MetricUUID {
@@ -132,4 +144,19 @@ func (m *MetricUUID) Uint64() uint64 {
 	uuidUint64 := bigInt.Uint64()
 
 	return uuidUint64
+}
+
+func LabelsFromMap(m map[string]string) MetricLabels {
+	labels := make(MetricLabels, 0, len(m))
+
+	for name, value := range m {
+		label := MetricLabel{
+			Name:  name,
+			Value: value,
+		}
+
+		labels = append(labels, label)
+	}
+
+	return labels
 }

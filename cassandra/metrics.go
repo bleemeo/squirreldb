@@ -18,7 +18,7 @@ var (
 		Name:      "next_timestamp",
 		Help:      "Next aggregation timestamp",
 	})
-	aggregateSecondsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	aggregateSeconds = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "cassandra",
 		Subsystem: "aggregate",
 		Name:      "seconds_total",
@@ -30,14 +30,14 @@ var (
 		Name:      "processed_points_total",
 		Help:      "Total number of points processed",
 	})
-	readAggregatedSecondsTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	readAggregatedSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "read_seconds",
 		Help:        "Total seconds of reading",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
-	readRawSecondsTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	readRawSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "read_seconds",
@@ -58,14 +58,14 @@ var (
 		Help:        "Total number of points read",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
-	wroteAggregatedSecondsTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	wroteAggregatedSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "wrote_seconds",
 		Help:        "Total seconds of writing",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
-	wroteRawSecondsTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	wroteRawSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "wrote_seconds",
@@ -86,14 +86,14 @@ var (
 		Help:        "Total number of points wrote",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
-	readQueriesTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	readQueriesSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "queries_seconds",
 		Help:        "Total number of queries",
 		ConstLabels: prometheus.Labels{"type": "read"},
 	})
-	writeQueriesTotal = promauto.NewSummary(prometheus.SummaryOpts{
+	writeQueriesSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "",
 		Name:        "queries_seconds",

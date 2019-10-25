@@ -11,6 +11,7 @@ import (
 const (
 	DataTable          = "data"
 	AggregateDataTable = "data_aggregated"
+	IndexTable         = "indx"
 )
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
@@ -32,6 +33,7 @@ type Options struct {
 
 	dataTable          string
 	aggregateDataTable string
+	indexTable         string
 }
 
 type Cassandra struct {
@@ -52,6 +54,7 @@ func New(options Options) (*Cassandra, error) {
 
 	options.dataTable = options.Keyspace + "." + DataTable
 	options.aggregateDataTable = options.Keyspace + "." + AggregateDataTable
+	options.indexTable = options.Keyspace + "." + IndexTable
 
 	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 
@@ -123,6 +126,20 @@ func New(options Options) (*Cassandra, error) {
 	`))
 
 	if err := createAggregatedDataTable.Exec(); err != nil {
+		session.Close()
+		return nil, err
+	}
+
+	createIndexTableReplacer := strings.NewReplacer("$INDEX_TABLE", options.indexTable)
+	createIndexTable := session.Query(createIndexTableReplacer.Replace(`
+		CREATE TABLE IF NOT EXISTS $INDEX_TABLE (
+			metric_uuid uuid,
+			labels map<text, text>,
+			PRIMARY KEY (metric_uuid)
+		)
+	`))
+
+	if err := createIndexTable.Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}

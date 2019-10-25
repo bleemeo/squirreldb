@@ -67,7 +67,7 @@ func (m *mockStorer) Append(newMetrics, actualMetrics types.Metrics) error {
 	return nil
 }
 
-func (m *mockStorer) Get(uuids []types.MetricUUID) (types.Metrics, error) {
+func (m *mockStorer) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
 	for _, uuid := range uuids {
@@ -513,7 +513,7 @@ func TestBatch_read(t *testing.T) {
 				states:           nil,
 			},
 			args: args{request: types.MetricRequest{
-				UUIDs: []types.MetricUUID{
+				UUIDs: types.MetricUUIDs{
 					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,
@@ -559,7 +559,7 @@ func TestBatch_read(t *testing.T) {
 				states:           nil,
 			},
 			args: args{request: types.MetricRequest{
-				UUIDs: []types.MetricUUID{
+				UUIDs: types.MetricUUIDs{
 					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,
@@ -619,7 +619,7 @@ func TestBatch_read(t *testing.T) {
 				states:           nil,
 			},
 			args: args{request: types.MetricRequest{
-				UUIDs: []types.MetricUUID{
+				UUIDs: types.MetricUUIDs{
 					uuidify("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 50,

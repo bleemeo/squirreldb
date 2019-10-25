@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"squirreldb/aggregate"
-	"squirreldb/compare"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
@@ -35,6 +34,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 		return
 	}
 
+	uuids := c.readUUIDs()
 	ticker := time.NewTicker(time.Duration(c.options.AggregateSize) * time.Second)
 	defer ticker.Stop()
 
@@ -42,15 +42,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 		nowUnix = time.Now().Unix()
 		aggregateNextTimestamp.Set(float64(nowUnix+c.options.AggregateSize) * 1000)
 
-		_ = backoff.Retry(func() error {
-			err := c.aggregate(fromTimestamp, toTimestamp)
-
-			if err != nil {
-				logger.Println("aggregate: Can't aggregate (", err, ")")
-			}
-
-			return err
-		}, retry.NewBackOff(30*time.Second))
+		c.aggregateInParts(ctx, uuids, fromTimestamp, toTimestamp, 20, 4)
 
 		fromTimestamp = toTimestamp
 		toTimestamp += c.options.AggregateSize
@@ -58,7 +50,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 		nowUnix = time.Now().Unix()
 		aggregateLastTimestamp.Set(float64(nowUnix) * 1000)
 
-		logger.Println("Run: Aggregate") // TODO: Debug
+		logger.Println("Run: Aggregate all parts") // TODO: Debug
 
 		select {
 		case <-ticker.C:
@@ -69,14 +61,47 @@ func (c *Cassandra) Run(ctx context.Context) {
 	}
 }
 
-func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
-	startTime := time.Now()
+func (c *Cassandra) aggregateInParts(ctx context.Context, uuids types.MetricUUIDs, fromTimestamp, toTimestamp, size int64, parts int) {
+	ticker := time.NewTicker(time.Duration(size/int64(parts)) * time.Second)
+	uuidsLen := len(uuids)
+	var fromIndex, toIndex int
+	var force bool
 
-	uuids := c.readUUIDs(fromTimestamp, toTimestamp)
+	for i := 0; i < parts; i++ {
+		fromIndex = int(float64(uuidsLen) * (float64(i) / float64(parts)))
+		toIndex = int(float64(uuidsLen) * (float64(i+1) / float64(parts)))
+		uuidsPart := uuids[fromIndex:toIndex]
+
+		_ = backoff.Retry(func() error {
+			err := c.aggregate(uuidsPart, fromTimestamp, toTimestamp)
+
+			if err != nil {
+				logger.Println("aggregateInParts: Can't aggregate (", err, ")")
+			}
+
+			return err
+		}, retry.NewBackOff(30*time.Second))
+
+		logger.Println("aggregateInParts: Aggregate from", fromIndex, "to", toIndex, "on", uuidsLen, "metrics") // TODO: Debug
+
+		if force {
+			continue
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			force = true
+		}
+	}
+}
+
+func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
+	startTime := time.Now()
 
 	for _, mUUID := range uuids {
 		request := types.MetricRequest{
-			UUIDs:         []types.MetricUUID{mUUID},
+			UUIDs:         types.MetricUUIDs{mUUID},
 			FromTimestamp: fromTimestamp,
 			ToTimestamp:   toTimestamp,
 		}
@@ -99,7 +124,7 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	}
 
 	duration := time.Since(startTime)
-	aggregateSecondsTotal.Add(duration.Seconds())
+	aggregateSeconds.Add(duration.Seconds())
 
 	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags) // TODO: Debug
 	debugLog.Println("[cassandra] aggregate():")
@@ -111,33 +136,17 @@ func (c *Cassandra) aggregate(fromTimestamp, toTimestamp int64) error {
 	return nil
 }
 
-func (c *Cassandra) readUUIDs(fromTimestamp, toTimestamp int64) []types.MetricUUID {
-	batchSize := c.options.BatchSize
-	rawPartitionSize := c.options.RawPartitionSize
-	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
-	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
+func (c *Cassandra) readUUIDs() types.MetricUUIDs {
+	var uuids types.MetricUUIDs
 
-	uuidMap := make(map[types.MetricUUID]bool)
+	iterator := c.readDatabaseUUIDs()
+	var metricUUID string
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
-		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
-		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
-
-		iterator := c.readDatabaseUUIDs(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		var metricUUID string
-
-		for iterator.Scan(&metricUUID) {
-			uuidItem := types.MetricUUID{
-				UUID: uuid.FromStringOrNil(metricUUID),
-			}
-
-			uuidMap[uuidItem] = true
+	for iterator.Scan(&metricUUID) {
+		uuidItem := types.MetricUUID{
+			UUID: uuid.FromStringOrNil(metricUUID),
 		}
-	}
 
-	var uuids []types.MetricUUID
-
-	for uuidItem := range uuidMap {
 		uuids = append(uuids, uuidItem)
 	}
 
@@ -145,13 +154,12 @@ func (c *Cassandra) readUUIDs(fromTimestamp, toTimestamp int64) []types.MetricUU
 }
 
 // Returns an iterator of all metrics from the data table according to the parameters
-func (c *Cassandra) readDatabaseUUIDs(baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
-	iteratorReplacer := strings.NewReplacer("$DATA_TABLE", c.options.dataTable)
+func (c *Cassandra) readDatabaseUUIDs() *gocql.Iter {
+	iteratorReplacer := strings.NewReplacer("$INDEX_TABLE", c.options.indexTable)
 	iterator := c.session.Query(iteratorReplacer.Replace(`
-		SELECT metric_uuid FROM $DATA_TABLE
-		WHERE base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
+		SELECT metric_uuid FROM $INDEX_TABLE
 		ALLOW FILTERING
-	`), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+	`)).Iter()
 
 	return iterator
 }

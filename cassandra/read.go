@@ -83,7 +83,7 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 	metricData.Points = metricData.Points.SortUnify()
 
 	duration := time.Since(startTime)
-	readRawSecondsTotal.Observe(duration.Seconds())
+	readRawSeconds.Observe(duration.Seconds())
 	readRawPointsTotal.Add(float64(len(metricData.Points)))
 
 	return metricData, nil
@@ -118,7 +118,7 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 	metricData.Points = metricData.Points.SortUnify()
 
 	duration := time.Since(startTime)
-	readAggregatedSecondsTotal.Observe(duration.Seconds())
+	readAggregatedSeconds.Observe(duration.Seconds())
 	readAggregatedPointsTotal.Add(float64(len(metricData.Points)))
 
 	return metricData, nil
@@ -135,7 +135,7 @@ func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, f
 	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
 
 	duration := time.Since(startTime)
-	readQueriesTotal.Observe(duration.Seconds())
+	readQueriesSeconds.Observe(duration.Seconds())
 
 	return iterator
 }

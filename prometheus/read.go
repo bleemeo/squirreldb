@@ -51,7 +51,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	for _, query := range readRequest.Queries {
 		labels := pbMatchersToLabels(query.Matchers)
 		matchers := r.indexer.UUIDs(labels)
-		var uuids []types.MetricUUID
+		var uuids types.MetricUUIDs
 
 		for uuid := range matchers {
 			uuids = append(uuids, uuid)
@@ -129,7 +129,7 @@ func labelsToPbLabels(labels types.MetricLabels) []*prompb.Label {
 }
 
 // Generate MetricRequest
-func toMetricRequest(uuids []types.MetricUUID, query *prompb.Query) types.MetricRequest {
+func toMetricRequest(uuids types.MetricUUIDs, query *prompb.Query) types.MetricRequest {
 	request := types.MetricRequest{
 		UUIDs:         uuids,
 		FromTimestamp: query.StartTimestampMs / 1000,

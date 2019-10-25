@@ -22,7 +22,7 @@ var (
 
 type Storer interface {
 	Append(newMetrics, actualMetrics types.Metrics) error
-	Get(uuids []types.MetricUUID) (types.Metrics, error)
+	Get(uuids types.MetricUUIDs) (types.Metrics, error)
 	Set(newMetrics, actualMetrics types.Metrics) error
 }
 
@@ -109,7 +109,7 @@ func (b *Batch) check(now time.Time, flushAll bool) {
 // Transfers all metrics according to the states in the flush queue from the temporary storage to
 // the persistent storage
 func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
-	uuids := make([]types.MetricUUID, 0, len(flushQueue))
+	uuids := make(types.MetricUUIDs, 0, len(flushQueue))
 
 	for uuid := range flushQueue {
 		uuids = append(uuids, uuid)
