@@ -1,9 +1,7 @@
 package types
 
 import (
-	"crypto/md5"
-	"github.com/gofrs/uuid"
-	"math/big"
+	gouuid "github.com/gofrs/uuid"
 	"sort"
 	"strings"
 )
@@ -37,7 +35,7 @@ type MetricLabel struct {
 type MetricLabels []MetricLabel
 
 type MetricUUID struct {
-	uuid.UUID
+	gouuid.UUID
 }
 
 type MetricUUIDs []MetricUUID
@@ -52,8 +50,9 @@ type MetricRequest struct {
 	Function      string
 }
 
-func (m MetricPoints) SortUnify() MetricPoints {
-	if len(m) <= 0 {
+// Deduplicate returns a sorted and deduplicated list of point
+func (m MetricPoints) Deduplicate() MetricPoints {
+	if len(m) == 0 {
 		return m
 	}
 
@@ -69,6 +68,7 @@ func (m MetricPoints) SortUnify() MetricPoints {
 		}
 
 		i++
+
 		m[i] = m[j]
 	}
 
@@ -99,6 +99,7 @@ func (m MetricLabels) Canonical() string {
 	return canonical
 }
 
+// Map returns labels as a map
 func (m MetricLabels) Map() map[string]string {
 	res := make(map[string]string, len(m))
 
@@ -107,23 +108,6 @@ func (m MetricLabels) Map() map[string]string {
 	}
 
 	return res
-}
-
-// UUID returns generated UUID from labels
-// If a UUID label is specified, the UUID will be generated from its value
-func (m MetricLabels) UUID() MetricUUID {
-	uuidString, exists := m.Value("__bleemeo_uuid__")
-	var metricUUID MetricUUID
-
-	if exists {
-		metricUUID.UUID = uuid.FromStringOrNil(uuidString)
-	} else {
-		canonical := m.Canonical()
-
-		metricUUID.UUID = md5.Sum([]byte(canonical))
-	}
-
-	return metricUUID
 }
 
 // Value returns value corresponding to specified label name
@@ -137,15 +121,7 @@ func (m MetricLabels) Value(name string) (string, bool) {
 	return "", false
 }
 
-// Uint64 returns uint64 from the UUID value
-func (m *MetricUUID) Uint64() uint64 {
-	bigInt := big.NewInt(0).SetBytes(m.Bytes())
-
-	uuidUint64 := bigInt.Uint64()
-
-	return uuidUint64
-}
-
+// LabelsFromMap returns labels generated from a map
 func LabelsFromMap(m map[string]string) MetricLabels {
 	labels := make(MetricLabels, 0, len(m))
 

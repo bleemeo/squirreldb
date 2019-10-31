@@ -1,18 +1,16 @@
 package aggregate
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 )
 
 func uuidify(value string) types.MetricUUID {
-	uuid := types.MetricLabels{
-		{
-			Name:  "__bleemeo_uuid__",
-			Value: value,
-		},
-	}.UUID()
+	uuid := types.MetricUUID{
+		UUID: gouuid.FromStringOrNil(value),
+	}
 
 	return uuid
 }

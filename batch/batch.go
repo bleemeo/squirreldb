@@ -2,8 +2,8 @@ package batch
 
 import (
 	"context"
-	"github.com/cenkalti/backoff"
 	"log"
+	"math/big"
 	"os"
 	"squirreldb/compare"
 	"squirreldb/retry"
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	CheckerInterval = 60
+	checkerInterval = 60
 )
 
 var (
@@ -21,9 +21,9 @@ var (
 )
 
 type Storer interface {
-	Append(newMetrics, actualMetrics types.Metrics) error
+	Append(newMetrics, actualMetrics types.Metrics, timeToLive int64) error
 	Get(uuids types.MetricUUIDs) (types.Metrics, error)
-	Set(newMetrics, actualMetrics types.Metrics) error
+	Set(newMetrics, actualMetrics types.Metrics, timeToLive int64) error
 }
 
 type state struct {
@@ -71,7 +71,7 @@ func (b *Batch) Write(metrics types.Metrics) error {
 // Run calls check() every checker interval seconds
 // If the context receives a stop signal, a last check is made before stopping the service
 func (b *Batch) Run(ctx context.Context) {
-	ticker := time.NewTicker(CheckerInterval * time.Second)
+	ticker := time.NewTicker(checkerInterval * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -81,6 +81,7 @@ func (b *Batch) Run(ctx context.Context) {
 		case <-ctx.Done():
 			b.check(time.Now(), true)
 			logger.Println("Run: Stopped")
+
 			return
 		}
 	}
@@ -97,6 +98,7 @@ func (b *Batch) check(now time.Time, flushAll bool) {
 	for uuid, state := range b.states {
 		if (state.flushTimestamp < nowUnix) || flushAll {
 			flushQueue[uuid] = append(flushQueue[uuid], state)
+
 			delete(b.states, uuid)
 		}
 	}
@@ -117,16 +119,15 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 	var temporaryMetrics types.Metrics
 
-	_ = backoff.Retry(func() error {
+	retry.Do(func() error {
 		var err error
 		temporaryMetrics, err = b.store.Get(uuids)
 
-		if err != nil {
-			logger.Println("flush: Can't get metrics from the temporary storage (", err, ")")
-		}
-
 		return err
-	}, retry.NewBackOff(30*time.Second))
+	}, "batch", "flush",
+		"Can't get metrics from the temporary storage",
+		"Resolved: Get metrics from the temporary storage",
+		retry.NewBackOff(30*time.Second))
 
 	cutoff := now.Unix() + b.batchSize
 	metricsToSet := make(types.Metrics)
@@ -135,6 +136,8 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	for uuid, states := range flushQueue {
 		currentState := b.states[uuid]
 		temporaryMetricData := temporaryMetrics[uuid]
+
+		// Points to set
 		var pointsToSet types.MetricPoints
 
 		for _, point := range temporaryMetricData.Points {
@@ -149,42 +152,39 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 		}
 		metricsToSet[uuid] = data
 
-		for _, state := range states {
-			var pointsToWrite types.MetricPoints
+		// Points to write
+		var pointsToWrite types.MetricPoints
 
+		for _, state := range states {
 			for _, point := range temporaryMetricData.Points {
 				if (point.Timestamp >= state.firstPointTimestamp) && (point.Timestamp <= state.lastPointTimestamp) {
 					pointsToWrite = append(pointsToWrite, point)
 				}
 			}
-
-			data := types.MetricData{
-				Points:     pointsToWrite,
-				TimeToLive: temporaryMetricData.TimeToLive,
-			}
-			metricsToWrite[uuid] = data
 		}
+
+		data = types.MetricData{
+			Points:     pointsToWrite,
+			TimeToLive: temporaryMetricData.TimeToLive,
+		}
+		metricsToWrite[uuid] = data
 	}
 
-	_ = backoff.Retry(func() error {
-		err := b.store.Set(nil, metricsToSet)
+	retry.Do(func() error {
+		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
-		if err != nil {
-			logger.Println("flush: Can't set metrics in the temporary storage (", err, ")")
-		}
+		return b.store.Set(nil, metricsToSet, timeToLive)
+	}, "batch", "flush",
+		"Can't set metrics in the temporary storage",
+		"Resolved: Set metrics in the temporary storage",
+		retry.NewBackOff(30*time.Second))
 
-		return err
-	}, retry.NewBackOff(30*time.Second))
-
-	_ = backoff.Retry(func() error {
-		err := b.writer.Write(metricsToWrite)
-
-		if err != nil {
-			logger.Println("flush: Can't write metrics in the persistent storage (", err, ")")
-		}
-
-		return err
-	}, retry.NewBackOff(30*time.Second))
+	retry.Do(func() error {
+		return b.writer.Write(metricsToWrite)
+	}, "batch", "flush",
+		"Can't write metrics in the persistent storage",
+		"Resolved: Write metrics in the persistent storage",
+		retry.NewBackOff(30*time.Second))
 }
 
 // Returns metrics from the temporary and permanent storages according to the request
@@ -194,16 +194,15 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	// Retrieves metrics from the temporary storage according to the request
 	var temporaryMetrics types.Metrics
 
-	_ = backoff.Retry(func() error {
+	retry.Do(func() error {
 		var err error
 		temporaryMetrics, err = b.store.Get(request.UUIDs)
 
-		if err != nil {
-			logger.Println("flush: Can't get metrics from the temporary storage (", err, ")")
-		}
-
 		return err
-	}, retry.NewBackOff(30*time.Second))
+	}, "batch", "read",
+		"Can't get metrics from the temporary storage",
+		"Resolved: Get metrics from the temporary storage",
+		retry.NewBackOff(30*time.Second))
 
 	for uuid, temporaryMetricData := range temporaryMetrics {
 		var points types.MetricPoints
@@ -215,7 +214,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		}
 
 		data := types.MetricData{
-			Points: points.SortUnify(),
+			Points: points.Deduplicate(),
 		}
 		metrics[uuid] = data
 	}
@@ -223,16 +222,15 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	// Retrieves metrics from the persistent storage
 	var persistentMetrics types.Metrics
 
-	_ = backoff.Retry(func() error {
+	retry.Do(func() error {
 		var err error
 		persistentMetrics, err = b.reader.Read(request)
 
-		if err != nil {
-			logger.Println("read: Can't read metrics from the persistent storage (", err, ")")
-		}
-
 		return err
-	}, retry.NewBackOff(30*time.Second))
+	}, "batch", "read",
+		"Can't read metrics from the persistent storage",
+		"Resolved: Read metrics from the persistent storage",
+		retry.NewBackOff(30*time.Second))
 
 	for uuid, persistentMetricData := range persistentMetrics {
 		data := types.MetricData{
@@ -254,6 +252,8 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 	actualMetrics := make(types.Metrics)
 
 	for uuid, metricData := range metrics {
+		var newMetricPoints, actualMetricPoints types.MetricPoints
+
 		for _, point := range metricData.Points {
 			currentState, exists := b.states[uuid]
 
@@ -289,29 +289,36 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 
 			b.states[uuid] = currentState
 
-			data := types.MetricData{
-				TimeToLive: metricData.TimeToLive,
-			}
-
 			if !exists {
-				data.Points = append(newMetrics[uuid].Points, point)
-				newMetrics[uuid] = data
+				newMetricPoints = append(newMetricPoints, point)
 			} else {
-				data.Points = append(actualMetrics[uuid].Points, point)
-				actualMetrics[uuid] = data
+				actualMetricPoints = append(actualMetricPoints, point)
 			}
 		}
+
+		data := types.MetricData{
+			TimeToLive: metricData.TimeToLive,
+			Points:     newMetricPoints,
+		}
+
+		newMetrics[uuid] = data
+
+		data = types.MetricData{
+			TimeToLive: metricData.TimeToLive,
+			Points:     actualMetricPoints,
+		}
+
+		actualMetrics[uuid] = data
 	}
 
-	_ = backoff.Retry(func() error {
-		err := b.store.Append(newMetrics, actualMetrics)
+	retry.Do(func() error {
+		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
-		if err != nil {
-			logger.Println("write: Can't metrics points in the temporary storage (", err, ")")
-		}
-
-		return err
-	}, retry.NewBackOff(30*time.Second))
+		return b.store.Append(newMetrics, actualMetrics, timeToLive)
+	}, "batch", "write",
+		"Can't append metrics points in the temporary storage",
+		"Resolved: Append metrics points in the temporary storage",
+		retry.NewBackOff(30*time.Second))
 
 	if len(flushQueue) != 0 {
 		b.flush(flushQueue, now)
@@ -326,10 +333,11 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 // It follows the formula:
 // deadline = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
 func flushTimestamp(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
+	uuidBigInt := big.NewInt(0).SetBytes(uuid.Bytes())
 	deadline := now.Unix() + batchSize
-	offset := int64(uuid.Uint64() % uint64(batchSize))
+	offset := int64(uuidBigInt.Uint64() % uint64(batchSize))
 
-	deadline = deadline - ((deadline + offset) % batchSize)
+	deadline -= (deadline + offset) % batchSize
 
 	return deadline
 }

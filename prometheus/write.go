@@ -1,7 +1,6 @@
 package prometheus
 
 import (
-	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
@@ -27,6 +26,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Println("WritePoints: Error: Can't read the body (", err, ")")
 		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -35,6 +35,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Println("WritePoints: Error: Can't decode the body (", err, ")")
 		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -43,6 +44,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err := proto.Unmarshal(decoded, &writeRequest); err != nil {
 		logger.Println("WritePoints: Error: Can't unmarshal the decoded body (", err, ")")
 		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -56,15 +58,12 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		metrics[uuid] = toMetricData(series, timeToLive)
 	}
 
-	_ = backoff.Retry(func() error {
-		err := w.writer.Write(metrics)
-
-		if err != nil {
-			logger.Println("WritePoints: Can't write in storage (", err, ")")
-		}
-
-		return err
-	}, retry.NewBackOff(30*time.Second))
+	retry.Do(func() error {
+		return w.writer.Write(metrics)
+	}, "prometheus", "WritePoints",
+		"Can't write in storage",
+		"Resolved: Write in storage",
+		retry.NewBackOff(30*time.Second))
 }
 
 // Convert Prometheus Labels to MetricLabels

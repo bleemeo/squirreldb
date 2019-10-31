@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/cenkalti/backoff"
 	"log"
 	"os"
 	"os/signal"
@@ -63,18 +62,19 @@ func main() {
 
 	var squirrelCassandra *cassandra.Cassandra
 
-	_ = backoff.Retry(func() error {
+	retry.Do(func() error {
 		var err error
 		squirrelCassandra, err = cassandra.New(cassandraOptions)
 
-		if err != nil {
-			logger.Println("cassandra: Init: Can't initialize the session (", err, ")")
-		}
-
 		return err
-	}, retry.NewBackOff(30*time.Second))
+	}, "main", "main",
+		"Can't initialize the session",
+		"Resolved: Initialized the session",
+		retry.NewBackOff(30*time.Second))
 
-	squirrelStore := store.New(batchSize, store.TimeToLiveOffset)
+	squirrelCassandra.LoadStates()
+
+	squirrelStore := store.New()
 	squirrelBatch := batch.New(batchSize, squirrelStore, squirrelCassandra, squirrelCassandra)
 	squirrelIndex := index.New(squirrelCassandra)
 	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
@@ -87,29 +87,41 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Run services
-	wg.Add(1)
-	go func() {
+	runSquirrelCassandra := func() {
 		defer wg.Done()
 		squirrelCassandra.Run(ctx)
-	}()
+	}
 
 	wg.Add(1)
-	go func() {
+
+	go runSquirrelCassandra()
+
+	runSquirrelPrometheus := func() {
 		defer wg.Done()
 		squirrelPrometheus.Run(ctx, prometheusListenAddress)
-	}()
+	}
 
 	wg.Add(1)
-	go func() {
+
+	go runSquirrelPrometheus()
+
+	runSquirrelBatch := func() {
 		defer wg.Done()
 		squirrelBatch.Run(ctx)
-	}()
+	}
 
 	wg.Add(1)
-	go func() {
+
+	go runSquirrelBatch()
+
+	runSquirrelStore := func() {
 		defer wg.Done()
 		squirrelStore.Run(ctx)
-	}()
+	}
+
+	wg.Add(1)
+
+	go runSquirrelStore()
 
 	logger.Println("SquirrelDB is ready")
 
@@ -134,6 +146,10 @@ func main() {
 		logger.Println("All services have been successfully stopped")
 	case <-signalChan:
 		logger.Println("Force stop")
+	}
+
+	if err := squirrelCassandra.SaveStates(); err != nil {
+		logger.Println("Can't save the states (", err, ")")
 	}
 
 	squirrelCassandra.Close()

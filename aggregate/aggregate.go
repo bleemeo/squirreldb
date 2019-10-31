@@ -33,7 +33,7 @@ func Metrics(metrics types.Metrics, fromTimestamp, toTimestamp, resolution int64
 	return aggregatedMetrics
 }
 
-// MetricPoints returns AggregatedPoints according to the parameters
+// MetricData returns AggregatedData according to the parameters
 func MetricData(metricData types.MetricData, fromTimestamp, toTimestamp, resolution int64) AggregatedData {
 	aggregatedData := AggregatedData{
 		TimeToLive: metricData.TimeToLive,

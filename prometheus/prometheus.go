@@ -2,7 +2,6 @@ package prometheus
 
 import (
 	"context"
-	"github.com/cenkalti/backoff"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
@@ -49,16 +48,18 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 	router.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	go func() {
-		_ = backoff.Retry(func() error {
+		retry.Do(func() error {
 			err := server.ListenAndServe()
 
 			if err != http.ErrServerClosed {
-				logger.Println("Run: Can't listen and serve the server (", err, ")")
 				return err
 			}
 
 			return nil
-		}, retry.NewBackOff(30*time.Second))
+		}, "prometheus", "Run",
+			"Can't listen and serve the server",
+			"Resolved: Listen and serve the server",
+			retry.NewBackOff(30*time.Second))
 	}()
 
 	// Wait to receive a stop signal

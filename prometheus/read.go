@@ -1,7 +1,6 @@
 package prometheus
 
 import (
-	"github.com/cenkalti/backoff"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
@@ -27,6 +26,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	if err != nil {
 		logger.Println("ReadPoints: Error: Can't read the body (", err, ")")
 		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -35,6 +35,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	if err != nil {
 		logger.Println("ReadPoints: Error: Can't decode the body (", err, ")")
 		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -43,6 +44,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	if err := proto.Unmarshal(decoded, &readRequest); err != nil {
 		logger.Println("ReadPoints: Error: Can't unmarshal the decoded body (", err, ")")
 		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
+
 		return
 	}
 
@@ -60,16 +62,15 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		request := toMetricRequest(uuids, query)
 		var metrics types.Metrics
 
-		_ = backoff.Retry(func() error {
+		retry.Do(func() error {
 			var err error
 			metrics, err = r.reader.Read(request)
 
-			if err != nil {
-				logger.Println("ReadPoints: Can't read from storage (", err, ")")
-			}
-
 			return err
-		}, retry.NewBackOff(30*time.Second))
+		}, "prometheus", "ReadPoints",
+			"Can't read in storage",
+			"Resolved: Read in storage",
+			retry.NewBackOff(30*time.Second))
 
 		queryResult := toQueryResult(matchers, metrics)
 
@@ -81,6 +82,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	if err != nil {
 		logger.Println("ReadPoints: Error: Can't marshal the read response (", err, ")")
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
+
 		return
 	}
 
@@ -91,6 +93,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	if err != nil {
 		logger.Println("ReadPoints: Error: Can't write the read response (", err, ")")
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
+
 		return
 	}
 }

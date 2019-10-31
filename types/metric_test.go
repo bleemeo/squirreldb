@@ -1,8 +1,6 @@
 package types
 
 import (
-	"github.com/gofrs/uuid"
-	"reflect"
 	"testing"
 )
 
@@ -76,46 +74,6 @@ func TestMetricLabels_Canonical(t *testing.T) {
 	}
 }
 
-func TestMetricLabels_UUID(t *testing.T) {
-	tests := []struct {
-		name string
-		m    MetricLabels
-		want MetricUUID
-	}{
-		{
-			name: "valid_uuid",
-			m: MetricLabels{
-				{
-					Name:  "__bleemeo_uuid__",
-					Value: "abcdef01-2345-6789-abcd-ef0123456789",
-				},
-			},
-			want: MetricUUID{
-				UUID: uuid.FromStringOrNil("abcdef01-2345-6789-abcd-ef0123456789"),
-			},
-		},
-		{
-			name: "invalid_uuid",
-			m: MetricLabels{
-				{
-					Name:  "__bleemeo_uuid__",
-					Value: "i-am-an-invalid-uuid",
-				},
-			},
-			want: MetricUUID{
-				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.m.UUID(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UUID() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMetricLabels_Value(t *testing.T) {
 	type args struct {
 		name string
@@ -164,42 +122,6 @@ func TestMetricLabels_Value(t *testing.T) {
 			}
 			if got1 != tt.want1 {
 				t.Errorf("Value() got1 = %v, want %v", got1, tt.want1)
-			}
-		})
-	}
-}
-
-func TestMetricUUID_Uint64(t *testing.T) {
-	type fields struct {
-		UUID uuid.UUID
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   uint64
-	}{
-		{
-			name: "uuid_0",
-			fields: fields{
-				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
-			},
-			want: 1,
-		},
-		{
-			name: "uuid_10",
-			fields: fields{
-				UUID: uuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
-			},
-			want: 10,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &MetricUUID{
-				UUID: tt.fields.UUID,
-			}
-			if got := m.Uint64(); got != tt.want {
-				t.Errorf("Int64() = %v, want %v", got, tt.want)
 			}
 		})
 	}

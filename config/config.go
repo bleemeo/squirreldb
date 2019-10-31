@@ -118,23 +118,19 @@ func flagsToFlagSet(flags []flag) *pflag.FlagSet {
 	flagSet := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 
 	for _, flag := range flags {
-		switch flag.value.(type) {
+		switch value := flag.value.(type) {
 		case bool:
-			value, _ := flag.value.(bool)
 			flagSet.BoolP(flag.name, flag.short, value, flag.usage)
 		case float64:
-			value, _ := flag.value.(float64)
 			flagSet.Float64P(flag.name, flag.short, value, flag.usage)
 		case int:
-			value, _ := flag.value.(int)
 			flagSet.IntP(flag.name, flag.short, value, flag.usage)
 		case string:
-			value, _ := flag.value.(string)
 			flagSet.StringP(flag.name, flag.short, value, flag.usage)
 		case []string:
-			value, _ := flag.value.([]string)
 			flagSet.StringSliceP(flag.name, flag.short, value, flag.usage)
 		}
+
 		if flag.hidden {
 			_ = flagSet.MarkHidden(flag.name)
 		}

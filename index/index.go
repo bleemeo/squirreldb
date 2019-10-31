@@ -1,42 +1,43 @@
 package index
 
 import (
-	"github.com/cenkalti/backoff"
-	"log"
-	"os"
+	"crypto/md5"
+	gouuid "github.com/gofrs/uuid"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"time"
 )
 
-var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
+type Storage interface {
+	Request() (map[types.MetricUUID]types.MetricLabels, error)
+	Save(uuid types.MetricUUID, labels types.MetricLabels) error
+}
 
 type Index struct {
-	indexerTable types.MetricIndexerTable
+	storage Storage
 
 	pairs map[types.MetricUUID]types.MetricLabels
 	mutex sync.Mutex
 }
 
 // New creates a new Index object
-func New(indexerTable types.MetricIndexerTable) *Index {
+func New(storage Storage) *Index {
 	var pairs map[types.MetricUUID]types.MetricLabels
 
-	_ = backoff.Retry(func() error {
+	retry.Do(func() error {
 		var err error
-		pairs, err = indexerTable.Request()
-
-		if err != nil {
-			logger.Println("UUID: Can't request uuid labels pairs from the index table (", err, ")")
-		}
+		pairs, err = storage.Request()
 
 		return err
-	}, retry.NewBackOff(30*time.Second))
+	}, "index", "New",
+		"Can't get uuid labels pairs from the storage",
+		"Resolved: Get uuid labels pairs from the storage",
+		retry.NewBackOff(30*time.Second))
 
 	index := &Index{
-		indexerTable: indexerTable,
-		pairs:        pairs,
+		storage: storage,
+		pairs:   pairs,
 	}
 
 	return index
@@ -47,27 +48,24 @@ func (i *Index) UUID(labels types.MetricLabels) types.MetricUUID {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 
-	uuid := labels.UUID()
+	uuid := labelsToUUID(labels)
 
 	if _, exists := i.pairs[uuid]; !exists {
 		i.pairs[uuid] = labels
 
-		_ = backoff.Retry(func() error {
-			err := i.indexerTable.Save(uuid, labels)
-
-			if err != nil {
-				logger.Println("UUID: Can't save uuid labels pair in the index table (", err, ")")
-			}
-
-			return err
-		}, retry.NewBackOff(30*time.Second))
+		retry.Do(func() error {
+			return i.storage.Save(uuid, labels)
+		}, "index", "New",
+			"Can't save uuid labels pair in the storage",
+			"Resolved: Save uuid labels pair in the storage",
+			retry.NewBackOff(30*time.Second))
 	}
 
 	return uuid
 }
 
 // UUIDs returns UUIDs that matches with the label set
-func (i *Index) UUIDs(labelSet types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
+func (i *Index) UUIDs(search types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 
@@ -75,7 +73,7 @@ func (i *Index) UUIDs(labelSet types.MetricLabels) map[types.MetricUUID]types.Me
 
 forLoop:
 	for uuid, labels := range i.pairs {
-		for _, label := range labelSet {
+		for _, label := range search {
 			value, exists := labels.Value(label.Name)
 
 			if !exists || (value != label.Value) {
@@ -87,10 +85,27 @@ forLoop:
 	}
 
 	if len(matchers) == 0 {
-		uuid := labelSet.UUID()
-
-		matchers[uuid] = labelSet
+		i.mutex.Unlock()
+		i.UUID(search)
+		i.mutex.Lock()
 	}
 
 	return matchers
+}
+
+// Returns generated UUID from labels
+// If a UUID label is specified, the UUID will be generated from its value
+func labelsToUUID(labels types.MetricLabels) types.MetricUUID {
+	var uuid types.MetricUUID
+	uuidString, exists := labels.Value("__bleemeo_uuid__")
+
+	if exists {
+		uuid.UUID = gouuid.FromStringOrNil(uuidString)
+	} else {
+		canonical := labels.Canonical()
+
+		uuid.UUID = md5.Sum([]byte(canonical))
+	}
+
+	return uuid
 }

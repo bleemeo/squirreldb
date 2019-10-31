@@ -1,6 +1,7 @@
 package batch
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/compare"
 	"squirreldb/types"
@@ -21,12 +22,9 @@ type mockMetricWriter struct {
 }
 
 func uuidify(value string) types.MetricUUID {
-	uuid := types.MetricLabels{
-		{
-			Name:  "__bleemeo_uuid__",
-			Value: value,
-		},
-	}.UUID()
+	uuid := types.MetricUUID{
+		UUID: gouuid.FromStringOrNil(value),
+	}
 
 	return uuid
 }
@@ -45,7 +43,7 @@ func (m *mockMetricReader) Read(request types.MetricRequest) (types.Metrics, err
 	return metrics, nil
 }
 
-func (m *mockStorer) Append(newMetrics, actualMetrics types.Metrics) error {
+func (m *mockStorer) Append(newMetrics, actualMetrics types.Metrics, timeToLive int64) error {
 	for uuid, metricData := range newMetrics {
 		metric := m.metrics[uuid]
 
@@ -81,7 +79,7 @@ func (m *mockStorer) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	return metrics, nil
 }
 
-func (m *mockStorer) Set(newMetrics, actualMetrics types.Metrics) error {
+func (m *mockStorer) Set(newMetrics, actualMetrics types.Metrics, timeToLive int64) error {
 	for uuid, metricData := range newMetrics {
 		m.metrics[uuid] = metricData
 	}

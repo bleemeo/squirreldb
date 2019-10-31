@@ -1,6 +1,7 @@
 package store
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
@@ -8,12 +9,9 @@ import (
 )
 
 func uuidify(value string) types.MetricUUID {
-	uuid := types.MetricLabels{
-		{
-			Name:  "__bleemeo_uuid__",
-			Value: value,
-		},
-	}.UUID()
+	uuid := types.MetricUUID{
+		UUID: gouuid.FromStringOrNil(value),
+	}
 
 	return uuid
 }
@@ -35,14 +33,13 @@ func TestNewStore(t *testing.T) {
 				offset:    150,
 			},
 			want: &Store{
-				timeToLive: 300*2 + 150,
-				Metrics:    make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]metric),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New(tt.args.batchSize, tt.args.offset); !reflect.DeepEqual(got, tt.want) {
+			if got := New(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
@@ -51,13 +48,13 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_append(t *testing.T) {
 	type fields struct {
-		timeToLive int64
-		Metrics    map[types.MetricUUID]metric
+		metrics map[types.MetricUUID]metric
 	}
 	type args struct {
 		newMetrics    types.Metrics
 		actualMetrics types.Metrics
 		now           time.Time
+		timeToLive    int64
 	}
 	tests := []struct {
 		name    string
@@ -69,8 +66,7 @@ func TestStore_append(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				timeToLive: 300,
-				Metrics:    make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
 				newMetrics: types.Metrics{
@@ -111,7 +107,8 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				now: time.Unix(0, 0),
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
 			want: map[types.MetricUUID]metric{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
@@ -160,8 +157,7 @@ func TestStore_append(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
-				timeToLive: 300,
-				Metrics: map[types.MetricUUID]metric{
+				metrics: map[types.MetricUUID]metric{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
 							Points: types.MetricPoints{
@@ -219,7 +215,8 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				now: time.Unix(0, 0),
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
 			want: map[types.MetricUUID]metric{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
@@ -276,8 +273,7 @@ func TestStore_append(t *testing.T) {
 		{
 			name: "replace_time_to_live",
 			fields: fields{
-				timeToLive: 300,
-				Metrics:    make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
 				newMetrics: types.Metrics{
@@ -320,7 +316,8 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 1800,
 					},
 				},
-				now: time.Unix(0, 0),
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
 			want: map[types.MetricUUID]metric{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
@@ -362,14 +359,13 @@ func TestStore_append(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				timeToLive: tt.fields.timeToLive,
-				Metrics:    tt.fields.Metrics,
+				metrics: tt.fields.metrics,
 			}
-			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now); (err != nil) != tt.wantErr {
+			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(s.Metrics, tt.want) {
-				t.Errorf("append() s.Metrics = %v, want %v", s.Metrics, tt.want)
+			if !reflect.DeepEqual(s.metrics, tt.want) {
+				t.Errorf("append() s.metrics = %v, want %v", s.metrics, tt.want)
 			}
 		})
 	}
@@ -377,8 +373,7 @@ func TestStore_append(t *testing.T) {
 
 func TestStore_expire(t *testing.T) {
 	type fields struct {
-		timeToLive int64
-		Metrics    map[types.MetricUUID]metric
+		Metrics map[types.MetricUUID]metric
 	}
 	type args struct {
 		now time.Time
@@ -392,7 +387,6 @@ func TestStore_expire(t *testing.T) {
 		{
 			name: "no_expiration",
 			fields: fields{
-				timeToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
@@ -445,7 +439,6 @@ func TestStore_expire(t *testing.T) {
 		{
 			name: "expiration",
 			fields: fields{
-				timeToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
@@ -478,12 +471,11 @@ func TestStore_expire(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				timeToLive: tt.fields.timeToLive,
-				Metrics:    tt.fields.Metrics,
+				metrics: tt.fields.Metrics,
 			}
 			s.expire(tt.args.now)
-			if !reflect.DeepEqual(s.Metrics, tt.want) {
-				t.Errorf("expire() s.Metrics = %v, want %v", s.Metrics, tt.want)
+			if !reflect.DeepEqual(s.metrics, tt.want) {
+				t.Errorf("expire() s.metrics = %v, want %v", s.metrics, tt.want)
 			}
 		})
 	}
@@ -491,8 +483,7 @@ func TestStore_expire(t *testing.T) {
 
 func TestStore_get(t *testing.T) {
 	type fields struct {
-		timeToLive int64
-		Metrics    map[types.MetricUUID]metric
+		Metrics map[types.MetricUUID]metric
 	}
 	type args struct {
 		uuids types.MetricUUIDs
@@ -507,8 +498,7 @@ func TestStore_get(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				timeToLive: 300,
-				Metrics:    make(map[types.MetricUUID]metric),
+				Metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{uuids: types.MetricUUIDs{
 				uuidify("00000000-0000-0000-0000-000000000001"),
@@ -519,7 +509,6 @@ func TestStore_get(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
-				timeToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
@@ -571,8 +560,7 @@ func TestStore_get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				timeToLive: tt.fields.timeToLive,
-				Metrics:    tt.fields.Metrics,
+				metrics: tt.fields.Metrics,
 			}
 			got, err := s.get(tt.args.uuids)
 			if (err != nil) != tt.wantErr {
@@ -588,13 +576,13 @@ func TestStore_get(t *testing.T) {
 
 func TestStore_set(t *testing.T) {
 	type fields struct {
-		timeToLive int64
-		Metrics    map[types.MetricUUID]metric
+		Metrics map[types.MetricUUID]metric
 	}
 	type args struct {
 		newMetrics    types.Metrics
 		actualMetrics types.Metrics
 		now           time.Time
+		timeToLive    int64
 	}
 	tests := []struct {
 		name    string
@@ -606,8 +594,7 @@ func TestStore_set(t *testing.T) {
 		{
 			name: "empty_store",
 			fields: fields{
-				timeToLive: 300,
-				Metrics:    make(map[types.MetricUUID]metric),
+				Metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
 				newMetrics: types.Metrics{
@@ -648,7 +635,8 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				now: time.Unix(0, 0),
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
 			want: map[types.MetricUUID]metric{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
@@ -697,7 +685,6 @@ func TestStore_set(t *testing.T) {
 		{
 			name: "filled_store",
 			fields: fields{
-				timeToLive: 300,
 				Metrics: map[types.MetricUUID]metric{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
@@ -756,7 +743,8 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				now: time.Unix(0, 0),
+				now:        time.Unix(0, 0),
+				timeToLive: 300,
 			},
 			want: map[types.MetricUUID]metric{
 				uuidify("00000000-0000-0000-0000-000000000001"): {
@@ -806,10 +794,9 @@ func TestStore_set(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				timeToLive: tt.fields.timeToLive,
-				Metrics:    tt.fields.Metrics,
+				metrics: tt.fields.Metrics,
 			}
-			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

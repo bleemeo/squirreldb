@@ -80,7 +80,7 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
 	}
 
-	metricData.Points = metricData.Points.SortUnify()
+	metricData.Points = metricData.Points.Deduplicate()
 
 	duration := time.Since(startTime)
 	readRawSeconds.Observe(duration.Seconds())
@@ -115,7 +115,7 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
 	}
 
-	metricData.Points = metricData.Points.SortUnify()
+	metricData.Points = metricData.Points.Deduplicate()
 
 	duration := time.Since(startTime)
 	readAggregatedSeconds.Observe(duration.Seconds())

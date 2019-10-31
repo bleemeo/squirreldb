@@ -1,6 +1,7 @@
 package cassandra
 
 import (
+	"fmt"
 	"github.com/gocql/gocql"
 	"log"
 	"os"
@@ -9,12 +10,18 @@ import (
 )
 
 const (
+	StatesTable        = "states"
 	DataTable          = "data"
 	AggregateDataTable = "data_aggregated"
 	IndexTable         = "indx"
 )
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
+
+type states struct {
+	lastAggregationFromTimestamp int64
+	lastAggregatedPart           int
+}
 
 type Options struct {
 	Addresses              []string
@@ -31,6 +38,7 @@ type Options struct {
 	DebugAggregateForce bool
 	DebugAggregateSize  int64
 
+	statesTable        string
 	dataTable          string
 	aggregateDataTable string
 	indexTable         string
@@ -39,6 +47,7 @@ type Options struct {
 type Cassandra struct {
 	session *gocql.Session
 	options Options
+	states  states
 }
 
 // New creates a new Cassandra object
@@ -52,6 +61,7 @@ func New(options Options) (*Cassandra, error) {
 
 	session.SetConsistency(gocql.LocalQuorum)
 
+	options.statesTable = options.Keyspace + "." + StatesTable
 	options.dataTable = options.Keyspace + "." + DataTable
 	options.aggregateDataTable = options.Keyspace + "." + AggregateDataTable
 	options.indexTable = options.Keyspace + "." + IndexTable
@@ -68,6 +78,20 @@ func New(options Options) (*Cassandra, error) {
 	`))
 
 	if err := createKeyspace.Exec(); err != nil {
+		session.Close()
+		return nil, err
+	}
+
+	createStatesTableReplacer := strings.NewReplacer("$STATES_TABLE", options.statesTable)
+	createStatesTable := session.Query(createStatesTableReplacer.Replace(`
+		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
+			name text,
+			value text,
+			PRIMARY KEY (name)
+		)
+	`))
+
+	if err := createStatesTable.Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}
@@ -152,7 +176,64 @@ func New(options Options) (*Cassandra, error) {
 	return &cassandra, nil
 }
 
+func (c *Cassandra) LoadStates() {
+	lastAggregationFromTimestamp, exists := c.readState("lastAggregationFromTimestamp")
+
+	if exists {
+		c.states.lastAggregationFromTimestamp, _ = strconv.ParseInt(lastAggregationFromTimestamp, 10, 64)
+	}
+
+	lastAggregatedPart, exists := c.readState("lastAggregatedPart")
+
+	if exists {
+		c.states.lastAggregatedPart, _ = strconv.Atoi(lastAggregatedPart)
+	}
+}
+
+func (c *Cassandra) SaveStates() error {
+	if err := c.writeState("lastAggregationFromTimestamp", c.states.lastAggregationFromTimestamp); err != nil {
+		return err
+	}
+
+	if err := c.writeState("lastAggregatedPart", c.states.lastAggregatedPart); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Close closes Cassandra
 func (c *Cassandra) Close() {
 	c.session.Close()
+}
+
+// Reads a state value from the states table
+func (c *Cassandra) readState(name string) (string, bool) {
+	replacer := strings.NewReplacer("$STATES_TABLE", c.options.statesTable)
+	iterator := c.session.Query(replacer.Replace(`
+		SELECT value FROM $STATES_TABLE
+		WHERE name = ?
+	`), name).Iter()
+
+	var value string
+
+	exists := iterator.Scan(&value)
+
+	return value, exists
+}
+
+// Writes the specified state to the states table
+func (c *Cassandra) writeState(name string, value interface{}) error {
+	replacer := strings.NewReplacer("$STATES_TABLE", c.options.statesTable)
+	update := c.session.Query(replacer.Replace(`
+		UPDATE $STATES_TABLE
+		SET value = ?
+		WHERE name = ?
+	`), fmt.Sprintf("%v", value), name)
+
+	if err := update.Exec(); err != nil {
+		return err
+	}
+
+	return nil
 }
