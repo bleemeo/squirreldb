@@ -134,23 +134,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	metricsToWrite := make(types.Metrics)
 
 	for uuid, states := range flushQueue {
-		currentState := b.states[uuid]
 		temporaryMetricData := temporaryMetrics[uuid]
-
-		// Points to set
-		var pointsToSet types.MetricPoints
-
-		for _, point := range temporaryMetricData.Points {
-			if (point.Timestamp >= cutoff) || (point.Timestamp >= currentState.firstPointTimestamp) {
-				pointsToSet = append(pointsToSet, point)
-			}
-		}
-
-		data := types.MetricData{
-			Points:     pointsToSet,
-			TimeToLive: temporaryMetricData.TimeToLive,
-		}
-		metricsToSet[uuid] = data
 
 		// Points to write
 		var pointsToWrite types.MetricPoints
@@ -163,12 +147,39 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 			}
 		}
 
-		data = types.MetricData{
+		data := types.MetricData{
 			Points:     pointsToWrite,
 			TimeToLive: temporaryMetricData.TimeToLive,
 		}
 		metricsToWrite[uuid] = data
+
+		// Points to set
+		currentState, exists := b.states[uuid]
+		var pointsToSet types.MetricPoints
+
+		if exists {
+			cutoff = compare.Int64Min(cutoff, currentState.firstPointTimestamp)
+		}
+
+		for _, point := range temporaryMetricData.Points {
+			if point.Timestamp >= cutoff {
+				pointsToSet = append(pointsToSet, point)
+			}
+		}
+
+		data = types.MetricData{
+			Points:     pointsToSet,
+			TimeToLive: temporaryMetricData.TimeToLive,
+		}
+		metricsToSet[uuid] = data
 	}
+
+	retry.Do(func() error {
+		return b.writer.Write(metricsToWrite)
+	}, "batch", "flush",
+		"Can't write metrics in the persistent storage",
+		"Resolved: Write metrics in the persistent storage",
+		retry.NewBackOff(30*time.Second))
 
 	retry.Do(func() error {
 		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
@@ -177,13 +188,6 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	}, "batch", "flush",
 		"Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage",
-		retry.NewBackOff(30*time.Second))
-
-	retry.Do(func() error {
-		return b.writer.Write(metricsToWrite)
-	}, "batch", "flush",
-		"Can't write metrics in the persistent storage",
-		"Resolved: Write metrics in the persistent storage",
 		retry.NewBackOff(30*time.Second))
 }
 
