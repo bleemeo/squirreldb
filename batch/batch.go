@@ -129,7 +129,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 		"Resolved: Get metrics from the temporary storage",
 		retry.NewBackOff(30*time.Second))
 
-	cutoff := now.Unix() + b.batchSize
+	cutoff := now.Unix() - b.batchSize
 	metricsToSet := make(types.Metrics)
 	metricsToWrite := make(types.Metrics)
 
