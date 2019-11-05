@@ -18,10 +18,15 @@ const (
 	AggregateShardsPeriod = 60
 )
 
+// Run calls aggregateShards() every aggregate period if from timestamp is valid and if metrics are to be aggregated
+// If a stop signal is received, the service is stopped
 func (c *Cassandra) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(AggregatePeriod) * time.Second)
 
 	for {
+		aggregateNextTimestamp.SetToCurrentTime()
+		aggregateNextTimestamp.Add(AggregatePeriod)
+
 		uuids := c.readUUIDs()
 		var fromTimestamp int64
 
@@ -43,6 +48,8 @@ func (c *Cassandra) Run(ctx context.Context) {
 
 			complete := c.aggregateShards(ctx, AggregateShards, AggregateShardsPeriod, uuids, fromTimestamp, toTimestamp)
 
+			aggregateLastTimestamp.SetToCurrentTime()
+
 			if complete {
 				logger.Println("runAggregate: Aggregate completed") // TODO: Debug
 
@@ -63,6 +70,9 @@ func (c *Cassandra) Run(ctx context.Context) {
 	}
 }
 
+// Aggregate by shards all specified metrics contained in the specified period
+// Aggregation resumes since the shard after the last successfully aggregated shard
+// If an error or stop signal is received, the last successfully aggregated shard is saved
 func (c *Cassandra) aggregateShards(ctx context.Context, shards, period int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) bool {
 	var lastShard int
 
@@ -104,6 +114,7 @@ func (c *Cassandra) aggregateShards(ctx context.Context, shards, period int, uui
 	return true
 }
 
+// Aggregate each specified metrics contained in the specified period
 func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
 	startTime := time.Now()
 
@@ -144,6 +155,7 @@ func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestam
 	return nil
 }
 
+// Returns all UUIDs
 func (c *Cassandra) readUUIDs() types.MetricUUIDs {
 	var uuids types.MetricUUIDs
 
@@ -161,7 +173,7 @@ func (c *Cassandra) readUUIDs() types.MetricUUIDs {
 	return uuids
 }
 
-// Returns an iterator of all metrics from the data table according to the parameters
+// Returns an iterator of all UUIDs from the index table according to the parameters
 func (c *Cassandra) readDatabaseUUIDs() *gocql.Iter {
 	iteratorReplacer := strings.NewReplacer("$INDEX_TABLE", c.options.indexTable)
 	iterator := c.session.Query(iteratorReplacer.Replace(`

@@ -122,6 +122,7 @@ func (m MetricLabels) Value(name string) (string, bool) {
 	return "", false
 }
 
+// Uint64 returns uint64 from the UUID value
 func (m MetricUUID) Uint64() uint64 {
 	bigInt := big.NewInt(0).SetBytes(m.Bytes())
 
