@@ -2,6 +2,7 @@ package types
 
 import (
 	gouuid "github.com/gofrs/uuid"
+	"math/big"
 	"sort"
 	"strings"
 )
@@ -119,6 +120,12 @@ func (m MetricLabels) Value(name string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func (m MetricUUID) Uint64() uint64 {
+	bigInt := big.NewInt(0).SetBytes(m.Bytes())
+
+	return bigInt.Uint64()
 }
 
 // LabelsFromMap returns labels generated from a map

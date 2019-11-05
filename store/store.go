@@ -34,11 +34,11 @@ func New() *Store {
 }
 
 // Append is the public function of append()
-func (s *Store) Append(newMetrics, actualMetrics types.Metrics, timeToLive int64) error {
+func (s *Store) Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.append(newMetrics, actualMetrics, time.Now(), timeToLive)
+	return s.append(newMetrics, existingMetrics, time.Now(), timeToLive)
 }
 
 // Get is the public function of get()
@@ -50,11 +50,11 @@ func (s *Store) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 }
 
 // Set is the public function of set()
-func (s *Store) Set(newMetrics, actualMetrics types.Metrics, timeToLive int64) error {
+func (s *Store) Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(newMetrics, actualMetrics, time.Now(), timeToLive)
+	return s.set(newMetrics, existingMetrics, time.Now(), timeToLive)
 }
 
 // Run calls expire() every expirator interval seconds
@@ -76,7 +76,7 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 // Appends metrics to existing items and update expiration
-func (s *Store) append(newMetrics, actualMetrics types.Metrics, now time.Time, timeToLive int64) error {
+func (s *Store) append(newMetrics, existingMetrics types.Metrics, now time.Time, timeToLive int64) error {
 	expirationTimestamp := now.Unix() + timeToLive
 
 	for uuid, metricData := range newMetrics {
@@ -89,7 +89,7 @@ func (s *Store) append(newMetrics, actualMetrics types.Metrics, now time.Time, t
 		s.metrics[uuid] = metric
 	}
 
-	for uuid, metricData := range actualMetrics {
+	for uuid, metricData := range existingMetrics {
 		metric := s.metrics[uuid]
 
 		metric.Points = append(metric.Points, metricData.Points...)
@@ -132,7 +132,7 @@ func (s *Store) get(uuids types.MetricUUIDs) (types.Metrics, error) {
 }
 
 // Set metrics (overwrite existing items) and expiration
-func (s *Store) set(newMetrics, actualMetrics types.Metrics, now time.Time, timeToLive int64) error {
+func (s *Store) set(newMetrics, existingMetrics types.Metrics, now time.Time, timeToLive int64) error {
 	expirationTimestamp := now.Unix() + timeToLive
 
 	for uuid, metricData := range newMetrics {
@@ -144,7 +144,7 @@ func (s *Store) set(newMetrics, actualMetrics types.Metrics, now time.Time, time
 		s.metrics[uuid] = metric
 	}
 
-	for uuid, metricData := range actualMetrics {
+	for uuid, metricData := range existingMetrics {
 		metric := s.metrics[uuid]
 
 		metric.MetricData = metricData

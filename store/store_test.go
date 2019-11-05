@@ -51,10 +51,10 @@ func TestStore_append(t *testing.T) {
 		metrics map[types.MetricUUID]metric
 	}
 	type args struct {
-		newMetrics    types.Metrics
-		actualMetrics types.Metrics
-		now           time.Time
-		timeToLive    int64
+		newMetrics      types.Metrics
+		existingMetrics types.Metrics
+		now             time.Time
+		timeToLive      int64
 	}
 	tests := []struct {
 		name    string
@@ -88,7 +88,7 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				actualMetrics: types.Metrics{
+				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000002"): {
 						Points: types.MetricPoints{
 							{
@@ -196,7 +196,7 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				actualMetrics: types.Metrics{
+				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000002"): {
 						Points: types.MetricPoints{
 							{
@@ -296,7 +296,7 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				actualMetrics: types.Metrics{
+				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
@@ -361,7 +361,7 @@ func TestStore_append(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			if err := s.append(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.append(tt.args.newMetrics, tt.args.existingMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(s.metrics, tt.want) {
@@ -579,10 +579,10 @@ func TestStore_set(t *testing.T) {
 		Metrics map[types.MetricUUID]metric
 	}
 	type args struct {
-		newMetrics    types.Metrics
-		actualMetrics types.Metrics
-		now           time.Time
-		timeToLive    int64
+		newMetrics      types.Metrics
+		existingMetrics types.Metrics
+		now             time.Time
+		timeToLive      int64
 	}
 	tests := []struct {
 		name    string
@@ -616,7 +616,7 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				actualMetrics: types.Metrics{
+				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000002"): {
 						Points: types.MetricPoints{
 							{
@@ -724,7 +724,7 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 3600,
 					},
 				},
-				actualMetrics: types.Metrics{
+				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000002"): {
 						Points: types.MetricPoints{
 							{
@@ -796,7 +796,7 @@ func TestStore_set(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.Metrics,
 			}
-			if err := s.set(tt.args.newMetrics, tt.args.actualMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.newMetrics, tt.args.existingMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

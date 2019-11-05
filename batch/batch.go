@@ -3,7 +3,6 @@ package batch
 import (
 	"context"
 	"log"
-	"math/big"
 	"os"
 	"squirreldb/compare"
 	"squirreldb/retry"
@@ -21,9 +20,9 @@ var (
 )
 
 type Storer interface {
-	Append(newMetrics, actualMetrics types.Metrics, timeToLive int64) error
+	Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error
 	Get(uuids types.MetricUUIDs) (types.Metrics, error)
-	Set(newMetrics, actualMetrics types.Metrics, timeToLive int64) error
+	Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error
 }
 
 type state struct {
@@ -221,6 +220,13 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 			Points: points.Deduplicate(),
 		}
 		metrics[uuid] = data
+
+		length := len(data.Points)
+
+		if length != 0 {
+			firstPoint := data.Points[0]
+			request.ToTimestamp = firstPoint.Timestamp
+		}
 	}
 
 	// Retrieves metrics from the persistent storage
@@ -253,10 +259,10 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 	nowUnix := now.Unix()
 	flushQueue := make(map[types.MetricUUID][]state)
 	newMetrics := make(types.Metrics)
-	actualMetrics := make(types.Metrics)
+	existingMetrics := make(types.Metrics)
 
 	for uuid, metricData := range metrics {
-		var newMetricPoints, actualMetricPoints types.MetricPoints
+		var newMetricPoints, existingMetricPoints types.MetricPoints
 
 		for _, point := range metricData.Points {
 			currentState, exists := b.states[uuid]
@@ -296,7 +302,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 			if !exists {
 				newMetricPoints = append(newMetricPoints, point)
 			} else {
-				actualMetricPoints = append(actualMetricPoints, point)
+				existingMetricPoints = append(existingMetricPoints, point)
 			}
 		}
 
@@ -309,16 +315,16 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 
 		data = types.MetricData{
 			TimeToLive: metricData.TimeToLive,
-			Points:     actualMetricPoints,
+			Points:     existingMetricPoints,
 		}
 
-		actualMetrics[uuid] = data
+		existingMetrics[uuid] = data
 	}
 
 	retry.Do(func() error {
 		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
-		return b.store.Append(newMetrics, actualMetrics, timeToLive)
+		return b.store.Append(newMetrics, existingMetrics, timeToLive)
 	}, "batch", "write",
 		"Can't append metrics points in the temporary storage",
 		"Resolved: Append metrics points in the temporary storage",
@@ -337,9 +343,8 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 // It follows the formula:
 // deadline = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
 func flushTimestamp(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
-	uuidBigInt := big.NewInt(0).SetBytes(uuid.Bytes())
 	deadline := now.Unix() + batchSize
-	offset := int64(uuidBigInt.Uint64() % uint64(batchSize))
+	offset := int64(uuid.Uint64() % uint64(batchSize))
 
 	deadline -= (deadline + offset) % batchSize
 

@@ -18,12 +18,10 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
 	for _, uuid := range request.UUIDs {
-		fromTimestamp := request.FromTimestamp
-		toTimestamp := request.ToTimestamp
 		var metricData types.MetricData
 
 		if aggregated {
-			aggregatedMetricData, err := c.readAggregatedData(uuid, fromTimestamp, toTimestamp, request.Function)
+			aggregatedMetricData, err := c.readAggregatedData(uuid, request.FromTimestamp, request.ToTimestamp, request.Function)
 
 			if err != nil {
 				return nil, err
@@ -35,11 +33,11 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 
 			if length != 0 {
 				lastPoint := metricData.Points[length-1]
-				fromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution
+				request.FromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution
 			}
 		}
 
-		rawMetricData, err := c.readRawData(uuid, fromTimestamp, toTimestamp)
+		rawMetricData, err := c.readRawData(uuid, request.FromTimestamp, request.ToTimestamp)
 
 		if err != nil {
 			return nil, err

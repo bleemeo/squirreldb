@@ -72,8 +72,6 @@ func main() {
 		"Resolved: Initialized the session",
 		retry.NewBackOff(30*time.Second))
 
-	squirrelCassandra.LoadStates()
-
 	squirrelStore := store.New()
 	squirrelBatch := batch.New(batchSize, squirrelStore, squirrelCassandra, squirrelCassandra)
 	squirrelIndex := index.New(squirrelCassandra)
@@ -146,10 +144,6 @@ func main() {
 		logger.Println("All services have been successfully stopped")
 	case <-signalChan:
 		logger.Println("Force stop")
-	}
-
-	if err := squirrelCassandra.SaveStates(); err != nil {
-		logger.Println("Can't save the states (", err, ")")
 	}
 
 	squirrelCassandra.Close()

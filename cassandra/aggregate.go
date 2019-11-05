@@ -7,103 +7,101 @@ import (
 	"log"
 	"os"
 	"squirreldb/aggregate"
-	"squirreldb/compare"
 	"squirreldb/types"
 	"strings"
 	"time"
 )
 
-// Run calls aggregateInParts() every aggregate size interval seconds
-// If the context receives a stop signal, the service is stopped
+const (
+	AggregatePeriod       = 300
+	AggregateShards       = 60
+	AggregateShardsPeriod = 60
+)
+
 func (c *Cassandra) Run(ctx context.Context) {
-	nowUnix := time.Now().Unix()
-	toTimestamp := nowUnix - (nowUnix % c.options.AggregateSize)
-	fromTimestamp := compare.Int64Max(toTimestamp-c.options.AggregateSize, c.states.lastAggregationFromTimestamp)
-	waitTimestamp := nowUnix - toTimestamp + c.options.AggregateStartOffset
+	ticker := time.NewTicker(time.Duration(AggregatePeriod) * time.Second)
 
-	if c.options.DebugAggregateForce { // TODO: Debug
-		fromTimestamp = toTimestamp - c.options.DebugAggregateSize
-		waitTimestamp = 5
-	}
+	for {
+		uuids := c.readUUIDs()
+		var fromTimestamp int64
 
-	aggregateNextTimestamp.Set(float64(nowUnix+waitTimestamp) * 1000)
+		_ = c.readState("last_aggregation_from_timestamp", &fromTimestamp)
 
-	logger.Println("Run: Start in", waitTimestamp, "seconds...") // TODO: Debug
+		now := time.Now()
+		limitFromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.options.AggregateSize
 
-	select {
-	case <-time.After(time.Duration(waitTimestamp) * time.Second):
-	case <-ctx.Done():
-		logger.Println("Run: Stopped")
-		return
-	}
+		if fromTimestamp == 0 {
+			fromTimestamp = limitFromTimestamp
+		}
 
-	ticker := time.NewTicker(time.Duration(c.options.AggregateSize) * time.Second)
-	defer ticker.Stop()
+		toTimestamp := fromTimestamp + c.options.AggregateSize
 
-	for uuids := c.readUUIDs(); ; {
-		if (len(uuids) == 0) || ((fromTimestamp == c.states.lastAggregationFromTimestamp) && (c.states.lastAggregatedPart == 60)) {
-			logger.Println("Run: Nothing to aggregate") // TODO: Debug
+		if (len(uuids) == 0) || (fromTimestamp > limitFromTimestamp) {
+			logger.Println("runAggregate: Nothing to aggregate")
 		} else {
-			nowUnix = time.Now().Unix()
+			logger.Println("runAggregate: Aggregate", len(uuids), "metric(s) from", fromTimestamp, "to", toTimestamp) // TODO: Debug
 
-			c.states.lastAggregatedPart %= 60
+			complete := c.aggregateShards(ctx, AggregateShards, AggregateShardsPeriod, uuids, fromTimestamp, toTimestamp)
 
-			lastAggregatedPart, err := c.aggregateInParts(ctx, uuids, fromTimestamp, toTimestamp, 60, 60)
+			if complete {
+				logger.Println("runAggregate: Aggregate completed") // TODO: Debug
 
-			c.states.lastAggregatedPart = lastAggregatedPart
-
-			if err != nil {
-				logger.Println("Run: Can't aggregate (", err, ")")
+				fromTimestamp += c.options.AggregateSize
 			} else {
-				logger.Println("Run: Aggregate all parts") // TODO: Debug
+				logger.Println("runAggregate: Aggregate not completed") // TODO: Debug
 			}
+
+			_ = c.writeState("last_aggregation_from_timestamp", fromTimestamp)
 		}
-
-		c.states.lastAggregationFromTimestamp = fromTimestamp
-
-		if c.states.lastAggregatedPart == 0 {
-			fromTimestamp = toTimestamp
-			toTimestamp += c.options.AggregateSize
-		}
-
-		aggregateNextTimestamp.Set(float64(nowUnix+c.options.AggregateSize) * 1000)
-		nowUnix = time.Now().Unix()
-		aggregateLastTimestamp.Set(float64(nowUnix) * 1000)
 
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			logger.Println("Run: Stopped")
+			logger.Println("runAggregate: Stopped")
 			return
 		}
 	}
 }
 
-func (c *Cassandra) aggregateInParts(ctx context.Context, uuids types.MetricUUIDs, fromTimestamp, toTimestamp, size int64, parts int) (int, error) {
-	ticker := time.NewTicker(time.Duration(size/int64(parts)) * time.Second)
-	uuidsLen := len(uuids)
-	var fromIndex, toIndex int
+func (c *Cassandra) aggregateShards(ctx context.Context, shards, period int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) bool {
+	var lastShard int
 
-	for currentPart := c.states.lastAggregatedPart + 1; currentPart <= parts; currentPart++ {
-		fromIndex = int(float64(uuidsLen) * (float64(currentPart-1) / float64(parts)))
-		toIndex = int(float64(uuidsLen) * (float64(currentPart) / float64(parts)))
-		uuidsPart := uuids[fromIndex:toIndex]
+	_ = c.readState("last_aggregation_shard", &lastShard)
 
-		if err := c.aggregate(uuidsPart, fromTimestamp, toTimestamp); err != nil {
-			return currentPart - 1, err
+	ticker := time.NewTicker(time.Duration(float64(period)/float64(shards)) * time.Second)
+
+	for currentShard := lastShard + 1; currentShard <= shards; currentShard++ {
+		var uuidsShard types.MetricUUIDs
+
+		for _, uuid := range uuids {
+			if (uuid.Uint64() % uint64(shards)) == uint64(currentShard) {
+				uuidsShard = append(uuidsShard, uuid)
+			}
 		}
 
-		logger.Println("aggregateInParts: Aggregate from", fromIndex, "to", toIndex, "on", uuidsLen, "metrics") // TODO: Debug
+		if err := c.aggregate(uuidsShard, fromTimestamp, toTimestamp); err != nil {
+			logger.Println("aggregateShards: Can't aggregate (", err, ")")
+
+			_ = c.writeState("last_aggregation_shard", currentShard-1)
+
+			return false
+		}
+
+		logger.Println("aggregateShards: Aggregate", len(uuidsShard), "metric(s) (", currentShard, "/", shards, ")") // TODO: Debug
 
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			logger.Println("aggregateInParts: Stopped")
-			return currentPart, nil
+			ctx.Done()
+			_ = c.writeState("last_aggregation_shard", currentShard)
+
+			return false
 		}
 	}
 
-	return parts, nil
+	_ = c.writeState("last_aggregation_shard", 0)
+
+	return true
 }
 
 func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
@@ -137,11 +135,11 @@ func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestam
 	aggregateSeconds.Add(duration.Seconds())
 
 	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags) // TODO: Debug
-	debugLog.Println("[cassandra] aggregate():")
+	debugLog.Println("[cassandra] aggregate():")              // TODO: Debug
 	debugLog.Printf("\t"+"|_ fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
-		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0))
+		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0)) // TODO: Debug
 	debugLog.Printf("\t"+"|_ Process %d metric(s) in %v (%f metric(s)/s)",
-		len(uuids), duration, float64(len(uuids))/duration.Seconds())
+		len(uuids), duration, float64(len(uuids))/duration.Seconds()) // TODO: Debug
 
 	return nil
 }
