@@ -7,30 +7,39 @@ import (
 	"log"
 	"os"
 	"squirreldb/aggregate"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
 	"time"
 )
 
 const (
-	AggregatePeriod       = 300
 	AggregateShards       = 60
 	AggregateShardsPeriod = 60
 )
 
-// Run calls aggregateShards() every aggregate period if from timestamp is valid and if metrics are to be aggregated
+// Run calls aggregateShard() every period if the conditions are met
+// The process starts from the last saved states (from timestamp and last shard)
 // If a stop signal is received, the service is stopped
 func (c *Cassandra) Run(ctx context.Context) {
-	ticker := time.NewTicker(time.Duration(AggregatePeriod) * time.Second)
+	ticker := time.NewTicker(time.Duration(float64(AggregateShardsPeriod)/float64(AggregateShards)) * time.Second)
 
 	for {
-		aggregateNextTimestamp.SetToCurrentTime()
-		aggregateNextTimestamp.Add(AggregatePeriod)
-
-		uuids := c.readUUIDs()
+		uuids := c.readUUIDs() // TODO: Replace with index
 		var fromTimestamp int64
 
-		_ = c.readState("last_aggregation_from_timestamp", &fromTimestamp)
+		retry.Do(func() error {
+			err := c.readState("aggregate_from_timestamp", &fromTimestamp)
+
+			if err == gocql.ErrNotFound {
+				return nil
+			}
+
+			return err
+		}, "cassandra", "readState",
+			"Can't read state",
+			"Resolved: Read state",
+			retry.NewBackOff(30*time.Second))
 
 		now := time.Now()
 		limitFromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.options.AggregateSize
@@ -39,79 +48,65 @@ func (c *Cassandra) Run(ctx context.Context) {
 			fromTimestamp = limitFromTimestamp
 		}
 
-		toTimestamp := fromTimestamp + c.options.AggregateSize
+		if (len(uuids) > 0) && (fromTimestamp <= limitFromTimestamp) {
+			var lastShard int
 
-		if (len(uuids) == 0) || (fromTimestamp > limitFromTimestamp) {
-			logger.Println("runAggregate: Nothing to aggregate")
-		} else {
-			logger.Println("runAggregate: Aggregate", len(uuids), "metric(s) from", fromTimestamp, "to", toTimestamp) // TODO: Debug
+			retry.Do(func() error {
+				err := c.readState("aggregate_last_shard", &lastShard)
 
-			complete := c.aggregateShards(ctx, AggregateShards, AggregateShardsPeriod, uuids, fromTimestamp, toTimestamp)
+				if err == gocql.ErrNotFound {
+					return nil
+				}
 
-			aggregateLastTimestamp.SetToCurrentTime()
+				return err
+			}, "cassandra", "readState",
+				"Can't read state",
+				"Resolved: Read state",
+				retry.NewBackOff(30*time.Second))
 
-			if complete {
-				logger.Println("runAggregate: Aggregate completed") // TODO: Debug
+			toTimestamp := fromTimestamp + c.options.AggregateSize
+			shard := lastShard + 1
 
-				fromTimestamp += c.options.AggregateSize
+			err := c.aggregateShard(shard, uuids, fromTimestamp, toTimestamp)
+
+			if err != nil {
+				logger.Println("Run: Can't aggregate shard ", shard, " (", err, ")")
 			} else {
-				logger.Println("runAggregate: Aggregate not completed") // TODO: Debug
+				_ = c.writeState("aggregate_last_shard", shard%60)
+
+				logger.Println("Run: Aggregate shard", shard, "on", AggregateShards)
 			}
 
-			_ = c.writeState("last_aggregation_from_timestamp", fromTimestamp)
+			if (err == nil) && (shard == AggregateShards) {
+				_ = c.writeState("aggregate_from_timestamp", toTimestamp)
+
+				logger.Println("Run: Aggregate completed")
+			}
 		}
 
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			logger.Println("runAggregate: Stopped")
 			return
 		}
 	}
 }
 
-// Aggregate by shards all specified metrics contained in the specified period
-// Aggregation resumes since the shard after the last successfully aggregated shard
-// If an error or stop signal is received, the last successfully aggregated shard is saved
-func (c *Cassandra) aggregateShards(ctx context.Context, shards, period int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) bool {
-	var lastShard int
+// Aggregate each metric corresponding to the shard
+func (c *Cassandra) aggregateShard(shard int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
+	var uuidsShard types.MetricUUIDs
 
-	_ = c.readState("last_aggregation_shard", &lastShard)
-
-	ticker := time.NewTicker(time.Duration(float64(period)/float64(shards)) * time.Second)
-
-	for currentShard := lastShard + 1; currentShard <= shards; currentShard++ {
-		var uuidsShard types.MetricUUIDs
-
-		for _, uuid := range uuids {
-			if (uuid.Uint64() % uint64(shards)) == uint64(currentShard) {
-				uuidsShard = append(uuidsShard, uuid)
-			}
-		}
-
-		if err := c.aggregate(uuidsShard, fromTimestamp, toTimestamp); err != nil {
-			logger.Println("aggregateShards: Can't aggregate (", err, ")")
-
-			_ = c.writeState("last_aggregation_shard", currentShard-1)
-
-			return false
-		}
-
-		logger.Println("aggregateShards: Aggregate", len(uuidsShard), "metric(s) (", currentShard, "/", shards, ")") // TODO: Debug
-
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			ctx.Done()
-			_ = c.writeState("last_aggregation_shard", currentShard)
-
-			return false
+	for _, uuid := range uuids {
+		if (uuid.Uint64() % (uint64(AggregateShards) + 1)) == uint64(shard) {
+			uuidsShard = append(uuidsShard, uuid)
 		}
 	}
 
-	_ = c.writeState("last_aggregation_shard", 0)
+	if err := c.aggregate(uuidsShard, fromTimestamp, toTimestamp); err != nil {
+		return err
+	}
 
-	return true
+	return nil
 }
 
 // Aggregate each specified metrics contained in the specified period

@@ -51,11 +51,11 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 		retry.Do(func() error {
 			err := server.ListenAndServe()
 
-			if err != http.ErrServerClosed {
-				return err
+			if err == http.ErrServerClosed {
+				return nil
 			}
 
-			return nil
+			return err
 		}, "prometheus", "Run",
 			"Can't listen and serve the server",
 			"Resolved: Listen and serve the server",
