@@ -68,7 +68,7 @@ func main() {
 
 		return err
 	}, "main", "main",
-		"Can't initialize the session",
+		"Error: Can't initialize the session",
 		"Resolved: Initialized the session",
 		retry.NewBackOff(30*time.Second))
 

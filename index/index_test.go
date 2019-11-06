@@ -10,7 +10,7 @@ import (
 type mockIndexerTable struct {
 }
 
-func (m *mockIndexerTable) Request() (map[types.MetricUUID]types.MetricLabels, error) {
+func (m *mockIndexerTable) Retrieve() (map[types.MetricUUID]types.MetricLabels, error) {
 	return nil, nil
 }
 
@@ -33,8 +33,8 @@ func TestNew(t *testing.T) {
 				storage: &mockIndexerTable{},
 			},
 			want: &Index{
-				storage: &mockIndexerTable{},
-				pairs:   nil,
+				store: &mockIndexerTable{},
+				pairs: nil,
 			},
 		},
 	}
@@ -83,8 +83,8 @@ func TestIndex_UUID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Index{
-				storage: &tt.fields.storage,
-				pairs:   tt.fields.pairs,
+				store: &tt.fields.storage,
+				pairs: tt.fields.pairs,
 			}
 			if got := m.UUID(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("UUID() = %v, want %v", got, tt.want)

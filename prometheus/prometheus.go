@@ -21,14 +21,14 @@ type Prometheus struct {
 }
 
 // New creates a new Prometheus object
-func New(matcher types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
+func New(indexer types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
 	return &Prometheus{
 		readPoints: ReadPoints{
-			indexer: matcher,
+			indexer: indexer,
 			reader:  reader,
 		},
 		writePoints: WritePoints{
-			indexer: matcher,
+			indexer: indexer,
 			writer:  writer,
 		},
 	}
@@ -57,7 +57,7 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 
 			return err
 		}, "prometheus", "Run",
-			"Can't listen and serve the server",
+			"Error: Can't listen and serve the server",
 			"Resolved: Listen and serve the server",
 			retry.NewBackOff(30*time.Second))
 	}()

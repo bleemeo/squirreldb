@@ -124,7 +124,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 		return err
 	}, "batch", "flush",
-		"Can't get metrics from the temporary storage",
+		"Error: Can't get metrics from the temporary storage",
 		"Resolved: Get metrics from the temporary storage",
 		retry.NewBackOff(30*time.Second))
 
@@ -176,7 +176,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	retry.Do(func() error {
 		return b.writer.Write(metricsToWrite)
 	}, "batch", "flush",
-		"Can't write metrics in the persistent storage",
+		"Error: Can't write metrics in the persistent storage",
 		"Resolved: Write metrics in the persistent storage",
 		retry.NewBackOff(30*time.Second))
 
@@ -185,7 +185,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 		return b.store.Set(nil, metricsToSet, timeToLive)
 	}, "batch", "flush",
-		"Can't set metrics in the temporary storage",
+		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage",
 		retry.NewBackOff(30*time.Second))
 }
@@ -203,7 +203,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 
 		return err
 	}, "batch", "read",
-		"Can't get metrics from the temporary storage",
+		"Error: Can't get metrics from the temporary storage",
 		"Resolved: Get metrics from the temporary storage",
 		retry.NewBackOff(30*time.Second))
 
@@ -238,7 +238,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 
 		return err
 	}, "batch", "read",
-		"Can't read metrics from the persistent storage",
+		"Error: Can't read metrics from the persistent storage",
 		"Resolved: Read metrics from the persistent storage",
 		retry.NewBackOff(30*time.Second))
 
@@ -326,7 +326,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 
 		return b.store.Append(newMetrics, existingMetrics, timeToLive)
 	}, "batch", "write",
-		"Can't append metrics points in the temporary storage",
+		"Error: Can't append metrics points in the temporary storage",
 		"Resolved: Append metrics points in the temporary storage",
 		retry.NewBackOff(30*time.Second))
 

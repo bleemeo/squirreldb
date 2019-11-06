@@ -36,8 +36,8 @@ func (c *Cassandra) Run(ctx context.Context) {
 			}
 
 			return err
-		}, "cassandra", "readState",
-			"Can't read state",
+		}, "cassandra", "Run",
+			"Error: Can't read state",
 			"Resolved: Read state",
 			retry.NewBackOff(30*time.Second))
 
@@ -59,8 +59,8 @@ func (c *Cassandra) Run(ctx context.Context) {
 				}
 
 				return err
-			}, "cassandra", "readState",
-				"Can't read state",
+			}, "cassandra", "Run",
+				"Error: Can't read state",
 				"Resolved: Read state",
 				retry.NewBackOff(30*time.Second))
 

@@ -68,7 +68,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 			return err
 		}, "prometheus", "ReadPoints",
-			"Can't read in storage",
+			"Error: Can't read in storage",
 			"Resolved: Read in storage",
 			retry.NewBackOff(30*time.Second))
 

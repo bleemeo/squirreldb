@@ -4,15 +4,16 @@ import (
 	"github.com/gocql/gocql"
 	"log"
 	"os"
+	"squirreldb/types"
 	"strconv"
 	"strings"
 )
 
 const (
-	StatesTable        = "states"
 	DataTable          = "data"
 	AggregateDataTable = "data_aggregated"
-	IndexTable         = "indx"
+	IndexTable         = "index"
+	StatesTable        = "states"
 )
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
@@ -40,6 +41,7 @@ type Options struct {
 
 type Cassandra struct {
 	session *gocql.Session
+	indexer types.MetricIndexer
 	options Options
 }
 
@@ -54,10 +56,10 @@ func New(options Options) (*Cassandra, error) {
 
 	session.SetConsistency(gocql.LocalQuorum)
 
-	options.statesTable = options.Keyspace + "." + StatesTable
 	options.dataTable = options.Keyspace + "." + DataTable
 	options.aggregateDataTable = options.Keyspace + "." + AggregateDataTable
-	options.indexTable = options.Keyspace + "." + IndexTable
+	options.indexTable = options.Keyspace + "." + "\"" + IndexTable + "\""
+	options.statesTable = options.Keyspace + "." + StatesTable
 
 	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 
@@ -71,20 +73,6 @@ func New(options Options) (*Cassandra, error) {
 	`))
 
 	if err := createKeyspace.Exec(); err != nil {
-		session.Close()
-		return nil, err
-	}
-
-	createStatesTableReplacer := strings.NewReplacer("$STATES_TABLE", options.statesTable)
-	createStatesTable := session.Query(createStatesTableReplacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
-			name text,
-			value text,
-			PRIMARY KEY (name)
-		)
-	`))
-
-	if err := createStatesTable.Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}
@@ -157,6 +145,20 @@ func New(options Options) (*Cassandra, error) {
 	`))
 
 	if err := createIndexTable.Exec(); err != nil {
+		session.Close()
+		return nil, err
+	}
+
+	createStatesTableReplacer := strings.NewReplacer("$STATES_TABLE", options.statesTable)
+	createStatesTable := session.Query(createStatesTableReplacer.Replace(`
+		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
+			name text,
+			value text,
+			PRIMARY KEY (name)
+		)
+	`))
+
+	if err := createStatesTable.Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}

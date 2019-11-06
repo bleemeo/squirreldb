@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// Request reads all the uuid-labels pairs from the index table
-func (c *Cassandra) Request() (map[types.MetricUUID]types.MetricLabels, error) {
+// Retrieve reads all the uuid-labels pairs from the index table
+func (c *Cassandra) Retrieve() (map[types.MetricUUID]types.MetricLabels, error) {
 	iterator := c.readIndex()
 	var metricUUID string
 	var metricLabels map[string]string

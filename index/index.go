@@ -9,35 +9,35 @@ import (
 	"time"
 )
 
-type Storage interface {
-	Request() (map[types.MetricUUID]types.MetricLabels, error)
+type Storer interface {
+	Retrieve() (map[types.MetricUUID]types.MetricLabels, error)
 	Save(uuid types.MetricUUID, labels types.MetricLabels) error
 }
 
 type Index struct {
-	storage Storage
+	store Storer
 
 	pairs map[types.MetricUUID]types.MetricLabels
 	mutex sync.Mutex
 }
 
 // New creates a new Index object
-func New(storage Storage) *Index {
+func New(storage Storer) *Index {
 	var pairs map[types.MetricUUID]types.MetricLabels
 
 	retry.Do(func() error {
 		var err error
-		pairs, err = storage.Request()
+		pairs, err = storage.Retrieve()
 
 		return err
 	}, "index", "New",
-		"Can't get uuid labels pairs from the storage",
-		"Resolved: Get uuid labels pairs from the storage",
+		"Error: Can't get uuid-labels pairs from the store",
+		"Resolved: Get uuid-labels pairs from the store",
 		retry.NewBackOff(30*time.Second))
 
 	index := &Index{
-		storage: storage,
-		pairs:   pairs,
+		store: storage,
+		pairs: pairs,
 	}
 
 	return index
@@ -54,10 +54,10 @@ func (i *Index) UUID(labels types.MetricLabels) types.MetricUUID {
 		i.pairs[uuid] = labels
 
 		retry.Do(func() error {
-			return i.storage.Save(uuid, labels)
-		}, "index", "New",
-			"Can't save uuid labels pair in the storage",
-			"Resolved: Save uuid labels pair in the storage",
+			return i.store.Save(uuid, labels)
+		}, "index", "UUID",
+			"Error: Can't save uuid-labels pair in the store",
+			"Resolved: Save uuid-labels pair in the store",
 			retry.NewBackOff(30*time.Second))
 	}
 
@@ -65,15 +65,14 @@ func (i *Index) UUID(labels types.MetricLabels) types.MetricUUID {
 }
 
 // UUIDs returns UUIDs that matches with the label set
-func (i *Index) UUIDs(search types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
+func (i *Index) UUIDs(matchers types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
+	pairs := make(map[types.MetricUUID]types.MetricLabels)
 
-	matchers := make(map[types.MetricUUID]types.MetricLabels)
+	i.mutex.Lock()
 
 forLoop:
 	for uuid, labels := range i.pairs {
-		for _, label := range search {
+		for _, label := range matchers {
 			value, exists := labels.Value(label.Name)
 
 			if !exists || (value != label.Value) {
@@ -81,16 +80,16 @@ forLoop:
 			}
 		}
 
-		matchers[uuid] = labels
+		pairs[uuid] = labels
 	}
 
-	if len(matchers) == 0 {
-		i.mutex.Unlock()
-		i.UUID(search)
-		i.mutex.Lock()
+	i.mutex.Unlock()
+
+	if len(pairs) == 0 {
+		i.UUID(matchers)
 	}
 
-	return matchers
+	return pairs
 }
 
 // Returns generated UUID from labels
