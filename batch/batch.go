@@ -13,6 +13,7 @@ import (
 
 const (
 	checkerInterval = 60
+	maxFlush        = 100
 )
 
 var (
@@ -94,16 +95,29 @@ func (b *Batch) check(now time.Time, flushAll bool) {
 	nowUnix := now.Unix()
 	flushQueue := make(map[types.MetricUUID][]state)
 
-	for uuid, state := range b.states {
-		if (state.flushTimestamp < nowUnix) || flushAll {
-			flushQueue[uuid] = append(flushQueue[uuid], state)
+	for i, max, total := 0, maxFlush, len(b.states); i < total; i += max {
+		count := 0
 
-			delete(b.states, uuid)
+		if i+max > total {
+			max = total % 1000
 		}
-	}
 
-	if len(flushQueue) != 0 {
-		b.flush(flushQueue, now)
+		for uuid, state := range b.states {
+			if (state.flushTimestamp < nowUnix) || flushAll {
+				flushQueue[uuid] = append(flushQueue[uuid], state)
+				count++
+
+				delete(b.states, uuid)
+			}
+
+			if count >= max {
+				break
+			}
+		}
+
+		if count != 0 {
+			b.flush(flushQueue, now)
+		}
 	}
 }
 
