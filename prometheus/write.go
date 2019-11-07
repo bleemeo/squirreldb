@@ -24,7 +24,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
-		logger.Println("WritePoints: Error: Can't read the body (", err, ")")
+		logger.Printf("Error: Can't read the body (%v)", err)
 		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
 
 		return
@@ -33,7 +33,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	decoded, err := snappy.Decode(nil, body)
 
 	if err != nil {
-		logger.Println("WritePoints: Error: Can't decode the body (", err, ")")
+		logger.Printf("Error: Can't decode the body (%v)", err)
 		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
 
 		return
@@ -42,7 +42,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	var writeRequest prompb.WriteRequest
 
 	if err := proto.Unmarshal(decoded, &writeRequest); err != nil {
-		logger.Println("WritePoints: Error: Can't unmarshal the decoded body (", err, ")")
+		logger.Printf("Error: Can't unmarshal the decoded body (%v)", err)
 		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
 
 		return
@@ -58,12 +58,11 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		metrics[uuid] = toMetricData(series, timeToLive)
 	}
 
-	retry.Do(func() error {
+	retry.Print(func() error {
 		return w.writer.Write(metrics)
-	}, logger,
+	}, retry.NewBackOff(30*time.Second), logger,
 		"Error: Can't write in storage",
-		"Resolved: Write in storage",
-		retry.NewBackOff(30*time.Second))
+		"Resolved: Write in storage")
 }
 
 // Convert Prometheus Labels to MetricLabels

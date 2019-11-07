@@ -3,16 +3,22 @@ package index
 import (
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+	"log"
+	"os"
 	"sort"
 	"squirreldb/compare"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
 	Table = "index"
 )
+
+var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 type CassandraIndex struct {
 	session    *gocql.Session
@@ -22,7 +28,8 @@ type CassandraIndex struct {
 	mutex sync.Mutex
 }
 
-func NewCassandraIndex(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
+// New creates a new CassandraIndex object
+func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 	indexTable := keyspace + "." + "\"" + Table + "\""
 
 	createIndexTableQuery := createIndexTableQuery(session, indexTable)
@@ -43,6 +50,7 @@ func NewCassandraIndex(session *gocql.Session, keyspace string) (*CassandraIndex
 	return index, nil
 }
 
+// Pairs returns all uuid-labels pairs matching with the specified matchers
 func (c *CassandraIndex) Pairs(matchers types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -65,6 +73,7 @@ forLoop:
 	return pairs
 }
 
+// UUID returns the UUID associated with the specified labels
 func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -81,11 +90,16 @@ func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 
 	uuid := uuidFromLabels(labels)
 
-	_ = c.savePair(uuid, labels)
+	retry.Print(func() error {
+		return c.savePair(uuid, labels)
+	}, retry.NewBackOff(30*time.Second), logger,
+		"Error: Can't save pair in the index table",
+		"Resolved: Save pair in the index table")
 
 	return uuid
 }
 
+// UUIDs returns all UUIDs
 func (c *CassandraIndex) UUIDs() types.MetricUUIDs {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -99,6 +113,7 @@ func (c *CassandraIndex) UUIDs() types.MetricUUIDs {
 	return uuids
 }
 
+// Saves pair in the index
 func (c *CassandraIndex) savePair(uuid types.MetricUUID, labels types.MetricLabels) error {
 	uuidString := uuid.String()
 	uuidCQL, _ := gocql.ParseUUID(uuidString)
@@ -115,6 +130,7 @@ func (c *CassandraIndex) savePair(uuid types.MetricUUID, labels types.MetricLabe
 	return nil
 }
 
+// Returns index table insert query
 func (c *CassandraIndex) writeIndexTableQuery(uuid gocql.UUID, labels map[string]string) *gocql.Query {
 	replacer := strings.NewReplacer("$INDEX_TABLE", c.indexTable)
 	query := c.session.Query(replacer.Replace(`
@@ -126,6 +142,7 @@ func (c *CassandraIndex) writeIndexTableQuery(uuid gocql.UUID, labels map[string
 	return query
 }
 
+// Returns index table create query
 func createIndexTableQuery(session *gocql.Session, indexTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$INDEX_TABLE", indexTable)
 	query := session.Query(replacer.Replace(`
@@ -139,6 +156,7 @@ func createIndexTableQuery(session *gocql.Session, indexTable string) *gocql.Que
 	return query
 }
 
+// Returns index table load iterator
 func loadIndexTableIterator(session *gocql.Session, indexTable string) *gocql.Iter {
 	replacer := strings.NewReplacer("$INDEX_TABLE", indexTable)
 	query := session.Query(replacer.Replace(`
@@ -150,6 +168,7 @@ func loadIndexTableIterator(session *gocql.Session, indexTable string) *gocql.It
 	return iterator
 }
 
+// Returns all uuid-labels pairs
 func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID]types.MetricLabels {
 	pairs := make(map[types.MetricUUID]types.MetricLabels)
 
@@ -168,6 +187,8 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID]t
 	return pairs
 }
 
+// Returns UUID generated from labels
+// If the labels contains a UUID label, the value of the latter is used, otherwise a random UUID is generated
 func uuidFromLabels(labels types.MetricLabels) types.MetricUUID {
 	var uuid types.MetricUUID
 	uuidString, exists := labels.Value("__bleemeo_uuid__")

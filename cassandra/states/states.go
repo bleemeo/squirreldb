@@ -16,7 +16,8 @@ type CassandraStates struct {
 	statesTable string
 }
 
-func NewCassandraStates(session *gocql.Session, keyspace string) (*CassandraStates, error) {
+// New creates a new CassandraStates object
+func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
 	statesTable := keyspace + "." + Table
 
 	createStatesTable := createStatesTableQuery(session, statesTable)
@@ -34,6 +35,7 @@ func NewCassandraStates(session *gocql.Session, keyspace string) (*CassandraStat
 	return states, nil
 }
 
+// Read assigns the value from the specified state
 func (c *CassandraStates) Read(name string, value interface{}) error {
 	valueString, err := c.readStatesTable(name)
 
@@ -58,6 +60,7 @@ func (c *CassandraStates) Read(name string, value interface{}) error {
 	return nil
 }
 
+// Write writes the specified state
 func (c *CassandraStates) Write(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
 
@@ -68,20 +71,7 @@ func (c *CassandraStates) Write(name string, value interface{}) error {
 	return nil
 }
 
-func createStatesTableQuery(session *gocql.Session, statesTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$STATES_TABLE", statesTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
-			name text,
-			value text,
-			PRIMARY KEY (name)
-		)
-	`))
-
-	return query
-}
-
-// Reads a state value from the states table
+// Reads the value of the specified state from the states table
 func (c *CassandraStates) readStatesTable(name string) (string, error) {
 	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
 	iterator := c.session.Query(replacer.Replace(`
@@ -112,4 +102,18 @@ func (c *CassandraStates) writeStatesTable(name string, value string) error {
 	}
 
 	return nil
+}
+
+// Returns states table create query
+func createStatesTableQuery(session *gocql.Session, statesTable string) *gocql.Query {
+	replacer := strings.NewReplacer("$STATES_TABLE", statesTable)
+	query := session.Query(replacer.Replace(`
+		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
+			name text,
+			value text,
+			PRIMARY KEY (name)
+		)
+	`))
+
+	return query
 }

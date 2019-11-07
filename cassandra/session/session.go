@@ -16,7 +16,8 @@ type Cassandra struct {
 	Session *gocql.Session
 }
 
-func NewCassandra(options Options) (*Cassandra, error) {
+// New creates a new Cassandra object
+func New(options Options) (*Cassandra, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	session, err := cluster.CreateSession()
 
@@ -41,10 +42,12 @@ func NewCassandra(options Options) (*Cassandra, error) {
 	return &cassandra, nil
 }
 
+// Close closes the Cassandra session
 func (c *Cassandra) Close() {
 	c.Session.Close()
 }
 
+// Returns keyspace create query
 func createKeyspaceQuery(session *gocql.Session, keyspace, replicationFactor string) *gocql.Query {
 	replacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	query := session.Query(replacer.Replace(`

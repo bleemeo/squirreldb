@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/gocql/gocql"
 	"squirreldb/aggregate"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -18,13 +19,21 @@ const (
 // The process starts from the last saved states (from timestamp and last shard)
 // If a stop signal is received, the service is stopped
 func (c *CassandraTSDB) Run(ctx context.Context) {
+	if c.debug.AggregateForce {
+		now := time.Now()
+		fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.debug.AggregateSize
+
+		_ = c.states.Write("aggregate_from_timestamp", fromTimestamp)
+	}
+
 	ticker := time.NewTicker(time.Duration(float64(AggregateShardsPeriod)/float64(AggregateShards)) * time.Second)
+	started := false
 
 	for {
 		uuids := c.index.UUIDs()
 		var fromTimestamp int64
 
-		retry.Do(func() error {
+		retry.Print(func() error {
 			err := c.states.Read("aggregate_from_timestamp", &fromTimestamp)
 
 			if err == gocql.ErrNotFound {
@@ -32,10 +41,9 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 			}
 
 			return err
-		}, logger,
-			"Error: Can't read state",
-			"Resolved: Read state",
-			retry.NewBackOff(30*time.Second))
+		}, retry.NewBackOff(30*time.Second), logger,
+			"Error: Can't read 'aggregate_from_timestamp' state",
+			"Resolved: Read 'aggregate_from_timestamp' state")
 
 		now := time.Now()
 		limitFromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.options.AggregateSize
@@ -47,7 +55,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 		if (len(uuids) > 0) && (fromTimestamp <= limitFromTimestamp) {
 			var lastShard int
 
-			retry.Do(func() error {
+			retry.Print(func() error {
 				err := c.states.Read("aggregate_last_shard", &lastShard)
 
 				if err == gocql.ErrNotFound {
@@ -55,28 +63,46 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 				}
 
 				return err
-			}, logger,
-				"Error: Can't read state",
-				"Resolved: Read state",
-				retry.NewBackOff(30*time.Second))
+			}, retry.NewBackOff(30*time.Second), logger,
+				"Error: Can't read 'aggregate_last_shard' state",
+				"Resolved: Read 'aggregate_last_shard' state")
 
 			toTimestamp := fromTimestamp + c.options.AggregateSize
 			shard := lastShard + 1
 
+			if !started {
+				logger.Printf("Aggregate from %v to %v",
+					time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
+
+				if shard != 1 {
+					logger.Printf("Aggregate from shard %d on %d", shard, AggregateShards)
+				}
+
+				started = true
+			}
+
 			err := c.aggregateShard(shard, uuids, fromTimestamp, toTimestamp)
 
 			if err != nil {
-				logger.Println("Run: Can't aggregate shard ", shard, " (", err, ")")
+				logger.Printf("Error: Can't aggregate shard (%v)", err)
 			} else {
-				_ = c.states.Write("aggregate_last_shard", shard%60)
+				retry.Print(func() error {
+					return c.states.Write("aggregate_last_shard", shard%60)
+				}, retry.NewBackOff(30*time.Second), logger,
+					"Error: Can't write 'aggregate_last_shard' state",
+					"Resolved: Write 'aggregate_last_shard' state")
 
-				logger.Println("Run: Aggregate shard", shard, "on", AggregateShards)
+				debug.Print(debug.Level1, logger, "Aggregate shard %d on %d", shard, AggregateShards)
 			}
 
 			if (err == nil) && (shard == AggregateShards) {
-				_ = c.states.Write("aggregate_from_timestamp", toTimestamp)
+				retry.Print(func() error {
+					return c.states.Write("aggregate_from_timestamp", toTimestamp)
+				}, retry.NewBackOff(30*time.Second), logger,
+					"Error: Can't write 'aggregate_from_timestamp' state",
+					"Resolved: Write 'aggregate_from_timestamp' state")
 
-				logger.Println("Run: Aggregate completed")
+				logger.Println("Aggregate completed")
 			}
 		}
 
@@ -136,8 +162,8 @@ func (c *CassandraTSDB) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTime
 	duration := time.Since(startTime)
 	aggregateSeconds.Add(duration.Seconds())
 
-	logger.Printf( // TODO: Debug
-		"[DEBUG] aggregate():"+"\n"+
+	debug.Print(debug.Level1, logger,
+		"Aggregate details:"+"\n"+
 			"|__ fromTimestamp: %v (%d)"+"\n"+
 			"|__ toTimestamp: %v (%d)"+"\n"+
 			"|__ Process %d metric(s) in %v (%f metric(s)/s)",

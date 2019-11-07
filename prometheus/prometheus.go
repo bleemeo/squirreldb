@@ -48,7 +48,7 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 	router.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	go func() {
-		retry.Do(func() error {
+		retry.Print(func() error {
 			err := server.ListenAndServe()
 
 			if err == http.ErrServerClosed {
@@ -56,10 +56,9 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 			}
 
 			return err
-		}, logger,
+		}, retry.NewBackOff(30*time.Second), logger,
 			"Error: Can't listen and serve the server",
-			"Resolved: Listen and serve the server",
-			retry.NewBackOff(30*time.Second))
+			"Resolved: Listen and serve the server")
 	}()
 
 	// Wait to receive a stop signal
@@ -71,8 +70,8 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Println("Run: Error while stopping server (", err, ")")
+		logger.Printf("Error: Can't stop the server (%v)", err)
 	}
 
-	logger.Println("Run: Stopped")
+	logger.Println("Stopped")
 }

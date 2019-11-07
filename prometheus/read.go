@@ -24,7 +24,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
-		logger.Println("ReadPoints: Error: Can't read the body (", err, ")")
+		logger.Printf("Error: Can't read the body (%v)", err)
 		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
 
 		return
@@ -33,7 +33,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	decoded, err := snappy.Decode(nil, body)
 
 	if err != nil {
-		logger.Println("ReadPoints: Error: Can't decode the body (", err, ")")
+		logger.Printf("Error: Can't decode the body (%v)", err)
 		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
 
 		return
@@ -42,7 +42,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	var readRequest prompb.ReadRequest
 
 	if err := proto.Unmarshal(decoded, &readRequest); err != nil {
-		logger.Println("ReadPoints: Error: Can't unmarshal the decoded body (", err, ")")
+		logger.Printf("Error: Can't unmarshal the decoded body (%v)", err)
 		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
 
 		return
@@ -62,15 +62,14 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		request := toMetricRequest(uuids, query)
 		var metrics types.Metrics
 
-		retry.Do(func() error {
+		retry.Print(func() error {
 			var err error
 			metrics, err = r.reader.Read(request)
 
 			return err
-		}, logger,
+		}, retry.NewBackOff(30*time.Second), logger,
 			"Error: Can't read in storage",
-			"Resolved: Read in storage",
-			retry.NewBackOff(30*time.Second))
+			"Resolved: Read in storage")
 
 		queryResult := toQueryResult(pairs, metrics)
 
@@ -80,7 +79,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	marshal, err := readResponse.Marshal()
 
 	if err != nil {
-		logger.Println("ReadPoints: Error: Can't marshal the read response (", err, ")")
+		logger.Printf("Error: Can't marshal the read response (%v)", err)
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
 
 		return
@@ -91,7 +90,7 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	_, err = writer.Write(encoded)
 
 	if err != nil {
-		logger.Println("ReadPoints: Error: Can't write the read response (", err, ")")
+		logger.Printf("Error: Can't write the read response (%v)", err)
 		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
 
 		return

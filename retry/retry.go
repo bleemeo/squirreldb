@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// Do is a backoff.Retry wrapper that adds useful logs
-func Do(fun func() error, logger *log.Logger, errorMsg, resolveMsg string, b backoff.BackOff) {
+// Print is a backoff.Retry wrapper that adds useful logs
+func Print(fun func() error, b backoff.BackOff, logger *log.Logger, errorMsg, resolveMsg string) {
 	tried := false
 
 	_ = backoff.RetryNotify(fun, b, func(err error, duration time.Duration) {

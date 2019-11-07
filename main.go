@@ -12,6 +12,7 @@ import (
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
+	"squirreldb/debug"
 	"squirreldb/prometheus"
 	"squirreldb/retry"
 	"squirreldb/store"
@@ -28,7 +29,7 @@ func main() {
 	squirrelConfig, err := config.New()
 
 	if err != nil {
-		logger.Fatalln("config: Init: Can't initialize config (", err, ")")
+		logger.Fatalf("Can't create the config (%v)", err)
 	}
 
 	// Flags handle
@@ -42,9 +43,9 @@ func main() {
 		return
 	}
 
-	// Create services instance
-	prometheusListenAddress := squirrelConfig.String("prometheus.listen_address")
+	debug.Level = squirrelConfig.Int("debug.level")
 
+	// Create Cassandra services
 	cassandraOptions := session.Options{
 		Addresses:         squirrelConfig.Strings("cassandra.addresses"),
 		ReplicationFactor: squirrelConfig.Int("cassandra.replication_factor"),
@@ -53,15 +54,36 @@ func main() {
 
 	var squirrelCassandra *session.Cassandra
 
-	retry.Do(func() error {
+	retry.Print(func() error {
 		var err error
-		squirrelCassandra, err = session.NewCassandra(cassandraOptions)
+		squirrelCassandra, err = session.New(cassandraOptions)
 
 		return err
-	}, logger,
-		"Error: Can't initialize the session",
-		"Resolved: Initialized the session",
-		retry.NewBackOff(30*time.Second))
+	}, retry.NewBackOff(30*time.Second), logger,
+		"Error: Can't create the session",
+		"Resolved: Create the session")
+
+	var squirrelIndex *index.CassandraIndex
+
+	retry.Print(func() error {
+		var err error
+		squirrelIndex, err = index.New(squirrelCassandra.Session, cassandraOptions.Keyspace)
+
+		return err
+	}, retry.NewBackOff(30*time.Second), logger,
+		"Error: Can't create the index",
+		"Resolved: Create the index")
+
+	var squirrelStates *states.CassandraStates
+
+	retry.Print(func() error {
+		var err error
+		squirrelStates, err = states.New(squirrelCassandra.Session, cassandraOptions.Keyspace)
+
+		return err
+	}, retry.NewBackOff(30*time.Second), logger,
+		"Error: Can't create the states",
+		"Resolved: Create the states")
 
 	tsdbOptions := tsdb.Options{
 		BatchSize:              squirrelConfig.Int64("batch.size"),
@@ -72,47 +94,29 @@ func main() {
 		AggregatePartitionSize: squirrelConfig.Int64("cassandra.partition_size.aggregate"),
 	}
 
-	var squirrelIndex *index.CassandraIndex
-
-	retry.Do(func() error {
-		var err error
-		squirrelIndex, err = index.NewCassandraIndex(squirrelCassandra.Session, cassandraOptions.Keyspace)
-
-		return err
-	}, logger,
-		"Error: Can't initialize the index",
-		"Resolved: Initialized the index",
-		retry.NewBackOff(30*time.Second))
-
-	var squirrelStates *states.CassandraStates
-
-	retry.Do(func() error {
-		var err error
-		squirrelStates, err = states.NewCassandraStates(squirrelCassandra.Session, cassandraOptions.Keyspace)
-
-		return err
-	}, logger,
-		"Error: Can't initialize the index",
-		"Resolved: Initialized the index",
-		retry.NewBackOff(30*time.Second))
+	tsdbDebug := tsdb.Debug{
+		AggregateForce: squirrelConfig.Bool("debug.aggregate.force"),
+		AggregateSize:  squirrelConfig.Int64("debug.aggregate.size"),
+	}
 
 	var squirrelTSDB *tsdb.CassandraTSDB
 
-	retry.Do(func() error {
+	retry.Print(func() error {
 		var err error
-		squirrelTSDB, err = tsdb.NewCassandraTSDB(squirrelCassandra.Session, cassandraOptions.Keyspace, tsdbOptions,
-			squirrelIndex, squirrelStates)
+		squirrelTSDB, err = tsdb.New(squirrelCassandra.Session, cassandraOptions.Keyspace, tsdbOptions,
+			tsdbDebug, squirrelIndex, squirrelStates)
 
 		return err
-	}, logger,
-		"Error: Can't initialize the TSDB",
-		"Resolved: Initialized the TSDB",
-		retry.NewBackOff(30*time.Second))
+	}, retry.NewBackOff(30*time.Second), logger,
+		"Error: Can't create the TSDB",
+		"Resolved: create the TSDB")
 
+	// Create store, batch and Prometheus services
 	squirrelStore := store.New()
 	squirrelBatch := batch.New(tsdbOptions.BatchSize, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
 
+	// Handle signals
 	signalChan := make(chan os.Signal, 1)
 
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
@@ -129,6 +133,8 @@ func main() {
 	wg.Add(1)
 
 	go runSquirrelCassandra()
+
+	prometheusListenAddress := squirrelConfig.String("prometheus.listen_address")
 
 	runSquirrelPrometheus := func() {
 		defer wg.Done()
@@ -158,6 +164,7 @@ func main() {
 	go runSquirrelStore()
 
 	logger.Println("SquirrelDB is ready")
+	logger.Println("Listening on", prometheusListenAddress)
 
 	// Wait to receive a stop signal
 	<-signalChan
@@ -182,6 +189,7 @@ func main() {
 		logger.Println("Force stop")
 	}
 
+	// Close session and signal
 	squirrelCassandra.Close()
 
 	signal.Stop(signalChan)

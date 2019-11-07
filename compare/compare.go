@@ -20,6 +20,7 @@ func Int64Max(x, y int64) int64 {
 	return y
 }
 
+// LabelsEqual verifies the equality between x and y label tables
 func LabelsEqual(x, y types.MetricLabels) bool {
 	if len(x) != len(y) {
 		return false

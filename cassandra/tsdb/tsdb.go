@@ -17,6 +17,11 @@ const (
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
 
+type Debug struct {
+	AggregateForce bool
+	AggregateSize  int64
+}
+
 type Options struct {
 	DefaultTimeToLive      int64
 	BatchSize              int64
@@ -33,11 +38,13 @@ type Options struct {
 type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
+	debug   Debug
 	index   *index.CassandraIndex
 	states  *states.CassandraStates
 }
 
-func NewCassandraTSDB(session *gocql.Session, keyspace string, options Options, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
+// New creates a new CassandraTSDB object
+func New(session *gocql.Session, keyspace string, options Options, debug Debug, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + DataTable
 	options.aggregateDataTable = keyspace + "." + AggregateDataTable
 
@@ -60,6 +67,7 @@ func NewCassandraTSDB(session *gocql.Session, keyspace string, options Options, 
 	tsdb := &CassandraTSDB{
 		session: session,
 		options: options,
+		debug:   debug,
 		index:   index,
 		states:  states,
 	}
@@ -67,6 +75,7 @@ func NewCassandraTSDB(session *gocql.Session, keyspace string, options Options, 
 	return tsdb, nil
 }
 
+// Returns data table create query
 func createDataTableQuery(session *gocql.Session, dataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
@@ -94,6 +103,7 @@ func createDataTableQuery(session *gocql.Session, dataTable, defaultTimeToLive s
 	return query
 }
 
+// Returns aggregate data table create query
 func createAggregateDataTableQuery(session *gocql.Session, aggregateDataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregateDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`

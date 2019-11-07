@@ -68,7 +68,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			logger.Println("Run: Stopped")
+			logger.Println("Stopped")
 
 			return
 		}
