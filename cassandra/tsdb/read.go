@@ -1,4 +1,4 @@
-package cassandra
+package tsdb
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 )
 
 // Read returns metrics according to the request
-func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
+func (c *CassandraTSDB) Read(request types.MetricRequest) (types.Metrics, error) {
 	aggregated := request.Step >= c.options.AggregateResolution
 
 	metrics := make(types.Metrics)
@@ -53,7 +53,7 @@ func (c *Cassandra) Read(request types.MetricRequest) (types.Metrics, error) {
 }
 
 // Reads raw data
-func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
+func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
 	startTime := time.Now()
 
 	batchSize := c.options.BatchSize
@@ -67,7 +67,7 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
 		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
 
-		iterator := c.readDatabase(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+		iterator := c.readTable(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 		partitionMetricData, err := iterateRawData(iterator, fromTimestamp, toTimestamp)
 
 		if err != nil {
@@ -88,7 +88,7 @@ func (c *Cassandra) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTi
 }
 
 // Reads aggregated data
-func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
+func (c *CassandraTSDB) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
 	startTime := time.Now()
 
 	aggregateRowSize := c.options.AggregateSize
@@ -102,7 +102,7 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-aggregateRowSize, 0)
 		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, aggregatePartitionSize)
 
-		iterator := c.readDatabase(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+		iterator := c.readTable(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 		partitionMetricData, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function)
 
 		if err != nil {
@@ -123,7 +123,7 @@ func (c *Cassandra) readAggregatedData(uuid types.MetricUUID, fromTimestamp int6
 }
 
 // Returns an iterator from the specified table according to the parameters
-func (c *Cassandra) readDatabase(table string, uuid gocql.UUID, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+func (c *CassandraTSDB) readTable(table string, uuid gocql.UUID, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
 	startTime := time.Now()
 
 	iteratorReplacer := strings.NewReplacer("$TABLE", table)

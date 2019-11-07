@@ -144,3 +144,21 @@ func LabelsFromMap(m map[string]string) MetricLabels {
 
 	return labels
 }
+
+// UUIDFromBytes returns UUID generator from bytes
+func UUIDFromBytes(bytes []byte) MetricUUID {
+	uuid := MetricUUID{
+		UUID: gouuid.FromBytesOrNil(bytes),
+	}
+
+	return uuid
+}
+
+// UUIDFromString returns UUID generator from a string
+func UUIDFromString(str string) MetricUUID {
+	uuid := MetricUUID{
+		UUID: gouuid.FromStringOrNil(str),
+	}
+
+	return uuid
+}

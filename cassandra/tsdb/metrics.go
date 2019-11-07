@@ -1,4 +1,4 @@
-package cassandra
+package tsdb
 
 import (
 	"github.com/prometheus/client_golang/prometheus"

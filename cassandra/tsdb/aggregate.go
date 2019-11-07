@@ -1,15 +1,11 @@
-package cassandra
+package tsdb
 
 import (
 	"context"
 	"github.com/gocql/gocql"
-	gouuid "github.com/gofrs/uuid"
-	"log"
-	"os"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
-	"strings"
 	"time"
 )
 
@@ -21,22 +17,22 @@ const (
 // Run calls aggregateShard() every period if the conditions are met
 // The process starts from the last saved states (from timestamp and last shard)
 // If a stop signal is received, the service is stopped
-func (c *Cassandra) Run(ctx context.Context) {
+func (c *CassandraTSDB) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(float64(AggregateShardsPeriod)/float64(AggregateShards)) * time.Second)
 
 	for {
-		uuids := c.readUUIDs() // TODO: Replace with index
+		uuids := c.index.UUIDs()
 		var fromTimestamp int64
 
 		retry.Do(func() error {
-			err := c.readState("aggregate_from_timestamp", &fromTimestamp)
+			err := c.states.Read("aggregate_from_timestamp", &fromTimestamp)
 
 			if err == gocql.ErrNotFound {
 				return nil
 			}
 
 			return err
-		}, "cassandra", "Run",
+		}, logger,
 			"Error: Can't read state",
 			"Resolved: Read state",
 			retry.NewBackOff(30*time.Second))
@@ -52,14 +48,14 @@ func (c *Cassandra) Run(ctx context.Context) {
 			var lastShard int
 
 			retry.Do(func() error {
-				err := c.readState("aggregate_last_shard", &lastShard)
+				err := c.states.Read("aggregate_last_shard", &lastShard)
 
 				if err == gocql.ErrNotFound {
 					return nil
 				}
 
 				return err
-			}, "cassandra", "Run",
+			}, logger,
 				"Error: Can't read state",
 				"Resolved: Read state",
 				retry.NewBackOff(30*time.Second))
@@ -72,13 +68,13 @@ func (c *Cassandra) Run(ctx context.Context) {
 			if err != nil {
 				logger.Println("Run: Can't aggregate shard ", shard, " (", err, ")")
 			} else {
-				_ = c.writeState("aggregate_last_shard", shard%60)
+				_ = c.states.Write("aggregate_last_shard", shard%60)
 
 				logger.Println("Run: Aggregate shard", shard, "on", AggregateShards)
 			}
 
 			if (err == nil) && (shard == AggregateShards) {
-				_ = c.writeState("aggregate_from_timestamp", toTimestamp)
+				_ = c.states.Write("aggregate_from_timestamp", toTimestamp)
 
 				logger.Println("Run: Aggregate completed")
 			}
@@ -93,7 +89,7 @@ func (c *Cassandra) Run(ctx context.Context) {
 }
 
 // Aggregate each metric corresponding to the shard
-func (c *Cassandra) aggregateShard(shard int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
+func (c *CassandraTSDB) aggregateShard(shard int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
 	var uuidsShard types.MetricUUIDs
 
 	for _, uuid := range uuids {
@@ -110,7 +106,7 @@ func (c *Cassandra) aggregateShard(shard int, uuids types.MetricUUIDs, fromTimes
 }
 
 // Aggregate each specified metrics contained in the specified period
-func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
+func (c *CassandraTSDB) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
 	startTime := time.Now()
 
 	for _, uuid := range uuids {
@@ -140,41 +136,15 @@ func (c *Cassandra) aggregate(uuids types.MetricUUIDs, fromTimestamp, toTimestam
 	duration := time.Since(startTime)
 	aggregateSeconds.Add(duration.Seconds())
 
-	debugLog := log.New(os.Stdout, "[debug] ", log.LstdFlags) // TODO: Debug
-	debugLog.Println("[cassandra] aggregate():")              // TODO: Debug
-	debugLog.Printf("\t"+"|_ fromTimestamp: %d (%v), toTimestamp: %d (%v)"+"\n",
-		fromTimestamp, time.Unix(fromTimestamp, 0), toTimestamp, time.Unix(toTimestamp, 0)) // TODO: Debug
-	debugLog.Printf("\t"+"|_ Process %d metric(s) in %v (%f metric(s)/s)",
-		len(uuids), duration, float64(len(uuids))/duration.Seconds()) // TODO: Debug
+	logger.Printf( // TODO: Debug
+		"[DEBUG] aggregate():"+"\n"+
+			"|__ fromTimestamp: %v (%d)"+"\n"+
+			"|__ toTimestamp: %v (%d)"+"\n"+
+			"|__ Process %d metric(s) in %v (%f metric(s)/s)",
+		time.Unix(fromTimestamp, 0), fromTimestamp,
+		time.Unix(toTimestamp, 0), toTimestamp,
+		len(uuids), duration, float64(len(uuids))/duration.Seconds(),
+	)
 
 	return nil
-}
-
-// Returns all UUIDs
-func (c *Cassandra) readUUIDs() types.MetricUUIDs {
-	var uuids types.MetricUUIDs
-
-	iterator := c.readDatabaseUUIDs()
-	var metricUUID string
-
-	for iterator.Scan(&metricUUID) {
-		uuidItem := types.MetricUUID{
-			UUID: gouuid.FromStringOrNil(metricUUID),
-		}
-
-		uuids = append(uuids, uuidItem)
-	}
-
-	return uuids
-}
-
-// Returns an iterator of all UUIDs from the index table according to the parameters
-func (c *Cassandra) readDatabaseUUIDs() *gocql.Iter {
-	iteratorReplacer := strings.NewReplacer("$INDEX_TABLE", c.options.indexTable)
-	iterator := c.session.Query(iteratorReplacer.Replace(`
-		SELECT metric_uuid FROM $INDEX_TABLE
-		ALLOW FILTERING
-	`)).Iter()
-
-	return iterator
 }

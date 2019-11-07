@@ -1,4 +1,4 @@
-package cassandra
+package tsdb
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 )
 
 // Write writes metrics in the data table
-func (c *Cassandra) Write(metrics types.Metrics) error {
+func (c *CassandraTSDB) Write(metrics types.Metrics) error {
 	startTime := time.Now()
 	var totalPoints float64
 
@@ -64,7 +64,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 					}
 				}
 
-				if err := c.writeDatabase(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
+				if err := c.writeTable(c.options.dataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
@@ -81,7 +81,7 @@ func (c *Cassandra) Write(metrics types.Metrics) error {
 }
 
 // Writes aggregated metrics in the data aggregated table
-func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
+func (c *CassandraTSDB) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
 	startTime := time.Now()
 	var totalAggregatedPoints float64
 
@@ -137,7 +137,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 					}
 				}
 
-				if err := c.writeDatabase(c.options.aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
+				if err := c.writeTable(c.options.aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, offsetTimestamp, timeToLive, buffer.Bytes()); err != nil {
 					return err
 				}
 			}
@@ -154,7 +154,7 @@ func (c *Cassandra) writeAggregated(aggregatedMetrics aggregate.AggregatedMetric
 }
 
 // Write in the specified table according to the parameters
-func (c *Cassandra) writeDatabase(table string, uuid gocql.UUID, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) error {
+func (c *CassandraTSDB) writeTable(table string, uuid gocql.UUID, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) error {
 	startTime := time.Now()
 
 	insertReplacer := strings.NewReplacer("$TABLE", table)

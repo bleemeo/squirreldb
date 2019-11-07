@@ -60,7 +60,7 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	retry.Do(func() error {
 		return w.writer.Write(metrics)
-	}, "prometheus", "WritePoints",
+	}, logger,
 		"Error: Can't write in storage",
 		"Resolved: Write in storage",
 		retry.NewBackOff(30*time.Second))

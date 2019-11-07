@@ -1,8 +1,9 @@
 package types
 
 type MetricIndexer interface {
+	Pairs(matchers MetricLabels) map[MetricUUID]MetricLabels
 	UUID(labels MetricLabels) MetricUUID
-	UUIDs(labels MetricLabels) map[MetricUUID]MetricLabels
+	UUIDs() MetricUUIDs
 }
 
 type MetricReader interface {

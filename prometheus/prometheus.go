@@ -56,7 +56,7 @@ func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
 			}
 
 			return err
-		}, "prometheus", "Run",
+		}, logger,
 			"Error: Can't listen and serve the server",
 			"Resolved: Listen and serve the server",
 			retry.NewBackOff(30*time.Second))

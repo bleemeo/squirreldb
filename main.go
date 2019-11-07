@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"squirreldb/batch"
-	"squirreldb/cassandra"
+	"squirreldb/cassandra/index"
+	"squirreldb/cassandra/session"
+	"squirreldb/cassandra/states"
+	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
-	"squirreldb/index"
 	"squirreldb/prometheus"
 	"squirreldb/retry"
 	"squirreldb/store"
@@ -41,40 +43,74 @@ func main() {
 	}
 
 	// Create services instance
-	batchSize := squirrelConfig.Int64("batch.size")
 	prometheusListenAddress := squirrelConfig.String("prometheus.listen_address")
 
-	cassandraOptions := cassandra.Options{
-		Addresses:              squirrelConfig.Strings("cassandra.addresses"),
-		ReplicationFactor:      squirrelConfig.Int("cassandra.replication_factor"),
-		Keyspace:               squirrelConfig.String("cassandra.keyspace"),
-		DefaultTimeToLive:      squirrelConfig.Int64("cassandra.default_time_to_live"),
-		BatchSize:              batchSize,
+	cassandraOptions := session.Options{
+		Addresses:         squirrelConfig.Strings("cassandra.addresses"),
+		ReplicationFactor: squirrelConfig.Int("cassandra.replication_factor"),
+		Keyspace:          squirrelConfig.String("cassandra.keyspace"),
+	}
+
+	var squirrelCassandra *session.Cassandra
+
+	retry.Do(func() error {
+		var err error
+		squirrelCassandra, err = session.NewCassandra(cassandraOptions)
+
+		return err
+	}, logger,
+		"Error: Can't initialize the session",
+		"Resolved: Initialized the session",
+		retry.NewBackOff(30*time.Second))
+
+	tsdbOptions := tsdb.Options{
+		BatchSize:              squirrelConfig.Int64("batch.size"),
 		RawPartitionSize:       squirrelConfig.Int64("cassandra.partition_size.raw"),
 		AggregateResolution:    squirrelConfig.Int64("cassandra.aggregate.resolution"),
 		AggregateSize:          squirrelConfig.Int64("cassandra.aggregate.size"),
 		AggregateStartOffset:   squirrelConfig.Int64("cassandra.aggregate.start_offset"),
 		AggregatePartitionSize: squirrelConfig.Int64("cassandra.partition_size.aggregate"),
-
-		DebugAggregateForce: squirrelConfig.Bool("debug.aggregate.force"), // TODO: Debug
-		DebugAggregateSize:  squirrelConfig.Int64("debug.aggregate.size"), // TODO: Debug
 	}
 
-	var squirrelCassandra *cassandra.Cassandra
+	var squirrelIndex *index.CassandraIndex
 
 	retry.Do(func() error {
 		var err error
-		squirrelCassandra, err = cassandra.New(cassandraOptions)
+		squirrelIndex, err = index.NewCassandraIndex(squirrelCassandra.Session, cassandraOptions.Keyspace)
 
 		return err
-	}, "main", "main",
-		"Error: Can't initialize the session",
-		"Resolved: Initialized the session",
+	}, logger,
+		"Error: Can't initialize the index",
+		"Resolved: Initialized the index",
+		retry.NewBackOff(30*time.Second))
+
+	var squirrelStates *states.CassandraStates
+
+	retry.Do(func() error {
+		var err error
+		squirrelStates, err = states.NewCassandraStates(squirrelCassandra.Session, cassandraOptions.Keyspace)
+
+		return err
+	}, logger,
+		"Error: Can't initialize the index",
+		"Resolved: Initialized the index",
+		retry.NewBackOff(30*time.Second))
+
+	var squirrelTSDB *tsdb.CassandraTSDB
+
+	retry.Do(func() error {
+		var err error
+		squirrelTSDB, err = tsdb.NewCassandraTSDB(squirrelCassandra.Session, cassandraOptions.Keyspace, tsdbOptions,
+			squirrelIndex, squirrelStates)
+
+		return err
+	}, logger,
+		"Error: Can't initialize the TSDB",
+		"Resolved: Initialized the TSDB",
 		retry.NewBackOff(30*time.Second))
 
 	squirrelStore := store.New()
-	squirrelBatch := batch.New(batchSize, squirrelStore, squirrelCassandra, squirrelCassandra)
-	squirrelIndex := index.New(squirrelCassandra)
+	squirrelBatch := batch.New(tsdbOptions.BatchSize, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
 
 	signalChan := make(chan os.Signal, 1)
@@ -87,7 +123,7 @@ func main() {
 	// Run services
 	runSquirrelCassandra := func() {
 		defer wg.Done()
-		squirrelCassandra.Run(ctx)
+		squirrelTSDB.Run(ctx)
 	}
 
 	wg.Add(1)

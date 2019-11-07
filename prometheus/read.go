@@ -52,10 +52,10 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 	for _, query := range readRequest.Queries {
 		labels := pbMatchersToLabels(query.Matchers)
-		matchers := r.indexer.UUIDs(labels)
+		pairs := r.indexer.Pairs(labels)
 		var uuids types.MetricUUIDs
 
-		for uuid := range matchers {
+		for uuid := range pairs {
 			uuids = append(uuids, uuid)
 		}
 
@@ -67,12 +67,12 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 			metrics, err = r.reader.Read(request)
 
 			return err
-		}, "prometheus", "ReadPoints",
+		}, logger,
 			"Error: Can't read in storage",
 			"Resolved: Read in storage",
 			retry.NewBackOff(30*time.Second))
 
-		queryResult := toQueryResult(matchers, metrics)
+		queryResult := toQueryResult(pairs, metrics)
 
 		readResponse.Results = append(readResponse.Results, &queryResult)
 	}
@@ -148,11 +148,11 @@ func toMetricRequest(uuids types.MetricUUIDs, query *prompb.Query) types.MetricR
 }
 
 // Generate Prometheus QueryResult
-func toQueryResult(matchers map[types.MetricUUID]types.MetricLabels, metrics types.Metrics) prompb.QueryResult {
+func toQueryResult(pairs map[types.MetricUUID]types.MetricLabels, metrics types.Metrics) prompb.QueryResult {
 	var queryResult prompb.QueryResult
 
 	for uuid, metricData := range metrics {
-		labels := matchers[uuid]
+		labels := pairs[uuid]
 		pbLabels := labelsToPbLabels(labels)
 
 		series := prompb.TimeSeries{
