@@ -94,7 +94,6 @@ func (r *Redis) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 		}
 
 		metrics[uuid] = metricData
-
 	}
 
 	return metrics, nil
@@ -159,9 +158,10 @@ func encode(metricData types.MetricData) ([]byte, error) {
 
 // Decode MetricData
 func decode(data []byte) (types.MetricData, error) {
-	var metricData types.MetricData
+	metricData := types.MetricData{}
 	buffer := bytes.NewReader(data)
 
+forLoop:
 	for {
 		var pointData struct {
 			Timestamp  int64
@@ -171,7 +171,8 @@ func decode(data []byte) (types.MetricData, error) {
 
 		err := binary.Read(buffer, binary.BigEndian, &pointData)
 
-		if err == nil {
+		switch err {
+		case nil:
 			point := types.MetricPoint{
 				Timestamp: pointData.Timestamp,
 				Value:     pointData.Value,
@@ -179,10 +180,12 @@ func decode(data []byte) (types.MetricData, error) {
 
 			metricData.Points = append(metricData.Points, point)
 			metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, pointData.TimeToLive)
-		} else if err != io.EOF {
+		case io.EOF:
+			break forLoop
+		default:
 			return types.MetricData{}, err
-		} else {
-			return metricData, nil
 		}
 	}
+
+	return metricData, nil
 }

@@ -21,6 +21,7 @@ func TestNewStore(t *testing.T) {
 		batchSize int64
 		offset    int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -37,6 +38,7 @@ func TestNewStore(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := New(); !reflect.DeepEqual(got, tt.want) {
@@ -50,12 +52,14 @@ func TestStore_append(t *testing.T) {
 	type fields struct {
 		metrics map[types.MetricUUID]metric
 	}
+
 	type args struct {
 		newMetrics      types.Metrics
 		existingMetrics types.Metrics
 		now             time.Time
 		timeToLive      int64
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -356,6 +360,7 @@ func TestStore_append(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -375,9 +380,11 @@ func TestStore_expire(t *testing.T) {
 	type fields struct {
 		Metrics map[types.MetricUUID]metric
 	}
+
 	type args struct {
 		now time.Time
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -468,6 +475,7 @@ func TestStore_expire(t *testing.T) {
 			want: make(map[types.MetricUUID]metric),
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -485,9 +493,11 @@ func TestStore_get(t *testing.T) {
 	type fields struct {
 		Metrics map[types.MetricUUID]metric
 	}
+
 	type args struct {
 		uuids types.MetricUUIDs
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -557,6 +567,7 @@ func TestStore_get(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -578,12 +589,14 @@ func TestStore_set(t *testing.T) {
 	type fields struct {
 		Metrics map[types.MetricUUID]metric
 	}
+
 	type args struct {
 		newMetrics      types.Metrics
 		existingMetrics types.Metrics
 		now             time.Time
 		timeToLive      int64
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -791,6 +804,7 @@ func TestStore_set(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{

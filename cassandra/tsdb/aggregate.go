@@ -31,8 +31,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 	running := false
 
 	for {
-		uuids := c.index.UUIDs()
-		var fromTimestamp int64
+		fromTimestamp := int64(0)
 
 		retry.Print(func() error {
 			err := c.states.Read("aggregate_from_timestamp", &fromTimestamp)
@@ -53,6 +52,8 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 		if fromTimestamp == 0 {
 			fromTimestamp = limitFromTimestamp
 		}
+
+		uuids := c.index.UUIDs()
 
 		if (len(uuids) > 0) && (fromTimestamp <= limitFromTimestamp) && isMarginSafe {
 			var lastShard int
@@ -122,7 +123,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 
 // Aggregate each metric corresponding to the shard
 func (c *CassandraTSDB) aggregateShard(shard int, uuids types.MetricUUIDs, fromTimestamp, toTimestamp int64) error {
-	var uuidsShard types.MetricUUIDs
+	uuidsShard := types.MetricUUIDs{}
 
 	for _, uuid := range uuids {
 		if (uuid.Uint64() % (uint64(aggregateShards) + 1)) == uint64(shard) {

@@ -77,7 +77,7 @@ func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	var labelsCopy types.MetricLabels
+	labelsCopy := types.MetricLabels{}
 
 	copy(labelsCopy, labels)
 
@@ -177,8 +177,8 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID]t
 
 	loadIndexTableIterator := loadIndexTableIterator(session, indexTable)
 
-	var uuidString string
-	var labelsMap map[string]string
+	uuidString := ""
+	labelsMap := map[string]string{}
 
 	for loadIndexTableIterator.Scan(&uuidString, &labelsMap) {
 		uuid := types.UUIDFromString(uuidString)
@@ -193,7 +193,7 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID]t
 // Returns UUID generated from labels
 // If the labels contains a UUID label, the value of the latter is used, otherwise a random UUID is generated
 func uuidFromLabels(labels types.MetricLabels) types.MetricUUID {
-	var uuid types.MetricUUID
+	uuid := types.MetricUUID{}
 	uuidString, exists := labels.Value("__bleemeo_uuid__")
 
 	if exists {

@@ -16,9 +16,7 @@ const (
 	maxFlush        = 100
 )
 
-var (
-	logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
-)
+var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 type Storer interface {
 	Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error
@@ -130,7 +128,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 		uuids = append(uuids, uuid)
 	}
 
-	var temporaryMetrics types.Metrics
+	temporaryMetrics := types.Metrics{}
 
 	retry.Print(func() error {
 		var err error
@@ -149,7 +147,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 		temporaryMetricData := temporaryMetrics[uuid]
 
 		// Points to write
-		var pointsToWrite types.MetricPoints
+		pointsToWrite := types.MetricPoints{}
 
 		for _, state := range states {
 			for _, point := range temporaryMetricData.Points {
@@ -167,7 +165,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 		// Points to set
 		currentState, exists := b.states[uuid]
-		var pointsToSet types.MetricPoints
+		pointsToSet := types.MetricPoints{}
 
 		if exists {
 			cutoff = compare.Int64Min(cutoff, currentState.firstPointTimestamp)
@@ -206,7 +204,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	metrics := make(types.Metrics)
 
 	// Retrieves metrics from the temporary storage according to the request
-	var temporaryMetrics types.Metrics
+	temporaryMetrics := types.Metrics{}
 
 	retry.Print(func() error {
 		var err error
@@ -218,7 +216,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 		"Resolved: Get metrics from the temporary storage")
 
 	for uuid, temporaryMetricData := range temporaryMetrics {
-		var points types.MetricPoints
+		points := types.MetricPoints{}
 
 		for _, point := range temporaryMetricData.Points {
 			if point.Timestamp >= request.FromTimestamp && point.Timestamp <= request.ToTimestamp {
@@ -240,7 +238,7 @@ func (b *Batch) read(request types.MetricRequest) (types.Metrics, error) {
 	}
 
 	// Retrieves metrics from the persistent storage
-	var persistentMetrics types.Metrics
+	persistentMetrics := types.Metrics{}
 
 	retry.Print(func() error {
 		var err error
@@ -271,7 +269,7 @@ func (b *Batch) write(metrics types.Metrics, now time.Time) error {
 	existingMetrics := make(types.Metrics)
 
 	for uuid, metricData := range metrics {
-		var newMetricPoints, existingMetricPoints types.MetricPoints
+		newMetricPoints, existingMetricPoints := types.MetricPoints{}, types.MetricPoints{}
 
 		for _, point := range metricData.Points {
 			currentState, exists := b.states[uuid]

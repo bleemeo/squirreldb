@@ -18,7 +18,7 @@ func (c *CassandraTSDB) Read(request types.MetricRequest) (types.Metrics, error)
 	metrics := make(types.Metrics)
 
 	for _, uuid := range request.UUIDs {
-		var metricData types.MetricData
+		metricData := types.MetricData{}
 
 		if aggregated {
 			aggregatedMetricData, err := c.readAggregatedData(uuid, request.FromTimestamp, request.ToTimestamp, request.Function)
@@ -61,7 +61,7 @@ func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp int64, 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
 	dataTable := c.options.dataTable
-	var metricData types.MetricData
+	metricData := types.MetricData{}
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
@@ -96,7 +96,7 @@ func (c *CassandraTSDB) readAggregatedData(uuid types.MetricUUID, fromTimestamp 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % aggregatePartitionSize)
 	aggregateDataTable := c.options.aggregateDataTable
-	var metricData types.MetricData
+	metricData := types.MetricData{}
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += aggregatePartitionSize {
 		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-aggregateRowSize, 0)
@@ -140,9 +140,12 @@ func (c *CassandraTSDB) readTable(table string, uuid gocql.UUID, baseTimestamp, 
 
 // Returns metrics
 func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
-	var baseTimestamp, offsetTimestamp, timeToLive int64
-	var values []byte
-	var metricData types.MetricData
+	var (
+		baseTimestamp, offsetTimestamp, timeToLive int64
+		values                                     []byte
+	)
+
+	metricData := types.MetricData{}
 
 	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
 		buffer := bytes.NewReader(values)
@@ -183,9 +186,12 @@ func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64
 
 // Returns aggregated metrics
 func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string, resolution int64) (types.MetricData, error) {
-	var baseTimestamp, offsetTimestamp, timeToLive int64
-	var values []byte
-	var metricData types.MetricData
+	var (
+		baseTimestamp, offsetTimestamp, timeToLive int64
+		values                                     []byte
+	)
+
+	metricData := types.MetricData{}
 
 	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
 		buffer := bytes.NewReader(values)

@@ -53,14 +53,14 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	for _, query := range readRequest.Queries {
 		labels := pbMatchersToLabels(query.Matchers)
 		pairs := r.indexer.Pairs(labels)
-		var uuids types.MetricUUIDs
+		uuids := types.MetricUUIDs{}
 
 		for uuid := range pairs {
 			uuids = append(uuids, uuid)
 		}
 
 		request := toMetricRequest(uuids, query)
-		var metrics types.Metrics
+		metrics := types.Metrics{}
 
 		retry.Print(func() error {
 			var err error

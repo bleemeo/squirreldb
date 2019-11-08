@@ -22,6 +22,7 @@ func TestMetrics(t *testing.T) {
 		toTimestamp   int64
 		resolution    int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -88,6 +89,7 @@ func TestMetrics(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Metrics(tt.args.metrics, tt.args.fromTimestamp, tt.args.toTimestamp, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
@@ -104,6 +106,7 @@ func TestMetricPoints(t *testing.T) {
 		toTimestamp   int64
 		resolution    int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -166,6 +169,7 @@ func TestMetricPoints(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := MetricData(tt.args.metricData, tt.args.fromTimestamp, tt.args.toTimestamp, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
@@ -180,6 +184,7 @@ func Test_aggregate(t *testing.T) {
 		timestamp int64
 		points    types.MetricPoints
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -221,6 +226,7 @@ func Test_aggregate(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := aggregate(tt.args.timestamp, tt.args.points); !reflect.DeepEqual(got, tt.want) {

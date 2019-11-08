@@ -40,7 +40,7 @@ func MetricData(metricData types.MetricData, fromTimestamp, toTimestamp, resolut
 	}
 
 	for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += resolution {
-		var resolutionPoints types.MetricPoints
+		resolutionPoints := types.MetricPoints{}
 
 		for _, point := range metricData.Points {
 			if (point.Timestamp >= timestamp) && (point.Timestamp < (timestamp + resolution)) {

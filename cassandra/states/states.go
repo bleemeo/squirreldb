@@ -80,8 +80,7 @@ func (c *CassandraStates) readStatesTable(name string) (string, error) {
 		SELECT value FROM $STATES_TABLE
 		WHERE name = ?
 	`), name)
-
-	var value string
+	value := ""
 
 	if err := iterator.Scan(&value); err != nil {
 		return "", err

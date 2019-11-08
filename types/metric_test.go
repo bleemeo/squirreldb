@@ -79,6 +79,7 @@ func TestMetricLabels_Value(t *testing.T) {
 	type args struct {
 		name string
 	}
+
 	tests := []struct {
 		name  string
 		m     MetricLabels
@@ -115,6 +116,7 @@ func TestMetricLabels_Value(t *testing.T) {
 			want1: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, got1 := tt.m.Value(tt.args.name)
@@ -132,6 +134,7 @@ func TestMetricUUID_Uint64(t *testing.T) {
 	type fields struct {
 		UUID uuid.UUID
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -152,6 +155,7 @@ func TestMetricUUID_Uint64(t *testing.T) {
 			want: 10,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &MetricUUID{

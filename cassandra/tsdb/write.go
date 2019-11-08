@@ -13,7 +13,7 @@ import (
 // Write writes metrics in the data table
 func (c *CassandraTSDB) Write(metrics types.Metrics) error {
 	startTime := time.Now()
-	var totalPoints float64
+	totalPoints := int64(0)
 
 	nowUnix := time.Now().Unix()
 
@@ -31,13 +31,15 @@ func (c *CassandraTSDB) Write(metrics types.Metrics) error {
 		}
 
 		for baseTimestamp, points := range baseTimestampPoints {
-			var smallestTimestamp, biggestTimestamp int64
+			smallestTimestamp, biggestTimestamp := int64(0), int64(0)
 
 			for i, point := range points {
 				if i == 0 {
 					smallestTimestamp = point.Timestamp
 					biggestTimestamp = point.Timestamp
-				} else if point.Timestamp < smallestTimestamp {
+				}
+
+				if point.Timestamp < smallestTimestamp {
 					smallestTimestamp = point.Timestamp
 				} else if point.Timestamp > biggestTimestamp {
 					biggestTimestamp = point.Timestamp
@@ -70,12 +72,12 @@ func (c *CassandraTSDB) Write(metrics types.Metrics) error {
 			}
 		}
 
-		totalPoints += float64(len(metricData.Points))
+		totalPoints += int64(len(metricData.Points))
 	}
 
 	duration := time.Since(startTime)
 	wroteRawSeconds.Observe(duration.Seconds())
-	wroteRawPointsTotal.Add(totalPoints)
+	wroteRawPointsTotal.Add(float64(totalPoints))
 
 	return nil
 }
@@ -83,7 +85,7 @@ func (c *CassandraTSDB) Write(metrics types.Metrics) error {
 // Writes aggregated metrics in the data aggregated table
 func (c *CassandraTSDB) writeAggregated(aggregatedMetrics aggregate.AggregatedMetrics) error {
 	startTime := time.Now()
-	var totalAggregatedPoints float64
+	totalAggregatedPoints := int64(0)
 
 	nowUnix := time.Now().Unix()
 
@@ -101,13 +103,15 @@ func (c *CassandraTSDB) writeAggregated(aggregatedMetrics aggregate.AggregatedMe
 		}
 
 		for baseTimestamp, points := range baseTimestampPoints {
-			var smallestTimestamp, biggestTimestamp int64
+			smallestTimestamp, biggestTimestamp := int64(0), int64(0)
 
 			for i, point := range points {
 				if i == 0 {
 					smallestTimestamp = point.Timestamp
 					biggestTimestamp = point.Timestamp
-				} else if point.Timestamp < smallestTimestamp {
+				}
+
+				if point.Timestamp < smallestTimestamp {
 					smallestTimestamp = point.Timestamp
 				} else if point.Timestamp > biggestTimestamp {
 					biggestTimestamp = point.Timestamp
@@ -144,12 +148,12 @@ func (c *CassandraTSDB) writeAggregated(aggregatedMetrics aggregate.AggregatedMe
 			}
 		}
 
-		totalAggregatedPoints += float64(len(aggregatedData.Points))
+		totalAggregatedPoints += int64(len(aggregatedData.Points))
 	}
 
 	duration := time.Since(startTime)
 	wroteAggregatedSeconds.Observe(duration.Seconds())
-	wroteAggregatedPointsTotal.Add(totalAggregatedPoints)
+	wroteAggregatedPointsTotal.Add(float64(totalAggregatedPoints))
 
 	return nil
 }

@@ -127,6 +127,7 @@ func main() {
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	var wg sync.WaitGroup
 
 	// Run services

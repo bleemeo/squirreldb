@@ -7,6 +7,7 @@ func TestInt64Min(t *testing.T) {
 		x int64
 		y int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -29,6 +30,7 @@ func TestInt64Min(t *testing.T) {
 			want: 10,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Int64Min(tt.args.x, tt.args.y); got != tt.want {
@@ -43,6 +45,7 @@ func TestInt64Max(t *testing.T) {
 		x int64
 		y int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -65,6 +68,7 @@ func TestInt64Max(t *testing.T) {
 			want: 20,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Int64Max(tt.args.x, tt.args.y); got != tt.want {

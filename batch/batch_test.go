@@ -104,6 +104,7 @@ func TestNewBatch(t *testing.T) {
 		persistentReader types.MetricReader
 		persistentWriter types.MetricWriter
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -126,6 +127,7 @@ func TestNewBatch(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := New(tt.args.batchSize, tt.args.temporaryStorer, tt.args.persistentReader, tt.args.persistentWriter); !reflect.DeepEqual(got, tt.want) {
@@ -143,10 +145,12 @@ func TestBatch_check(t *testing.T) {
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
 	}
+
 	type args struct {
 		now      time.Time
 		flushAll bool
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -310,6 +314,7 @@ func TestBatch_check(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
@@ -332,10 +337,12 @@ func TestBatch_flush(t *testing.T) {
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
 	}
+
 	type args struct {
 		flushQueue map[types.MetricUUID][]state
 		now        time.Time
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -445,6 +452,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
@@ -470,9 +478,11 @@ func TestBatch_read(t *testing.T) {
 		persistentWriter types.MetricWriter
 		states           map[types.MetricUUID]state
 	}
+
 	type args struct {
 		request types.MetricRequest
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -641,6 +651,7 @@ func TestBatch_read(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
@@ -670,10 +681,12 @@ func TestBatch_write(t *testing.T) {
 		persistentWriter mockMetricWriter
 		states           map[types.MetricUUID]state
 	}
+
 	type args struct {
 		metrics types.Metrics
 		now     time.Time
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -805,6 +818,7 @@ func TestBatch_write(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
@@ -830,6 +844,7 @@ func Test_flushTimestamp(t *testing.T) {
 		now       time.Time
 		batchSize int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -854,6 +869,7 @@ func Test_flushTimestamp(t *testing.T) {
 			want: 93,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := flushTimestamp(tt.args.uuid, tt.args.now, tt.args.batchSize); got != tt.want {

@@ -83,7 +83,7 @@ func pbLabelsToLabels(pbLabels []*prompb.Label) types.MetricLabels {
 
 func timeToLive(labels types.MetricLabels) int64 {
 	timeToLiveString, exists := labels.Value("__bleemeo_ttl__")
-	var timeToLive int64
+	timeToLive := int64(0)
 
 	if exists {
 		timeToLive, _ = strconv.ParseInt(timeToLiveString, 10, 64)
@@ -94,7 +94,7 @@ func timeToLive(labels types.MetricLabels) int64 {
 
 // Generate MetricPoints
 func toMetricData(series *prompb.TimeSeries, timeToLive int64) types.MetricData {
-	var points types.MetricPoints
+	points := types.MetricPoints{}
 
 	for _, sample := range series.Samples {
 		point := types.MetricPoint{

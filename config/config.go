@@ -92,6 +92,7 @@ func New() (*Config, error) {
 // Returns every config files in the root folder matching with the specified extensions
 func findConfigPaths(root string, extensions []string) ([]string, error) {
 	var configPaths []string
+
 	files, err := ioutil.ReadDir(root)
 
 	if err != nil {
