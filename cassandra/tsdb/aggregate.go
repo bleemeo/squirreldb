@@ -24,10 +24,11 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 		fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.debug.AggregateSize
 
 		_ = c.states.Write("aggregate_from_timestamp", fromTimestamp)
+		_ = c.states.Write("aggregate_last_shard", 0)
 	}
 
 	ticker := time.NewTicker(time.Duration(float64(AggregateShardsPeriod)/float64(AggregateShards)) * time.Second)
-	started := false
+	running := false
 
 	for {
 		uuids := c.index.UUIDs()
@@ -70,7 +71,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 			toTimestamp := fromTimestamp + c.options.AggregateSize
 			shard := lastShard + 1
 
-			if !started {
+			if !running {
 				logger.Printf("Aggregate from %v to %v",
 					time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
@@ -78,7 +79,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 					logger.Printf("Aggregate from shard %d on %d", shard, AggregateShards)
 				}
 
-				started = true
+				running = true
 			}
 
 			err := c.aggregateShard(shard, uuids, fromTimestamp, toTimestamp)
@@ -103,6 +104,8 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 					"Resolved: Write 'aggregate_from_timestamp' state")
 
 				logger.Println("Aggregate completed")
+
+				running = false
 			}
 		}
 

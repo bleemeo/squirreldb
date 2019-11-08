@@ -14,8 +14,8 @@ import (
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/prometheus"
+	"squirreldb/redis"
 	"squirreldb/retry"
-	"squirreldb/store"
 	"sync"
 	"syscall"
 	"time"
@@ -86,6 +86,7 @@ func main() {
 		"Resolved: Create the states")
 
 	tsdbOptions := tsdb.Options{
+		DefaultTimeToLive:      squirrelConfig.Int64("cassandra.default_time_to_live"),
 		BatchSize:              squirrelConfig.Int64("batch.size"),
 		RawPartitionSize:       squirrelConfig.Int64("cassandra.partition_size.raw"),
 		AggregateResolution:    squirrelConfig.Int64("cassandra.aggregate.resolution"),
@@ -111,9 +112,13 @@ func main() {
 		"Error: Can't create the TSDB",
 		"Resolved: create the TSDB")
 
+	redisOptions := redis.Options{
+		Address: squirrelConfig.String("redis.address"),
+	}
+
 	// Create store, batch and Prometheus services
-	squirrelStore := store.New()
-	squirrelBatch := batch.New(tsdbOptions.BatchSize, squirrelStore, squirrelTSDB, squirrelTSDB)
+	squirrelRedis := redis.New(redisOptions)
+	squirrelBatch := batch.New(tsdbOptions.BatchSize, squirrelRedis, squirrelTSDB, squirrelTSDB)
 	squirrelPrometheus := prometheus.New(squirrelIndex, squirrelBatch, squirrelBatch)
 
 	// Handle signals
@@ -153,15 +158,6 @@ func main() {
 	wg.Add(1)
 
 	go runSquirrelBatch()
-
-	runSquirrelStore := func() {
-		defer wg.Done()
-		squirrelStore.Run(ctx)
-	}
-
-	wg.Add(1)
-
-	go runSquirrelStore()
 
 	logger.Println("SquirrelDB is ready")
 	logger.Println("Listening on", prometheusListenAddress)

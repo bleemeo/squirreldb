@@ -15,7 +15,7 @@ var Level = 0
 
 // Print displays information according to the debug level
 func Print(level int, logger *log.Logger, msg string, v ...interface{}) {
-	if level >= Level {
+	if level <= Level {
 		levelString := strconv.Itoa(level)
 		prefix := "[DEBUG-" + levelString + "]"
 
