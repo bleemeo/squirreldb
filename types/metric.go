@@ -8,11 +8,7 @@ import (
 )
 
 const (
-	LabelTypeEq        = 0
-	LabelTypeNeq       = 1
-	LabelTypeRe        = 2
-	LabelTypeNre       = 3
-	LabelPrefixSpecial = "__bleemeo_"
+	labelPrefixSpecial = "__bleemeo_"
 )
 
 type MetricPoint struct {
@@ -87,7 +83,7 @@ func (m MetricLabels) Canonical() string {
 	elements := make([]string, 0, len(m))
 
 	for _, label := range m {
-		if !strings.HasPrefix(label.Name, LabelPrefixSpecial) {
+		if !strings.HasPrefix(label.Name, labelPrefixSpecial) {
 			value := strings.ReplaceAll(label.Value, `"`, `\"`)
 			element := label.Name + `="` + value + `"`
 

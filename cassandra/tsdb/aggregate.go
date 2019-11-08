@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	AggregateShards       = 60
-	AggregateShardsPeriod = 60
+	aggregateShards       = 60
+	aggregateShardsPeriod = 60
 )
 
 // Run calls aggregateShard() every period if the conditions are met
@@ -27,7 +27,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 		_ = c.states.Write("aggregate_last_shard", 0)
 	}
 
-	ticker := time.NewTicker(time.Duration(float64(AggregateShardsPeriod)/float64(AggregateShards)) * time.Second)
+	ticker := time.NewTicker(time.Duration(float64(aggregateShardsPeriod)/float64(aggregateShards)) * time.Second)
 	running := false
 
 	for {
@@ -48,12 +48,13 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 
 		now := time.Now()
 		limitFromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize) - c.options.AggregateSize
+		isMarginSafe := (now.Unix() % c.options.AggregateSize) >= 3600 // 1 hour safe margin
 
 		if fromTimestamp == 0 {
 			fromTimestamp = limitFromTimestamp
 		}
 
-		if (len(uuids) > 0) && (fromTimestamp <= limitFromTimestamp) {
+		if (len(uuids) > 0) && (fromTimestamp <= limitFromTimestamp) && isMarginSafe {
 			var lastShard int
 
 			retry.Print(func() error {
@@ -76,7 +77,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 					time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 				if shard != 1 {
-					logger.Printf("Aggregate from shard %d on %d", shard, AggregateShards)
+					logger.Printf("Aggregate from shard %d on %d", shard, aggregateShards)
 				}
 
 				running = true
@@ -93,15 +94,17 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 					"Error: Can't write 'aggregate_last_shard' state",
 					"Resolved: Write 'aggregate_last_shard' state")
 
-				debug.Print(debug.Level1, logger, "Aggregate shard %d on %d", shard, AggregateShards)
+				debug.Print(debug.Level1, logger, "Aggregate shard %d on %d", shard, aggregateShards)
 			}
 
-			if (err == nil) && (shard == AggregateShards) {
+			if (err == nil) && (shard == aggregateShards) {
 				retry.Print(func() error {
 					return c.states.Write("aggregate_from_timestamp", toTimestamp)
 				}, retry.NewBackOff(30*time.Second), logger,
 					"Error: Can't write 'aggregate_from_timestamp' state",
 					"Resolved: Write 'aggregate_from_timestamp' state")
+
+				aggregateLastTimestamp.SetToCurrentTime()
 
 				logger.Println("Aggregate completed")
 
@@ -122,7 +125,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, uuids types.MetricUUIDs, fromT
 	var uuidsShard types.MetricUUIDs
 
 	for _, uuid := range uuids {
-		if (uuid.Uint64() % (uint64(AggregateShards) + 1)) == uint64(shard) {
+		if (uuid.Uint64() % (uint64(aggregateShards) + 1)) == uint64(shard) {
 			uuidsShard = append(uuidsShard, uuid)
 		}
 	}

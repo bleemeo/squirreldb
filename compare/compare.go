@@ -1,6 +1,8 @@
 package compare
 
-import "squirreldb/types"
+import (
+	"squirreldb/types"
+)
 
 // Int64Min returns the smallest number between x and y
 func Int64Min(x, y int64) int64 {
@@ -20,7 +22,7 @@ func Int64Max(x, y int64) int64 {
 	return y
 }
 
-// LabelsEqual verifies the equality between x and y label tables
+// LabelsEqual verifies the strict equality between x and y labels tables
 func LabelsEqual(x, y types.MetricLabels) bool {
 	if len(x) != len(y) {
 		return false

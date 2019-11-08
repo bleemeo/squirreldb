@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	Table = "index"
+	table = "index"
 )
 
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
@@ -30,12 +30,11 @@ type CassandraIndex struct {
 
 // New creates a new CassandraIndex object
 func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
-	indexTable := keyspace + "." + "\"" + Table + "\""
+	indexTable := keyspace + "." + "\"" + table + "\""
 
 	createIndexTableQuery := createIndexTableQuery(session, indexTable)
 
 	if err := createIndexTableQuery.Exec(); err != nil {
-		session.Close()
 		return nil, err
 	}
 
@@ -78,12 +77,16 @@ func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	sort.Slice(labels, func(i, j int) bool {
-		return labels[i].Name < labels[j].Name
+	var labelsCopy types.MetricLabels
+
+	copy(labelsCopy, labels)
+
+	sort.Slice(labelsCopy, func(i, j int) bool {
+		return labelsCopy[i].Name < labelsCopy[j].Name
 	})
 
 	for uuid, value := range c.pairs {
-		if compare.LabelsEqual(value, labels) {
+		if compare.LabelsEqual(value, labelsCopy) {
 			return uuid
 		}
 	}

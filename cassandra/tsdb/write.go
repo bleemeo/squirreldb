@@ -122,8 +122,9 @@ func (c *CassandraTSDB) writeAggregated(aggregatedMetrics aggregate.AggregatedMe
 				buffer := new(bytes.Buffer)
 
 				for _, point := range points {
+					pointOffsetTimestamp := (point.Timestamp - baseTimestamp - offsetTimestamp) / c.options.AggregateResolution
 					pointData := []interface{}{
-						uint16(point.Timestamp - baseTimestamp - offsetTimestamp),
+						uint16(pointOffsetTimestamp),
 						point.Min,
 						point.Max,
 						point.Average,

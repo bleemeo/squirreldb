@@ -12,12 +12,6 @@ var (
 		Name:      "last_timestamp",
 		Help:      "Last aggregation timestamp",
 	})
-	aggregateNextTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "cassandra",
-		Subsystem: "aggregate",
-		Name:      "next_timestamp",
-		Help:      "Next aggregation timestamp",
-	})
 	aggregateSeconds = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "cassandra",
 		Subsystem: "aggregate",

@@ -103,7 +103,7 @@ func (c *CassandraTSDB) readAggregatedData(uuid types.MetricUUID, fromTimestamp 
 		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, aggregatePartitionSize)
 
 		iterator := c.readTable(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		partitionMetricData, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function)
+		partitionMetricData, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function, c.options.AggregateResolution)
 
 		if err != nil {
 			return types.MetricData{}, err
@@ -182,7 +182,7 @@ func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64
 }
 
 // Returns aggregated metrics
-func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
+func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string, resolution int64) (types.MetricData, error) {
 	var baseTimestamp, offsetTimestamp, timeToLive int64
 	var values []byte
 	var metricData types.MetricData
@@ -204,7 +204,8 @@ func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestam
 
 			switch err {
 			case nil:
-				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
+				pointOffsetTimestamp := int64(pointData.Timestamp) * resolution
+				timestamp := baseTimestamp + offsetTimestamp + pointOffsetTimestamp
 
 				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
 					point := types.MetricPoint{

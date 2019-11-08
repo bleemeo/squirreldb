@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	Table = "states"
+	table = "states"
 )
 
 type CassandraStates struct {
@@ -18,7 +18,7 @@ type CassandraStates struct {
 
 // New creates a new CassandraStates object
 func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
-	statesTable := keyspace + "." + Table
+	statesTable := keyspace + "." + table
 
 	createStatesTable := createStatesTableQuery(session, statesTable)
 
@@ -55,6 +55,8 @@ func (c *CassandraStates) Read(name string, value interface{}) error {
 		*v = valueInt64
 	case *string:
 		*v = valueString
+	default:
+		return fmt.Errorf("unknown type")
 	}
 
 	return nil

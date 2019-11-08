@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	DataTable          = "data"
-	AggregateDataTable = "data_aggregated"
+	dataTable          = "data"
+	aggregateDataTable = "data_aggregated"
 )
 
 var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
@@ -45,22 +45,20 @@ type CassandraTSDB struct {
 
 // New creates a new CassandraTSDB object
 func New(session *gocql.Session, keyspace string, options Options, debug Debug, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
-	options.dataTable = keyspace + "." + DataTable
-	options.aggregateDataTable = keyspace + "." + AggregateDataTable
+	options.dataTable = keyspace + "." + dataTable
+	options.aggregateDataTable = keyspace + "." + aggregateDataTable
 
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
 
 	createDataTable := createDataTableQuery(session, options.dataTable, defaultTimeToLive)
 
 	if err := createDataTable.Exec(); err != nil {
-		session.Close()
 		return nil, err
 	}
 
 	createAggregateDataTable := createAggregateDataTableQuery(session, options.aggregateDataTable, defaultTimeToLive)
 
 	if err := createAggregateDataTable.Exec(); err != nil {
-		session.Close()
 		return nil, err
 	}
 
