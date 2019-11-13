@@ -79,12 +79,8 @@ func (m *mockStorer) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	return metrics, nil
 }
 
-func (m *mockStorer) Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
-	for uuid, metricData := range newMetrics {
-		m.metrics[uuid] = metricData
-	}
-
-	for uuid, metricData := range existingMetrics {
+func (m *mockStorer) Set(metrics types.Metrics, timeToLive int64) error {
+	for uuid, metricData := range metrics {
 		m.metrics[uuid] = metricData
 	}
 

@@ -21,7 +21,7 @@ var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 type Storer interface {
 	Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error
 	Get(uuids types.MetricUUIDs) (types.Metrics, error)
-	Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error
+	Set(metrics types.Metrics, timeToLive int64) error
 }
 
 type state struct {
@@ -145,6 +145,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 
 	for uuid, states := range flushQueue {
 		temporaryMetricData := temporaryMetrics[uuid]
+		totalPoints := 0
 
 		// Points to write
 		pointsToWrite := types.MetricPoints{}
@@ -155,6 +156,8 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 					pointsToWrite = append(pointsToWrite, point)
 				}
 			}
+
+			totalPoints += state.pointCount
 		}
 
 		data := types.MetricData{
@@ -177,11 +180,19 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 			}
 		}
 
+		totalPoints += currentState.pointCount
+
 		data = types.MetricData{
 			Points:     pointsToSet,
 			TimeToLive: temporaryMetricData.TimeToLive,
 		}
 		metricsToSet[uuid] = data
+
+		length := len(temporaryMetricData.Points)
+
+		if length < totalPoints {
+			logger.Printf("Metric %s expected at least %d points, had %d", uuid, totalPoints, length)
+		}
 	}
 
 	retry.Print(func() error {
@@ -193,7 +204,7 @@ func (b *Batch) flush(flushQueue map[types.MetricUUID][]state, now time.Time) {
 	retry.Print(func() error {
 		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
-		return b.store.Set(nil, metricsToSet, timeToLive)
+		return b.store.Set(metricsToSet, timeToLive)
 	}, retry.NewBackOff(30*time.Second), logger,
 		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage")

@@ -21,9 +21,7 @@ import (
 	"time"
 )
 
-var (
-	logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
-)
+var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 func main() {
 	squirrelConfig, err := config.New()

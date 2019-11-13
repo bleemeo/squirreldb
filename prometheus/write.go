@@ -21,6 +21,8 @@ type WritePoints struct {
 // Decodes the request and transforms it into Metrics
 // Sends the Metrics to storage
 func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	startTime := time.Now()
+
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -63,6 +65,9 @@ func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}, retry.NewBackOff(30*time.Second), logger,
 		"Error: Can't write in storage",
 		"Resolved: Write in storage")
+
+	duration := time.Since(startTime)
+	writeRequestSeconds.Observe(duration.Seconds())
 }
 
 // Convert Prometheus Labels to MetricLabels

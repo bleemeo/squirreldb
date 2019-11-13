@@ -38,6 +38,7 @@ func New(options Options) *Redis {
 // Append appends metrics to existing entries
 func (r *Redis) Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
 	pipe := r.client.Pipeline()
+	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
 	for uuid, metricData := range newMetrics {
 		data, err := encode(metricData)
@@ -49,6 +50,7 @@ func (r *Redis) Append(newMetrics, existingMetrics types.Metrics, timeToLive int
 		key := keyPrefix + uuid.String()
 
 		pipe.Append(key, string(data))
+		pipe.Expire(key, timeToLiveDuration)
 	}
 
 	for uuid, metricData := range existingMetrics {
@@ -73,17 +75,14 @@ func (r *Redis) Append(newMetrics, existingMetrics types.Metrics, timeToLive int
 // Get returns requested metrics
 func (r *Redis) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 	metrics := make(types.Metrics)
-	pipe := r.client.Pipeline()
 
 	for _, uuid := range uuids {
 		key := keyPrefix + uuid.String()
 		data, err := r.client.Get(key).Bytes()
 
-		if err != nil {
-			return nil, err
-		}
-
-		if _, err := pipe.Exec(); err != nil {
+		if err == goredis.Nil {
+			return nil, nil
+		} else if err != nil {
 			return nil, err
 		}
 
@@ -100,23 +99,11 @@ func (r *Redis) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 }
 
 // Set set metrics (overwrite existing entries)
-func (r *Redis) Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
+func (r *Redis) Set(metrics types.Metrics, timeToLive int64) error {
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
-	for uuid, metricData := range newMetrics {
-		data, err := encode(metricData)
-
-		if err != nil {
-			return err
-		}
-
-		key := keyPrefix + uuid.String()
-
-		pipe.Set(key, string(data), timeToLiveDuration)
-	}
-
-	for uuid, metricData := range existingMetrics {
+	for uuid, metricData := range metrics {
 		data, err := encode(metricData)
 
 		if err != nil {

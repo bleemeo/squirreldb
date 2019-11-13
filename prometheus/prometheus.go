@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-var (
-	logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
-)
+var logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
 
 type Prometheus struct {
 	readPoints  ReadPoints

@@ -28,8 +28,8 @@ func LabelsEqual(x, y types.MetricLabels) bool {
 		return false
 	}
 
-	for i, label := range x {
-		if label != y[i] {
+	for i := range x {
+		if x[i] != y[i] {
 			return false
 		}
 	}

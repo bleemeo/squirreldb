@@ -591,10 +591,9 @@ func TestStore_set(t *testing.T) {
 	}
 
 	type args struct {
-		newMetrics      types.Metrics
-		existingMetrics types.Metrics
-		now             time.Time
-		timeToLive      int64
+		metrics    types.Metrics
+		now        time.Time
+		timeToLive int64
 	}
 
 	tests := []struct {
@@ -610,7 +609,7 @@ func TestStore_set(t *testing.T) {
 				Metrics: make(map[types.MetricUUID]metric),
 			},
 			args: args{
-				newMetrics: types.Metrics{
+				metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
@@ -628,21 +627,19 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 3600,
 					},
-				},
-				existingMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000002"): {
+					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
-								Timestamp: 150,
-								Value:     150,
+								Timestamp: 0,
+								Value:     0,
 							},
 							{
-								Timestamp: 200,
-								Value:     200,
+								Timestamp: 50,
+								Value:     50,
 							},
 							{
-								Timestamp: 250,
-								Value:     250,
+								Timestamp: 100,
+								Value:     100,
 							},
 						},
 						TimeToLive: 3600,
@@ -718,7 +715,7 @@ func TestStore_set(t *testing.T) {
 				},
 			},
 			args: args{
-				newMetrics: types.Metrics{
+				metrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000001"): {
 						Points: types.MetricPoints{
 							{
@@ -736,8 +733,6 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 3600,
 					},
-				},
-				existingMetrics: types.Metrics{
 					uuidify("00000000-0000-0000-0000-000000000002"): {
 						Points: types.MetricPoints{
 							{
@@ -810,7 +805,7 @@ func TestStore_set(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.Metrics,
 			}
-			if err := s.set(tt.args.newMetrics, tt.args.existingMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.metrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

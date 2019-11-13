@@ -50,11 +50,11 @@ func (s *Store) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
 }
 
 // Set is the public function of set()
-func (s *Store) Set(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
+func (s *Store) Set(metrics types.Metrics, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(newMetrics, existingMetrics, time.Now(), timeToLive)
+	return s.set(metrics, time.Now(), timeToLive)
 }
 
 // Run calls expire() every expirator interval seconds
@@ -132,19 +132,10 @@ func (s *Store) get(uuids types.MetricUUIDs) (types.Metrics, error) {
 }
 
 // Set metrics (overwrite existing items) and expiration
-func (s *Store) set(newMetrics, existingMetrics types.Metrics, now time.Time, timeToLive int64) error {
+func (s *Store) set(metrics types.Metrics, now time.Time, timeToLive int64) error {
 	expirationTimestamp := now.Unix() + timeToLive
 
-	for uuid, metricData := range newMetrics {
-		metric := s.metrics[uuid]
-
-		metric.MetricData = metricData
-		metric.ExpirationTimestamp = expirationTimestamp
-
-		s.metrics[uuid] = metric
-	}
-
-	for uuid, metricData := range existingMetrics {
+	for uuid, metricData := range metrics {
 		metric := s.metrics[uuid]
 
 		metric.MetricData = metricData

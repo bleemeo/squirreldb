@@ -77,9 +77,11 @@ func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	labelsCopy := types.MetricLabels{}
+	labelsCopy := make(types.MetricLabels, len(labels))
 
-	copy(labelsCopy, labels)
+	for key, value := range labels {
+		labelsCopy[key] = value
+	}
 
 	sort.Slice(labelsCopy, func(i, j int) bool {
 		return labelsCopy[i].Name < labelsCopy[j].Name
@@ -91,10 +93,10 @@ func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
 		}
 	}
 
-	uuid := uuidFromLabels(labels)
+	uuid := uuidFromLabels(labelsCopy)
 
 	retry.Print(func() error {
-		return c.savePair(uuid, labels)
+		return c.savePair(uuid, labelsCopy)
 	}, retry.NewBackOff(30*time.Second), logger,
 		"Error: Can't save pair in the index table",
 		"Resolved: Save pair in the index table")

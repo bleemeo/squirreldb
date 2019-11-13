@@ -21,6 +21,8 @@ type ReadPoints struct {
 // Retrieves metrics via MetricRequests
 // Generates and returns a response containing the requested data
 func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	startTime := time.Now()
+
 	body, err := ioutil.ReadAll(request.Body)
 
 	if err != nil {
@@ -95,6 +97,9 @@ func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request
 
 		return
 	}
+
+	duration := time.Since(startTime)
+	readRequestSeconds.Observe(duration.Seconds())
 }
 
 // Convert Prometheus LabelMatchers to MetricLabels
