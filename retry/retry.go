@@ -6,11 +6,20 @@ import (
 	"time"
 )
 
-// Print is a backoff.Retry wrapper that adds useful logs
-func Print(fun func() error, b backoff.BackOff, logger *log.Logger, errorMsg, resolveMsg string) {
+// NewExponentialBackOff creates a new ExponentialBackOff object
+func NewExponentialBackOff(maxInterval time.Duration) backoff.BackOff {
+	exponentialBackOff := backoff.NewExponentialBackOff()
+
+	exponentialBackOff.MaxInterval = maxInterval
+
+	return exponentialBackOff
+}
+
+// Print displays if an error message has occurred, the time before the next attempt and a resolution message
+func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, errorMsg, resolveMsg string) {
 	tried := false
 
-	_ = backoff.RetryNotify(fun, b, func(err error, duration time.Duration) {
+	_ = backoff.RetryNotify(o, b, func(err error, duration time.Duration) {
 		if err != nil {
 			tried = true
 			logger.Printf("%s (%v)", errorMsg, err)
@@ -21,13 +30,4 @@ func Print(fun func() error, b backoff.BackOff, logger *log.Logger, errorMsg, re
 	if tried {
 		logger.Printf("%s", resolveMsg)
 	}
-}
-
-// NewBackOff create a new ExponentialBackOff with specified settings
-func NewBackOff(maxInterval time.Duration) backoff.BackOff {
-	exponentialBackOff := backoff.NewExponentialBackOff()
-
-	exponentialBackOff.MaxInterval = maxInterval
-
-	return exponentialBackOff
 }

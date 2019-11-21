@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-const (
-	keyPrefix = "squirreldb-"
-)
+const keyPrefix = "squirreldb"
 
 type Options struct {
 	Address string
@@ -28,125 +26,134 @@ func New(options Options) *Redis {
 		Addr: options.Address,
 	})
 
-	redis := Redis{
+	redis := &Redis{
 		client: client,
 	}
 
-	return &redis
+	return redis
 }
 
-// Append appends metrics to existing entries
-func (r *Redis) Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
+// Append appends the specified metrics
+func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
+		return nil
+	}
+
+	start := time.Now()
+
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
-	for uuid, metricData := range newMetrics {
-		data, err := encode(metricData)
+	for uuid, data := range newMetrics {
+		values, err := valuesFromData(data)
 
 		if err != nil {
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + "-" + uuid.String()
 
-		pipe.Append(key, string(data))
+		pipe.Append(key, string(values))
 		pipe.Expire(key, timeToLiveDuration)
+
+		appendPointsTotal.Add(float64(len(data.Points)))
 	}
 
-	for uuid, metricData := range existingMetrics {
-		data, err := encode(metricData)
+	for uuid, data := range existingMetrics {
+		values, err := valuesFromData(data)
 
 		if err != nil {
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + "-" + uuid.String()
 
-		pipe.Append(key, string(data))
+		pipe.Append(key, string(values))
+
+		appendPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
 
+	appendSeconds.Observe(time.Since(start).Seconds())
+
 	return nil
 }
 
-// Get returns requested metrics
-func (r *Redis) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
-	metrics := make(types.Metrics)
+// Get return the requested metrics
+func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+
+	start := time.Now()
+
+	metrics := make(map[types.MetricUUID]types.MetricData)
 
 	for _, uuid := range uuids {
-		key := keyPrefix + uuid.String()
-		data, err := r.client.Get(key).Bytes()
+		key := keyPrefix + "-" + uuid.String()
+		values, err := r.client.Get(key).Bytes()
 
-		if err == goredis.Nil {
-			return nil, nil
-		} else if err != nil {
+		if (err != nil) && (err != goredis.Nil) {
 			return nil, err
 		}
 
-		metricData, err := decode(data)
+		data, err := dataFromValues(values)
 
 		if err != nil {
 			return nil, err
 		}
 
-		metrics[uuid] = metricData
+		metrics[uuid] = data
+
+		getPointsTotal.Add(float64(len(data.Points)))
 	}
+
+	getSeconds.Observe(time.Since(start).Seconds())
 
 	return metrics, nil
 }
 
-// Set set metrics (overwrite existing entries)
-func (r *Redis) Set(metrics types.Metrics, timeToLive int64) error {
+// Set sets the specified metrics
+func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	start := time.Now()
+
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
-	for uuid, metricData := range metrics {
-		data, err := encode(metricData)
+	for uuid, data := range metrics {
+		values, err := valuesFromData(data)
 
 		if err != nil {
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + "-" + uuid.String()
 
-		pipe.Set(key, string(data), timeToLiveDuration)
+		pipe.Set(key, string(values), timeToLiveDuration)
+
+		setPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
 
+	setSeconds.Observe(time.Since(start).Seconds())
+
 	return nil
 }
 
-// Encode MetricData
-func encode(metricData types.MetricData) ([]byte, error) {
-	buffer := new(bytes.Buffer)
-
-	for _, point := range metricData.Points {
-		pointData := []interface{}{
-			point.Timestamp,
-			point.Value,
-			metricData.TimeToLive,
-		}
-
-		for _, element := range pointData {
-			if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return buffer.Bytes(), nil
-}
-
-// Decode MetricData
-func decode(data []byte) (types.MetricData, error) {
-	metricData := types.MetricData{}
-	buffer := bytes.NewReader(data)
+// Return data from bytes values
+func dataFromValues(values []byte) (types.MetricData, error) {
+	data := types.MetricData{}
+	buffer := bytes.NewReader(values)
 
 forLoop:
 	for {
@@ -165,8 +172,8 @@ forLoop:
 				Value:     pointData.Value,
 			}
 
-			metricData.Points = append(metricData.Points, point)
-			metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, pointData.TimeToLive)
+			data.Points = append(data.Points, point)
+			data.TimeToLive = compare.MaxInt64(data.TimeToLive, pointData.TimeToLive)
 		case io.EOF:
 			break forLoop
 		default:
@@ -174,5 +181,26 @@ forLoop:
 		}
 	}
 
-	return metricData, nil
+	return data, nil
+}
+
+// Return bytes values from data
+func valuesFromData(data types.MetricData) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+
+	for _, point := range data.Points {
+		pointData := []interface{}{
+			point.Timestamp,
+			point.Value,
+			data.TimeToLive,
+		}
+
+		for _, element := range pointData {
+			if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return buffer.Bytes(), nil
 }

@@ -6,18 +6,18 @@ import (
 )
 
 var (
-	readRequestSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	requestSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "prometheus",
 		Subsystem:   "",
 		Name:        "request_seconds",
-		Help:        "Total number of queries",
+		Help:        "Total seconds of processing request",
 		ConstLabels: prometheus.Labels{"type": "read"},
 	})
-	writeRequestSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	requestSecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "prometheus",
 		Subsystem:   "",
 		Name:        "request_seconds",
-		Help:        "Total number of queries",
+		Help:        "Total seconds of processing request",
 		ConstLabels: prometheus.Labels{"type": "write"},
 	})
 )

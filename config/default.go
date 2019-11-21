@@ -1,6 +1,6 @@
 package config
 
-var configDefault = map[string]interface{}{
+var defaults = map[string]interface{}{
 	"cassandra.addresses":                []string{"localhost:9042"},
 	"cassandra.replication_factor":       1,
 	"cassandra.keyspace":                 "squirreldb",

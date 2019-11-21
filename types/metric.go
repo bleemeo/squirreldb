@@ -4,11 +4,6 @@ import (
 	gouuid "github.com/gofrs/uuid"
 	"math/big"
 	"sort"
-	"strings"
-)
-
-const (
-	labelPrefixSpecial = "__bleemeo_"
 )
 
 type MetricPoint struct {
@@ -16,118 +11,92 @@ type MetricPoint struct {
 	Value     float64
 }
 
-type MetricPoints []MetricPoint
-
 type MetricData struct {
-	Points     MetricPoints
+	Points     []MetricPoint
 	TimeToLive int64
 }
 
 type MetricLabel struct {
 	Name  string
 	Value string
-	Type  uint8
 }
 
-type MetricLabels []MetricLabel
+type MetricLabelMatcher struct {
+	MetricLabel
+	Type uint8
+}
 
 type MetricUUID struct {
 	gouuid.UUID
 }
 
-type MetricUUIDs []MetricUUID
-
-type Metrics map[MetricUUID]MetricData
-
 type MetricRequest struct {
-	UUIDs         MetricUUIDs
+	UUIDs         []MetricUUID
 	FromTimestamp int64
 	ToTimestamp   int64
 	Step          int64
 	Function      string
 }
 
-// Deduplicate returns a sorted and deduplicated list of point
-func (m MetricPoints) Deduplicate() MetricPoints {
-	if len(m) == 0 {
-		return m
-	}
-
-	sort.Slice(m, func(i, j int) bool {
-		return m[i].Timestamp < m[j].Timestamp
-	})
-
-	i := 0
-
-	for j := 0; j < len(m); j++ {
-		if m[i].Timestamp == m[j].Timestamp {
-			continue
-		}
-
-		i++
-
-		m[i] = m[j]
-	}
-
-	result := m[:(i + 1)]
-
-	return result
-}
-
-// Canonical returns string from labels
-func (m MetricLabels) Canonical() string {
-	sort.Slice(m, func(i, j int) bool {
-		return m[i].Name < m[j].Name
-	})
-
-	elements := make([]string, 0, len(m))
-
-	for _, label := range m {
-		if !strings.HasPrefix(label.Name, labelPrefixSpecial) {
-			value := strings.ReplaceAll(label.Value, `"`, `\"`)
-			element := label.Name + `="` + value + `"`
-
-			elements = append(elements, element)
-		}
-	}
-
-	canonical := strings.Join(elements, ",")
-
-	return canonical
-}
-
-// Map returns labels as a map
-func (m MetricLabels) Map() map[string]string {
-	res := make(map[string]string, len(m))
-
-	for _, label := range m {
-		res[label.Name] = label.Value
-	}
-
-	return res
-}
-
-// Value returns value corresponding to specified label name
-func (m MetricLabels) Value(name string) (string, bool) {
-	for _, label := range m {
-		if label.Name == name {
-			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// Uint64 returns uint64 from the UUID value
-func (m MetricUUID) Uint64() uint64 {
+// Uint64 returns an uint64 generated from the UUID
+func (m *MetricUUID) Uint64() uint64 {
 	bigInt := big.NewInt(0).SetBytes(m.Bytes())
 
 	return bigInt.Uint64()
 }
 
-// LabelsFromMap returns labels generated from a map
-func LabelsFromMap(m map[string]string) MetricLabels {
-	labels := make(MetricLabels, 0, len(m))
+// LabelsContains returns a bool and a string
+func LabelsContains(labels []MetricLabel, name string) (bool, string) {
+	if len(labels) == 0 {
+		return false, ""
+	}
+
+	for _, label := range labels {
+		if label.Name == name {
+			return true, label.Value
+		}
+	}
+
+	return false, ""
+}
+
+// LabelsEqual returns a boolean defined by the equality of the specified MetricLabel
+func LabelsEqual(labels, reference []MetricLabel) bool {
+	if len(labels) != len(reference) {
+		return false
+	}
+
+	for i := range labels {
+		if labels[i] != reference[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// LabelsFromMatchers returns a list of MetricLabel generated from a list of MetricLabelMatcher
+func LabelsFromMatchers(matchers []MetricLabelMatcher) []MetricLabel {
+	if len(matchers) == 0 {
+		return nil
+	}
+
+	labels := make([]MetricLabel, 0, len(matchers))
+
+	for _, matcher := range matchers {
+		labels = append(labels, matcher.MetricLabel)
+	}
+
+	return labels
+}
+
+// LabelsFromMap returns a list of MetricLabel generated from a map
+func LabelsFromMap(m map[string]string) []MetricLabel {
+	if len(m) == 0 {
+		return nil
+	}
+
+	labels := make([]MetricLabel, 0, len(m))
 
 	for name, value := range m {
 		label := MetricLabel{
@@ -141,20 +110,91 @@ func LabelsFromMap(m map[string]string) MetricLabels {
 	return labels
 }
 
-// UUIDFromBytes returns UUID generator from bytes
-func UUIDFromBytes(bytes []byte) MetricUUID {
-	uuid := MetricUUID{
-		UUID: gouuid.FromBytesOrNil(bytes),
+// LabelsSort returns the MetricLabel list sorted by name
+func LabelsSort(labels []MetricLabel) []MetricLabel {
+	if len(labels) == 0 {
+		return nil
 	}
 
-	return uuid
+	sortedLabels := make([]MetricLabel, len(labels))
+
+	copy(sortedLabels, labels)
+
+	sort.Slice(sortedLabels, func(i, j int) bool {
+		return sortedLabels[i].Name < sortedLabels[j].Name
+	})
+
+	return sortedLabels
 }
 
-// UUIDFromString returns UUID generator from a string
-func UUIDFromString(str string) MetricUUID {
-	uuid := MetricUUID{
-		UUID: gouuid.FromStringOrNil(str),
+// MapFromLabels returns a map generated from a MetricLabel list
+func MapFromLabels(labels []MetricLabel) map[string]string {
+	if len(labels) == 0 {
+		return nil
 	}
 
-	return uuid
+	m := make(map[string]string, len(labels))
+
+	for _, label := range labels {
+		m[label.Name] = label.Value
+	}
+
+	return m
+}
+
+// PointsDeduplicate returns the MetricPoint list deduplicated and sorted by timestamp
+func PointsDeduplicate(points []MetricPoint) []MetricPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	sortedPoints := PointsSort(points)
+
+	i := 0
+
+	for j, length := 0, len(sortedPoints); j < length; j++ {
+		if sortedPoints[i].Timestamp == sortedPoints[j].Timestamp {
+			continue
+		}
+
+		i++
+
+		sortedPoints[i] = sortedPoints[j]
+	}
+
+	deduplicatedPoints := sortedPoints[:(i + 1)]
+
+	return deduplicatedPoints
+}
+
+// PointsSort returns the MetricPoint list sorted by timestamp
+func PointsSort(points []MetricPoint) []MetricPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	sortedPoints := make([]MetricPoint, len(points))
+
+	copy(sortedPoints, points)
+
+	sort.Slice(sortedPoints, func(i, j int) bool {
+		return sortedPoints[i].Timestamp < sortedPoints[j].Timestamp
+	})
+
+	return sortedPoints
+}
+
+// UUIDFromString returns a MetricUUID generated from a string
+func UUIDFromString(s string) (MetricUUID, error) {
+	u, err := gouuid.FromString(s)
+
+	if err != nil {
+		return MetricUUID{}, err
+	}
+
+	uuid := MetricUUID{
+		UUID: u,
+	}
+
+	return uuid, nil
 }

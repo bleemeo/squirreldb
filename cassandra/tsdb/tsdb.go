@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	dataTable          = "data"
-	aggregateDataTable = "data_aggregated"
+	dataTableName          = "data"
+	aggregateDataTableName = "data_aggregated"
 )
 
-var logger = log.New(os.Stdout, "[cassandra] ", log.LstdFlags)
+var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
-type Debug struct {
+type DebugOptions struct {
 	AggregateForce bool
 	AggregateSize  int64
 }
@@ -36,45 +36,44 @@ type Options struct {
 }
 
 type CassandraTSDB struct {
-	session *gocql.Session
-	options Options
-	debug   Debug
-	index   *index.CassandraIndex
-	states  *states.CassandraStates
+	session      *gocql.Session
+	options      Options
+	debugOptions DebugOptions
+
+	index  *index.CassandraIndex
+	states *states.CassandraStates
 }
 
-// New creates a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, debug Debug, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
-	options.dataTable = keyspace + "." + dataTable
-	options.aggregateDataTable = keyspace + "." + aggregateDataTable
-
+// New created a new CassandraTSDB object
+func New(session *gocql.Session, keyspace string, options Options, debugOptions DebugOptions, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
+	options.dataTable = keyspace + "." + dataTableName
+	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
+	dataTableCreateQuery := dataTableCreateQuery(session, options.dataTable, defaultTimeToLive)
 
-	createDataTable := createDataTableQuery(session, options.dataTable, defaultTimeToLive)
-
-	if err := createDataTable.Exec(); err != nil {
+	if err := dataTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
-	createAggregateDataTable := createAggregateDataTableQuery(session, options.aggregateDataTable, defaultTimeToLive)
+	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, options.aggregateDataTable, defaultTimeToLive)
 
-	if err := createAggregateDataTable.Exec(); err != nil {
+	if err := aggregateDataTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
 	tsdb := &CassandraTSDB{
-		session: session,
-		options: options,
-		debug:   debug,
-		index:   index,
-		states:  states,
+		session:      session,
+		options:      options,
+		debugOptions: debugOptions,
+		index:        index,
+		states:       states,
 	}
 
 	return tsdb, nil
 }
 
-// Returns data table create query
-func createDataTableQuery(session *gocql.Session, dataTable, defaultTimeToLive string) *gocql.Query {
+// Returns data table create Query
+func dataTableCreateQuery(session *gocql.Session, dataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
         CREATE TABLE IF NOT EXISTS $DATA_TABLE (
@@ -101,8 +100,8 @@ func createDataTableQuery(session *gocql.Session, dataTable, defaultTimeToLive s
 	return query
 }
 
-// Returns aggregate data table create query
-func createAggregateDataTableQuery(session *gocql.Session, aggregateDataTable, defaultTimeToLive string) *gocql.Query {
+// Returns aggregate data table create Query
+func aggregateDataTableCreateQuery(session *gocql.Session, aggregateDataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregateDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
         CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (

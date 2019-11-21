@@ -2,6 +2,7 @@ package aggregate
 
 import (
 	"math"
+	"sort"
 	"squirreldb/types"
 )
 
@@ -13,54 +14,74 @@ type AggregatedPoint struct {
 	Count     float64
 }
 
-type AggregatedPoints []AggregatedPoint
-
 type AggregatedData struct {
-	Points     AggregatedPoints
+	Points     []AggregatedPoint
 	TimeToLive int64
 }
 
-type AggregatedMetrics map[types.MetricUUID]AggregatedData
+// Aggregate returns an aggregated metric list from a metric list
+func Aggregate(metrics map[types.MetricUUID]types.MetricData, resolution int64) map[types.MetricUUID]AggregatedData {
+	if len(metrics) == 0 {
+		return nil
+	}
 
-// Metrics returns AggregatedMetrics according to the parameters
-func Metrics(metrics types.Metrics, fromTimestamp, toTimestamp, resolution int64) AggregatedMetrics {
-	aggregatedMetrics := make(AggregatedMetrics)
+	aggregatedMetrics := make(map[types.MetricUUID]AggregatedData)
 
-	for uuid, metricData := range metrics {
-		aggregatedMetrics[uuid] = MetricData(metricData, fromTimestamp, toTimestamp, resolution)
+	for uuid, data := range metrics {
+		aggregatedData := aggregateData(data, resolution)
+
+		aggregatedMetrics[uuid] = aggregatedData
 	}
 
 	return aggregatedMetrics
 }
 
-// MetricData returns AggregatedData according to the parameters
-func MetricData(metricData types.MetricData, fromTimestamp, toTimestamp, resolution int64) AggregatedData {
-	aggregatedData := AggregatedData{
-		TimeToLive: metricData.TimeToLive,
+// PointsSort returns the AggregatedPoint list sorted by timestamp
+func PointsSort(aggregatedPoints []AggregatedPoint) []AggregatedPoint {
+	if len(aggregatedPoints) == 0 {
+		return nil
 	}
 
-	for timestamp := fromTimestamp; timestamp < toTimestamp; timestamp += resolution {
-		resolutionPoints := types.MetricPoints{}
+	sortedAggregatedPoints := make([]AggregatedPoint, len(aggregatedPoints))
 
-		for _, point := range metricData.Points {
-			if (point.Timestamp >= timestamp) && (point.Timestamp < (timestamp + resolution)) {
-				resolutionPoints = append(resolutionPoints, point)
-			}
-		}
+	copy(sortedAggregatedPoints, aggregatedPoints)
 
-		if len(resolutionPoints) != 0 {
-			aggregatedPoint := aggregate(timestamp, resolutionPoints)
+	sort.Slice(sortedAggregatedPoints, func(i, j int) bool {
+		return sortedAggregatedPoints[i].Timestamp < sortedAggregatedPoints[j].Timestamp
+	})
 
-			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
-		}
+	return sortedAggregatedPoints
+}
+
+// Returns aggregated data from data
+func aggregateData(data types.MetricData, resolution int64) AggregatedData {
+	if len(data.Points) == 0 {
+		return AggregatedData{}
+	}
+
+	resolutionTimestampPoints := make(map[int64][]types.MetricPoint)
+
+	for _, point := range data.Points {
+		resolutionTimestamp := point.Timestamp - (point.Timestamp % resolution)
+
+		resolutionTimestampPoints[resolutionTimestamp] = append(resolutionTimestampPoints[resolutionTimestamp], point)
+	}
+
+	aggregatedData := AggregatedData{
+		TimeToLive: data.TimeToLive,
+	}
+
+	for resolutionTimestamp, points := range resolutionTimestampPoints {
+		aggregatedPoint := aggregatePoints(points, resolutionTimestamp)
+
+		aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
 	}
 
 	return aggregatedData
 }
 
-// Returns an AggregatedPoint from specified MetricPoints
-// Calculations are: minimum, maximum, average and count of points
-func aggregate(timestamp int64, points types.MetricPoints) AggregatedPoint {
+// Returns an aggregated point from a point list
+func aggregatePoints(points []types.MetricPoint, timestamp int64) AggregatedPoint {
 	aggregatedPoint := AggregatedPoint{
 		Timestamp: timestamp,
 		Count:     float64(len(points)),
@@ -69,12 +90,10 @@ func aggregate(timestamp int64, points types.MetricPoints) AggregatedPoint {
 	for i, point := range points {
 		if i == 0 {
 			aggregatedPoint.Min = point.Value
-			aggregatedPoint.Max = point.Value
-		} else {
-			aggregatedPoint.Min = math.Min(point.Value, aggregatedPoint.Min)
-			aggregatedPoint.Max = math.Max(point.Value, aggregatedPoint.Max)
 		}
 
+		aggregatedPoint.Min = math.Min(point.Value, aggregatedPoint.Min)
+		aggregatedPoint.Max = math.Max(point.Value, aggregatedPoint.Max)
 		aggregatedPoint.Average += point.Value
 	}
 

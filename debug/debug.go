@@ -11,11 +11,11 @@ const (
 	Level2 = 2
 )
 
-var Level = 0
+var CurrentLevel = 0
 
-// Print displays information according to the debug level
+// Print displays a debug message according to its level
 func Print(level int, logger *log.Logger, msg string, v ...interface{}) {
-	if level <= Level {
+	if level <= CurrentLevel {
 		levelString := strconv.Itoa(level)
 		prefix := "[DEBUG-" + levelString + "]"
 

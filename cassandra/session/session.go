@@ -12,12 +12,8 @@ type Options struct {
 	Keyspace          string
 }
 
-type Cassandra struct {
-	Session *gocql.Session
-}
-
 // New creates a new Cassandra object
-func New(options Options) (*Cassandra, error) {
+func New(options Options) (*gocql.Session, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	session, err := cluster.CreateSession()
 
@@ -28,27 +24,18 @@ func New(options Options) (*Cassandra, error) {
 	session.SetConsistency(gocql.LocalQuorum)
 
 	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
-	createKeyspace := createKeyspaceQuery(session, options.Keyspace, replicationFactor)
+	keyspaceCreateQuery := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
 
-	if err := createKeyspace.Exec(); err != nil {
+	if err := keyspaceCreateQuery.Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	cassandra := Cassandra{
-		Session: session,
-	}
-
-	return &cassandra, nil
-}
-
-// Close closes the Cassandra session
-func (c *Cassandra) Close() {
-	c.Session.Close()
+	return session, nil
 }
 
 // Returns keyspace create query
-func createKeyspaceQuery(session *gocql.Session, keyspace, replicationFactor string) *gocql.Query {
+func keyspaceCreateQuery(session *gocql.Session, keyspace, replicationFactor string) *gocql.Query {
 	replacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	query := session.Query(replacer.Replace(`
 		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE

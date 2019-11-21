@@ -11,237 +11,283 @@ import (
 	"time"
 )
 
-// Read returns metrics according to the request
-func (c *CassandraTSDB) Read(request types.MetricRequest) (types.Metrics, error) {
-	aggregated := request.Step >= c.options.AggregateResolution
+// Read returns metrics according to the request made
+func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+	if len(request.UUIDs) == 0 {
+		return nil, nil
+	}
 
-	metrics := make(types.Metrics)
+	readAggregate := request.Step >= c.options.AggregateResolution
+	metrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
 
 	for _, uuid := range request.UUIDs {
-		metricData := types.MetricData{}
+		data := types.MetricData{}
+		fromTimestamp := request.FromTimestamp
 
-		if aggregated {
-			aggregatedMetricData, err := c.readAggregatedData(uuid, request.FromTimestamp, request.ToTimestamp, request.Function)
+		if readAggregate {
+			aggregateData, err := c.readAggregateData(uuid, fromTimestamp, request.ToTimestamp, request.Function)
 
 			if err != nil {
 				return nil, err
 			}
 
-			metricData = aggregatedMetricData
+			data = aggregateData
 
-			length := len(metricData.Points)
-
-			if length != 0 {
-				lastPoint := metricData.Points[length-1]
-				request.FromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution
+			if len(data.Points) != 0 {
+				lastPoint := data.Points[len(data.Points)-1]
+				fromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution
 			}
 		}
 
-		rawMetricData, err := c.readRawData(uuid, request.FromTimestamp, request.ToTimestamp)
+		if fromTimestamp >= request.ToTimestamp {
+			return metrics, nil
+		}
+
+		rawData, err := c.readRawData(uuid, fromTimestamp, request.ToTimestamp)
 
 		if err != nil {
 			return nil, err
 		}
 
-		metricData.Points = append(metricData.Points, rawMetricData.Points...)
-		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, rawMetricData.TimeToLive)
-
-		metrics[uuid] = metricData
+		data.Points = append(data.Points, rawData.Points...)
+		data.TimeToLive = compare.MaxInt64(data.TimeToLive, rawData.TimeToLive)
+		metrics[uuid] = data
 	}
 
 	return metrics, nil
 }
 
-// Reads raw data
-func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
-	startTime := time.Now()
+// Returns aggregated data between the specified timestamps of the requested metric
+func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
+	functionStart := time.Now()
 
-	batchSize := c.options.BatchSize
-	rawPartitionSize := c.options.RawPartitionSize
-	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize)
-	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize)
-	dataTable := c.options.dataTable
-	metricData := types.MetricData{}
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.AggregatePartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.AggregatePartitionSize)
+	aggregateData := types.MetricData{}
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += rawPartitionSize {
-		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-batchSize, 0)
-		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, rawPartitionSize)
-
-		iterator := c.readTable(dataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		partitionMetricData, err := iterateRawData(iterator, fromTimestamp, toTimestamp)
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.AggregatePartitionSize {
+		aggregatePartitionData, err := c.readAggregatePartitionData(uuid, fromTimestamp, toTimestamp, baseTimestamp, function)
 
 		if err != nil {
 			return types.MetricData{}, err
 		}
 
-		metricData.Points = append(metricData.Points, partitionMetricData.Points...)
-		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
+		aggregateData.Points = append(aggregateData.Points, aggregatePartitionData.Points...)
+		aggregateData.TimeToLive = compare.MaxInt64(aggregateData.TimeToLive, aggregatePartitionData.TimeToLive)
 	}
 
-	metricData.Points = metricData.Points.Deduplicate()
+	aggregateData.Points = types.PointsDeduplicate(aggregateData.Points)
 
-	duration := time.Since(startTime)
-	readRawSeconds.Observe(duration.Seconds())
-	readRawPointsTotal.Add(float64(len(metricData.Points)))
+	readPointsTotalAggregated.Add(float64(len(aggregateData.Points)))
+	readSecondsAggregated.Observe(time.Since(functionStart).Seconds())
 
-	return metricData, nil
+	return aggregateData, nil
 }
 
-// Reads aggregated data
-func (c *CassandraTSDB) readAggregatedData(uuid types.MetricUUID, fromTimestamp int64, toTimestamp int64, function string) (types.MetricData, error) {
-	startTime := time.Now()
+// Returns aggregated partition data between the specified timestamps of the requested metric
+func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTimestamp, toTimestamp, baseTimestamp int64, function string) (types.MetricData, error) {
+	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.AggregateSize
+	toOffsetTimestamp := toTimestamp - baseTimestamp
 
-	aggregateRowSize := c.options.AggregateSize
-	aggregatePartitionSize := c.options.AggregatePartitionSize
-	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize)
-	toBaseTimestamp := toTimestamp - (toTimestamp % aggregatePartitionSize)
-	aggregateDataTable := c.options.aggregateDataTable
-	metricData := types.MetricData{}
+	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += aggregatePartitionSize {
-		fromOffsetTimestamp := compare.Int64Max(fromTimestamp-baseTimestamp-aggregateRowSize, 0)
-		toOffsetTimestamp := compare.Int64Min(toTimestamp-baseTimestamp, aggregatePartitionSize)
+	tableSelectDataIter := c.tableSelectDataIter(c.options.aggregateDataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	aggregatePartitionData := types.MetricData{}
 
-		iterator := c.readTable(aggregateDataTable, gocql.UUID(uuid.UUID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
-		partitionMetricData, err := iterateAggregatedData(iterator, fromTimestamp, toTimestamp, function, c.options.AggregateResolution)
+	var (
+		offsetTimestamp int64
+		timeToLive      int64
+		values          []byte
+	)
+
+	var duration time.Duration
+
+	start := time.Now()
+
+	for tableSelectDataIter.Scan(&offsetTimestamp, &timeToLive, &values) {
+		duration += time.Since(start)
+
+		points, err := pointsFromAggregateValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp, c.options.AggregateResolution, function)
 
 		if err != nil {
 			return types.MetricData{}, err
 		}
 
-		metricData.Points = append(metricData.Points, partitionMetricData.Points...)
-		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, partitionMetricData.TimeToLive)
+		aggregatePartitionData.Points = append(aggregatePartitionData.Points, points...)
+		aggregatePartitionData.TimeToLive = compare.MaxInt64(aggregatePartitionData.TimeToLive, timeToLive)
+
+		start = time.Now()
 	}
 
-	metricData.Points = metricData.Points.Deduplicate()
+	querySecondsRead.Observe(duration.Seconds())
 
-	duration := time.Since(startTime)
-	readAggregatedSeconds.Observe(duration.Seconds())
-	readAggregatedPointsTotal.Add(float64(len(metricData.Points)))
-
-	return metricData, nil
+	return aggregatePartitionData, nil
 }
 
-// Returns an iterator from the specified table according to the parameters
-func (c *CassandraTSDB) readTable(table string, uuid gocql.UUID, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
-	startTime := time.Now()
+// Returns raw data between the specified timestamps of the requested metric
+func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
+	functionStart := time.Now()
 
-	iteratorReplacer := strings.NewReplacer("$TABLE", table)
-	iterator := c.session.Query(iteratorReplacer.Replace(`
-		SELECT base_ts, offset_ts, TTL(values), values FROM $TABLE
+	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize)
+	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.RawPartitionSize)
+	rawData := types.MetricData{}
+
+	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.RawPartitionSize {
+		partitionData, err := c.readRawPartitionData(uuid, fromTimestamp, toTimestamp, baseTimestamp)
+
+		if err != nil {
+			return types.MetricData{}, err
+		}
+
+		rawData.Points = append(rawData.Points, partitionData.Points...)
+		rawData.TimeToLive = compare.MaxInt64(rawData.TimeToLive, partitionData.TimeToLive)
+	}
+
+	rawData.Points = types.PointsDeduplicate(rawData.Points)
+
+	readPointsTotalRaw.Add(float64(len(rawData.Points)))
+	readSecondsRaw.Observe(time.Since(functionStart).Seconds())
+
+	return rawData, nil
+}
+
+// Returns raw partition data between the specified timestamps of the requested metric
+func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestamp, toTimestamp, baseTimestamp int64) (types.MetricData, error) {
+	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.BatchSize
+	toOffsetTimestamp := toTimestamp - baseTimestamp
+
+	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)
+
+	tableSelectDataIter := c.tableSelectDataIter(c.options.dataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	rawPartitionData := types.MetricData{}
+
+	var (
+		offsetTimestamp int64
+		timeToLive      int64
+		values          []byte
+	)
+
+	var duration time.Duration
+
+	start := time.Now()
+
+	for tableSelectDataIter.Scan(&offsetTimestamp, &timeToLive, &values) {
+		duration += time.Since(start)
+
+		points, err := pointsFromRawValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp)
+
+		if err != nil {
+			return types.MetricData{}, err
+		}
+
+		rawPartitionData.Points = append(rawPartitionData.Points, points...)
+		rawPartitionData.TimeToLive = compare.MaxInt64(rawPartitionData.TimeToLive, timeToLive)
+
+		start = time.Now()
+	}
+
+	querySecondsRead.Observe(duration.Seconds())
+
+	return rawPartitionData, nil
+}
+
+// Returns table select data Query
+func (c *CassandraTSDB) tableSelectDataIter(table string, uuid string, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	replacer := strings.NewReplacer("$TABLE", table)
+	query := c.session.Query(replacer.Replace(`
+		SELECT offset_ts, TTL(values), values FROM $TABLE
 		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
-	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp).Iter()
+	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	iter := query.Iter()
 
-	duration := time.Since(startTime)
-	readQueriesSeconds.Observe(duration.Seconds())
-
-	return iterator
+	return iter
 }
 
-// Returns metrics
-func iterateRawData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64) (types.MetricData, error) {
-	var (
-		baseTimestamp, offsetTimestamp, timeToLive int64
-		values                                     []byte
-	)
+// Return points from bytes aggregated values
+func pointsFromAggregateValues(values []byte, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp, resolution int64, function string) ([]types.MetricPoint, error) {
+	buffer := bytes.NewReader(values)
 
-	metricData := types.MetricData{}
+	var points []types.MetricPoint
 
-	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
-		buffer := bytes.NewReader(values)
-
-	forLoop:
-		for {
-			var pointData struct {
-				Timestamp uint16
-				Value     float64
-			}
-
-			err := binary.Read(buffer, binary.BigEndian, &pointData)
-
-			switch err {
-			case nil:
-				timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
-
-				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
-					point := types.MetricPoint{
-						Timestamp: timestamp,
-						Value:     pointData.Value,
-					}
-
-					metricData.Points = append(metricData.Points, point)
-				}
-			case io.EOF:
-				break forLoop
-			default:
-				return types.MetricData{}, err
-			}
+forLoop:
+	for {
+		var pointData struct {
+			Timestamp uint16
+			Min       float64
+			Max       float64
+			Average   float64
+			Count     float64
 		}
 
-		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, timeToLive)
+		err := binary.Read(buffer, binary.BigEndian, &pointData)
+
+		switch err {
+		case nil:
+			timestamp := baseTimestamp + offsetTimestamp + (int64(pointData.Timestamp) * resolution)
+
+			if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
+				point := types.MetricPoint{
+					Timestamp: timestamp,
+				}
+
+				switch function {
+				case "min":
+					point.Value = pointData.Min
+				case "max":
+					point.Value = pointData.Max
+				case "avg":
+					point.Value = pointData.Average
+				case "count":
+					point.Value = pointData.Count
+				default:
+					point.Value = pointData.Average
+				}
+
+				points = append(points, point)
+			}
+		case io.EOF:
+			break forLoop
+		default:
+			return nil, err
+		}
 	}
 
-	return metricData, nil
+	return points, nil
 }
 
-// Returns aggregated metrics
-func iterateAggregatedData(iterator *gocql.Iter, fromTimestamp int64, toTimestamp int64, function string, resolution int64) (types.MetricData, error) {
-	var (
-		baseTimestamp, offsetTimestamp, timeToLive int64
-		values                                     []byte
-	)
+// Return points from bytes raw values
+func pointsFromRawValues(values []byte, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp int64) ([]types.MetricPoint, error) {
+	buffer := bytes.NewReader(values)
 
-	metricData := types.MetricData{}
+	var points []types.MetricPoint
 
-	for iterator.Scan(&baseTimestamp, &offsetTimestamp, &timeToLive, &values) {
-		buffer := bytes.NewReader(values)
-
-	forLoop:
-		for {
-			var pointData struct {
-				Timestamp uint16
-				Min       float64
-				Max       float64
-				Average   float64
-				Count     float64
-			}
-
-			err := binary.Read(buffer, binary.BigEndian, &pointData)
-
-			switch err {
-			case nil:
-				pointOffsetTimestamp := int64(pointData.Timestamp) * resolution
-				timestamp := baseTimestamp + offsetTimestamp + pointOffsetTimestamp
-
-				if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
-					point := types.MetricPoint{
-						Timestamp: timestamp,
-					}
-
-					switch function {
-					case "min":
-						point.Value = pointData.Min
-					case "max":
-						point.Value = pointData.Max
-					case "avg":
-						point.Value = pointData.Average
-					case "count":
-						point.Value = pointData.Count
-					default:
-						point.Value = pointData.Average
-					}
-
-					metricData.Points = append(metricData.Points, point)
-				}
-			case io.EOF:
-				break forLoop
-			default:
-				return types.MetricData{}, err
-			}
+forLoop:
+	for {
+		var pointData struct {
+			Timestamp uint16
+			Value     float64
 		}
 
-		metricData.TimeToLive = compare.Int64Max(metricData.TimeToLive, timeToLive)
+		err := binary.Read(buffer, binary.BigEndian, &pointData)
+
+		switch err {
+		case nil:
+			timestamp := baseTimestamp + offsetTimestamp + int64(pointData.Timestamp)
+
+			if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
+				point := types.MetricPoint{
+					Timestamp: timestamp,
+					Value:     pointData.Value,
+				}
+
+				points = append(points, point)
+			}
+		case io.EOF:
+			break forLoop
+		default:
+			return nil, err
+		}
 	}
 
-	return metricData, nil
+	return points, nil
 }

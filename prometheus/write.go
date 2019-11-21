@@ -1,83 +1,56 @@
 package prometheus
 
 import (
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
-	"io/ioutil"
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"
-	"strconv"
 	"time"
 )
 
-type WritePoints struct {
+type WriteMetrics struct {
 	indexer types.MetricIndexer
 	writer  types.MetricWriter
 }
 
-// Serve the write handler
-// Decodes the request and transforms it into Metrics
-// Sends the Metrics to storage
-func (w *WritePoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	startTime := time.Now()
-
-	body, err := ioutil.ReadAll(request.Body)
-
-	if err != nil {
-		logger.Printf("Error: Can't read the body (%v)", err)
-		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
-
-		return
-	}
-
-	decoded, err := snappy.Decode(nil, body)
-
-	if err != nil {
-		logger.Printf("Error: Can't decode the body (%v)", err)
-		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
-
-		return
-	}
+// ServeHTTP handles writing requests
+func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	start := time.Now()
 
 	var writeRequest prompb.WriteRequest
 
-	if err := proto.Unmarshal(decoded, &writeRequest); err != nil {
-		logger.Printf("Error: Can't unmarshal the decoded body (%v)", err)
-		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
+	err := decodeRequest(request, &writeRequest)
+
+	if err != nil {
+		logger.Printf("Error: Can't decode the write request (%v)", err)
+		http.Error(writer, "Can't decode the write request", http.StatusBadRequest)
 
 		return
 	}
 
-	metrics := make(types.Metrics)
-
-	for _, series := range writeRequest.Timeseries {
-		labels := pbLabelsToLabels(series.Labels)
-		timeToLive := timeToLive(labels)
-		uuid := w.indexer.UUID(labels)
-
-		metrics[uuid] = toMetricData(series, timeToLive)
-	}
+	metrics := metricsFromTimeseries(writeRequest.Timeseries, w.indexer.UUID)
 
 	retry.Print(func() error {
 		return w.writer.Write(metrics)
-	}, retry.NewBackOff(30*time.Second), logger,
-		"Error: Can't write in storage",
-		"Resolved: Write in storage")
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't write metrics with the writer",
+		"Resolved: Read metrics with the writer")
 
-	duration := time.Since(startTime)
-	writeRequestSeconds.Observe(duration.Seconds())
+	requestSecondsWrite.Observe(time.Since(start).Seconds())
 }
 
-// Convert Prometheus Labels to MetricLabels
-func pbLabelsToLabels(pbLabels []*prompb.Label) types.MetricLabels {
-	labels := make(types.MetricLabels, 0, len(pbLabels))
+// Returns a MetricLabel list generated from a Label list
+func labelsFromPromLabels(promLabels []*prompb.Label) []types.MetricLabel {
+	if len(promLabels) == 0 {
+		return nil
+	}
 
-	for _, pbLabel := range pbLabels {
+	labels := make([]types.MetricLabel, 0, len(promLabels))
+
+	for _, promLabel := range promLabels {
 		label := types.MetricLabel{
-			Name:  pbLabel.Name,
-			Value: pbLabel.Value,
+			Name:  promLabel.Name,
+			Value: promLabel.Value,
 		}
 
 		labels = append(labels, label)
@@ -86,34 +59,53 @@ func pbLabelsToLabels(pbLabels []*prompb.Label) types.MetricLabels {
 	return labels
 }
 
-func timeToLive(labels types.MetricLabels) int64 {
-	timeToLiveString, exists := labels.Value("__bleemeo_ttl__")
-	timeToLive := int64(0)
-
-	if exists {
-		timeToLive, _ = strconv.ParseInt(timeToLiveString, 10, 64)
+// Returns a MetricPoint list generated from a Sample list
+func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
+	if len(promSamples) == 0 {
+		return nil
 	}
 
-	return timeToLive
-}
+	points := make([]types.MetricPoint, 0, len(promSamples))
 
-// Generate MetricPoints
-func toMetricData(series *prompb.TimeSeries, timeToLive int64) types.MetricData {
-	points := types.MetricPoints{}
-
-	for _, sample := range series.Samples {
+	for _, promSample := range promSamples {
 		point := types.MetricPoint{
-			Timestamp: sample.Timestamp / 1000,
-			Value:     sample.Value,
+			Timestamp: promSample.Timestamp / 1000,
+			Value:     promSample.Value,
 		}
 
 		points = append(points, point)
 	}
 
-	metricData := types.MetricData{
+	return points
+}
+
+// Returns a MetricUUID and a MetricData generated from a TimeSeries
+func metricFromPromSeries(promSeries *prompb.TimeSeries, fun func(labels []types.MetricLabel) types.MetricUUID) (types.MetricUUID, types.MetricData) {
+	labels := labelsFromPromLabels(promSeries.Labels)
+	uuid := fun(labels)
+	timeToLive := int64(0)
+	points := pointsFromPromSamples(promSeries.Samples)
+	data := types.MetricData{
 		Points:     points,
 		TimeToLive: timeToLive,
 	}
 
-	return metricData
+	return uuid, data
+}
+
+// Returns a metric list generated from a TimeSeries list
+func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels []types.MetricLabel) types.MetricUUID) map[types.MetricUUID]types.MetricData {
+	if len(promTimeseries) == 0 {
+		return nil
+	}
+
+	metrics := make(map[types.MetricUUID]types.MetricData, len(promTimeseries))
+
+	for _, promSeries := range promTimeseries {
+		uuid, data := metricFromPromSeries(promSeries, fun)
+
+		metrics[uuid] = data
+	}
+
+	return metrics
 }

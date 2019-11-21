@@ -12,86 +12,74 @@ var (
 		Name:      "last_timestamp",
 		Help:      "Last aggregation timestamp",
 	})
-	aggregateSeconds = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "cassandra",
-		Subsystem: "aggregate",
-		Name:      "seconds_total",
-		Help:      "Total seconds of aggregation (reading, aggregating, writing)",
-	})
-	aggregateProcessedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "cassandra",
-		Subsystem: "aggregate",
-		Name:      "processed_points_total",
-		Help:      "Total number of points processed",
-	})
-	readAggregatedSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	querySecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "read_seconds",
-		Help:        "Total seconds of reading",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
-	})
-	readRawSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "read_seconds",
-		Help:        "Total seconds of reading",
-		ConstLabels: prometheus.Labels{"type": "raw"},
-	})
-	readAggregatedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "read_points_total",
-		Help:        "Total number of points read",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
-	})
-	readRawPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "read_points_total",
-		Help:        "Total number of points read",
-		ConstLabels: prometheus.Labels{"type": "raw"},
-	})
-	wroteAggregatedSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "wrote_seconds",
-		Help:        "Total seconds of writing",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
-	})
-	wroteRawSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "wrote_seconds",
-		Help:        "Total seconds of writing",
-		ConstLabels: prometheus.Labels{"type": "raw"},
-	})
-	wroteAggregatedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "wrote_points_total",
-		Help:        "Total number of points wrote",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
-	})
-	wroteRawPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "wrote_points_total",
-		Help:        "Total number of points wrote",
-		ConstLabels: prometheus.Labels{"type": "raw"},
-	})
-	readQueriesSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "queries_seconds",
-		Help:        "Total number of queries",
+		Subsystem:   "tsdb",
+		Name:        "query_seconds",
+		Help:        "Total seconds of querying",
 		ConstLabels: prometheus.Labels{"type": "read"},
 	})
-	writeQueriesSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	querySecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
-		Subsystem:   "",
-		Name:        "queries_seconds",
-		Help:        "Total number of queries",
+		Subsystem:   "tsdb",
+		Name:        "query_seconds",
+		Help:        "Total seconds of querying",
 		ConstLabels: prometheus.Labels{"type": "write"},
+	})
+	readPointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "read_points_total",
+		Help:        "Total number of points read",
+		ConstLabels: prometheus.Labels{"type": "aggregated"},
+	})
+	readPointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "read_points_total",
+		Help:        "Total number of points read",
+		ConstLabels: prometheus.Labels{"type": "raw"},
+	})
+	readSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "read_seconds",
+		Help:        "Total seconds of reading",
+		ConstLabels: prometheus.Labels{"type": "aggregated"},
+	})
+	readSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "read_seconds",
+		Help:        "Total seconds of reading",
+		ConstLabels: prometheus.Labels{"type": "raw"},
+	})
+	wrotePointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "wrote_points_total",
+		Help:        "Total number of points wrote",
+		ConstLabels: prometheus.Labels{"type": "aggregated"},
+	})
+	wrotePointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "wrote_points_total",
+		Help:        "Total number of points wrote",
+		ConstLabels: prometheus.Labels{"type": "raw"},
+	})
+	wroteSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "wrote_seconds",
+		Help:        "Total seconds of writing",
+		ConstLabels: prometheus.Labels{"type": "aggregated"},
+	})
+	wroteSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "cassandra",
+		Subsystem:   "tsdb",
+		Name:        "wrote_seconds",
+		Help:        "Total seconds of writing",
+		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
 )

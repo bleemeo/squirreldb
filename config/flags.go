@@ -1,6 +1,6 @@
 package config
 
-var configFlags = []flag{
+var flags = []flag{
 	{
 		name:  "help",
 		short: "h",
@@ -19,11 +19,12 @@ var configFlags = []flag{
 		value: []string{"localhost:9042"},
 		usage: "Set the Cassandra cluster addresses",
 	},
-	{
-		name:   "test",
-		short:  "",
-		value:  false,
-		usage:  "Display config file and flags variables and values (only for testing)",
-		hidden: true,
-	},
+}
+
+type flag struct {
+	name   string
+	short  string
+	value  interface{}
+	usage  string
+	hidden bool
 }

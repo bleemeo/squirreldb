@@ -11,65 +11,83 @@ import (
 	"time"
 )
 
+const (
+	metricsPattern = "/metrics"
+	readPattern    = "/read"
+	writePattern   = "/write"
+)
+
 var logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
 
 type Prometheus struct {
-	readPoints  ReadPoints
-	writePoints WritePoints
+	readMetrics  ReadMetrics
+	writeMetrics WriteMetrics
+	server       *http.Server
 }
 
 // New creates a new Prometheus object
-func New(indexer types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
-	return &Prometheus{
-		readPoints: ReadPoints{
-			indexer: indexer,
-			reader:  reader,
-		},
-		writePoints: WritePoints{
-			indexer: indexer,
-			writer:  writer,
-		},
-	}
-}
-
-// Run run the server to receive write and read requests
-// If the context receives a stop signal, the server is stopped
-func (p *Prometheus) Run(ctx context.Context, listenAddress string) {
+func New(listenAddress string, indexer types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
 	router := http.NewServeMux()
-	server := http.Server{
+	readMetrics := ReadMetrics{
+		indexer: indexer,
+		reader:  reader,
+	}
+	writeMetrics := WriteMetrics{
+		indexer: indexer,
+		writer:  writer,
+	}
+
+	router.Handle(metricsPattern, promhttp.Handler())
+	router.HandleFunc(readPattern, readMetrics.ServeHTTP)
+	router.HandleFunc(writePattern, writeMetrics.ServeHTTP)
+
+	server := &http.Server{
 		Addr:    listenAddress,
 		Handler: router,
 	}
 
-	router.HandleFunc("/read", p.readPoints.ServeHTTP)
-	router.HandleFunc("/write", p.writePoints.ServeHTTP)
-	router.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
+	prometheus := &Prometheus{
+		readMetrics:  readMetrics,
+		writeMetrics: writeMetrics,
+		server:       server,
+	}
 
+	return prometheus
+}
+
+// Run starts all Prometheus services
+func (p *Prometheus) Run(ctx context.Context) {
+	p.runServer(ctx)
+}
+
+// Starts the server
+// If a stop signal is received, the server will be stopped
+// If 10 seconds after this signal is received, and the server is not stopped, it is forced to stop.
+func (p *Prometheus) runServer(ctx context.Context) {
 	go func() {
 		retry.Print(func() error {
-			err := server.ListenAndServe()
+			err := p.server.ListenAndServe()
 
 			if err == http.ErrServerClosed {
 				return nil
 			}
 
 			return err
-		}, retry.NewBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't listen and serve the server",
 			"Resolved: Listen and serve the server")
 	}()
 
-	// Wait to receive a stop signal
+	logger.Printf("Listening the server on %s", p.server.Addr)
+
 	<-ctx.Done()
 
-	// Stop the server
-	// If it is not stopped within 10 seconds, the stop is forced
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	if err := p.server.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("Error: Can't stop the server (%v)", err)
 	}
 
-	logger.Println("Stopped")
+	logger.Println("Server stopped")
 }

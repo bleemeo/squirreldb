@@ -15,21 +15,13 @@ import (
 	"strings"
 )
 
-var configFileExtensions = []string{".conf", ".yaml", ".yml"}
-
 const (
-	configFolderRoot = "."
-	configEnvPrefix  = "SQUIRRELDB_"
-	configDelimiter  = "."
+	delimiter  = "."
+	envPrefix  = "SQUIRRELDB_"
+	folderRoot = "."
 )
 
-type flag struct {
-	name   string
-	short  string
-	value  interface{}
-	usage  string
-	hidden bool
-}
+var fileExtensions = []string{".conf", ".yaml", ".yml"}
 
 type Config struct {
 	*koanf.Koanf
@@ -38,84 +30,86 @@ type Config struct {
 
 // New creates a new Config object
 func New() (*Config, error) {
-	config := Config{
-		Koanf: koanf.New(configDelimiter),
-	}
+	instance := koanf.New(delimiter)
 
-	// Initializes config default values
-	err := config.Koanf.Load(confmap.Provider(configDefault, configDelimiter), nil)
+	err := instance.Load(confmap.Provider(defaults, delimiter), nil)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Initializes config file support
-	configPaths, err := findConfigPaths(configFolderRoot, configFileExtensions)
+	filePaths, err := filePaths(folderRoot, fileExtensions)
 
 	if err != nil {
 		return nil, err
 	}
 
-	for _, path := range configPaths {
-		err = config.Load(file.Provider(path), yaml.Parser())
+	for _, filePath := range filePaths {
+		err = instance.Load(file.Provider(filePath), yaml.Parser())
 
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// Initializes environment support
-	err = config.Load(env.Provider(configEnvPrefix, configDelimiter, func(s string) string {
-		return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, configEnvPrefix)), "_", configDelimiter)
+	err = instance.Load(env.Provider(envPrefix, delimiter, func(s string) string {
+		return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, envPrefix)), "_", delimiter)
 	}), nil)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Initializes flags support
-	config.FlagSet = flagsToFlagSet(configFlags)
+	flagSet := flagSetFromFlags(flags)
 
-	if err := config.FlagSet.Parse(os.Args); err != nil {
+	if err := flagSet.Parse(os.Args); err != nil {
 		return nil, err
 	}
 
-	err = config.Load(posflag.Provider(config.FlagSet, configDelimiter, config.Koanf), nil)
+	err = instance.Load(posflag.Provider(flagSet, delimiter, instance), nil)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	config := &Config{
+		Koanf:   instance,
+		FlagSet: flagSet,
+	}
+
+	return config, nil
 }
 
-// Returns every config files in the root folder matching with the specified extensions
-func findConfigPaths(root string, extensions []string) ([]string, error) {
-	var configPaths []string
-
-	files, err := ioutil.ReadDir(root)
+// Return file paths
+func filePaths(root string, fileExtensions []string) ([]string, error) {
+	filesInfo, err := ioutil.ReadDir(root)
 
 	if err != nil {
 		return nil, err
 	}
 
-	for _, f := range files {
-		path := filepath.Join(root, f.Name())
+	var filePaths []string
 
-		for _, extension := range extensions {
-			if filepath.Ext(path) == extension {
-				configPaths = append(configPaths, path)
+filesLoop:
+	for _, fileInfo := range filesInfo {
+		path := filepath.Join(root, fileInfo.Name())
+
+		for _, fileExtension := range fileExtensions {
+			if filepath.Ext(path) == fileExtension {
+				filePaths = append(filePaths, path)
+
+				continue filesLoop
 			}
 		}
 	}
 
-	sort.Strings(configPaths)
+	sort.Strings(filePaths)
 
-	return configPaths, nil
+	return filePaths, nil
 }
 
-// Convert flags to spf13 FlagSet
-func flagsToFlagSet(flags []flag) *pflag.FlagSet {
+// Returns a flag set generated from a flag list
+func flagSetFromFlags(flags []flag) *pflag.FlagSet {
 	flagSet := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 
 	for _, flag := range flags {

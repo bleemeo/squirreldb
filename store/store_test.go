@@ -1,44 +1,30 @@
 package store
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 	"time"
 )
 
-func uuidify(value string) types.MetricUUID {
-	uuid := types.MetricUUID{
-		UUID: gouuid.FromStringOrNil(value),
-	}
+func uuidFromStringOrNil(s string) types.MetricUUID {
+	uuid, _ := types.UUIDFromString(s)
 
 	return uuid
 }
 
-func TestNewStore(t *testing.T) {
-	type args struct {
-		batchSize int64
-		offset    int64
-	}
-
+func TestNew(t *testing.T) {
 	tests := []struct {
 		name string
-		args args
 		want *Store
 	}{
 		{
 			name: "new",
-			args: args{
-				batchSize: 300,
-				offset:    150,
-			},
 			want: &Store{
-				metrics: make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]storeData),
 			},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := New(); !reflect.DeepEqual(got, tt.want) {
@@ -50,327 +36,421 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_append(t *testing.T) {
 	type fields struct {
-		metrics map[types.MetricUUID]metric
+		metrics map[types.MetricUUID]storeData
 	}
-
 	type args struct {
-		newMetrics      types.Metrics
-		existingMetrics types.Metrics
-		now             time.Time
+		newMetrics      map[types.MetricUUID]types.MetricData
+		existingMetrics map[types.MetricUUID]types.MetricData
 		timeToLive      int64
+		now             time.Time
 	}
-
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[types.MetricUUID]metric
+		want    map[types.MetricUUID]storeData
 		wantErr bool
 	}{
 		{
-			name: "empty_store",
+			name: "store_filled",
 			fields: fields{
-				metrics: make(map[types.MetricUUID]metric),
-			},
-			args: args{
-				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
-							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
-						},
-						TimeToLive: 3600,
-					},
-				},
-				existingMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000002"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 150,
-								Value:     150,
-							},
-							{
-								Timestamp: 200,
-								Value:     200,
-							},
-							{
-								Timestamp: 250,
-								Value:     250,
-							},
-						},
-						TimeToLive: 3600,
-					},
-				},
-				now:        time.Unix(0, 0),
-				timeToLive: 300,
-			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
-							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
-						},
-						TimeToLive: 3600,
-					},
-					ExpirationTimestamp: 300,
-				},
-				uuidify("00000000-0000-0000-0000-000000000002"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
-							{
-								Timestamp: 150,
-								Value:     150,
-							},
-							{
-								Timestamp: 200,
-								Value:     200,
-							},
-							{
-								Timestamp: 250,
-								Value:     250,
-							},
-						},
-						TimeToLive: 3600,
-					},
-					ExpirationTimestamp: 300,
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "filled_store",
-			fields: fields{
-				metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
-							Points: types.MetricPoints{
+							Points: []types.MetricPoint{
 								{
-									Timestamp: 25,
-									Value:     25,
+									Timestamp: 0,
+									Value:     10,
 								},
 								{
-									Timestamp: 75,
-									Value:     75,
+									Timestamp: 10,
+									Value:     20,
 								},
 							},
-							TimeToLive: 3600,
+							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 0,
+						ExpirationTimestamp: 400,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     50,
+								},
+								{
+									Timestamp: 20,
+									Value:     100,
+								},
+							},
+							TimeToLive: 2400,
+						},
+						ExpirationTimestamp: 400,
 					},
 				},
 			},
 			args: args{
-				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						Points: []types.MetricPoint{
 							{
-								Timestamp: 0,
-								Value:     0,
+								Timestamp: 20,
+								Value:     30,
 							},
 							{
-								Timestamp: 50,
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
 								Value:     50,
 							},
 							{
-								Timestamp: 100,
-								Value:     100,
+								Timestamp: 50,
+								Value:     60,
+							},
+							{
+								Timestamp: 60,
+								Value:     70,
 							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 300,
 					},
 				},
-				existingMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000002"): {
-						Points: types.MetricPoints{
+				existingMetrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						Points: []types.MetricPoint{
 							{
-								Timestamp: 150,
+								Timestamp: 40,
 								Value:     150,
 							},
 							{
-								Timestamp: 200,
+								Timestamp: 60,
 								Value:     200,
 							},
 							{
-								Timestamp: 250,
+								Timestamp: 80,
 								Value:     250,
 							},
+							{
+								Timestamp: 100,
+								Value:     300,
+							},
+							{
+								Timestamp: 120,
+								Value:     350,
+							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 1200,
 					},
 				},
-				now:        time.Unix(0, 0),
-				timeToLive: 300,
+				timeToLive: 1200,
+				now:        time.Unix(400, 0),
 			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
-						Points: types.MetricPoints{
-							{
-								Timestamp: 25,
-								Value:     25,
-							},
-							{
-								Timestamp: 75,
-								Value:     75,
-							},
+						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
-								Value:     0,
+								Value:     10,
 							},
 							{
-								Timestamp: 50,
+								Timestamp: 10,
+								Value:     20,
+							},
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
 								Value:     50,
 							},
 							{
-								Timestamp: 100,
-								Value:     100,
+								Timestamp: 50,
+								Value:     60,
+							},
+							{
+								Timestamp: 60,
+								Value:     70,
 							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 300,
 					},
-					ExpirationTimestamp: 300,
+					ExpirationTimestamp: 1600,
 				},
-				uuidify("00000000-0000-0000-0000-000000000002"): {
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
-						Points: types.MetricPoints{
+						Points: []types.MetricPoint{
 							{
-								Timestamp: 150,
+								Timestamp: 0,
+								Value:     50,
+							},
+							{
+								Timestamp: 20,
+								Value:     100,
+							},
+							{
+								Timestamp: 40,
 								Value:     150,
 							},
 							{
-								Timestamp: 200,
+								Timestamp: 60,
 								Value:     200,
 							},
 							{
-								Timestamp: 250,
+								Timestamp: 80,
 								Value:     250,
 							},
+							{
+								Timestamp: 100,
+								Value:     300,
+							},
+							{
+								Timestamp: 120,
+								Value:     350,
+							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 2400,
 					},
-					ExpirationTimestamp: 300,
+					ExpirationTimestamp: 1600,
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "replace_time_to_live",
+			name: "store_empty",
 			fields: fields{
-				metrics: make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]storeData),
 			},
 			args: args{
-				newMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
+				newMetrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
-								Value:     0,
+								Value:     10,
 							},
-						},
-						TimeToLive: 3600,
-					},
-					uuidify("00000000-0000-0000-0000-000000000002"): {
-						Points: types.MetricPoints{
 							{
-								Timestamp: 100,
-								Value:     100,
+								Timestamp: 10,
+								Value:     20,
 							},
-						},
-						TimeToLive: 3600,
-					},
-				},
-				existingMetrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
 							{
-								Timestamp: 50,
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
 								Value:     50,
 							},
 						},
-						TimeToLive: 86400,
-					},
-					uuidify("00000000-0000-0000-0000-000000000002"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 150,
-								Value:     150,
-							},
-						},
-						TimeToLive: 1800,
+						TimeToLive: 300,
 					},
 				},
-				now:        time.Unix(0, 0),
-				timeToLive: 300,
-			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
+				existingMetrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
-								Value:     0,
-							},
-							{
-								Timestamp: 50,
 								Value:     50,
 							},
-						},
-						TimeToLive: 86400,
-					},
-					ExpirationTimestamp: 300,
-				},
-				uuidify("00000000-0000-0000-0000-000000000002"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
 							{
-								Timestamp: 100,
+								Timestamp: 20,
 								Value:     100,
 							},
 							{
-								Timestamp: 150,
+								Timestamp: 40,
 								Value:     150,
 							},
+							{
+								Timestamp: 60,
+								Value:     200,
+							},
+							{
+								Timestamp: 80,
+								Value:     250,
+							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 1200,
 					},
-					ExpirationTimestamp: 300,
+				},
+				timeToLive: 600,
+				now:        time.Unix(200, 0),
+			},
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     10,
+							},
+							{
+								Timestamp: 10,
+								Value:     20,
+							},
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
+								Value:     50,
+							},
+						},
+						TimeToLive: 300,
+					},
+					ExpirationTimestamp: 800,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     50,
+							},
+							{
+								Timestamp: 20,
+								Value:     100,
+							},
+							{
+								Timestamp: 40,
+								Value:     150,
+							},
+							{
+								Timestamp: 60,
+								Value:     200,
+							},
+							{
+								Timestamp: 80,
+								Value:     250,
+							},
+						},
+						TimeToLive: 1200,
+					},
+					ExpirationTimestamp: 800,
 				},
 			},
+			wantErr: false,
+		},
+		{
+			name: "store_filled_metrics_empty",
+			fields: fields{
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     10,
+								},
+								{
+									Timestamp: 10,
+									Value:     20,
+								},
+							},
+							TimeToLive: 150,
+						},
+						ExpirationTimestamp: 400,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     50,
+								},
+								{
+									Timestamp: 20,
+									Value:     100,
+								},
+							},
+							TimeToLive: 2400,
+						},
+						ExpirationTimestamp: 400,
+					},
+				},
+			},
+			args: args{
+				newMetrics:      nil,
+				existingMetrics: nil,
+				timeToLive:      600,
+				now:             time.Unix(200, 0),
+			},
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     10,
+							},
+							{
+								Timestamp: 10,
+								Value:     20,
+							},
+						},
+						TimeToLive: 150,
+					},
+					ExpirationTimestamp: 400,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     50,
+							},
+							{
+								Timestamp: 20,
+								Value:     100,
+							},
+						},
+						TimeToLive: 2400,
+					},
+					ExpirationTimestamp: 400,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "store_empty_metrics_empty",
+			fields: fields{
+				metrics: make(map[types.MetricUUID]storeData),
+			},
+			args: args{
+				newMetrics:      nil,
+				existingMetrics: nil,
+				timeToLive:      600,
+				now:             time.Unix(200, 0),
+			},
+			want:    make(map[types.MetricUUID]storeData),
 			wantErr: false,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			if err := s.append(tt.args.newMetrics, tt.args.existingMetrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.append(tt.args.newMetrics, tt.args.existingMetrics, tt.args.timeToLive, tt.args.now); (err != nil) != tt.wantErr {
 				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(s.metrics, tt.want) {
-				t.Errorf("append() s.metrics = %v, want %v", s.metrics, tt.want)
+				t.Errorf("append() metrics = %v, want %v", s.metrics, tt.want)
 			}
 		})
 	}
@@ -378,112 +458,78 @@ func TestStore_append(t *testing.T) {
 
 func TestStore_expire(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
+		metrics map[types.MetricUUID]storeData
 	}
-
 	type args struct {
 		now time.Time
 	}
-
 	tests := []struct {
 		name   string
 		fields fields
 		args   args
-		want   map[types.MetricUUID]metric
+		want   map[types.MetricUUID]storeData
 	}{
 		{
-			name: "no_expiration",
+			name: "no_expire",
 			fields: fields{
-				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						MetricData: types.MetricData{
-							Points: types.MetricPoints{
-								{
-									Timestamp: 0,
-									Value:     0,
-								},
-								{
-									Timestamp: 50,
-									Value:     50,
-								},
-								{
-									Timestamp: 100,
-									Value:     100,
-								},
-							},
-							TimeToLive: 3600,
-						},
-						ExpirationTimestamp: 300,
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						MetricData:          types.MetricData{},
+						ExpirationTimestamp: 800,
 					},
-				},
-			},
-			args: args{
-				now: time.Unix(0, 0),
-			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
-							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
-						},
-						TimeToLive: 3600,
-					},
-					ExpirationTimestamp: 300,
-				},
-			},
-		},
-		{
-			name: "expiration",
-			fields: fields{
-				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						MetricData: types.MetricData{
-							Points: types.MetricPoints{
-								{
-									Timestamp: 0,
-									Value:     0,
-								},
-								{
-									Timestamp: 50,
-									Value:     50,
-								},
-								{
-									Timestamp: 100,
-									Value:     100,
-								},
-							},
-							TimeToLive: 3600,
-						},
-						ExpirationTimestamp: 300,
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData:          types.MetricData{},
+						ExpirationTimestamp: 1600,
 					},
 				},
 			},
 			args: args{
 				now: time.Unix(600, 0),
 			},
-			want: make(map[types.MetricUUID]metric),
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData:          types.MetricData{},
+					ExpirationTimestamp: 800,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData:          types.MetricData{},
+					ExpirationTimestamp: 1600,
+				},
+			},
+		},
+		{
+			name: "expire",
+			fields: fields{
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						MetricData:          types.MetricData{},
+						ExpirationTimestamp: 800,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData:          types.MetricData{},
+						ExpirationTimestamp: 1600,
+					},
+				},
+			},
+			args: args{
+				now: time.Unix(1200, 0),
+			},
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData:          types.MetricData{},
+					ExpirationTimestamp: 1600,
+				},
+			},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.Metrics,
+				metrics: tt.fields.metrics,
 			}
 			s.expire(tt.args.now)
 			if !reflect.DeepEqual(s.metrics, tt.want) {
-				t.Errorf("expire() s.metrics = %v, want %v", s.metrics, tt.want)
+				t.Errorf("expire() metrics = %v, want %v", s.metrics, tt.want)
 			}
 		})
 	}
@@ -491,87 +537,132 @@ func TestStore_expire(t *testing.T) {
 
 func TestStore_get(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
+		metrics map[types.MetricUUID]storeData
 	}
-
 	type args struct {
-		uuids types.MetricUUIDs
+		uuids []types.MetricUUID
 	}
-
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    types.Metrics
+		want    map[types.MetricUUID]types.MetricData
 		wantErr bool
 	}{
 		{
-			name: "empty_store",
+			name: "store_empty",
 			fields: fields{
-				Metrics: make(map[types.MetricUUID]metric),
+				metrics: make(map[types.MetricUUID]storeData),
 			},
-			args: args{uuids: types.MetricUUIDs{
-				uuidify("00000000-0000-0000-0000-000000000001"),
-			}},
-			want:    make(types.Metrics),
+			args: args{
+				uuids: []types.MetricUUID{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				},
+			},
+			want:    make(map[types.MetricUUID]types.MetricData),
 			wantErr: false,
 		},
 		{
-			name: "filled_store",
+			name: "store_filled",
 			fields: fields{
-				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
-							Points: types.MetricPoints{
+							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
-									Value:     0,
+									Value:     10,
 								},
 								{
-									Timestamp: 50,
+									Timestamp: 10,
+									Value:     20,
+								},
+								{
+									Timestamp: 20,
+									Value:     30,
+								},
+								{
+									Timestamp: 30,
+									Value:     40,
+								},
+								{
+									Timestamp: 40,
+									Value:     50,
+								},
+							},
+							TimeToLive: 300,
+						},
+						ExpirationTimestamp: 800,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
 									Value:     50,
 								},
 								{
-									Timestamp: 100,
+									Timestamp: 20,
 									Value:     100,
 								},
+								{
+									Timestamp: 40,
+									Value:     150,
+								},
+								{
+									Timestamp: 60,
+									Value:     200,
+								},
+								{
+									Timestamp: 80,
+									Value:     250,
+								},
 							},
-							TimeToLive: 3600,
+							TimeToLive: 1200,
 						},
-						ExpirationTimestamp: 300,
+						ExpirationTimestamp: 800,
 					},
 				},
 			},
-			args: args{uuids: types.MetricUUIDs{
-				uuidify("00000000-0000-0000-0000-000000000001"),
-			}},
-			want: types.Metrics{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
-					Points: types.MetricPoints{
+			args: args{
+				uuids: []types.MetricUUID{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				},
+			},
+			want: map[types.MetricUUID]types.MetricData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
-							Value:     0,
+							Value:     10,
 						},
 						{
-							Timestamp: 50,
+							Timestamp: 10,
+							Value:     20,
+						},
+						{
+							Timestamp: 20,
+							Value:     30,
+						},
+						{
+							Timestamp: 30,
+							Value:     40,
+						},
+						{
+							Timestamp: 40,
 							Value:     50,
 						},
-						{
-							Timestamp: 100,
-							Value:     100,
-						},
 					},
-					TimeToLive: 3600,
+					TimeToLive: 300,
 				},
 			},
 			wantErr: false,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.Metrics,
+				metrics: tt.fields.metrics,
 			}
 			got, err := s.get(tt.args.uuids)
 			if (err != nil) != tt.wantErr {
@@ -587,225 +678,394 @@ func TestStore_get(t *testing.T) {
 
 func TestStore_set(t *testing.T) {
 	type fields struct {
-		Metrics map[types.MetricUUID]metric
+		metrics map[types.MetricUUID]storeData
 	}
-
 	type args struct {
-		metrics    types.Metrics
-		now        time.Time
+		metrics    map[types.MetricUUID]types.MetricData
 		timeToLive int64
+		now        time.Time
 	}
-
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[types.MetricUUID]metric
+		want    map[types.MetricUUID]storeData
 		wantErr bool
 	}{
 		{
-			name: "empty_store",
+			name: "store_filled",
 			fields: fields{
-				Metrics: make(map[types.MetricUUID]metric),
-			},
-			args: args{
-				metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     10,
+								},
+								{
+									Timestamp: 10,
+									Value:     20,
+								},
 							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
+							TimeToLive: 150,
 						},
-						TimeToLive: 3600,
+						ExpirationTimestamp: 800,
 					},
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     50,
+								},
+								{
+									Timestamp: 20,
+									Value:     100,
+								},
 							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
+							TimeToLive: 2400,
 						},
-						TimeToLive: 3600,
+						ExpirationTimestamp: 800,
 					},
 				},
-				now:        time.Unix(0, 0),
-				timeToLive: 300,
 			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+			args: args{
+				metrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
+								Value:     50,
+							},
+							{
+								Timestamp: 50,
+								Value:     60,
+							},
+							{
+								Timestamp: 60,
+								Value:     70,
+							},
+						},
+						TimeToLive: 300,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 40,
+								Value:     150,
+							},
+							{
+								Timestamp: 60,
+								Value:     200,
+							},
+							{
+								Timestamp: 80,
+								Value:     250,
+							},
+							{
+								Timestamp: 100,
+								Value:     300,
+							},
+							{
+								Timestamp: 120,
+								Value:     350,
+							},
+						},
+						TimeToLive: 1200,
+					},
+				},
+				timeToLive: 1200,
+				now:        time.Unix(400, 0),
+			},
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
+								Value:     50,
+							},
+							{
+								Timestamp: 50,
+								Value:     60,
+							},
+							{
+								Timestamp: 60,
+								Value:     70,
+							},
+						},
+						TimeToLive: 300,
+					},
+					ExpirationTimestamp: 1600,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 40,
+								Value:     150,
+							},
+							{
+								Timestamp: 60,
+								Value:     200,
+							},
+							{
+								Timestamp: 80,
+								Value:     250,
+							},
+							{
+								Timestamp: 100,
+								Value:     300,
+							},
+							{
+								Timestamp: 120,
+								Value:     350,
+							},
+						},
+						TimeToLive: 1200,
+					},
+					ExpirationTimestamp: 1600,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "store_empty",
+			fields: fields{
+				metrics: make(map[types.MetricUUID]storeData),
+			},
+			args: args{
+				metrics: map[types.MetricUUID]types.MetricData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     10,
+							},
+							{
+								Timestamp: 10,
+								Value:     20,
+							},
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
+								Value:     50,
+							},
+						},
+						TimeToLive: 300,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     50,
+							},
+							{
+								Timestamp: 20,
+								Value:     100,
+							},
+							{
+								Timestamp: 40,
+								Value:     150,
+							},
+							{
+								Timestamp: 60,
+								Value:     200,
+							},
+							{
+								Timestamp: 80,
+								Value:     250,
+							},
+						},
+						TimeToLive: 1200,
+					},
+				},
+				timeToLive: 600,
+				now:        time.Unix(200, 0),
+			},
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
-								Value:     0,
+								Value:     10,
 							},
 							{
-								Timestamp: 50,
+								Timestamp: 10,
+								Value:     20,
+							},
+							{
+								Timestamp: 20,
+								Value:     30,
+							},
+							{
+								Timestamp: 30,
+								Value:     40,
+							},
+							{
+								Timestamp: 40,
+								Value:     50,
+							},
+						},
+						TimeToLive: 300,
+					},
+					ExpirationTimestamp: 800,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
 								Value:     50,
 							},
 							{
-								Timestamp: 100,
+								Timestamp: 20,
 								Value:     100,
 							},
-						},
-						TimeToLive: 3600,
-					},
-					ExpirationTimestamp: 300,
-				},
-				uuidify("00000000-0000-0000-0000-000000000002"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
 							{
-								Timestamp: 150,
+								Timestamp: 40,
 								Value:     150,
 							},
 							{
-								Timestamp: 200,
+								Timestamp: 60,
 								Value:     200,
 							},
 							{
-								Timestamp: 250,
+								Timestamp: 80,
 								Value:     250,
 							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 1200,
 					},
-					ExpirationTimestamp: 300,
+					ExpirationTimestamp: 800,
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "filled_store",
+			name: "store_filled_metrics_empty",
 			fields: fields{
-				Metrics: map[types.MetricUUID]metric{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
+				metrics: map[types.MetricUUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
-							Points: types.MetricPoints{
+							Points: []types.MetricPoint{
 								{
-									Timestamp: 25,
-									Value:     25,
+									Timestamp: 0,
+									Value:     10,
 								},
 								{
-									Timestamp: 75,
-									Value:     75,
+									Timestamp: 10,
+									Value:     20,
 								},
 							},
-							TimeToLive: 3600,
+							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 0,
+						ExpirationTimestamp: 400,
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						MetricData: types.MetricData{
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     50,
+								},
+								{
+									Timestamp: 20,
+									Value:     100,
+								},
+							},
+							TimeToLive: 2400,
+						},
+						ExpirationTimestamp: 400,
 					},
 				},
 			},
 			args: args{
-				metrics: types.Metrics{
-					uuidify("00000000-0000-0000-0000-000000000001"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 0,
-								Value:     0,
-							},
-							{
-								Timestamp: 50,
-								Value:     50,
-							},
-							{
-								Timestamp: 100,
-								Value:     100,
-							},
-						},
-						TimeToLive: 3600,
-					},
-					uuidify("00000000-0000-0000-0000-000000000002"): {
-						Points: types.MetricPoints{
-							{
-								Timestamp: 150,
-								Value:     150,
-							},
-							{
-								Timestamp: 200,
-								Value:     200,
-							},
-							{
-								Timestamp: 250,
-								Value:     250,
-							},
-						},
-						TimeToLive: 3600,
-					},
-				},
-				now:        time.Unix(0, 0),
-				timeToLive: 300,
+				metrics:    nil,
+				timeToLive: 600,
+				now:        time.Unix(200, 0),
 			},
-			want: map[types.MetricUUID]metric{
-				uuidify("00000000-0000-0000-0000-000000000001"): {
+			want: map[types.MetricUUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
-						Points: types.MetricPoints{
+						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
-								Value:     0,
+								Value:     10,
 							},
 							{
-								Timestamp: 50,
+								Timestamp: 10,
+								Value:     20,
+							},
+						},
+						TimeToLive: 150,
+					},
+					ExpirationTimestamp: 400,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
 								Value:     50,
 							},
 							{
-								Timestamp: 100,
+								Timestamp: 20,
 								Value:     100,
 							},
 						},
-						TimeToLive: 3600,
+						TimeToLive: 2400,
 					},
-					ExpirationTimestamp: 300,
-				},
-				uuidify("00000000-0000-0000-0000-000000000002"): {
-					MetricData: types.MetricData{
-						Points: types.MetricPoints{
-							{
-								Timestamp: 150,
-								Value:     150,
-							},
-							{
-								Timestamp: 200,
-								Value:     200,
-							},
-							{
-								Timestamp: 250,
-								Value:     250,
-							},
-						},
-						TimeToLive: 3600,
-					},
-					ExpirationTimestamp: 300,
+					ExpirationTimestamp: 400,
 				},
 			},
 			wantErr: false,
 		},
+		{
+			name: "store_empty_metrics_empty",
+			fields: fields{
+				metrics: make(map[types.MetricUUID]storeData),
+			},
+			args: args{
+				metrics:    nil,
+				timeToLive: 600,
+				now:        time.Unix(200, 0),
+			},
+			want:    make(map[types.MetricUUID]storeData),
+			wantErr: false,
+		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.Metrics,
+				metrics: tt.fields.metrics,
 			}
-			if err := s.set(tt.args.metrics, tt.args.now, tt.args.timeToLive); (err != nil) != tt.wantErr {
+			if err := s.set(tt.args.metrics, tt.args.timeToLive, tt.args.now); (err != nil) != tt.wantErr {
 				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

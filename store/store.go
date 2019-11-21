@@ -16,51 +16,60 @@ const (
 
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
-type metric struct {
+type storeData struct {
 	types.MetricData
 	ExpirationTimestamp int64
 }
 
 type Store struct {
-	metrics map[types.MetricUUID]metric
+	metrics map[types.MetricUUID]storeData
 	mutex   sync.Mutex
 }
 
 // New creates a new Store object
 func New() *Store {
-	return &Store{
-		metrics: make(map[types.MetricUUID]metric),
+	store := &Store{
+		metrics: make(map[types.MetricUUID]storeData),
 	}
+
+	return store
 }
 
-// Append is the public function of append()
-func (s *Store) Append(newMetrics, existingMetrics types.Metrics, timeToLive int64) error {
+// Append is the public method of append
+func (s *Store) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.append(newMetrics, existingMetrics, time.Now(), timeToLive)
+	return s.append(newMetrics, existingMetrics, timeToLive, time.Now())
 }
 
-// Get is the public function of get()
-func (s *Store) Get(uuids types.MetricUUIDs) (types.Metrics, error) {
+// Get is the public method of get
+func (s *Store) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	return s.get(uuids)
 }
 
-// Set is the public function of set()
-func (s *Store) Set(metrics types.Metrics, timeToLive int64) error {
+// Set is the public method of set
+func (s *Store) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(metrics, time.Now(), timeToLive)
+	return s.set(metrics, timeToLive, time.Now())
 }
 
-// Run calls expire() every expirator interval seconds
-// If the context receives a stop signal, the service is stopped
+// Run starts all Store services
 func (s *Store) Run(ctx context.Context) {
-	ticker := time.NewTicker(expiratorInterval * time.Second)
+	s.runExpirator(ctx)
+}
+
+// Starts the expirator service
+// If a stop signal is received, the service is stopped
+func (s *Store) runExpirator(ctx context.Context) {
+	delay := expiratorInterval * time.Second
+
+	ticker := time.NewTicker(delay)
 	defer ticker.Stop()
 
 	for {
@@ -68,81 +77,110 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			logger.Println("Stopped")
-
+			logger.Println("Expirator service stopped")
 			return
 		}
 	}
 }
 
-// Appends metrics to existing items and update expiration
-func (s *Store) append(newMetrics, existingMetrics types.Metrics, now time.Time, timeToLive int64) error {
-	expirationTimestamp := now.Unix() + timeToLive
-
-	for uuid, metricData := range newMetrics {
-		metric := s.metrics[uuid]
-
-		metric.Points = append(metric.Points, metricData.Points...)
-		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
-		metric.ExpirationTimestamp = expirationTimestamp
-
-		s.metrics[uuid] = metric
-	}
-
-	for uuid, metricData := range existingMetrics {
-		metric := s.metrics[uuid]
-
-		metric.Points = append(metric.Points, metricData.Points...)
-		metric.TimeToLive = compare.Int64Max(metric.TimeToLive, metricData.TimeToLive)
-		metric.ExpirationTimestamp = expirationTimestamp
-
-		s.metrics[uuid] = metric
-	}
-
-	return nil
-}
-
-// Checks each item likely to expire and deletes them if it is the case
+// Deletes all expired metrics
 func (s *Store) expire(now time.Time) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	nowUnix := now.Unix()
-
-	for uuid, metric := range s.metrics {
-		if metric.ExpirationTimestamp < nowUnix {
+	for uuid, storeData := range s.metrics {
+		if storeData.ExpirationTimestamp < now.Unix() {
 			delete(s.metrics, uuid)
 		}
 	}
 }
 
-// Returns requested metrics
-func (s *Store) get(uuids types.MetricUUIDs) (types.Metrics, error) {
-	metrics := make(types.Metrics)
+// Appends the specified metrics
+func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64, now time.Time) error {
+	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
+		return nil
+	}
+
+	start := time.Now()
+
+	expirationTimestamp := now.Unix() + timeToLive
+
+	for uuid, data := range newMetrics {
+		storeData := s.metrics[uuid]
+
+		storeData.Points = append(storeData.Points, data.Points...)
+		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
+		storeData.ExpirationTimestamp = expirationTimestamp
+
+		s.metrics[uuid] = storeData
+
+		appendPointsTotal.Add(float64(len(data.Points)))
+	}
+
+	for uuid, data := range existingMetrics {
+		storeData := s.metrics[uuid]
+
+		storeData.Points = append(storeData.Points, data.Points...)
+		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
+		storeData.ExpirationTimestamp = expirationTimestamp
+
+		s.metrics[uuid] = storeData
+
+		appendPointsTotal.Add(float64(len(data.Points)))
+	}
+
+	appendSeconds.Observe(time.Since(start).Seconds())
+
+	return nil
+}
+
+// Return the requested metrics
+func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+
+	start := time.Now()
+
+	metrics := make(map[types.MetricUUID]types.MetricData, len(uuids))
 
 	for _, uuid := range uuids {
-		metric, exists := s.metrics[uuid]
+		storeData, exists := s.metrics[uuid]
 
 		if exists {
-			metrics[uuid] = metric.MetricData
+			metrics[uuid] = storeData.MetricData
+
+			getPointsTotal.Add(float64(len(storeData.Points)))
 		}
 	}
+
+	getSeconds.Observe(time.Since(start).Seconds())
 
 	return metrics, nil
 }
 
-// Set metrics (overwrite existing items) and expiration
-func (s *Store) set(metrics types.Metrics, now time.Time, timeToLive int64) error {
+// Sets the specified metrics
+func (s *Store) set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64, now time.Time) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	start := time.Now()
+
 	expirationTimestamp := now.Unix() + timeToLive
 
-	for uuid, metricData := range metrics {
-		metric := s.metrics[uuid]
+	for uuid, data := range metrics {
+		storeData := s.metrics[uuid]
 
-		metric.MetricData = metricData
-		metric.ExpirationTimestamp = expirationTimestamp
+		storeData.MetricData = data
+		storeData.ExpirationTimestamp = expirationTimestamp
 
-		s.metrics[uuid] = metric
+		s.metrics[uuid] = storeData
+
+		setPointsTotal.Add(float64(len(data.Points)))
 	}
+
+	setSeconds.Observe(time.Since(start).Seconds())
 
 	return nil
 }

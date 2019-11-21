@@ -5,8 +5,6 @@ import (
 	gouuid "github.com/gofrs/uuid"
 	"log"
 	"os"
-	"sort"
-	"squirreldb/compare"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
@@ -15,7 +13,7 @@ import (
 )
 
 const (
-	table = "index"
+	tableName = "index"
 )
 
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
@@ -24,22 +22,20 @@ type CassandraIndex struct {
 	session    *gocql.Session
 	indexTable string
 
-	pairs map[types.MetricUUID]types.MetricLabels
+	pairs map[types.MetricUUID][]types.MetricLabel
 	mutex sync.Mutex
 }
 
-// New creates a new CassandraIndex object
+// New created a new CassandraIndex object
 func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
-	indexTable := keyspace + "." + "\"" + table + "\""
+	indexTable := keyspace + "." + "\"" + tableName + "\""
+	indexTableCreateQuery := indexTableCreateQuery(session, indexTable)
 
-	createIndexTableQuery := createIndexTableQuery(session, indexTable)
-
-	if err := createIndexTableQuery.Exec(); err != nil {
+	if err := indexTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
 	pairs := loadPairs(session, indexTable)
-
 	index := &CassandraIndex{
 		session:    session,
 		indexTable: indexTable,
@@ -49,106 +45,114 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 	return index, nil
 }
 
-// Pairs returns all uuid-labels pairs matching with the specified matchers
-func (c *CassandraIndex) Pairs(matchers types.MetricLabels) map[types.MetricUUID]types.MetricLabels {
+// Labels returns a MetricLabel list corresponding to the specified MetricUUID
+func (c *CassandraIndex) Labels(reference types.MetricUUID) []types.MetricLabel {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	pairs := make(map[types.MetricUUID]types.MetricLabels)
-
-forLoop:
 	for uuid, labels := range c.pairs {
-		for _, label := range matchers {
-			value, exists := labels.Value(label.Name)
-
-			if !exists || (value != label.Value) {
-				continue forLoop
-			}
+		if uuid == reference {
+			return labels
 		}
-
-		pairs[uuid] = labels
 	}
 
-	return pairs
+	return nil
 }
 
-// UUID returns the UUID associated with the specified labels
-func (c *CassandraIndex) UUID(labels types.MetricLabels) types.MetricUUID {
+// UUID returns a MetricUUID corresponding to the specified MetricLabel list
+func (c *CassandraIndex) UUID(labels []types.MetricLabel) types.MetricUUID {
+	if len(labels) == 0 {
+		return types.MetricUUID{}
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	labelsCopy := make(types.MetricLabels, len(labels))
+	reference := types.LabelsSort(labels)
 
-	for key, value := range labels {
-		labelsCopy[key] = value
-	}
-
-	sort.Slice(labelsCopy, func(i, j int) bool {
-		return labelsCopy[i].Name < labelsCopy[j].Name
-	})
-
-	for uuid, value := range c.pairs {
-		if compare.LabelsEqual(value, labelsCopy) {
+	for uuid, labels := range c.pairs {
+		if types.LabelsEqual(labels, reference) {
 			return uuid
 		}
 	}
 
-	uuid := uuidFromLabels(labelsCopy)
+	uuid := uuidFromLabels(reference)
 
 	retry.Print(func() error {
-		return c.savePair(uuid, labelsCopy)
-	}, retry.NewBackOff(30*time.Second), logger,
-		"Error: Can't save pair in the index table",
-		"Resolved: Save pair in the index table")
+		return c.writePair(uuid, reference)
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't write uuid-labels pair in the index table",
+		"Resolved: Write uuid-labels pair in the index table")
 
 	return uuid
 }
 
-// UUIDs returns all UUIDs
-func (c *CassandraIndex) UUIDs() types.MetricUUIDs {
+// UUIDs returns a MetricUUIDs list corresponding to the specified MetricLabelMatcher
+func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID {
+	if (len(matchers) == 0) && !all {
+		return nil
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	uuids := make(types.MetricUUIDs, 0, len(c.pairs))
+	var uuids []types.MetricUUID
 
-	for uuid := range c.pairs {
+forLoop:
+	for uuid, labels := range c.pairs {
+		if all {
+			uuids = append(uuids, uuid)
+
+			continue forLoop
+		}
+
+		for _, matcher := range matchers {
+			contains, value := types.LabelsContains(labels, matcher.Name)
+
+			if !contains || (value != matcher.Value) {
+				continue forLoop
+			}
+		}
+
 		uuids = append(uuids, uuid)
 	}
 
 	return uuids
 }
 
-// Saves pair in the index
-func (c *CassandraIndex) savePair(uuid types.MetricUUID, labels types.MetricLabels) error {
+// Returns index table insert pair Query
+func (c *CassandraIndex) indexTableInsertPairQuery(uuid string, labels map[string]string) *gocql.Query {
+	replacer := strings.NewReplacer("$INDEX_TABLE", c.indexTable)
+	query := c.session.Query(replacer.Replace(`
+		INSERT INTO $INDEX_TABLE (metric_uuid, labels)
+		VALUES (?, ?)
+		IF NOT EXISTS
+	`), uuid, labels)
+
+	return query
+}
+
+// Writes uuid-labels pair in the index table
+func (c *CassandraIndex) writePair(uuid types.MetricUUID, labels []types.MetricLabel) error {
 	uuidString := uuid.String()
-	uuidCQL, _ := gocql.ParseUUID(uuidString)
-	labelsMap := labels.Map()
+	labelsMap := types.MapFromLabels(labels)
+	writePairQuery := c.indexTableInsertPairQuery(uuidString, labelsMap)
 
-	writeIndexTableQuery := c.writeIndexTableQuery(uuidCQL, labelsMap)
+	start := time.Now()
 
-	if err := writeIndexTableQuery.Exec(); err != nil {
+	if err := writePairQuery.Exec(); err != nil {
 		return err
 	}
+
+	querySecondsWrite.Observe(time.Since(start).Seconds())
 
 	c.pairs[uuid] = labels
 
 	return nil
 }
 
-// Returns index table insert query
-func (c *CassandraIndex) writeIndexTableQuery(uuid gocql.UUID, labels map[string]string) *gocql.Query {
-	replacer := strings.NewReplacer("$INDEX_TABLE", c.indexTable)
-	query := c.session.Query(replacer.Replace(`
-		INSERT INTO $INDEX_TABLE (metric_uuid, labels)
-		VALUES (?, ?)
-		IF NOT EXISTS
-	`), uuid.String(), labels)
-
-	return query
-}
-
-// Returns index table create query
-func createIndexTableQuery(session *gocql.Session, indexTable string) *gocql.Query {
+// Returns index table create Query
+func indexTableCreateQuery(session *gocql.Session, indexTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$INDEX_TABLE", indexTable)
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS $INDEX_TABLE (
@@ -161,47 +165,70 @@ func createIndexTableQuery(session *gocql.Session, indexTable string) *gocql.Que
 	return query
 }
 
-// Returns index table load iterator
-func loadIndexTableIterator(session *gocql.Session, indexTable string) *gocql.Iter {
+// Returns index table select pair Iter
+func indexTableSelectPairIter(session *gocql.Session, indexTable string) *gocql.Iter {
 	replacer := strings.NewReplacer("$INDEX_TABLE", indexTable)
 	query := session.Query(replacer.Replace(`
 		SELECT metric_uuid, labels FROM $INDEX_TABLE
 		ALLOW FILTERING
 	`))
-	iterator := query.Iter()
+	iter := query.Iter()
 
-	return iterator
+	return iter
 }
 
-// Returns all uuid-labels pairs
-func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID]types.MetricLabels {
-	pairs := make(map[types.MetricUUID]types.MetricLabels)
+// Returns all uuid-labels pairs from the index table
+func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID][]types.MetricLabel {
+	pairs := make(map[types.MetricUUID][]types.MetricLabel)
+	loadPairIter := indexTableSelectPairIter(session, indexTable)
 
-	loadIndexTableIterator := loadIndexTableIterator(session, indexTable)
+	var (
+		uuidString string
+		labelsMap  map[string]string
+	)
 
-	uuidString := ""
-	labelsMap := map[string]string{}
+	var duration time.Duration
 
-	for loadIndexTableIterator.Scan(&uuidString, &labelsMap) {
-		uuid := types.UUIDFromString(uuidString)
+	start := time.Now()
+
+	for loadPairIter.Scan(&uuidString, &labelsMap) {
+		duration += time.Since(start)
+
+		uuid, err := types.UUIDFromString(uuidString)
+
+		if err != nil {
+			logger.Printf("Error: Can't generate UUID from string (%v)", err)
+		}
+
 		labels := types.LabelsFromMap(labelsMap)
 
 		pairs[uuid] = labels
+
+		start = time.Now()
 	}
+
+	querySecondsRead.Observe(duration.Seconds())
 
 	return pairs
 }
 
-// Returns UUID generated from labels
-// If the labels contains a UUID label, the value of the latter is used, otherwise a random UUID is generated
-func uuidFromLabels(labels types.MetricLabels) types.MetricUUID {
-	uuid := types.MetricUUID{}
-	uuidString, exists := labels.Value("__bleemeo_uuid__")
+// Returns a MetricUUID generated from a MetricLabels list
+func uuidFromLabels(labels []types.MetricLabel) types.MetricUUID {
+	contains, uuidString := types.LabelsContains(labels, "__bleemeo_uuid__")
 
-	if exists {
-		uuid = types.UUIDFromString(uuidString)
+	var (
+		uuid types.MetricUUID
+		err  error
+	)
+
+	if contains {
+		uuid, err = types.UUIDFromString(uuidString)
 	} else {
-		uuid.UUID, _ = gouuid.NewV4()
+		uuid.UUID, err = gouuid.NewV4()
+	}
+
+	if err != nil {
+		logger.Printf("Error: Can't generate UUID from string (%v)", err)
 	}
 
 	return uuid

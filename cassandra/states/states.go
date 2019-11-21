@@ -5,10 +5,11 @@ import (
 	"github.com/gocql/gocql"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	table = "states"
+	tableName = "states"
 )
 
 type CassandraStates struct {
@@ -18,12 +19,11 @@ type CassandraStates struct {
 
 // New creates a new CassandraStates object
 func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
-	statesTable := keyspace + "." + table
+	statesTable := keyspace + "." + tableName
 
-	createStatesTable := createStatesTableQuery(session, statesTable)
+	statesTableCreateQuery := statesTableCreateQuery(session, statesTable)
 
-	if err := createStatesTable.Exec(); err != nil {
-		session.Close()
+	if err := statesTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
@@ -35,9 +35,17 @@ func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
 	return states, nil
 }
 
-// Read assigns the value from the specified state
+// Read reads value of the state from the states table
 func (c *CassandraStates) Read(name string, value interface{}) error {
-	valueString, err := c.readStatesTable(name)
+	statesTableSelectStateQuery := c.statesTableSelectStateQuery(name)
+
+	var valueString string
+
+	start := time.Now()
+
+	err := statesTableSelectStateQuery.Scan(&valueString)
+
+	querySecondsRead.Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		return err
@@ -62,51 +70,75 @@ func (c *CassandraStates) Read(name string, value interface{}) error {
 	return nil
 }
 
-// Write writes the specified state
-func (c *CassandraStates) Write(name string, value interface{}) error {
+// Update updates the state in the states table
+func (c *CassandraStates) Update(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
+	statesTableUpdateStateQuery := c.statesTableUpdateStateQuery(name, valueString)
 
-	if err := c.writeStatesTable(name, valueString); err != nil {
+	start := time.Now()
+
+	if err := statesTableUpdateStateQuery.Exec(); err != nil {
 		return err
 	}
+
+	querySecondsUpdate.Observe(time.Since(start).Seconds())
 
 	return nil
 }
 
-// Reads the value of the specified state from the states table
-func (c *CassandraStates) readStatesTable(name string) (string, error) {
+// Write writes the state in the states table
+func (c *CassandraStates) Write(name string, value interface{}) error {
+	valueString := fmt.Sprint(value)
+	statesTableInsertStateQuery := c.statesTableInsertStateQuery(name, valueString)
+
+	start := time.Now()
+
+	if err := statesTableInsertStateQuery.Exec(); err != nil {
+		return err
+	}
+
+	querySecondsWrite.Observe(time.Since(start).Seconds())
+
+	return nil
+}
+
+// Returns states table insert state Query
+func (c *CassandraStates) statesTableInsertStateQuery(name string, value string) *gocql.Query {
 	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
-	iterator := c.session.Query(replacer.Replace(`
+	query := c.session.Query(replacer.Replace(`
+		INSERT INTO $STATES_TABLE (name, value)
+		VALUES (?, ?)
+		IF NOT EXISTS
+	`), name, value)
+
+	return query
+}
+
+// Returns states table select state Query
+func (c *CassandraStates) statesTableSelectStateQuery(name string) *gocql.Query {
+	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
+	query := c.session.Query(replacer.Replace(`
 		SELECT value FROM $STATES_TABLE
 		WHERE name = ?
 	`), name)
-	value := ""
 
-	if err := iterator.Scan(&value); err != nil {
-		return "", err
-	}
-
-	return value, nil
+	return query
 }
 
-// Writes the specified state to the states table
-func (c *CassandraStates) writeStatesTable(name string, value string) error {
+// Returns states table update state Query
+func (c *CassandraStates) statesTableUpdateStateQuery(name string, value string) *gocql.Query {
 	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
-	update := c.session.Query(replacer.Replace(`
+	query := c.session.Query(replacer.Replace(`
 		UPDATE $STATES_TABLE
 		SET value = ?
 		WHERE name = ?
 	`), value, name)
 
-	if err := update.Exec(); err != nil {
-		return err
-	}
-
-	return nil
+	return query
 }
 
-// Returns states table create query
-func createStatesTableQuery(session *gocql.Session, statesTable string) *gocql.Query {
+// Returns states table create Query
+func statesTableCreateQuery(session *gocql.Session, statesTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$STATES_TABLE", statesTable)
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS $STATES_TABLE (

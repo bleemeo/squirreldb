@@ -1,179 +1,207 @@
 package prometheus
 
 import (
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
-	"io/ioutil"
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
 )
 
-type ReadPoints struct {
+type ReadMetrics struct {
 	indexer types.MetricIndexer
 	reader  types.MetricReader
 }
 
-// Serve the read handler
-// Decodes the request and transforms it into MetricRequests
-// Retrieves metrics via MetricRequests
-// Generates and returns a response containing the requested data
-func (r *ReadPoints) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	startTime := time.Now()
-
-	body, err := ioutil.ReadAll(request.Body)
-
-	if err != nil {
-		logger.Printf("Error: Can't read the body (%v)", err)
-		http.Error(writer, "Can't read the HTTP body", http.StatusBadRequest)
-
-		return
-	}
-
-	decoded, err := snappy.Decode(nil, body)
-
-	if err != nil {
-		logger.Printf("Error: Can't decode the body (%v)", err)
-		http.Error(writer, "Can't decode the HTTP body", http.StatusBadRequest)
-
-		return
-	}
+// ServeHTTP handles read requests
+func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	start := time.Now()
 
 	var readRequest prompb.ReadRequest
 
-	if err := proto.Unmarshal(decoded, &readRequest); err != nil {
-		logger.Printf("Error: Can't unmarshal the decoded body (%v)", err)
-		http.Error(writer, "Can't unmarshal the decoded body", http.StatusBadRequest)
+	err := decodeRequest(request, &readRequest)
+
+	if err != nil {
+		logger.Printf("Error: Can't decode the read request (%v)", err)
+		http.Error(writer, "Can't decode the read request", http.StatusBadRequest)
 
 		return
 	}
 
-	var readResponse prompb.ReadResponse
+	requests := requestsFromPromReadRequest(&readRequest, r.indexer.UUIDs)
 
-	for _, query := range readRequest.Queries {
-		labels := pbMatchersToLabels(query.Matchers)
-		pairs := r.indexer.Pairs(labels)
-		uuids := types.MetricUUIDs{}
+	var promQueryResults []*prompb.QueryResult
 
-		for uuid := range pairs {
-			uuids = append(uuids, uuid)
-		}
-
-		request := toMetricRequest(uuids, query)
-		metrics := types.Metrics{}
+	for _, request := range requests {
+		var metrics map[types.MetricUUID]types.MetricData
 
 		retry.Print(func() error {
 			var err error
 			metrics, err = r.reader.Read(request)
 
 			return err
-		}, retry.NewBackOff(30*time.Second), logger,
-			"Error: Can't read in storage",
-			"Resolved: Read in storage")
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't read metrics with the reader",
+			"Resolved: Read metrics with the reader")
 
-		queryResult := toQueryResult(pairs, metrics)
+		promQueryResult := &prompb.QueryResult{
+			Timeseries: promTimeseriesFromMetrics(metrics, r.indexer.Labels),
+		}
 
-		readResponse.Results = append(readResponse.Results, &queryResult)
+		promQueryResults = append(promQueryResults, promQueryResult)
 	}
 
-	marshal, err := readResponse.Marshal()
+	readResponse := prompb.ReadResponse{
+		Results: promQueryResults,
+	}
+
+	encodedResponse, err := encodeResponse(&readResponse)
 
 	if err != nil {
-		logger.Printf("Error: Can't marshal the read response (%v)", err)
-		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
+		logger.Printf("Error: Can't encode the read response (%v)", err)
+		http.Error(writer, "Can't encode the read response", http.StatusBadRequest)
 
 		return
 	}
 
-	encoded := snappy.Encode(nil, marshal)
-
-	_, err = writer.Write(encoded)
+	_, err = writer.Write(encodedResponse)
 
 	if err != nil {
 		logger.Printf("Error: Can't write the read response (%v)", err)
-		http.Error(writer, "Can't marshal the read response", http.StatusBadRequest)
+		http.Error(writer, "Can't write the read response", http.StatusBadRequest)
 
 		return
 	}
 
-	duration := time.Since(startTime)
-	readRequestSeconds.Observe(duration.Seconds())
+	requestSecondsRead.Observe(time.Since(start).Seconds())
 }
 
-// Convert Prometheus LabelMatchers to MetricLabels
-func pbMatchersToLabels(pbLabels []*prompb.LabelMatcher) types.MetricLabels {
-	labels := make(types.MetricLabels, 0, len(pbLabels))
-
-	for _, pbLabel := range pbLabels {
-		label := types.MetricLabel{
-			Name:  pbLabel.Name,
-			Value: pbLabel.Value,
-			Type:  uint8(pbLabel.Type),
-		}
-
-		labels = append(labels, label)
+// Returns a MetricLabelMatcher list- generated from LabelMatcher
+func matchersFromPromMatchers(promMatchers []*prompb.LabelMatcher) []types.MetricLabelMatcher {
+	if len(promMatchers) == 0 {
+		return nil
 	}
 
-	return labels
-}
+	matchers := make([]types.MetricLabelMatcher, 0, len(promMatchers))
 
-// Convert MetricLabels to Prometheus Labels
-func labelsToPbLabels(labels types.MetricLabels) []*prompb.Label {
-	pbLabels := make([]*prompb.Label, 0, len(labels))
-
-	for _, label := range labels {
-		pbLabel := prompb.Label{
-			Name:  label.Name,
-			Value: label.Value,
+	for _, promMatcher := range promMatchers {
+		matcher := types.MetricLabelMatcher{
+			MetricLabel: types.MetricLabel{
+				Name:  promMatcher.Name,
+				Value: promMatcher.Value,
+			},
+			Type: uint8(promMatcher.Type),
 		}
 
-		pbLabels = append(pbLabels, &pbLabel)
+		matchers = append(matchers, matcher)
 	}
 
-	return pbLabels
+	return matchers
 }
 
-// Generate MetricRequest
-func toMetricRequest(uuids types.MetricUUIDs, query *prompb.Query) types.MetricRequest {
+// Returns a MetricRequest generated from a Query
+func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID) types.MetricRequest {
+	matchers := matchersFromPromMatchers(promQuery.Matchers)
+	uuids := fun(matchers, false)
+
 	request := types.MetricRequest{
 		UUIDs:         uuids,
-		FromTimestamp: query.StartTimestampMs / 1000,
-		ToTimestamp:   query.EndTimestampMs / 1000,
+		FromTimestamp: promQuery.StartTimestampMs / 1000,
+		ToTimestamp:   promQuery.EndTimestampMs / 1000,
 	}
 
-	if query.Hints != nil {
-		request.Step = query.Hints.StepMs / 1000
-		request.Function = query.Hints.Func
+	if promQuery.Hints != nil {
+		request.Step = promQuery.Hints.StepMs / 1000
+		request.Function = promQuery.Hints.Func
 	}
 
 	return request
 }
 
-// Generate Prometheus QueryResult
-func toQueryResult(pairs map[types.MetricUUID]types.MetricLabels, metrics types.Metrics) prompb.QueryResult {
-	var queryResult prompb.QueryResult
-
-	for uuid, metricData := range metrics {
-		labels := pairs[uuid]
-		pbLabels := labelsToPbLabels(labels)
-
-		series := prompb.TimeSeries{
-			Labels: pbLabels,
-		}
-
-		for _, point := range metricData.Points {
-			sample := prompb.Sample{
-				Value:     point.Value,
-				Timestamp: point.Timestamp * 1000,
-			}
-
-			series.Samples = append(series.Samples, sample)
-		}
-
-		queryResult.Timeseries = append(queryResult.Timeseries, &series)
+// Returns a MetricRequest list generated from a ReadRequest
+func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, fun func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID) []types.MetricRequest {
+	if len(promReadRequest.Queries) == 0 {
+		return nil
 	}
 
-	return queryResult
+	requests := make([]types.MetricRequest, 0, len(promReadRequest.Queries))
+
+	for _, query := range promReadRequest.Queries {
+		request := requestFromPromQuery(query, fun)
+
+		requests = append(requests, request)
+	}
+
+	return requests
+}
+
+// Returns a Label list generated from a MetricLabel list
+func promLabelsFromLabels(labels []types.MetricLabel) []*prompb.Label {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	promLabels := make([]*prompb.Label, 0, len(labels))
+
+	for _, label := range labels {
+		promLabel := &prompb.Label{
+			Name:  label.Name,
+			Value: label.Value,
+		}
+
+		promLabels = append(promLabels, promLabel)
+	}
+
+	return promLabels
+}
+
+// Returns a Sample list generated from a MetricPoint list
+func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
+	if len(points) == 0 {
+		return nil
+	}
+
+	promSamples := make([]prompb.Sample, 0, len(points))
+
+	for _, point := range points {
+		promSample := prompb.Sample{
+			Value:     point.Value,
+			Timestamp: point.Timestamp * 1000,
+		}
+
+		promSamples = append(promSamples, promSample)
+	}
+
+	return promSamples
+}
+
+// Returns a pointer of a TimeSeries generated from a MetricUUID and a MetricData
+func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, fun func(uuid types.MetricUUID) []types.MetricLabel) *prompb.TimeSeries {
+	labels := fun(uuid)
+	promLabels := promLabelsFromLabels(labels)
+	promSample := promSamplesFromPoints(data.Points)
+
+	promQueryResult := &prompb.TimeSeries{
+		Labels:  promLabels,
+		Samples: promSample,
+	}
+
+	return promQueryResult
+}
+
+// Returns a TimeSeries pointer list generated from a metric list
+func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, fun func(uuid types.MetricUUID) []types.MetricLabel) []*prompb.TimeSeries {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	promTimeseries := make([]*prompb.TimeSeries, 0, len(metrics))
+
+	for uuid, data := range metrics {
+		promSeries := promSeriesFromMetric(uuid, data, fun)
+
+		promTimeseries = append(promTimeseries, promSeries)
+	}
+
+	return promTimeseries
 }
