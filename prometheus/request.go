@@ -3,6 +3,7 @@ package prometheus
 import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+
 	"io/ioutil"
 	"net/http"
 )

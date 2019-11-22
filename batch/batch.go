@@ -15,6 +15,7 @@ const checkerInterval = 60
 
 const flushSize = 1000
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 type Storer interface {

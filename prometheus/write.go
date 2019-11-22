@@ -2,6 +2,7 @@ package prometheus
 
 import (
 	"github.com/prometheus/prometheus/prompb"
+
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"

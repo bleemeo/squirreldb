@@ -1,8 +1,9 @@
 package states
 
 import (
-	"fmt"
 	"github.com/gocql/gocql"
+
+	"fmt"
 	"strconv"
 	"strings"
 	"time"

@@ -2,6 +2,7 @@ package retry
 
 import (
 	"github.com/cenkalti/backoff"
+
 	"log"
 	"time"
 )

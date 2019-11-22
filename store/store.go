@@ -14,6 +14,7 @@ const (
 	expiratorInterval = 60
 )
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {

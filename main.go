@@ -1,8 +1,9 @@
 package main
 
 import (
-	"context"
 	"github.com/gocql/gocql"
+
+	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"time"
 )
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 func main() {
@@ -35,7 +37,7 @@ func main() {
 		return
 	}
 
-	debug.CurrentLevel = squirrelConfig.Int("debug.level")
+	debug.Level = squirrelConfig.Int("debug.level")
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 
@@ -171,7 +173,6 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 		RawPartitionSize:       config.Int64("cassandra.partition_size.raw"),
 		AggregateResolution:    config.Int64("cassandra.aggregate.resolution"),
 		AggregateSize:          config.Int64("cassandra.aggregate.size"),
-		AggregateStartOffset:   config.Int64("cassandra.aggregate.start_offset"),
 		AggregatePartitionSize: config.Int64("cassandra.partition_size.aggregate"),
 	}
 	debugOptions := tsdb.DebugOptions{

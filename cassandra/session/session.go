@@ -2,6 +2,7 @@ package session
 
 import (
 	"github.com/gocql/gocql"
+
 	"strconv"
 	"strings"
 )

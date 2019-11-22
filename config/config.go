@@ -8,6 +8,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/spf13/pflag"
+
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ const (
 	folderRoot = "."
 )
 
+//nolint: gochecknoglobals
 var fileExtensions = []string{".conf", ".yaml", ".yml"}
 
 type Config struct {

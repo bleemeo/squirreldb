@@ -1,9 +1,10 @@
 package redis
 
 import (
+	goredis "github.com/go-redis/redis"
+
 	"bytes"
 	"encoding/binary"
-	goredis "github.com/go-redis/redis"
 	"io"
 	"squirreldb/compare"
 	"squirreldb/types"

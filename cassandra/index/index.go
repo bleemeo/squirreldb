@@ -3,6 +3,7 @@ package index
 import (
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+
 	"log"
 	"os"
 	"squirreldb/retry"
@@ -16,6 +17,7 @@ const (
 	tableName = "index"
 )
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 type CassandraIndex struct {

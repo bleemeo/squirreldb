@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"github.com/gocql/gocql"
+
 	"log"
 	"os"
 	"squirreldb/cassandra/index"
@@ -15,6 +16,7 @@ const (
 	aggregateDataTableName = "data_aggregated"
 )
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type DebugOptions struct {
@@ -28,7 +30,6 @@ type Options struct {
 	RawPartitionSize       int64
 	AggregateResolution    int64
 	AggregateSize          int64
-	AggregateStartOffset   int64
 	AggregatePartitionSize int64
 
 	dataTable          string

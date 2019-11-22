@@ -5,6 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+//nolint: gochecknoglobals
 var (
 	aggregateLastTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "cassandra",

@@ -5,6 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+//nolint: gochecknoglobals
 var (
 	requestSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "prometheus",

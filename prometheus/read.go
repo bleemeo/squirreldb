@@ -2,6 +2,7 @@ package prometheus
 
 import (
 	"github.com/prometheus/prometheus/prompb"
+
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -30,7 +31,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	requests := requestsFromPromReadRequest(&readRequest, r.indexer.UUIDs)
 
-	var promQueryResults []*prompb.QueryResult
+	promQueryResults := make([]*prompb.QueryResult, 0, len(requests))
 
 	for _, request := range requests {
 		var metrics map[types.MetricUUID]types.MetricData

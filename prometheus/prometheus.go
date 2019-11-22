@@ -1,8 +1,9 @@
 package prometheus
 
 import (
-	"context"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ const (
 	writePattern   = "/write"
 )
 
+//nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
 
 type Prometheus struct {

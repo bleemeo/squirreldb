@@ -5,6 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+//nolint: gochecknoglobals
 var (
 	querySecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",

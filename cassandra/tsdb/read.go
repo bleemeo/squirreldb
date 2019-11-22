@@ -1,9 +1,10 @@
 package tsdb
 
 import (
+	"github.com/gocql/gocql"
+
 	"bytes"
 	"encoding/binary"
-	"github.com/gocql/gocql"
 	"io"
 	"squirreldb/compare"
 	"squirreldb/types"

@@ -2,6 +2,7 @@ package types
 
 import (
 	gouuid "github.com/gofrs/uuid"
+
 	"math/big"
 	"sort"
 )
