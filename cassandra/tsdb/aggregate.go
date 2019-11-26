@@ -2,9 +2,12 @@ package tsdb
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
+	"strconv"
 	"time"
 )
 
@@ -14,8 +17,7 @@ const (
 )
 
 const (
-	fromTimestampStateName = "aggregate_from_timestamp"
-	lastShardStateName     = "aggregate_last_shard"
+	shardStatePrefix = "shard_"
 )
 
 const safeMargin = 3600
@@ -32,9 +34,12 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 
 	delay := (shardsPeriod / shards) * time.Second
 	ticker := time.NewTicker(delay)
+	shard := rand.Intn(shards) + 1
 
 	for {
-		c.aggregate(c.index.UUIDs(nil, true))
+		c.aggregateShard(shard)
+
+		shard = (shard % shards) + 1
 
 		select {
 		case <-ticker.C:
@@ -45,7 +50,7 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	}
 }
 
-// Initializes the aggregate states
+// Initializes the aggregate shard states
 func (c *CassandraTSDB) aggregateInit() {
 	now := time.Now()
 	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
@@ -54,34 +59,35 @@ func (c *CassandraTSDB) aggregateInit() {
 		fromTimestamp -= c.debugOptions.AggregateSize
 	}
 
-	retry.Print(func() error {
-		return c.states.Write(fromTimestampStateName, fromTimestamp)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't write "+fromTimestampStateName+" state",
-		"Resolved: Write "+fromTimestampStateName+" state")
+	for i := 1; i <= shards; i++ {
+		name := shardStatePrefix + strconv.Itoa(i)
 
-	lastShard := 0
-
-	retry.Print(func() error {
-		return c.states.Write(lastShardStateName, lastShard)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't write "+lastShardStateName+" state",
-		"Resolved: Write "+lastShardStateName+" state")
+		if c.debugOptions.AggregateForce {
+			retry.Print(func() error {
+				return c.states.Update(name, fromTimestamp)
+			}, retry.NewExponentialBackOff(30*time.Second), logger,
+				"Error: Can't update "+name+" state",
+				"Resolved: Update "+name+" state")
+		} else {
+			retry.Print(func() error {
+				return c.states.Write(name, fromTimestamp)
+			}, retry.NewExponentialBackOff(30*time.Second), logger,
+				"Error: Can't write "+name+" state",
+				"Resolved: Write "+name+" state")
+		}
+	}
 }
 
-// Aggregates all metrics contained in the index by aggregation batch size and by shard
-func (c *CassandraTSDB) aggregate(uuids []types.MetricUUID) {
-	if len(uuids) == 0 {
-		return
-	}
+func (c *CassandraTSDB) aggregateShard(shard int) {
+	name := shardStatePrefix + strconv.Itoa(shard)
 
 	var fromTimestamp int64
 
 	retry.Print(func() error {
-		return c.states.Read(fromTimestampStateName, &fromTimestamp)
+		return c.states.Read(name, &fromTimestamp)
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't read "+fromTimestampStateName+" state",
-		"Resolved: Read "+fromTimestampStateName+" state")
+		"Error: Can't read "+name+" state",
+		"Resolved: Read "+name+" state")
 
 	now := time.Now()
 	maxTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
@@ -92,64 +98,62 @@ func (c *CassandraTSDB) aggregate(uuids []types.MetricUUID) {
 		return
 	}
 
-	shard, err := c.aggregateSize(uuids, fromTimestamp, toTimestamp, c.options.AggregateResolution)
-
-	if err != nil {
-		logger.Printf("Error: Can't aggregate from [%v] to [%v] (%v)",
-			time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
-	}
-
-	if shard == shards {
-		logger.Printf("Successfully aggregate from [%v] to [%v]",
-			time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
+	if err := c.aggregateShardSizeLock(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
+		logger.Printf("Aggregate shard %d from [%v] to [%v]",
+			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 		retry.Print(func() error {
-			return c.states.Update(fromTimestampStateName, toTimestamp)
+			return c.states.Update(name, toTimestamp)
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't update "+fromTimestampStateName+" state",
-			"Resolved: Update "+fromTimestampStateName+" state")
+			"Error: Can't update "+name+" state",
+			"Resolved: update "+name+" state")
+	} else {
+		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
+			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
 	}
 }
 
-// Aggregates all metrics by aggregation batch size
-func (c *CassandraTSDB) aggregateSize(uuids []types.MetricUUID, fromTimestamp, toTimestamp, resolution int64) (int, error) {
-	var lastShard int
+func (c *CassandraTSDB) aggregateShardSizeLock(shard int, fromTimestamp, toTimestamp, resolution int64) error {
+	name := shardStatePrefix + strconv.Itoa(shard)
+
+	var applied bool
 
 	retry.Print(func() error {
-		return c.states.Read(lastShardStateName, &lastShard)
+		var err error
+		applied, err = c.locks.Write(name, 30*time.Second)
+
+		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't read "+lastShardStateName+" state",
-		"Resolved: Read "+lastShardStateName+" state")
+		"Error: Can't write "+name+" lock",
+		"Resolved: Write "+name+" lock")
 
-	shard := lastShard + 1
-	err := c.aggregateShard(shard, uuids, fromTimestamp, toTimestamp, resolution)
-
-	if err != nil {
-		return shard, err
+	if !applied {
+		return fmt.Errorf("not the leader on the shard")
 	}
 
-	retry.Print(func() error {
-		return c.states.Update(lastShardStateName, shard%60)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't update "+lastShardStateName+" state",
-		"Resolved: Update "+lastShardStateName+" state")
+	err := c.aggregateShardSize(shards, fromTimestamp, toTimestamp, resolution)
 
-	return shard, nil
+	retry.Print(func() error {
+		return c.locks.Delete(name)
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't delete "+name+" lock",
+		"Resolved: Delete "+name+" lock")
+
+	return err
 }
 
-// Aggregates all metrics associated with the shard
-func (c *CassandraTSDB) aggregateShard(shard int, uuids []types.MetricUUID, fromTimestamp, toTimestamp, resolution int64) error {
-	var uuidsShard []types.MetricUUID
+func (c *CassandraTSDB) aggregateShardSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
+	var shardUUIDs []types.MetricUUID
 
-	for _, uuid := range uuids {
-		shardUUID := int(uuid.Uint64() % (uint64(shards) + 1))
+	for _, uuid := range c.index.UUIDs(nil, true) {
+		uuidShard := (int(uuid.Uint64() % uint64(shards))) + 1
 
-		if shardUUID == shard {
-			uuidsShard = append(uuidsShard, uuid)
+		if uuidShard == shard {
+			shardUUIDs = append(shardUUIDs, uuid)
 		}
 	}
 
-	err := c.readAggregateWrite(uuidsShard, fromTimestamp, toTimestamp, resolution)
+	err := c.readAggregateWrite(shardUUIDs, fromTimestamp, toTimestamp, resolution)
 
 	return err
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const keyPrefix = "squirreldb"
+const keyPrefix = "squirreldb-"
 
 type Options struct {
 	Address string
@@ -50,7 +50,7 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 			return err
 		}
 
-		key := keyPrefix + "-" + uuid.String()
+		key := keyPrefix + uuid.String()
 
 		pipe.Append(key, string(values))
 		pipe.Expire(key, timeToLiveDuration)
@@ -63,7 +63,7 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 			return err
 		}
 
-		key := keyPrefix + "-" + uuid.String()
+		key := keyPrefix + uuid.String()
 
 		pipe.Append(key, string(values))
 	}
@@ -84,7 +84,7 @@ func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 	metrics := make(map[types.MetricUUID]types.MetricData)
 
 	for _, uuid := range uuids {
-		key := keyPrefix + "-" + uuid.String()
+		key := keyPrefix + uuid.String()
 		values, err := r.client.Get(key).Bytes()
 
 		if (err != nil) && (err != goredis.Nil) {
@@ -119,7 +119,7 @@ func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 			return err
 		}
 
-		key := keyPrefix + "-" + uuid.String()
+		key := keyPrefix + uuid.String()
 
 		pipe.Set(key, string(values), timeToLiveDuration)
 	}

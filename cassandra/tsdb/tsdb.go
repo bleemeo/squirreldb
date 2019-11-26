@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"github.com/gocql/gocql"
+	"squirreldb/cassandra/locks"
 
 	"log"
 	"os"
@@ -42,11 +43,12 @@ type CassandraTSDB struct {
 	debugOptions DebugOptions
 
 	index  *index.CassandraIndex
+	locks  *locks.CassandraLocks
 	states *states.CassandraStates
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, debugOptions DebugOptions, index *index.CassandraIndex, states *states.CassandraStates) (*CassandraTSDB, error) {
+func New(session *gocql.Session, keyspace string, options Options, debugOptions DebugOptions, index *index.CassandraIndex, locks *locks.CassandraLocks, states *states.CassandraStates) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + dataTableName
 	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
@@ -68,6 +70,7 @@ func New(session *gocql.Session, keyspace string, options Options, debugOptions 
 		debugOptions: debugOptions,
 		index:        index,
 		states:       states,
+		locks:        locks,
 	}
 
 	return tsdb, nil
@@ -77,7 +80,7 @@ func New(session *gocql.Session, keyspace string, options Options, debugOptions 
 func dataTableCreateQuery(session *gocql.Session, dataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
-        CREATE TABLE IF NOT EXISTS $DATA_TABLE (
+		CREATE TABLE IF NOT EXISTS $DATA_TABLE (
 			metric_uuid uuid,
 			base_ts bigint,
 			offset_ts int,
@@ -105,7 +108,7 @@ func dataTableCreateQuery(session *gocql.Session, dataTable, defaultTimeToLive s
 func aggregateDataTableCreateQuery(session *gocql.Session, aggregateDataTable, defaultTimeToLive string) *gocql.Query {
 	replacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregateDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
-        CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
+		CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
 			metric_uuid uuid,
 			base_ts bigint,
 			offset_ts int,

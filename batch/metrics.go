@@ -20,25 +20,25 @@ var (
 		Help:      "Total seconds of adding to in-memory store",
 	})
 	readPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "store",
+		Namespace: "batch",
 		Subsystem: "",
 		Name:      "read_points_total",
 		Help:      "Total number of read points from in-memory store",
 	})
 	readSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "store",
+		Namespace: "batch",
 		Subsystem: "",
 		Name:      "read_seconds",
 		Help:      "Total seconds of reading from in-memory store",
 	})
 	purgedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "store",
+		Namespace: "batch",
 		Subsystem: "",
 		Name:      "purged_points_total",
 		Help:      "Total number of purged points from in-memory store",
 	})
 	purgeSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "store",
+		Namespace: "batch",
 		Subsystem: "",
 		Name:      "purge_seconds",
 		Help:      "Total seconds of purging from in-memory store",
