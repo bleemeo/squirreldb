@@ -24,10 +24,10 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 			return err
 		}
 
-		wrotePointsTotalRaw.Add(float64(len(data.Points)))
+		writtenPointsTotalRaw.Add(float64(len(data.Points)))
 	}
 
-	wroteSecondsRaw.Observe(time.Since(functionStart).Seconds())
+	writeSecondsRaw.Observe(time.Since(functionStart).Seconds())
 
 	return nil
 }
@@ -45,10 +45,10 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 			return err
 		}
 
-		wrotePointsTotalAggregated.Add(float64(len(aggregatedData.Points)))
+		writtenPointsTotalAggregated.Add(float64(len(aggregatedData.Points)))
 	}
 
-	wroteSecondsAggregated.Observe(time.Since(functionStart).Seconds())
+	writeSecondsAggregated.Observe(time.Since(functionStart).Seconds())
 
 	return nil
 }

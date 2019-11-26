@@ -37,7 +37,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		"Error: Can't write metrics with the writer",
 		"Resolved: Read metrics with the writer")
 
-	requestSecondsWrite.Observe(time.Since(start).Seconds())
+	writeRequestSeconds.Observe(time.Since(start).Seconds())
 }
 
 // Returns a MetricLabel list generated from a Label list
@@ -100,13 +100,19 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels 
 		return nil
 	}
 
+	totalPoints := 0
+
 	metrics := make(map[types.MetricUUID]types.MetricData, len(promTimeseries))
 
 	for _, promSeries := range promTimeseries {
 		uuid, data := metricFromPromSeries(promSeries, fun)
 
 		metrics[uuid] = data
+
+		totalPoints += len(data.Points)
 	}
+
+	writeRequestPointsTotal.Add(float64(totalPoints))
 
 	return metrics
 }

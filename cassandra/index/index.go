@@ -140,13 +140,9 @@ func (c *CassandraIndex) writePair(uuid types.MetricUUID, labels []types.MetricL
 	labelsMap := types.MapFromLabels(labels)
 	writePairQuery := c.indexTableInsertPairQuery(uuidString, labelsMap)
 
-	start := time.Now()
-
 	if err := writePairQuery.Exec(); err != nil {
 		return err
 	}
-
-	querySecondsWrite.Observe(time.Since(start).Seconds())
 
 	c.pairs[uuid] = labels
 
@@ -189,13 +185,7 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID][
 		labelsMap  map[string]string
 	)
 
-	var duration time.Duration
-
-	start := time.Now()
-
 	for loadPairIter.Scan(&uuidString, &labelsMap) {
-		duration += time.Since(start)
-
 		uuid, err := types.UUIDFromString(uuidString)
 
 		if err != nil {
@@ -205,11 +195,7 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID][
 		labels := types.LabelsFromMap(labelsMap)
 
 		pairs[uuid] = labels
-
-		start = time.Now()
 	}
-
-	querySecondsRead.Observe(duration.Seconds())
 
 	return pairs
 }

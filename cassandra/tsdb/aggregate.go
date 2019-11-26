@@ -50,6 +50,10 @@ func (c *CassandraTSDB) aggregateInit() {
 	now := time.Now()
 	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
 
+	if c.debugOptions.AggregateForce {
+		fromTimestamp -= c.debugOptions.AggregateSize
+	}
+
 	retry.Print(func() error {
 		return c.states.Write(fromTimestampStateName, fromTimestamp)
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -63,14 +67,6 @@ func (c *CassandraTSDB) aggregateInit() {
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't write "+lastShardStateName+" state",
 		"Resolved: Write "+lastShardStateName+" state")
-
-	if c.debugOptions.AggregateForce {
-		retry.Print(func() error {
-			return c.states.Update(fromTimestampStateName, fromTimestamp-c.debugOptions.AggregateSize)
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't write "+fromTimestampStateName+" state",
-			"Resolved: Write "+fromTimestampStateName+" state")
-	}
 }
 
 // Aggregates all metrics contained in the index by aggregation batch size and by shard
@@ -112,8 +108,6 @@ func (c *CassandraTSDB) aggregate(uuids []types.MetricUUID) {
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't update "+fromTimestampStateName+" state",
 			"Resolved: Update "+fromTimestampStateName+" state")
-
-		aggregateLastTimestamp.SetToCurrentTime()
 	}
 }
 
@@ -155,11 +149,9 @@ func (c *CassandraTSDB) aggregateShard(shard int, uuids []types.MetricUUID, from
 		}
 	}
 
-	if err := c.readAggregateWrite(uuidsShard, fromTimestamp, toTimestamp, resolution); err != nil {
-		return err
-	}
+	err := c.readAggregateWrite(uuidsShard, fromTimestamp, toTimestamp, resolution)
 
-	return nil
+	return err
 }
 
 // Reads all metrics contained between timestamps, generates aggregate data and writes it
@@ -181,9 +173,7 @@ func (c *CassandraTSDB) readAggregateWrite(uuids []types.MetricUUID, fromTimesta
 
 	aggregatedMetrics := aggregate.Aggregate(metrics, resolution)
 
-	if err := c.writeAggregate(aggregatedMetrics); err != nil {
-		return err
-	}
+	err = c.writeAggregate(aggregatedMetrics)
 
-	return nil
+	return err
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
@@ -42,11 +41,7 @@ func (c *CassandraStates) Read(name string, value interface{}) error {
 
 	var valueString string
 
-	start := time.Now()
-
 	err := statesTableSelectStateQuery.Scan(&valueString)
-
-	querySecondsRead.Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		return err
@@ -76,15 +71,9 @@ func (c *CassandraStates) Update(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
 	statesTableUpdateStateQuery := c.statesTableUpdateStateQuery(name, valueString)
 
-	start := time.Now()
+	err := statesTableUpdateStateQuery.Exec()
 
-	if err := statesTableUpdateStateQuery.Exec(); err != nil {
-		return err
-	}
-
-	querySecondsUpdate.Observe(time.Since(start).Seconds())
-
-	return nil
+	return err
 }
 
 // Write writes the state in the states table
@@ -92,15 +81,9 @@ func (c *CassandraStates) Write(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
 	statesTableInsertStateQuery := c.statesTableInsertStateQuery(name, valueString)
 
-	start := time.Now()
+	err := statesTableInsertStateQuery.Exec()
 
-	if err := statesTableInsertStateQuery.Exec(); err != nil {
-		return err
-	}
-
-	querySecondsWrite.Observe(time.Since(start).Seconds())
-
-	return nil
+	return err
 }
 
 // Returns states table insert state Query

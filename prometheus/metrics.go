@@ -7,18 +7,30 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	requestSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
+	readRequestPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "prometheus",
+		Subsystem: "",
+		Name:      "read_request_points_total",
+		Help:      "Total number of read points, including response to client",
+	})
+	readRequestSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "prometheus",
 		Subsystem:   "",
-		Name:        "request_seconds",
-		Help:        "Total seconds of processing request",
+		Name:        "read_request_seconds",
+		Help:        "Total seconds of processing read request, including response to client",
 		ConstLabels: prometheus.Labels{"type": "read"},
 	})
-	requestSecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
+	writeRequestPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "prometheus",
+		Subsystem: "",
+		Name:      "write_request_points_total",
+		Help:      "Total number of written points",
+	})
+	writeRequestSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "prometheus",
 		Subsystem:   "",
-		Name:        "request_seconds",
-		Help:        "Total seconds of processing request",
+		Name:        "write_request_seconds",
+		Help:        "Total seconds of processing write request",
 		ConstLabels: prometheus.Labels{"type": "write"},
 	})
 )

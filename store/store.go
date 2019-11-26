@@ -102,8 +102,6 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 		return nil
 	}
 
-	start := time.Now()
-
 	expirationTimestamp := now.Unix() + timeToLive
 
 	for uuid, data := range newMetrics {
@@ -114,8 +112,6 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 		storeData.ExpirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
-
-		appendPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	for uuid, data := range existingMetrics {
@@ -126,11 +122,7 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 		storeData.ExpirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
-
-		appendPointsTotal.Add(float64(len(data.Points)))
 	}
-
-	appendSeconds.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -141,8 +133,6 @@ func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 		return nil, nil
 	}
 
-	start := time.Now()
-
 	metrics := make(map[types.MetricUUID]types.MetricData, len(uuids))
 
 	for _, uuid := range uuids {
@@ -150,12 +140,8 @@ func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 
 		if exists {
 			metrics[uuid] = storeData.MetricData
-
-			getPointsTotal.Add(float64(len(storeData.Points)))
 		}
 	}
-
-	getSeconds.Observe(time.Since(start).Seconds())
 
 	return metrics, nil
 }
@@ -166,8 +152,6 @@ func (s *Store) set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 		return nil
 	}
 
-	start := time.Now()
-
 	expirationTimestamp := now.Unix() + timeToLive
 
 	for uuid, data := range metrics {
@@ -177,11 +161,7 @@ func (s *Store) set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 		storeData.ExpirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
-
-		setPointsTotal.Add(float64(len(data.Points)))
 	}
-
-	setSeconds.Observe(time.Since(start).Seconds())
 
 	return nil
 }

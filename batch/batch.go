@@ -126,6 +126,11 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		return
 	}
 
+	var (
+		readDuration, purgeDuration        time.Duration
+		readPointsCount, purgedPointsCount int
+	)
+
 	uuids := make([]types.MetricUUID, 0, len(states))
 
 	for uuid := range states {
@@ -135,8 +140,12 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	var metrics map[types.MetricUUID]types.MetricData
 
 	retry.Print(func() error {
+		start := time.Now()
+
 		var err error
 		metrics, err = b.storer.Get(uuids)
+
+		readDuration += time.Since(start)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -156,7 +165,13 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		dataToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
 		metricsToWrite[uuid] = dataToWrite
 		metricsToSet[uuid] = dataToSet
+
+		readPointsCount += len(data.Points)
+		purgedPointsCount += len(data.Points) - len(dataToSet.Points)
 	}
+
+	readPointsTotal.Add(float64(readPointsCount))
+	readSeconds.Observe(readDuration.Seconds())
 
 	retry.Print(func() error {
 		return b.writer.Write(metricsToWrite)
@@ -167,10 +182,19 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	timeToLive := (b.batchSize * 2) + 60
 
 	retry.Print(func() error {
-		return b.storer.Set(metricsToSet, timeToLive)
+		start := time.Now()
+
+		err := b.storer.Set(metricsToSet, timeToLive)
+
+		purgeDuration += time.Since(start)
+
+		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage")
+
+	purgedPointsTotal.Add(float64(purgedPointsCount))
+	purgeSeconds.Observe(purgeDuration.Seconds())
 }
 
 // Flushes the points corresponding to the status list of the specified metric
@@ -285,7 +309,16 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
 func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+	var (
+		readDuration    time.Duration
+		readPointsCount int
+	)
+
+	start := time.Now()
+
 	metrics, err := b.storer.Get(request.UUIDs)
+
+	readDuration += time.Since(start)
 
 	if err != nil {
 		return nil, err
@@ -306,7 +339,12 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 
 		temporaryData.Points = types.PointsDeduplicate(temporaryData.Points)
 		temporaryMetrics[uuid] = temporaryData
+
+		readPointsCount += len(data.Points)
 	}
+
+	readPointsTotal.Add(float64(readPointsCount))
+	readSeconds.Observe(readDuration.Seconds())
 
 	return temporaryMetrics, nil
 }
@@ -318,6 +356,11 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 	if len(metrics) == 0 {
 		return nil
 	}
+
+	var (
+		addDuration      time.Duration
+		addedPointsCount int
+	)
 
 	states := make(map[types.MetricUUID][]stateData)
 	newMetrics := make(map[types.MetricUUID]types.MetricData)
@@ -375,15 +418,26 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 
 		newMetrics[uuid] = newData
 		existingMetrics[uuid] = existingData
+
+		addedPointsCount += len(newData.Points) + len(existingData.Points)
 	}
 
 	retry.Print(func() error {
 		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
-		return b.storer.Append(newMetrics, existingMetrics, timeToLive)
+		start := time.Now()
+
+		err := b.storer.Append(newMetrics, existingMetrics, timeToLive)
+
+		addDuration += time.Since(start)
+
+		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't append metrics points in the temporary storage",
 		"Resolved: Append metrics points in the temporary storage")
+
+	addedPointsTotal.Add(float64(addedPointsCount))
+	addSeconds.Observe(addDuration.Seconds())
 
 	if len(states) != 0 {
 		b.flush(states, now)

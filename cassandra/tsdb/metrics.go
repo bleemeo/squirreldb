@@ -7,80 +7,74 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	aggregateLastTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "cassandra",
-		Subsystem: "aggregate",
-		Name:      "last_timestamp",
-		Help:      "Last aggregation timestamp",
-	})
 	querySecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "query_seconds",
-		Help:        "Total seconds of querying",
+		Help:        "Total seconds of querying Cassandra",
 		ConstLabels: prometheus.Labels{"type": "read"},
 	})
 	querySecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "query_seconds",
-		Help:        "Total seconds of querying",
+		Help:        "Total seconds of querying Cassandra",
 		ConstLabels: prometheus.Labels{"type": "write"},
 	})
 	readPointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "read_points_total",
-		Help:        "Total number of points read",
+		Help:        "Total number of read points from Cassandra after temporal filtering and deduplication",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
 	readPointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "read_points_total",
-		Help:        "Total number of points read",
+		Help:        "Total number of read points from Cassandra after temporal filtering and deduplication",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
 	readSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "read_seconds",
-		Help:        "Total seconds of reading",
+		Help:        "Total seconds of reading, including Cassandra querying, temporal filtering and deduplication",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
 	readSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
 		Name:        "read_seconds",
-		Help:        "Total seconds of reading",
+		Help:        "Total seconds of reading, including Cassandra querying, temporal filtering and deduplication",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
-	wrotePointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
+	writtenPointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
-		Name:        "wrote_points_total",
-		Help:        "Total number of points wrote",
+		Name:        "written_points_total",
+		Help:        "Total number of written points to Cassandra after deduplication",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
-	wrotePointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
+	writtenPointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
-		Name:        "wrote_points_total",
-		Help:        "Total number of points wrote",
+		Name:        "written_points_total",
+		Help:        "Total number of written points to Cassandra after deduplication",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
-	wroteSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
+	writeSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
-		Name:        "wrote_seconds",
-		Help:        "Total seconds of writing",
+		Name:        "write_seconds",
+		Help:        "Total seconds of writing, including Cassandra querying and deduplication",
 		ConstLabels: prometheus.Labels{"type": "aggregated"},
 	})
-	wroteSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
+	writeSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "cassandra",
 		Subsystem:   "tsdb",
-		Name:        "wrote_seconds",
-		Help:        "Total seconds of writing",
+		Name:        "write_seconds",
+		Help:        "Total seconds of writing, including Cassandra querying and deduplication",
 		ConstLabels: prometheus.Labels{"type": "raw"},
 	})
 )

@@ -40,8 +40,6 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 		return nil
 	}
 
-	start := time.Now()
-
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
@@ -56,8 +54,6 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 
 		pipe.Append(key, string(values))
 		pipe.Expire(key, timeToLiveDuration)
-
-		appendPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	for uuid, data := range existingMetrics {
@@ -70,15 +66,11 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 		key := keyPrefix + "-" + uuid.String()
 
 		pipe.Append(key, string(values))
-
-		appendPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
-
-	appendSeconds.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -88,8 +80,6 @@ func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 	if len(uuids) == 0 {
 		return nil, nil
 	}
-
-	start := time.Now()
 
 	metrics := make(map[types.MetricUUID]types.MetricData)
 
@@ -108,11 +98,7 @@ func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 		}
 
 		metrics[uuid] = data
-
-		getPointsTotal.Add(float64(len(data.Points)))
 	}
-
-	getSeconds.Observe(time.Since(start).Seconds())
 
 	return metrics, nil
 }
@@ -122,8 +108,6 @@ func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 	if len(metrics) == 0 {
 		return nil
 	}
-
-	start := time.Now()
 
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
@@ -138,15 +122,11 @@ func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 		key := keyPrefix + "-" + uuid.String()
 
 		pipe.Set(key, string(values), timeToLiveDuration)
-
-		setPointsTotal.Add(float64(len(data.Points)))
 	}
 
 	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
-
-	setSeconds.Observe(time.Since(start).Seconds())
 
 	return nil
 }

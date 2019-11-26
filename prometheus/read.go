@@ -74,7 +74,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	requestSecondsRead.Observe(time.Since(start).Seconds())
+	readRequestSeconds.Observe(time.Since(start).Seconds())
 }
 
 // Returns a MetricLabelMatcher list- generated from LabelMatcher
@@ -196,13 +196,19 @@ func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, fu
 		return nil
 	}
 
+	totalPoints := 0
+
 	promTimeseries := make([]*prompb.TimeSeries, 0, len(metrics))
 
 	for uuid, data := range metrics {
 		promSeries := promSeriesFromMetric(uuid, data, fun)
 
 		promTimeseries = append(promTimeseries, promSeries)
+
+		totalPoints += len(data.Points)
 	}
+
+	readRequestPointsTotal.Add(float64(totalPoints))
 
 	return promTimeseries
 }
