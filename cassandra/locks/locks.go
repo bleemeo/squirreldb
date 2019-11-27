@@ -84,7 +84,7 @@ func (c *CassandraLocks) locksTableInsertLockQuery(name string, duration time.Du
 func (c *CassandraLocks) locksTableUpdateLockQuery(name string) *gocql.Query {
 	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
 	query := c.session.Query(replacer.Replace(`
-		UPDATE $LOCKS_TABLE (name, timestamp, duration)
+		UPDATE $LOCKS_TABLE
 		SET timestamp = toUnixTimestamp(now())
 		WHERE name = ?
 	`), name)

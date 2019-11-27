@@ -131,7 +131,7 @@ func (c *CassandraTSDB) aggregateShardSizeLock(shard int, fromTimestamp, toTimes
 		return fmt.Errorf("not the leader on the shard")
 	}
 
-	err := c.aggregateShardSize(shards, fromTimestamp, toTimestamp, resolution)
+	err := c.aggregateShardSize(shard, fromTimestamp, toTimestamp, resolution)
 
 	retry.Print(func() error {
 		return c.locks.Delete(name)
@@ -143,9 +143,11 @@ func (c *CassandraTSDB) aggregateShardSizeLock(shard int, fromTimestamp, toTimes
 }
 
 func (c *CassandraTSDB) aggregateShardSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
+	uuids := c.index.UUIDs(nil, true)
+
 	var shardUUIDs []types.MetricUUID
 
-	for _, uuid := range c.index.UUIDs(nil, true) {
+	for _, uuid := range uuids {
 		uuidShard := (int(uuid.Uint64() % uint64(shards))) + 1
 
 		if uuidShard == shard {

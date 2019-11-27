@@ -60,7 +60,7 @@ func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricUUID]
 
 // Returns aggregated data between the specified timestamps of the requested metric
 func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
-	functionStart := time.Now()
+	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.AggregatePartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.AggregatePartitionSize)
@@ -80,7 +80,7 @@ func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, 
 	aggregateData.Points = types.PointsDeduplicate(aggregateData.Points)
 
 	readPointsTotalAggregated.Add(float64(len(aggregateData.Points)))
-	readSecondsAggregated.Observe(time.Since(functionStart).Seconds())
+	readSecondsAggregated.Observe(time.Since(start).Seconds())
 
 	return aggregateData, nil
 }
@@ -127,7 +127,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 
 // Returns raw data between the specified timestamps of the requested metric
 func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
-	functionStart := time.Now()
+	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize)
 	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.RawPartitionSize)
@@ -147,7 +147,7 @@ func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTime
 	rawData.Points = types.PointsDeduplicate(rawData.Points)
 
 	readPointsTotalRaw.Add(float64(len(rawData.Points)))
-	readSecondsRaw.Observe(time.Since(functionStart).Seconds())
+	readSecondsRaw.Observe(time.Since(start).Seconds())
 
 	return rawData, nil
 }

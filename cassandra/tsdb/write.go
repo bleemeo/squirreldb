@@ -17,7 +17,7 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 		return nil
 	}
 
-	functionStart := time.Now()
+	start := time.Now()
 
 	for uuid, data := range metrics {
 		if err := c.writeRawData(uuid, data); err != nil {
@@ -27,7 +27,7 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 		writtenPointsTotalRaw.Add(float64(len(data.Points)))
 	}
 
-	writeSecondsRaw.Observe(time.Since(functionStart).Seconds())
+	writeSecondsRaw.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -38,7 +38,7 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 		return nil
 	}
 
-	functionStart := time.Now()
+	start := time.Now()
 
 	for uuid, aggregatedData := range aggregatedMetrics {
 		if err := c.writeAggregateData(uuid, aggregatedData); err != nil {
@@ -48,7 +48,7 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 		writtenPointsTotalAggregated.Add(float64(len(aggregatedData.Points)))
 	}
 
-	writeSecondsAggregated.Observe(time.Since(functionStart).Seconds())
+	writeSecondsAggregated.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -97,7 +97,7 @@ func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggre
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertDataQuery(c.options.dataTable, uuid.String(), baseTimestamp, offsetTimestamp, aggregatedData.TimeToLive, aggregateValues)
+	tableInsertDataQuery := c.tableInsertDataQuery(c.options.aggregateDataTable, uuid.String(), baseTimestamp, offsetTimestamp, aggregatedData.TimeToLive, aggregateValues)
 
 	start := time.Now()
 
