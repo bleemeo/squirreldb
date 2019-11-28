@@ -13,9 +13,7 @@ import (
 	"time"
 )
 
-const (
-	tableName = "index"
-)
+const tableName = "index"
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)

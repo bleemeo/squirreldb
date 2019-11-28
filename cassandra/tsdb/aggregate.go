@@ -2,8 +2,9 @@ package tsdb
 
 import (
 	"context"
-	"fmt"
+	"github.com/gocql/gocql"
 	"math/rand"
+	"os"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -12,15 +13,22 @@ import (
 )
 
 const (
-	shards       = 60.
-	shardsPeriod = 60.
+	shardStatePrefix = "shard_"
+	shards           = 60.
+	shardsPeriod     = 60.
 )
 
 const (
-	shardStatePrefix = "shard_"
+	lockTimeToLive     = 600
+	lockUpdateInterval = 300
 )
 
 const safeMargin = 3600
+
+var (
+	instanceHostname = "" // TODO: Temporary
+	instanceUUID     = "" // TODO: Temporary
+)
 
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
@@ -30,14 +38,19 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 // Starts the aggregator service
 // If a stop signal is received, the service is stopped
 func (c *CassandraTSDB) runAggregator(ctx context.Context) {
+	uuid, _ := gocql.RandomUUID()       // TODO: Temporary
+	instanceHostname, _ = os.Hostname() // TODO: Temporary
+	instanceUUID = uuid.String()        // TODO: Temporary
+
 	c.aggregateInit()
 
-	delay := (shardsPeriod / shards) * time.Second
-	ticker := time.NewTicker(delay)
 	shard := rand.Intn(shards) + 1
+	interval := (shardsPeriod / shards) * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	for {
-		c.aggregateShard(shard)
+		c.aggregate(shard)
 
 		shard = (shard % shards) + 1
 
@@ -78,7 +91,8 @@ func (c *CassandraTSDB) aggregateInit() {
 	}
 }
 
-func (c *CassandraTSDB) aggregateShard(shard int) {
+// Aggregates metrics belonging to the shard
+func (c *CassandraTSDB) aggregate(shard int) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	var fromTimestamp int64
@@ -98,7 +112,15 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 		return
 	}
 
-	if err := c.aggregateShardSizeLock(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
+	if applied := c.aggregateLockWrite(name); !applied {
+		return
+	}
+
+	endChan := make(chan bool)
+
+	go c.aggregateLockUpdate(name, endChan)
+
+	if err := c.aggregateSize(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
 		logger.Printf("Aggregate shard %d from [%v] to [%v]",
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
@@ -111,38 +133,58 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
 	}
+
+	close(endChan)
+
+	c.aggregateLockDelete(name)
 }
 
-func (c *CassandraTSDB) aggregateShardSizeLock(shard int, fromTimestamp, toTimestamp, resolution int64) error {
-	name := shardStatePrefix + strconv.Itoa(shard)
+// Deletes the specified lock
+func (c *CassandraTSDB) aggregateLockDelete(name string) {
+	retry.Print(func() error {
+		return c.locks.Delete(name)
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't delete "+name+" lock",
+		"Resolved: Delete "+name+" lock")
+}
 
+// Returns a boolean if the specified lock was written or not
+func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
 	var applied bool
 
 	retry.Print(func() error {
 		var err error
-		applied, err = c.locks.Write(name, 30*time.Second)
+		applied, err = c.locks.Write(name, instanceHostname, instanceUUID, lockTimeToLive)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't write "+name+" lock",
 		"Resolved: Write "+name+" lock")
 
-	if !applied {
-		return fmt.Errorf("not the leader on the shard")
-	}
-
-	err := c.aggregateShardSize(shard, fromTimestamp, toTimestamp, resolution)
-
-	retry.Print(func() error {
-		return c.locks.Delete(name)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't delete "+name+" lock",
-		"Resolved: Delete "+name+" lock")
-
-	return err
+	return applied
 }
 
-func (c *CassandraTSDB) aggregateShardSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
+// Updates the specified lock until a signal is received
+func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
+	interval := lockUpdateInterval * time.Second
+	ticker := time.NewTicker(interval)
+
+	for {
+		select {
+		case <-ticker.C:
+			retry.Print(func() error {
+				return c.locks.Update(name, instanceHostname, instanceUUID, lockTimeToLive)
+			}, retry.NewExponentialBackOff(30*time.Second), logger,
+				"Error: Can't update "+name+" lock",
+				"Resolved: Update "+name+" lock")
+		case <-endChan:
+			return
+		}
+	}
+}
+
+// Aggregates metrics belonging to the shard by aggregation batch size
+func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
 	uuids := c.index.UUIDs(nil, true)
 
 	var shardUUIDs []types.MetricUUID

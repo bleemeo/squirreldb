@@ -8,9 +8,7 @@ import (
 	"strings"
 )
 
-const (
-	tableName = "states"
-)
+const tableName = "states"
 
 type CassandraStates struct {
 	session     *gocql.Session

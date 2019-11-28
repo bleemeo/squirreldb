@@ -13,7 +13,7 @@ import (
 
 const checkerInterval = 60
 
-const flushSize = 1000
+const flushMax = 1000
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
@@ -76,9 +76,8 @@ func (b *Batch) Run(ctx context.Context) {
 // Starts the checker service
 // If a stop signal is received, the service is stopped
 func (b *Batch) runChecker(ctx context.Context) {
-	delay := checkerInterval * time.Second
-
-	ticker := time.NewTicker(delay)
+	interval := checkerInterval * time.Second
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -107,7 +106,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 			delete(b.states, uuid)
 
-			if (len(states) % flushSize) == 0 {
+			if (len(states) % flushMax) == 0 {
 				b.flush(states, now)
 
 				states = make(map[types.MetricUUID][]stateData)
@@ -448,12 +447,12 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 
 // Returns a flush date
 // It follows the formula:
-// deadline = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
+// timestamp = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
 func flushTimestamp(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
-	deadline := now.Unix() + batchSize
+	timestamp := now.Unix() + batchSize
 	offset := int64(uuid.Uint64() % uint64(batchSize))
 
-	deadline -= (deadline + offset) % batchSize
+	timestamp -= (timestamp + offset) % batchSize
 
-	return deadline
+	return timestamp
 }

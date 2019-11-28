@@ -80,7 +80,7 @@ func (p *Prometheus) runServer(ctx context.Context) {
 			"Resolved: Listen and serve the server")
 	}()
 
-	logger.Printf("Listening the server on %s", p.server.Addr)
+	logger.Printf("Server listening on %s", p.server.Addr)
 
 	<-ctx.Done()
 

@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-const (
-	expiratorInterval = 60
-)
+const expiratorInterval = 60
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
@@ -68,9 +66,8 @@ func (s *Store) Run(ctx context.Context) {
 // Starts the expirator service
 // If a stop signal is received, the service is stopped
 func (s *Store) runExpirator(ctx context.Context) {
-	delay := expiratorInterval * time.Second
-
-	ticker := time.NewTicker(delay)
+	interval := expiratorInterval * time.Second
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
