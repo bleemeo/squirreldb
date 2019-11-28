@@ -2,11 +2,11 @@ package tsdb
 
 import (
 	"github.com/gocql/gocql"
-	"squirreldb/cassandra/locks"
 
 	"log"
 	"os"
 	"squirreldb/cassandra/index"
+	"squirreldb/cassandra/locks"
 	"squirreldb/cassandra/states"
 	"strconv"
 	"strings"

@@ -1,8 +1,9 @@
 package tsdb
 
 import (
-	"context"
 	"github.com/gocql/gocql"
+
+	"context"
 	"math/rand"
 	"os"
 	"squirreldb/aggregate"
@@ -47,6 +48,7 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	shard := rand.Intn(shards) + 1
 	interval := (shardsPeriod / shards) * time.Second
 	ticker := time.NewTicker(interval)
+
 	defer ticker.Stop()
 
 	for {

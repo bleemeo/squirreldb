@@ -68,6 +68,7 @@ func (s *Store) Run(ctx context.Context) {
 func (s *Store) runExpirator(ctx context.Context) {
 	interval := expiratorInterval * time.Second
 	ticker := time.NewTicker(interval)
+
 	defer ticker.Stop()
 
 	for {

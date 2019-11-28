@@ -78,6 +78,7 @@ func (b *Batch) Run(ctx context.Context) {
 func (b *Batch) runChecker(ctx context.Context) {
 	interval := checkerInterval * time.Second
 	ticker := time.NewTicker(interval)
+
 	defer ticker.Stop()
 
 	for {

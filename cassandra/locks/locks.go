@@ -2,6 +2,7 @@ package locks
 
 import (
 	"github.com/gocql/gocql"
+
 	"strings"
 )
 

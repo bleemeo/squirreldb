@@ -2,15 +2,15 @@ package main
 
 import (
 	"github.com/gocql/gocql"
-	"math/rand"
-	"squirreldb/cassandra/locks"
 
 	"context"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
+	"squirreldb/cassandra/locks"
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
