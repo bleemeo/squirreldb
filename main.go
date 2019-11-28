@@ -209,16 +209,12 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 		AggregateSize:          config.Int64("cassandra.aggregate.size"),
 		AggregatePartitionSize: config.Int64("cassandra.partition_size.aggregate"),
 	}
-	debugOptions := tsdb.DebugOptions{
-		AggregateForce: config.Bool("debug.aggregate.force"),
-		AggregateSize:  config.Int64("debug.aggregate.size"),
-	}
 
 	var squirrelTSDB *tsdb.CassandraTSDB
 
 	retry.Print(func() error {
 		var err error
-		squirrelTSDB, err = tsdb.New(session, keyspace, options, debugOptions, index, locks, states)
+		squirrelTSDB, err = tsdb.New(session, keyspace, options, index, locks, states)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,

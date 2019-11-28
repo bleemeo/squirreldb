@@ -20,11 +20,6 @@ const (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
-type DebugOptions struct {
-	AggregateForce bool
-	AggregateSize  int64
-}
-
 type Options struct {
 	DefaultTimeToLive      int64
 	BatchSize              int64
@@ -38,9 +33,8 @@ type Options struct {
 }
 
 type CassandraTSDB struct {
-	session      *gocql.Session
-	options      Options
-	debugOptions DebugOptions
+	session *gocql.Session
+	options Options
 
 	index  *index.CassandraIndex
 	locks  *locks.CassandraLocks
@@ -48,7 +42,7 @@ type CassandraTSDB struct {
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, debugOptions DebugOptions, index *index.CassandraIndex, locks *locks.CassandraLocks, states *states.CassandraStates) (*CassandraTSDB, error) {
+func New(session *gocql.Session, keyspace string, options Options, index *index.CassandraIndex, locks *locks.CassandraLocks, states *states.CassandraStates) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + dataTableName
 	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
@@ -65,12 +59,11 @@ func New(session *gocql.Session, keyspace string, options Options, debugOptions 
 	}
 
 	tsdb := &CassandraTSDB{
-		session:      session,
-		options:      options,
-		debugOptions: debugOptions,
-		index:        index,
-		states:       states,
-		locks:        locks,
+		session: session,
+		options: options,
+		index:   index,
+		states:  states,
+		locks:   locks,
 	}
 
 	return tsdb, nil

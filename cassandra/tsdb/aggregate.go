@@ -58,26 +58,13 @@ func (c *CassandraTSDB) aggregateInit() {
 	now := time.Now()
 	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
 
-	if c.debugOptions.AggregateForce {
-		fromTimestamp -= c.debugOptions.AggregateSize
-	}
-
 	for i := 1; i <= shards; i++ {
 		name := shardStatePrefix + strconv.Itoa(i)
-
-		if c.debugOptions.AggregateForce {
-			retry.Print(func() error {
-				return c.states.Update(name, fromTimestamp)
-			}, retry.NewExponentialBackOff(30*time.Second), logger,
-				"Error: Can't update "+name+" state",
-				"Resolved: Update "+name+" state")
-		} else {
-			retry.Print(func() error {
-				return c.states.Write(name, fromTimestamp)
-			}, retry.NewExponentialBackOff(30*time.Second), logger,
-				"Error: Can't write "+name+" state",
-				"Resolved: Write "+name+" state")
-		}
+		retry.Print(func() error {
+			return c.states.Write(name, fromTimestamp)
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't write "+name+" state",
+			"Resolved: Write "+name+" state")
 	}
 }
 
