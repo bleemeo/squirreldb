@@ -68,6 +68,7 @@ func (c *CassandraLocks) Update(name string, timeToLive int64) error {
 	return err
 }
 
+// Returns locks table delete lock Query
 func (c *CassandraLocks) locksTableDeleteLockQuery(name string) *gocql.Query {
 	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
 	query := c.session.Query(replacer.Replace(`
@@ -79,6 +80,7 @@ func (c *CassandraLocks) locksTableDeleteLockQuery(name string) *gocql.Query {
 	return query
 }
 
+// Returns locks table insert lock Query
 func (c *CassandraLocks) locksTableInsertLockQuery(name string, timeToLive int64) *gocql.Query {
 	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
 	query := c.session.Query(replacer.Replace(`
@@ -91,6 +93,7 @@ func (c *CassandraLocks) locksTableInsertLockQuery(name string, timeToLive int64
 	return query
 }
 
+// Returns locks table update lock Query
 func (c *CassandraLocks) locksTableUpdateLockQuery(name string, timeToLive int64) *gocql.Query {
 	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
 	query := c.session.Query(replacer.Replace(`
