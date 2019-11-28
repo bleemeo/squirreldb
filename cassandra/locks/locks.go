@@ -39,6 +39,8 @@ func New(session *gocql.Session, keyspace string, instance *types.Instance) (*Ca
 func (c *CassandraLocks) Delete(name string) error {
 	locksTableDeleteLockQuery := c.locksTableDeleteLockQuery(name)
 
+	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
+
 	err := locksTableDeleteLockQuery.Exec()
 
 	return err
@@ -50,7 +52,7 @@ func (c *CassandraLocks) Write(name string, timeToLive int64) (bool, error) {
 
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
 
-	applied, err := locksTableInsertLockQuery.ScanCAS(nil, nil, nil)
+	applied, err := locksTableInsertLockQuery.ScanCAS(nil, nil, nil, nil)
 
 	return applied, err
 }
@@ -71,6 +73,7 @@ func (c *CassandraLocks) locksTableDeleteLockQuery(name string) *gocql.Query {
 	query := c.session.Query(replacer.Replace(`
 		DELETE FROM $LOCKS_TABLE
 		WHERE name = ?
+		IF EXISTS
 	`), name)
 
 	return query

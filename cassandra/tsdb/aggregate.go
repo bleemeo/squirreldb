@@ -2,7 +2,7 @@ package tsdb
 
 import (
 	"context"
-	"math/rand"
+	"fmt"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -85,6 +85,14 @@ func (c *CassandraTSDB) aggregateInit() {
 func (c *CassandraTSDB) aggregate(shard int) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
+	if applied := c.aggregateLockWrite(name); !applied {
+		return
+	}
+
+	endChan := make(chan bool)
+
+	go c.aggregateLockUpdate(name, endChan)
+
 	var fromTimestamp int64
 
 	retry.Print(func() error {
@@ -99,19 +107,16 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	isSafeMargin := (now.Unix() % 86400) >= safeMargin // Authorizes aggregation if it is more than 1 a.m.
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
+		close(endChan)
+		c.aggregateLockDelete(name)
+
 		return
 	}
-
-	if applied := c.aggregateLockWrite(name); !applied {
-		return
-	}
-
-	endChan := make(chan bool)
-
-	go c.aggregateLockUpdate(name, endChan)
 
 	if err := c.aggregateSize(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
 		logger.Printf("Aggregate shard %d from [%v] to [%v]",
+			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
+		fmt.Printf("Aggregate shard %d from [%v] to [%v]"+"\n",
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 		retry.Print(func() error {
@@ -125,7 +130,6 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	}
 
 	close(endChan)
-
 	c.aggregateLockDelete(name)
 }
 
