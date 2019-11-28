@@ -1,11 +1,8 @@
 package tsdb
 
 import (
-	"github.com/gocql/gocql"
-
 	"context"
 	"math/rand"
-	"os"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -26,11 +23,6 @@ const (
 
 const safeMargin = 3600
 
-var (
-	instanceHostname = "" // TODO: Temporary
-	instanceUUID     = "" // TODO: Temporary
-)
-
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
 	c.runAggregator(ctx)
@@ -39,10 +31,6 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 // Starts the aggregator service
 // If a stop signal is received, the service is stopped
 func (c *CassandraTSDB) runAggregator(ctx context.Context) {
-	uuid, _ := gocql.RandomUUID()       // TODO: Temporary
-	instanceHostname, _ = os.Hostname() // TODO: Temporary
-	instanceUUID = uuid.String()        // TODO: Temporary
-
 	c.aggregateInit()
 
 	shard := rand.Intn(shards) + 1
@@ -51,7 +39,7 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		c.aggregate(shard)
 
 		shard = (shard % shards) + 1
@@ -156,7 +144,7 @@ func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
 
 	retry.Print(func() error {
 		var err error
-		applied, err = c.locks.Write(name, instanceHostname, instanceUUID, lockTimeToLive)
+		applied, err = c.locks.Write(name, lockTimeToLive)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -171,11 +159,13 @@ func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
 	interval := lockUpdateInterval * time.Second
 	ticker := time.NewTicker(interval)
 
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
 			retry.Print(func() error {
-				return c.locks.Update(name, instanceHostname, instanceUUID, lockTimeToLive)
+				return c.locks.Update(name, lockTimeToLive)
 			}, retry.NewExponentialBackOff(30*time.Second), logger,
 				"Error: Can't update "+name+" lock",
 				"Resolved: Update "+name+" lock")

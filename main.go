@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gocql/gocql"
+	gouuid "github.com/gofrs/uuid"
 
 	"context"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"squirreldb/prometheus"
 	"squirreldb/redis"
 	"squirreldb/retry"
+	"squirreldb/types"
 	"sync"
 	"syscall"
 	"time"
@@ -44,10 +46,10 @@ func main() {
 	debug.Level = squirrelConfig.Int("debug.level")
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
-
+	instance := createInstance()
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
 	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace)
-	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace)
+	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace, instance)
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelRedis := createSquirrelRedis(squirrelConfig)
@@ -120,6 +122,18 @@ func main() {
 	logger.Println("SquirrelDB is stopped")
 }
 
+func createInstance() *types.Instance {
+	hostname, _ := os.Hostname()
+	uuid, _ := gouuid.NewV4()
+
+	instance := &types.Instance{
+		Hostname: hostname,
+		UUID:     uuid.String(),
+	}
+
+	return instance
+}
+
 func createSquirrelSession(keyspace string, config *config.Config) *gocql.Session {
 	options := session.Options{
 		Addresses:         config.Strings("cassandra.addresses"),
@@ -156,12 +170,12 @@ func createSquirrelIndex(session *gocql.Session, keyspace string) *index.Cassand
 	return squirrelIndex
 }
 
-func createSquirrelLocks(session *gocql.Session, keyspace string) *locks.CassandraLocks {
+func createSquirrelLocks(session *gocql.Session, keyspace string, instance *types.Instance) *locks.CassandraLocks {
 	var squirrelLocks *locks.CassandraLocks
 
 	retry.Print(func() error {
 		var err error
-		squirrelLocks, err = locks.New(session, keyspace)
+		squirrelLocks, err = locks.New(session, keyspace, instance)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,

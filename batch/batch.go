@@ -81,7 +81,7 @@ func (b *Batch) runChecker(ctx context.Context) {
 
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
 			b.check(time.Now(), false)

@@ -13,3 +13,8 @@ type MetricReader interface {
 type MetricWriter interface {
 	Write(metrics map[MetricUUID]MetricData) error
 }
+
+type Instance struct {
+	Hostname string
+	UUID     string
+}

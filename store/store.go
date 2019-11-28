@@ -71,7 +71,7 @@ func (s *Store) runExpirator(ctx context.Context) {
 
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
 			s.expire(time.Now())
