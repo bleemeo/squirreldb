@@ -2,7 +2,7 @@ package tsdb
 
 import (
 	"context"
-	"fmt"
+	"math/rand"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -115,8 +115,6 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 	if err := c.aggregateSize(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
 		logger.Printf("Aggregate shard %d from [%v] to [%v]",
-			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
-		fmt.Printf("Aggregate shard %d from [%v] to [%v]"+"\n",
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 		retry.Print(func() error {
