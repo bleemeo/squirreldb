@@ -28,7 +28,7 @@ type Prometheus struct {
 }
 
 // New creates a new Prometheus object
-func New(listenAddress string, indexer types.MetricIndexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
+func New(listenAddress string, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
 	router := http.NewServeMux()
 	readMetrics := ReadMetrics{
 		indexer: indexer,

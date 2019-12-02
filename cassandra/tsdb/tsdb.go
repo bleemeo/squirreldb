@@ -5,9 +5,7 @@ import (
 
 	"log"
 	"os"
-	"squirreldb/cassandra/index"
-	"squirreldb/cassandra/locks"
-	"squirreldb/cassandra/states"
+	"squirreldb/types"
 	"strconv"
 	"strings"
 )
@@ -36,13 +34,13 @@ type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
 
-	index  *index.CassandraIndex
-	locks  *locks.CassandraLocks
-	states *states.CassandraStates
+	indexer types.Indexer
+	locker  types.Locker
+	stater  types.Stater
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, index *index.CassandraIndex, locks *locks.CassandraLocks, states *states.CassandraStates) (*CassandraTSDB, error) {
+func New(session *gocql.Session, keyspace string, options Options, indexer types.Indexer, locker types.Locker, stater types.Stater) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + dataTableName
 	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
@@ -61,9 +59,9 @@ func New(session *gocql.Session, keyspace string, options Options, index *index.
 	tsdb := &CassandraTSDB{
 		session: session,
 		options: options,
-		index:   index,
-		states:  states,
-		locks:   locks,
+		indexer: indexer,
+		locker:  locker,
+		stater:  stater,
 	}
 
 	return tsdb, nil

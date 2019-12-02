@@ -9,16 +9,28 @@ var flags = []flag{
 		usage: "Display help",
 	},
 	{
+		name:  "cassandra.addresses",
+		short: "",
+		value: []string{"localhost:9042"},
+		usage: "Set the Cassandra cluster addresses",
+	},
+	{
 		name:  "prometheus.listen_address",
 		short: "",
 		value: "localhost:1234",
 		usage: "Set the Prometheus listen address",
 	},
 	{
-		name:  "cassandra.addresses",
+		name:  "redis.address",
 		short: "",
-		value: []string{"localhost:9042"},
-		usage: "Set the Cassandra cluster addresses",
+		value: "localhost:6379",
+		usage: "Set the Redis address",
+	},
+	{
+		name:  "bypass-validate",
+		short: "",
+		value: false,
+		usage: "Bypass validate",
 	},
 }
 

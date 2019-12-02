@@ -38,6 +38,10 @@ func main() {
 		logger.Fatalf("Error: Can't create config (%v)", err)
 	}
 
+	if !squirrelConfig.Validate() {
+		logger.Fatalf("Error: Invalid configuration")
+	}
+
 	if squirrelConfig.Bool("help") {
 		squirrelConfig.FlagSet.PrintDefaults()
 		return
@@ -46,9 +50,9 @@ func main() {
 	debug.Level = squirrelConfig.Int("debug.level")
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
-	instance := createInstance()
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
 	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace)
+	instance := createInstance()
 	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace, instance)
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
@@ -57,6 +61,16 @@ func main() {
 	squirrelBatch := batch.New(squirrelBatchSize, squirrelRedis, squirrelTSDB, squirrelTSDB)
 	squirrelPrometheusListenAddress := squirrelConfig.String("prometheus.listen_address")
 	squirrelPrometheus := prometheus.New(squirrelPrometheusListenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
+
+	squirrelConfig.WriteRemote(squirrelStates)
+
+	if !squirrelConfig.ValidateRemote(squirrelStates) {
+		if squirrelConfig.Bool("bypass-validate") {
+			logger.Println("Warning: Configuration local constant values are not the same as remote constant values")
+		} else {
+			logger.Fatalln("Error: Configuration local constant values are not the same as remote constant values")
+		}
+	}
 
 	signalChan := make(chan os.Signal, 1)
 

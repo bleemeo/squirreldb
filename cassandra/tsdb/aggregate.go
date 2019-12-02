@@ -61,7 +61,7 @@ func (c *CassandraTSDB) aggregateInit() {
 	for i := 1; i <= shards; i++ {
 		name := shardStatePrefix + strconv.Itoa(i)
 		retry.Print(func() error {
-			return c.states.Write(name, fromTimestamp)
+			return c.stater.Write(name, fromTimestamp)
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")
@@ -83,7 +83,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	var fromTimestamp int64
 
 	retry.Print(func() error {
-		return c.states.Read(name, &fromTimestamp)
+		return c.stater.Read(name, &fromTimestamp)
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't read "+name+" state",
 		"Resolved: Read "+name+" state")
@@ -105,7 +105,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 		retry.Print(func() error {
-			return c.states.Update(name, toTimestamp)
+			return c.stater.Update(name, toTimestamp)
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't update "+name+" state",
 			"Resolved: update "+name+" state")
@@ -121,7 +121,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 // Deletes the specified lock
 func (c *CassandraTSDB) aggregateLockDelete(name string) {
 	retry.Print(func() error {
-		return c.locks.Delete(name)
+		return c.locker.Delete(name)
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't delete "+name+" lock",
 		"Resolved: Delete "+name+" lock")
@@ -133,7 +133,7 @@ func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
 
 	retry.Print(func() error {
 		var err error
-		applied, err = c.locks.Write(name, lockTimeToLive)
+		applied, err = c.locker.Write(name, lockTimeToLive)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -154,7 +154,7 @@ func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
 		select {
 		case <-ticker.C:
 			retry.Print(func() error {
-				return c.locks.Update(name, lockTimeToLive)
+				return c.locker.Update(name, lockTimeToLive)
 			}, retry.NewExponentialBackOff(30*time.Second), logger,
 				"Error: Can't update "+name+" lock",
 				"Resolved: Update "+name+" lock")
@@ -166,7 +166,7 @@ func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
 
 // Aggregates metrics belonging to the shard by aggregation batch size
 func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
-	uuids := c.index.UUIDs(nil, true)
+	uuids := c.indexer.UUIDs(nil, true)
 
 	var shardUUIDs []types.MetricUUID
 

@@ -1,6 +1,6 @@
 package types
 
-type MetricIndexer interface {
+type Indexer interface {
 	Labels(uuid MetricUUID) []MetricLabel
 	UUID(labels []MetricLabel) MetricUUID
 	UUIDs(matchers []MetricLabelMatcher, all bool) []MetricUUID
@@ -12,6 +12,18 @@ type MetricReader interface {
 
 type MetricWriter interface {
 	Write(metrics map[MetricUUID]MetricData) error
+}
+
+type Locker interface {
+	Delete(name string) error
+	Write(name string, timeToLive int64) (bool, error)
+	Update(name string, timeToLive int64) error
+}
+
+type Stater interface {
+	Read(name string, value interface{}) error
+	Update(name string, value interface{}) error
+	Write(name string, value interface{}) error
 }
 
 type Instance struct {

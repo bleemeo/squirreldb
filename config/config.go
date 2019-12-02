@@ -10,10 +10,14 @@ import (
 	"github.com/spf13/pflag"
 
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"squirreldb/retry"
+	"squirreldb/types"
 	"strings"
+	"time"
 )
 
 const (
@@ -24,6 +28,9 @@ const (
 
 //nolint: gochecknoglobals
 var fileExtensions = []string{".conf", ".yaml", ".yml"}
+
+//nolint: gochecknoglobals
+var logger = log.New(os.Stdout, "[config] ", log.LstdFlags)
 
 type Config struct {
 	*koanf.Koanf
@@ -80,6 +87,123 @@ func New() (*Config, error) {
 	}
 
 	return config, nil
+}
+
+// Validate checks if the configuration is valid and consistent
+func (c *Config) Validate() bool {
+	keyspace := c.String("cassandra.keyspace")
+	replicationFactor := c.Int("cassandra.replication_factor")
+	batchSize := c.Int64("batch.size")
+	rawPartitionSize := c.Int64("cassandra.partition_size.raw")
+	aggregateResolution := c.Int64("cassandra.aggregate.resolution")
+	aggregateSize := c.Int64("cassandra.aggregate.size")
+	aggregatePartitionSize := c.Int64("cassandra.partition_size.aggregate")
+	valid := true
+
+	if keyspace == "" {
+		valid = false
+
+		logger.Println("Error: Invalid keyspace (must be filled)")
+	}
+
+	if replicationFactor <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid replication factor (must be strictly greater than 0)")
+	}
+
+	if batchSize <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid batch size (must be strictly greater than 0)")
+	}
+
+	if rawPartitionSize <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid raw partition size (must be strictly greater than 0)")
+	}
+
+	if aggregateResolution <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate resolution: must be strictly greater than 0")
+	}
+
+	if aggregateSize <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate size (must be strictly greater than 0)")
+	}
+
+	if aggregatePartitionSize <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate partition size (must be strictly greater than 0)")
+	}
+
+	if batchSize > rawPartitionSize {
+		valid = false
+
+		logger.Println("Error: Invalid batch size (must be greater than raw partition size)")
+	}
+
+	if aggregateResolution > aggregateSize {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate resolution (must be greater than aggregate size)")
+	}
+
+	if aggregateSize > aggregatePartitionSize {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate size (must be greater than aggregate partition size)")
+	}
+
+	return valid
+}
+
+// ValidateRemote checks if the configuration is consistent with the remote constant values
+func (c *Config) ValidateRemote(states types.Stater) bool {
+	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
+		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
+	valid := true
+
+	for _, name := range names {
+		local := c.String(name)
+
+		var remote string
+
+		retry.Print(func() error {
+			return states.Read(name, &remote)
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't read "+name+" state",
+			"Resolved: Read "+name+" state")
+
+		if local != remote {
+			valid = false
+
+			logger.Printf("Error: Local and remote value for %s doesn't match", name)
+		}
+	}
+
+	return valid
+}
+
+// WriteRemote writes the remote constant values if they do not exist
+func (c *Config) WriteRemote(states types.Stater) {
+	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
+		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
+
+	for _, name := range names {
+		value := c.String(name)
+
+		retry.Print(func() error {
+			return states.Write(name, value)
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't write "+name+" state",
+			"Resolved: Write "+name+" state")
+	}
 }
 
 // Return file paths

@@ -10,7 +10,7 @@ import (
 )
 
 type WriteMetrics struct {
-	indexer types.MetricIndexer
+	indexer types.Indexer
 	writer  types.MetricWriter
 }
 

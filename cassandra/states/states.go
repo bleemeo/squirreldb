@@ -74,12 +74,22 @@ func (c *CassandraStates) Update(name string, value interface{}) error {
 	return err
 }
 
-// Write writes the state in the states table
+// Write writes the state in the states table only if it does not exist
 func (c *CassandraStates) Write(name string, value interface{}) error {
+	statesTableSelectStateQuery := c.statesTableSelectStateQuery(name)
+
+	err := statesTableSelectStateQuery.Scan(nil)
+
+	if (err != nil) && (err != gocql.ErrNotFound) {
+		return err
+	} else if err != gocql.ErrNotFound {
+		return nil
+	}
+
 	valueString := fmt.Sprint(value)
 	statesTableInsertStateQuery := c.statesTableInsertStateQuery(name, valueString)
 
-	err := statesTableInsertStateQuery.Exec()
+	err = statesTableInsertStateQuery.Exec()
 
 	return err
 }
@@ -90,7 +100,6 @@ func (c *CassandraStates) statesTableInsertStateQuery(name string, value string)
 	query := c.session.Query(replacer.Replace(`
 		INSERT INTO $STATES_TABLE (name, value)
 		VALUES (?, ?)
-		IF NOT EXISTS
 	`), name, value)
 
 	return query
