@@ -18,7 +18,7 @@ import (
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/redis"
-	"squirreldb/remote_storage"
+	"squirreldb/remotestorage"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -60,7 +60,7 @@ func main() {
 	squirrelBatchSize := squirrelConfig.Int64("batch.size")
 	squirrelBatch := batch.New(squirrelBatchSize, squirrelRedis, squirrelTSDB, squirrelTSDB)
 	listenAddress := squirrelConfig.String("remote_storage.listen_address")
-	squirrelRemoteStorage := remote_storage.New(listenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
+	squirrelRemoteStorage := remotestorage.New(listenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
 
 	squirrelConfig.WriteRemote(squirrelStates)
 

@@ -1,4 +1,4 @@
-package remote_storage
+package remotestorage
 
 import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -19,7 +19,7 @@ const (
 )
 
 //nolint: gochecknoglobals
-var logger = log.New(os.Stdout, "[remote_storage] ", log.LstdFlags)
+var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type RemoteStorage struct {
 	readMetrics  ReadMetrics
