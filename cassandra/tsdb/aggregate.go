@@ -13,8 +13,7 @@ import (
 
 const (
 	shardStatePrefix = "shard_"
-	shards           = 60.
-	shardsPeriod     = 60.
+	shards           = 60
 )
 
 const (
@@ -35,7 +34,8 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	c.aggregateInit()
 
 	shard := rand.Intn(shards) + 1
-	interval := (shardsPeriod / shards) * time.Second
+	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shards)
+	interval := (time.Duration(aggregateShardIntended)) * time.Second
 	ticker := time.NewTicker(interval)
 
 	defer ticker.Stop()

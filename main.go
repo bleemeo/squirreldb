@@ -216,12 +216,13 @@ func createSquirrelStates(session *gocql.Session, keyspace string) *states.Cassa
 
 func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, index *index.CassandraIndex, locks *locks.CassandraLocks, states *states.CassandraStates) *tsdb.CassandraTSDB {
 	options := tsdb.Options{
-		DefaultTimeToLive:      config.Int64("cassandra.default_time_to_live"),
-		BatchSize:              config.Int64("batch.size"),
-		RawPartitionSize:       config.Int64("cassandra.partition_size.raw"),
-		AggregateResolution:    config.Int64("cassandra.aggregate.resolution"),
-		AggregateSize:          config.Int64("cassandra.aggregate.size"),
-		AggregatePartitionSize: config.Int64("cassandra.partition_size.aggregate"),
+		DefaultTimeToLive:         config.Int64("cassandra.default_time_to_live"),
+		BatchSize:                 config.Int64("batch.size"),
+		RawPartitionSize:          config.Int64("cassandra.partition_size.raw"),
+		AggregatePartitionSize:    config.Int64("cassandra.partition_size.aggregate"),
+		AggregateResolution:       config.Int64("cassandra.aggregate.resolution"),
+		AggregateSize:             config.Int64("cassandra.aggregate.size"),
+		AggregateIntendedDuration: config.Int64("cassandra.aggregate.intended_duration"),
 	}
 
 	var squirrelTSDB *tsdb.CassandraTSDB

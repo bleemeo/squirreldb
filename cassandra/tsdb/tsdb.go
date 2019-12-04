@@ -19,12 +19,13 @@ const (
 var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {
-	DefaultTimeToLive      int64
-	BatchSize              int64
-	RawPartitionSize       int64
-	AggregateResolution    int64
-	AggregateSize          int64
-	AggregatePartitionSize int64
+	DefaultTimeToLive         int64
+	BatchSize                 int64
+	RawPartitionSize          int64
+	AggregatePartitionSize    int64
+	AggregateResolution       int64
+	AggregateSize             int64
+	AggregateIntendedDuration int64
 
 	dataTable          string
 	aggregateDataTable string
