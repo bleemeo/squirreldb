@@ -1,4 +1,4 @@
-package prometheus
+package remote_storage
 
 import (
 	"github.com/prometheus/prometheus/prompb"
@@ -74,7 +74,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	readRequestSeconds.Observe(time.Since(start).Seconds())
+	requestsSecondsRead.Observe(time.Since(start).Seconds())
 }
 
 // Returns a MetricLabelMatcher list- generated from LabelMatcher
@@ -208,7 +208,7 @@ func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, fu
 		totalPoints += len(data.Points)
 	}
 
-	readRequestPointsTotal.Add(float64(totalPoints))
+	requestsPointsTotalRead.Add(float64(totalPoints))
 
 	return promTimeseries
 }

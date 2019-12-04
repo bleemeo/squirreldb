@@ -7,40 +7,46 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	addedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "add_points_total",
-		Help:      "Total number of added points to in-memory store",
+	requestsPointsTotalDelete = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_points_total",
+		Help:        "Total points processed (only points in the in-memory store are counter, not points from/to TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "delete"},
 	})
-	addSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "append_seconds",
-		Help:      "Total seconds of adding to in-memory store",
+	requestsPointsTotalRead = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_points_total",
+		Help:        "Total points processed (only points in the in-memory store are counter, not points from/to TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "read"},
 	})
-	readPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "read_points_total",
-		Help:      "Total number of read points from in-memory store",
+	requestsPointsTotalWrite = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_points_total",
+		Help:        "Total points processed (only points in the in-memory store are counter, not points from/to TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
-	readSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "read_seconds",
-		Help:      "Total seconds of reading from in-memory store",
+	requestsSecondsDelete = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (only time for operation on in-memory store is counter, not time spent in TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "delete"},
 	})
-	purgedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "purged_points_total",
-		Help:      "Total number of purged points from in-memory store",
+	requestsSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (only time for operation on in-memory store is counter, not time spent in TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "read"},
 	})
-	purgeSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "batch",
-		Subsystem: "",
-		Name:      "purge_seconds",
-		Help:      "Total seconds of purging from in-memory store",
+	requestsSecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (only time for operation on in-memory store is counter, not time spent in TSDB)",
+		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
 )

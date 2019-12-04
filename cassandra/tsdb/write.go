@@ -24,10 +24,10 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 			return err
 		}
 
-		writtenPointsTotalRaw.Add(float64(len(data.Points)))
+		requestsPointsTotalWriteRaw.Add(float64(len(data.Points)))
 	}
 
-	writeSecondsRaw.Observe(time.Since(start).Seconds())
+	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -45,10 +45,10 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 			return err
 		}
 
-		writtenPointsTotalAggregated.Add(float64(len(aggregatedData.Points)))
+		requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
 	}
 
-	writeSecondsAggregated.Observe(time.Since(start).Seconds())
+	requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -105,7 +105,7 @@ func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggre
 		return err
 	}
 
-	querySecondsWrite.Observe(time.Since(start).Seconds())
+	cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -162,7 +162,7 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.
 		return err
 	}
 
-	querySecondsWrite.Observe(time.Since(start).Seconds())
+	cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
 
 	return nil
 }

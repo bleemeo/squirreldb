@@ -17,8 +17,8 @@ import (
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
 	"squirreldb/debug"
-	"squirreldb/prometheus"
 	"squirreldb/redis"
+	"squirreldb/remote_storage"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -59,8 +59,8 @@ func main() {
 	squirrelRedis := createSquirrelRedis(squirrelConfig)
 	squirrelBatchSize := squirrelConfig.Int64("batch.size")
 	squirrelBatch := batch.New(squirrelBatchSize, squirrelRedis, squirrelTSDB, squirrelTSDB)
-	squirrelPrometheusListenAddress := squirrelConfig.String("prometheus.listen_address")
-	squirrelPrometheus := prometheus.New(squirrelPrometheusListenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
+	listenAddress := squirrelConfig.String("remote_storage.listen_address")
+	squirrelRemoteStorage := remote_storage.New(listenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
 
 	squirrelConfig.WriteRemote(squirrelStates)
 
@@ -98,14 +98,14 @@ func main() {
 
 	go runSquirrelBatch()
 
-	runSquirrelPrometheus := func() {
+	runSquirrelRemoteStorage := func() {
 		defer wg.Done()
-		squirrelPrometheus.Run(ctx)
+		squirrelRemoteStorage.Run(ctx)
 	}
 
 	wg.Add(1)
 
-	go runSquirrelPrometheus()
+	go runSquirrelRemoteStorage()
 
 	logger.Println("SquirrelDB is ready")
 

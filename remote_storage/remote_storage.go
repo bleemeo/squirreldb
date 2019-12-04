@@ -1,4 +1,4 @@
-package prometheus
+package remote_storage
 
 import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -19,16 +19,16 @@ const (
 )
 
 //nolint: gochecknoglobals
-var logger = log.New(os.Stdout, "[prometheus] ", log.LstdFlags)
+var logger = log.New(os.Stdout, "[remote_storage] ", log.LstdFlags)
 
-type Prometheus struct {
+type RemoteStorage struct {
 	readMetrics  ReadMetrics
 	writeMetrics WriteMetrics
 	server       *http.Server
 }
 
-// New creates a new Prometheus object
-func New(listenAddress string, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *Prometheus {
+// New creates a new RemoteStorage object
+func New(listenAddress string, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
 	router := http.NewServeMux()
 	readMetrics := ReadMetrics{
 		indexer: indexer,
@@ -48,24 +48,24 @@ func New(listenAddress string, indexer types.Indexer, reader types.MetricReader,
 		Handler: router,
 	}
 
-	prometheus := &Prometheus{
+	remoteStorage := &RemoteStorage{
 		readMetrics:  readMetrics,
 		writeMetrics: writeMetrics,
 		server:       server,
 	}
 
-	return prometheus
+	return remoteStorage
 }
 
-// Run starts all Prometheus services
-func (p *Prometheus) Run(ctx context.Context) {
+// Run starts all RemoteStorage services
+func (p *RemoteStorage) Run(ctx context.Context) {
 	p.runServer(ctx)
 }
 
 // Starts the server
 // If a stop signal is received, the server will be stopped
 // If 10 seconds after this signal is received, and the server is not stopped, it is forced to stop.
-func (p *Prometheus) runServer(ctx context.Context) {
+func (p *RemoteStorage) runServer(ctx context.Context) {
 	go func() {
 		retry.Print(func() error {
 			err := p.server.ListenAndServe()

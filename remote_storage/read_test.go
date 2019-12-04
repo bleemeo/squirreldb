@@ -1,4 +1,4 @@
-package prometheus
+package remote_storage
 
 import (
 	"github.com/prometheus/prometheus/prompb"

@@ -9,8 +9,8 @@ import (
 
 type Options struct {
 	Addresses         []string
-	ReplicationFactor int
 	Keyspace          string
+	ReplicationFactor int
 }
 
 // New creates a new Cassandra object

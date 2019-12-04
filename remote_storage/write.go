@@ -1,4 +1,4 @@
-package prometheus
+package remote_storage
 
 import (
 	"github.com/prometheus/prometheus/prompb"
@@ -37,7 +37,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		"Error: Can't write metrics with the writer",
 		"Resolved: Read metrics with the writer")
 
-	writeRequestSeconds.Observe(time.Since(start).Seconds())
+	requestsSecondsWrite.Observe(time.Since(start).Seconds())
 }
 
 // Returns a MetricLabel list generated from a Label list
@@ -112,7 +112,7 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels 
 		totalPoints += len(data.Points)
 	}
 
-	writeRequestPointsTotal.Add(float64(totalPoints))
+	requestsPointsTotalWrite.Add(float64(totalPoints))
 
 	return metrics
 }

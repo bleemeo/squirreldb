@@ -7,74 +7,74 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	querySecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	cassandraQueriesSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "query_seconds",
-		Help:        "Total seconds of querying Cassandra",
-		ConstLabels: prometheus.Labels{"type": "read"},
+		Name:        "cassandra_queries_seconds",
+		Help:        "Total processing time spent in Cassandra queries in seconds",
+		ConstLabels: prometheus.Labels{"operation": "read"},
 	})
-	querySecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	cassandraQueriesSecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "query_seconds",
-		Help:        "Total seconds of querying Cassandra",
-		ConstLabels: prometheus.Labels{"type": "write"},
+		Name:        "cassandra_queries_seconds",
+		Help:        "Total processing time spent in Cassandra queries in seconds",
+		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
-	readPointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
+	requestsPointsTotalReadAggregated = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "read_points_total",
-		Help:        "Total number of read points from Cassandra after temporal filtering and deduplication",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
+		Name:        "requests_points_total",
+		Help:        "Total points processed by persistent TSDB (after temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "read", "type": "aggregated"},
 	})
-	readPointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
+	requestsPointsTotalReadRaw = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "read_points_total",
-		Help:        "Total number of read points from Cassandra after temporal filtering and deduplication",
-		ConstLabels: prometheus.Labels{"type": "raw"},
+		Name:        "requests_points_total",
+		Help:        "Total points processed by persistent TSDB (after temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "read", "type": "raw"},
 	})
-	readSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	requestsPointsTotalWriteAggregated = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "read_seconds",
-		Help:        "Total seconds of reading, including Cassandra querying, temporal filtering and deduplication",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
+		Name:        "requests_points_total",
+		Help:        "Total points processed by persistent TSDB (after temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "write", "type": "aggregated"},
 	})
-	readSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	requestsPointsTotalWriteRaw = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "read_seconds",
-		Help:        "Total seconds of reading, including Cassandra querying, temporal filtering and deduplication",
-		ConstLabels: prometheus.Labels{"type": "raw"},
+		Name:        "requests_points_total",
+		Help:        "Total points processed by persistent TSDB (after temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "write", "type": "raw"},
 	})
-	writtenPointsTotalAggregated = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
+	requestsSecondsReadAggregated = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "written_points_total",
-		Help:        "Total number of written points to Cassandra after deduplication",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (including Cassandra querying, temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "read", "type": "aggregated"},
 	})
-	writtenPointsTotalRaw = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "cassandra",
+	requestsSecondsReadRaw = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "written_points_total",
-		Help:        "Total number of written points to Cassandra after deduplication",
-		ConstLabels: prometheus.Labels{"type": "raw"},
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (including Cassandra querying, temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "read", "type": "raw"},
 	})
-	writeSecondsAggregated = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	requestsSecondsWriteAggregated = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "write_seconds",
-		Help:        "Total seconds of writing, including Cassandra querying and deduplication",
-		ConstLabels: prometheus.Labels{"type": "aggregated"},
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (including Cassandra querying, temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "write", "type": "aggregated"},
 	})
-	writeSecondsRaw = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "cassandra",
+	requestsSecondsWriteRaw = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
-		Name:        "write_seconds",
-		Help:        "Total seconds of writing, including Cassandra querying and deduplication",
-		ConstLabels: prometheus.Labels{"type": "raw"},
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds (including Cassandra querying, temporal filtering and deduplication)",
+		ConstLabels: prometheus.Labels{"operation": "write", "type": "raw"},
 	})
 )

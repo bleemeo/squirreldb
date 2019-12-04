@@ -170,8 +170,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		purgedPointsCount += len(data.Points) - len(dataToSet.Points)
 	}
 
-	readPointsTotal.Add(float64(readPointsCount))
-	readSeconds.Observe(readDuration.Seconds())
+	requestsPointsTotalRead.Add(float64(readPointsCount))
+	requestsSecondsRead.Observe(readDuration.Seconds())
 
 	retry.Print(func() error {
 		return b.writer.Write(metricsToWrite)
@@ -193,8 +193,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage")
 
-	purgedPointsTotal.Add(float64(purgedPointsCount))
-	purgeSeconds.Observe(purgeDuration.Seconds())
+	requestsPointsTotalDelete.Add(float64(purgedPointsCount))
+	requestsSecondsDelete.Observe(purgeDuration.Seconds())
 }
 
 // Flushes the points corresponding to the status list of the specified metric
@@ -343,8 +343,8 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 		readPointsCount += len(data.Points)
 	}
 
-	readPointsTotal.Add(float64(readPointsCount))
-	readSeconds.Observe(readDuration.Seconds())
+	requestsPointsTotalRead.Add(float64(readPointsCount))
+	requestsSecondsRead.Observe(readDuration.Seconds())
 
 	return temporaryMetrics, nil
 }
@@ -436,8 +436,8 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		"Error: Can't append metrics points in the temporary storage",
 		"Resolved: Append metrics points in the temporary storage")
 
-	addedPointsTotal.Add(float64(addedPointsCount))
-	addSeconds.Observe(addDuration.Seconds())
+	requestsPointsTotalWrite.Add(float64(addedPointsCount))
+	requestsSecondsWrite.Observe(addDuration.Seconds())
 
 	if len(states) != 0 {
 		b.flush(states, now)

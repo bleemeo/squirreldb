@@ -79,8 +79,8 @@ func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, 
 
 	aggregateData.Points = types.PointsDeduplicate(aggregateData.Points)
 
-	readPointsTotalAggregated.Add(float64(len(aggregateData.Points)))
-	readSecondsAggregated.Observe(time.Since(start).Seconds())
+	requestsPointsTotalReadAggregated.Add(float64(len(aggregateData.Points)))
+	requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
 
 	return aggregateData, nil
 }
@@ -120,7 +120,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 		start = time.Now()
 	}
 
-	querySecondsRead.Observe(duration.Seconds())
+	cassandraQueriesSecondsRead.Observe(duration.Seconds())
 
 	return aggregatePartitionData, nil
 }
@@ -146,8 +146,8 @@ func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTime
 
 	rawData.Points = types.PointsDeduplicate(rawData.Points)
 
-	readPointsTotalRaw.Add(float64(len(rawData.Points)))
-	readSecondsRaw.Observe(time.Since(start).Seconds())
+	requestsPointsTotalReadRaw.Add(float64(len(rawData.Points)))
+	requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
 
 	return rawData, nil
 }
@@ -187,7 +187,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 		start = time.Now()
 	}
 
-	querySecondsRead.Observe(duration.Seconds())
+	cassandraQueriesSecondsRead.Observe(duration.Seconds())
 
 	return rawPartitionData, nil
 }

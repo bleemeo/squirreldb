@@ -15,16 +15,16 @@ var flags = []flag{
 		usage: "Set the Cassandra cluster addresses",
 	},
 	{
-		name:  "prometheus.listen_address",
-		short: "",
-		value: "localhost:1234",
-		usage: "Set the Prometheus listen address",
-	},
-	{
 		name:  "redis.address",
 		short: "",
 		value: "localhost:6379",
 		usage: "Set the Redis address",
+	},
+	{
+		name:  "remote_storage.listen_address",
+		short: "",
+		value: "localhost:1234",
+		usage: "Set the remote storage listen address",
 	},
 	{
 		name:  "bypass-validate",
