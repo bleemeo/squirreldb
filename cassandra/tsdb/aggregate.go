@@ -83,7 +83,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 	runAggregateLockUpdate := func() {
 		defer wg.Done()
-		c.aggregateLockUpdate(name, ctx)
+		c.aggregateLockUpdate(ctx, name)
 	}
 
 	wg.Add(1)
@@ -154,7 +154,7 @@ func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
 }
 
 // Updates the specified lock until a signal is received
-func (c *CassandraTSDB) aggregateLockUpdate(name string, ctx context.Context) {
+func (c *CassandraTSDB) aggregateLockUpdate(ctx context.Context, name string) {
 	interval := lockUpdateInterval * time.Second
 	ticker := time.NewTicker(interval)
 
