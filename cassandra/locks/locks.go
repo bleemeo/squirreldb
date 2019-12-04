@@ -13,11 +13,11 @@ type CassandraLocks struct {
 	session    *gocql.Session
 	locksTable string
 
-	instance *types.Instance
+	instance types.Instance
 }
 
 // New creates a new CassandraLocks object
-func New(session *gocql.Session, keyspace string, instance *types.Instance) (*CassandraLocks, error) {
+func New(session *gocql.Session, keyspace string, instance types.Instance) (*CassandraLocks, error) {
 	locksTable := keyspace + "." + tableName
 
 	locksTableCreateQuery := locksTableCreateQuery(session, locksTable)

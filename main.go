@@ -119,7 +119,7 @@ func main() {
 
 	go func() {
 		wg.Wait()
-		waitChan <- true
+		close(waitChan)
 	}()
 
 	select {
@@ -136,11 +136,11 @@ func main() {
 	logger.Println("SquirrelDB is stopped")
 }
 
-func createInstance() *types.Instance {
+func createInstance() types.Instance {
 	hostname, _ := os.Hostname()
 	uuid, _ := gouuid.NewV4()
 
-	instance := &types.Instance{
+	instance := types.Instance{
 		Hostname: hostname,
 		UUID:     uuid.String(),
 	}
@@ -184,7 +184,7 @@ func createSquirrelIndex(session *gocql.Session, keyspace string) *index.Cassand
 	return squirrelIndex
 }
 
-func createSquirrelLocks(session *gocql.Session, keyspace string, instance *types.Instance) *locks.CassandraLocks {
+func createSquirrelLocks(session *gocql.Session, keyspace string, instance types.Instance) *locks.CassandraLocks {
 	var squirrelLocks *locks.CassandraLocks
 
 	retry.Print(func() error {

@@ -7,6 +7,7 @@ import (
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -76,9 +77,18 @@ func (c *CassandraTSDB) aggregate(shard int) {
 		return
 	}
 
-	endChan := make(chan bool)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	go c.aggregateLockUpdate(name, endChan)
+	var wg sync.WaitGroup
+
+	runAggregateLockUpdate := func() {
+		defer wg.Done()
+		c.aggregateLockUpdate(name, ctx)
+	}
+
+	wg.Add(1)
+
+	go runAggregateLockUpdate()
 
 	var fromTimestamp int64
 
@@ -94,7 +104,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	isSafeMargin := (now.Unix() % 86400) >= safeMargin // Authorizes aggregation if it is more than 1 a.m.
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
-		close(endChan)
+		cancel()
 		c.aggregateLockDelete(name)
 
 		return
@@ -114,7 +124,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
 	}
 
-	close(endChan)
+	cancel()
 	c.aggregateLockDelete(name)
 }
 
@@ -144,13 +154,13 @@ func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
 }
 
 // Updates the specified lock until a signal is received
-func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
+func (c *CassandraTSDB) aggregateLockUpdate(name string, ctx context.Context) {
 	interval := lockUpdateInterval * time.Second
 	ticker := time.NewTicker(interval)
 
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
 			retry.Print(func() error {
@@ -158,7 +168,7 @@ func (c *CassandraTSDB) aggregateLockUpdate(name string, endChan chan bool) {
 			}, retry.NewExponentialBackOff(30*time.Second), logger,
 				"Error: Can't update "+name+" lock",
 				"Resolved: Update "+name+" lock")
-		case <-endChan:
+		case <-ctx.Done():
 			return
 		}
 	}
