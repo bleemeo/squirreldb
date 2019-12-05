@@ -1,13 +1,11 @@
 package index
 
 import (
-	"fmt"
 	"github.com/gocql/gocql"
 	"regexp"
 	"squirreldb/types"
 	"strings"
 	"sync"
-	"time"
 )
 
 const (
@@ -73,17 +71,16 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 }
 
 func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
-	selectLabelsQuery := c.selectLabelsQuery(uuid.String())
-
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	selectLabelsQuery := c.selectLabelsQuery(uuid.String())
 
 	for uuidIt, labels := range c.pairs {
 		if uuidIt == uuid {
 			return labels, nil
 		}
 	}
-
-	c.mutex.Unlock()
 
 	var m map[string]string
 
@@ -93,27 +90,22 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 
 	labels := types.LabelsFromMap(m)
 
-	c.mutex.Lock()
-
 	c.pairs[uuid] = labels
-
-	c.mutex.Unlock()
 
 	return labels, nil
 }
 
 func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, error) {
-	sortedLabels := types.SortLabels(labels)
-
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	sortedLabels := types.SortLabels(labels)
 
 	for uuid, label := range c.pairs {
 		if types.EqualLabels(label, sortedLabels) {
 			return uuid, nil
 		}
 	}
-
-	c.mutex.Unlock()
 
 	str := types.StringFromLabels(labels)
 
@@ -167,18 +159,12 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		}
 	}
 
-	c.mutex.Lock()
-
 	c.pairs[uuid] = labels
-
-	c.mutex.Unlock()
 
 	return uuid, nil
 }
 
 func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([]types.MetricUUID, error) {
-	start := time.Now()
-
 	targetLabels, err := c.findTargetLabels(matchers)
 
 	if err != nil {
@@ -198,8 +184,6 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 			uuids = append(uuids, uuid)
 		}
 	}
-
-	fmt.Println("Load time:", time.Since(start))
 
 	return uuids, nil
 }
