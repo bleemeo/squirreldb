@@ -2,6 +2,7 @@ package index
 
 import (
 	"github.com/gocql/gocql"
+	gouuid "github.com/gofrs/uuid"
 	"regexp"
 	"squirreldb/types"
 	"strings"
@@ -74,13 +75,13 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	selectLabelsQuery := c.selectLabelsQuery(uuid.String())
-
 	for uuidIt, labels := range c.pairs {
 		if uuidIt == uuid {
 			return labels, nil
 		}
 	}
+
+	selectLabelsQuery := c.selectLabelsQuery(uuid.String())
 
 	var m map[string]string
 
@@ -108,7 +109,6 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	}
 
 	str := types.StringFromLabels(labels)
-
 	selectUUIDQuery := c.selectUUIDQuery(str)
 
 	var cqlUUID gocql.UUID
@@ -116,11 +116,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	if err := selectUUIDQuery.Scan(&cqlUUID); (err != nil) && (err != gocql.ErrNotFound) {
 		return types.MetricUUID{}, err
 	} else if err != gocql.ErrNotFound {
-		uuid, err := types.UUIDFromString(cqlUUID.String())
-
-		if err != nil {
-			return types.MetricUUID{}, err
-		}
+		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 		return uuid, nil
 	}
@@ -131,11 +127,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return types.MetricUUID{}, err
 	}
 
-	uuid, err := types.UUIDFromString(cqlUUID.String())
-
-	if err != nil {
-		return types.MetricUUID{}, err
-	}
+	uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 	m := types.MapFromLabels(labels)
 
@@ -256,11 +248,7 @@ func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.Metri
 
 		for selectUUIDsIter.Scan(&scanUUIDs) {
 			for _, scanUUID := range scanUUIDs {
-				labelUUID, err := types.UUIDFromString(scanUUID.String())
-
-				if err != nil {
-					return nil, nil
-				}
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -282,11 +270,7 @@ func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.Metri
 
 		for selectUUIDsIter.Scan(&scanUUIDs) {
 			for _, scanUUID := range scanUUIDs {
-				labelUUID, err := types.UUIDFromString(scanUUID.String())
-
-				if err != nil {
-					return nil, nil
-				}
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -308,11 +292,7 @@ func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.Metri
 
 		for selectUUIDsIter.Scan(&scanUUIDs) {
 			for _, scanUUID := range scanUUIDs {
-				labelUUID, err := types.UUIDFromString(scanUUID.String())
-
-				if err != nil {
-					return nil, nil
-				}
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
