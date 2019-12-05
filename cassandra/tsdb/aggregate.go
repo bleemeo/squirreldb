@@ -73,7 +73,7 @@ func (c *CassandraTSDB) aggregateInit() {
 func (c *CassandraTSDB) aggregate(shard int) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
-	if applied := c.aggregateLockWrite(name); !applied {
+	if applied := c.writeAggregateLock(name); !applied {
 		return
 	}
 
@@ -83,7 +83,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 	runAggregateLockUpdate := func() {
 		defer wg.Done()
-		c.aggregateLockUpdate(ctx, name)
+		c.updateAggregateLock(ctx, name)
 	}
 
 	wg.Add(1)
@@ -105,7 +105,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
 		cancel()
-		c.aggregateLockDelete(name)
+		c.deleteAggregateLock(name)
 
 		return
 	}
@@ -125,53 +125,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	}
 
 	cancel()
-	c.aggregateLockDelete(name)
-}
-
-// Deletes the specified lock
-func (c *CassandraTSDB) aggregateLockDelete(name string) {
-	retry.Print(func() error {
-		return c.locker.Delete(name)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't delete "+name+" lock",
-		"Resolved: Delete "+name+" lock")
-}
-
-// Returns a boolean if the specified lock was written or not
-func (c *CassandraTSDB) aggregateLockWrite(name string) bool {
-	var applied bool
-
-	retry.Print(func() error {
-		var err error
-		applied, err = c.locker.Write(name, lockTimeToLive)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't write "+name+" lock",
-		"Resolved: Write "+name+" lock")
-
-	return applied
-}
-
-// Updates the specified lock until a signal is received
-func (c *CassandraTSDB) aggregateLockUpdate(ctx context.Context, name string) {
-	interval := lockUpdateInterval * time.Second
-	ticker := time.NewTicker(interval)
-
-	defer ticker.Stop()
-
-	for ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			retry.Print(func() error {
-				return c.locker.Update(name, lockTimeToLive)
-			}, retry.NewExponentialBackOff(30*time.Second), logger,
-				"Error: Can't update "+name+" lock",
-				"Resolved: Update "+name+" lock")
-		case <-ctx.Done():
-			return
-		}
-	}
+	c.deleteAggregateLock(name)
 }
 
 // Aggregates metrics belonging to the shard by aggregation batch size
@@ -215,4 +169,50 @@ func (c *CassandraTSDB) readAggregateWrite(uuids []types.MetricUUID, fromTimesta
 	err = c.writeAggregate(aggregatedMetrics)
 
 	return err
+}
+
+// Deletes the specified lock
+func (c *CassandraTSDB) deleteAggregateLock(name string) {
+	retry.Print(func() error {
+		return c.locker.Delete(name)
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't delete "+name+" lock",
+		"Resolved: Delete "+name+" lock")
+}
+
+// Returns a boolean if the specified lock was written or not
+func (c *CassandraTSDB) writeAggregateLock(name string) bool {
+	var applied bool
+
+	retry.Print(func() error {
+		var err error
+		applied, err = c.locker.Write(name, lockTimeToLive)
+
+		return err
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't write "+name+" lock",
+		"Resolved: Write "+name+" lock")
+
+	return applied
+}
+
+// Updates the specified lock until a signal is received
+func (c *CassandraTSDB) updateAggregateLock(ctx context.Context, name string) {
+	interval := lockUpdateInterval * time.Second
+	ticker := time.NewTicker(interval)
+
+	defer ticker.Stop()
+
+	for ctx.Err() == nil {
+		select {
+		case <-ticker.C:
+			retry.Print(func() error {
+				return c.locker.Update(name, lockTimeToLive)
+			}, retry.NewExponentialBackOff(30*time.Second), logger,
+				"Error: Can't update "+name+" lock",
+				"Resolved: Update "+name+" lock")
+		case <-ctx.Done():
+			return
+		}
+	}
 }

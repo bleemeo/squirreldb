@@ -124,12 +124,12 @@ func TestLabelsContains(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := LabelsContains(tt.args.labels, tt.args.name)
+			got, got1 := ContainsLabels(tt.args.labels, tt.args.name)
 			if got != tt.want {
-				t.Errorf("LabelsContains() got = %v, want %v", got, tt.want)
+				t.Errorf("ContainsLabels() got = %v, want %v", got, tt.want)
 			}
 			if got1 != tt.want1 {
-				t.Errorf("LabelsContains() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("ContainsLabels() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}
@@ -290,8 +290,8 @@ func TestLabelsEqual(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := LabelsEqual(tt.args.labels, tt.args.reference); got != tt.want {
-				t.Errorf("LabelsEqual() = %v, want %v", got, tt.want)
+			if got := EqualLabels(tt.args.labels, tt.args.reference); got != tt.want {
+				t.Errorf("EqualLabels() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -489,8 +489,8 @@ func TestLabelsSort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := LabelsSort(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("LabelsSort() = %v, want %v", got, tt.want)
+			if got := SortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SortLabels() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -722,8 +722,8 @@ func TestPointsDeduplicate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := PointsDeduplicate(tt.args.points); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("PointsDeduplicate() = %v, want %v", got, tt.want)
+			if got := DeduplicatePoints(tt.args.points); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DeduplicatePoints() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -853,8 +853,8 @@ func TestPointsSort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := PointsSort(tt.args.points); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("PointsSort() = %v, want %v", got, tt.want)
+			if got := SortPoints(tt.args.points); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SortPoints() = %v, want %v", got, tt.want)
 			}
 		})
 	}

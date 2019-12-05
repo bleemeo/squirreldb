@@ -68,10 +68,10 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) types.MetricUUID {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	reference := types.LabelsSort(labels)
+	reference := types.SortLabels(labels)
 
 	for uuid, labels := range c.pairs {
-		if types.LabelsEqual(labels, reference) {
+		if types.EqualLabels(labels, reference) {
 			return uuid
 		}
 	}
@@ -107,7 +107,7 @@ forLoop:
 		}
 
 		for _, matcher := range matchers {
-			contains, value := types.LabelsContains(labels, matcher.Name)
+			contains, value := types.ContainsLabels(labels, matcher.Name)
 
 			if !contains || (value != matcher.Value) {
 				continue forLoop
@@ -200,7 +200,7 @@ func loadPairs(session *gocql.Session, indexTable string) map[types.MetricUUID][
 
 // Returns a MetricUUID generated from a MetricLabels list
 func uuidFromLabels(labels []types.MetricLabel) types.MetricUUID {
-	contains, uuidString := types.LabelsContains(labels, "__bleemeo_uuid__")
+	contains, uuidString := types.ContainsLabels(labels, "__bleemeo_uuid__")
 
 	var (
 		uuid types.MetricUUID

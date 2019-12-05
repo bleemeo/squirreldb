@@ -46,8 +46,8 @@ func (m *MetricUUID) Uint64() uint64 {
 	return bigInt.Uint64()
 }
 
-// LabelsContains returns a bool and a string
-func LabelsContains(labels []MetricLabel, name string) (bool, string) {
+// ContainsLabels returns a bool and a string
+func ContainsLabels(labels []MetricLabel, name string) (bool, string) {
 	if len(labels) == 0 {
 		return false, ""
 	}
@@ -61,8 +61,33 @@ func LabelsContains(labels []MetricLabel, name string) (bool, string) {
 	return false, ""
 }
 
-// LabelsEqual returns a boolean defined by the equality of the specified MetricLabel
-func LabelsEqual(labels, reference []MetricLabel) bool {
+// DeduplicatePoints returns the MetricPoint list deduplicated and sorted by timestamp
+func DeduplicatePoints(points []MetricPoint) []MetricPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	sortedPoints := SortPoints(points)
+
+	i := 0
+
+	for j, length := 0, len(sortedPoints); j < length; j++ {
+		if sortedPoints[i].Timestamp == sortedPoints[j].Timestamp {
+			continue
+		}
+
+		i++
+
+		sortedPoints[i] = sortedPoints[j]
+	}
+
+	deduplicatedPoints := sortedPoints[:(i + 1)]
+
+	return deduplicatedPoints
+}
+
+// EqualLabels returns a boolean defined by the equality of the specified MetricLabel
+func EqualLabels(labels, reference []MetricLabel) bool {
 	if len(labels) != len(reference) {
 		return false
 	}
@@ -111,23 +136,6 @@ func LabelsFromMap(m map[string]string) []MetricLabel {
 	return labels
 }
 
-// LabelsSort returns the MetricLabel list sorted by name
-func LabelsSort(labels []MetricLabel) []MetricLabel {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	sortedLabels := make([]MetricLabel, len(labels))
-
-	copy(sortedLabels, labels)
-
-	sort.Slice(sortedLabels, func(i, j int) bool {
-		return sortedLabels[i].Name < sortedLabels[j].Name
-	})
-
-	return sortedLabels
-}
-
 // MapFromLabels returns a map generated from a MetricLabel list
 func MapFromLabels(labels []MetricLabel) map[string]string {
 	if len(labels) == 0 {
@@ -143,33 +151,25 @@ func MapFromLabels(labels []MetricLabel) map[string]string {
 	return m
 }
 
-// PointsDeduplicate returns the MetricPoint list deduplicated and sorted by timestamp
-func PointsDeduplicate(points []MetricPoint) []MetricPoint {
-	if len(points) == 0 {
+// SortLabels returns the MetricLabel list sorted by name
+func SortLabels(labels []MetricLabel) []MetricLabel {
+	if len(labels) == 0 {
 		return nil
 	}
 
-	sortedPoints := PointsSort(points)
+	sortedLabels := make([]MetricLabel, len(labels))
 
-	i := 0
+	copy(sortedLabels, labels)
 
-	for j, length := 0, len(sortedPoints); j < length; j++ {
-		if sortedPoints[i].Timestamp == sortedPoints[j].Timestamp {
-			continue
-		}
+	sort.Slice(sortedLabels, func(i, j int) bool {
+		return sortedLabels[i].Name < sortedLabels[j].Name
+	})
 
-		i++
-
-		sortedPoints[i] = sortedPoints[j]
-	}
-
-	deduplicatedPoints := sortedPoints[:(i + 1)]
-
-	return deduplicatedPoints
+	return sortedLabels
 }
 
-// PointsSort returns the MetricPoint list sorted by timestamp
-func PointsSort(points []MetricPoint) []MetricPoint {
+// SortPoints returns the MetricPoint list sorted by timestamp
+func SortPoints(points []MetricPoint) []MetricPoint {
 	if len(points) == 0 {
 		return nil
 	}

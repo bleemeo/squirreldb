@@ -36,8 +36,8 @@ func Aggregate(metrics map[types.MetricUUID]types.MetricData, resolution int64) 
 	return aggregatedMetrics
 }
 
-// PointsSort returns the AggregatedPoint list sorted by timestamp
-func PointsSort(aggregatedPoints []AggregatedPoint) []AggregatedPoint {
+// SortPoints returns the AggregatedPoint list sorted by timestamp
+func SortPoints(aggregatedPoints []AggregatedPoint) []AggregatedPoint {
 	if len(aggregatedPoints) == 0 {
 		return nil
 	}

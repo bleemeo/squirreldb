@@ -251,8 +251,8 @@ func TestPointsSort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := PointsSort(tt.args.aggregatedPoints); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("PointsSort() = %v, want %v", got, tt.want)
+			if got := SortPoints(tt.args.aggregatedPoints); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SortPoints() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -337,7 +337,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 			}
 		}
 
-		temporaryData.Points = types.PointsDeduplicate(temporaryData.Points)
+		temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
 		temporaryMetrics[uuid] = temporaryData
 
 		readPointsCount += len(data.Points)

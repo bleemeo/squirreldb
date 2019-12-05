@@ -61,7 +61,7 @@ func (c *CassandraTSDB) writeAggregateData(uuid types.MetricUUID, aggregatedData
 
 	baseTimestampAggregatedPoints := make(map[int64][]aggregate.AggregatedPoint)
 
-	aggregatedData.Points = aggregate.PointsSort(aggregatedData.Points)
+	aggregatedData.Points = aggregate.SortPoints(aggregatedData.Points)
 
 	for _, aggregatedPoint := range aggregatedData.Points {
 		baseTimestamp := aggregatedPoint.Timestamp - (aggregatedPoint.Timestamp % c.options.AggregatePartitionSize)
@@ -118,7 +118,7 @@ func (c *CassandraTSDB) writeRawData(uuid types.MetricUUID, data types.MetricDat
 
 	baseTimestampPoints := make(map[int64][]types.MetricPoint)
 
-	data.Points = types.PointsDeduplicate(data.Points)
+	data.Points = types.DeduplicatePoints(data.Points)
 
 	for _, point := range data.Points {
 		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)

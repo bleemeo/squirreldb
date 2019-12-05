@@ -77,7 +77,7 @@ func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, 
 		aggregateData.TimeToLive = compare.MaxInt64(aggregateData.TimeToLive, aggregatePartitionData.TimeToLive)
 	}
 
-	aggregateData.Points = types.PointsDeduplicate(aggregateData.Points)
+	aggregateData.Points = types.DeduplicatePoints(aggregateData.Points)
 
 	requestsPointsTotalReadAggregated.Add(float64(len(aggregateData.Points)))
 	requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
@@ -144,7 +144,7 @@ func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTime
 		rawData.TimeToLive = compare.MaxInt64(rawData.TimeToLive, partitionData.TimeToLive)
 	}
 
-	rawData.Points = types.PointsDeduplicate(rawData.Points)
+	rawData.Points = types.DeduplicatePoints(rawData.Points)
 
 	requestsPointsTotalReadRaw.Add(float64(len(rawData.Points)))
 	requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
