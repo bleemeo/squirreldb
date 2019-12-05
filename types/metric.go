@@ -2,6 +2,7 @@ package types
 
 import (
 	gouuid "github.com/gofrs/uuid"
+	"strings"
 
 	"math/big"
 	"sort"
@@ -183,6 +184,24 @@ func SortPoints(points []MetricPoint) []MetricPoint {
 	})
 
 	return sortedPoints
+}
+
+// StringFromLabels returns a string generated from a MetricLabel list
+func StringFromLabels(labels []MetricLabel) string {
+	sortedLabels := SortLabels(labels)
+
+	strLabels := make([]string, 0, len(labels))
+
+	for _, label := range sortedLabels {
+		label.Value = strings.ReplaceAll(label.Value, `"`, `\"`)
+		str := label.Name + ":" + label.Value
+
+		strLabels = append(strLabels, str)
+	}
+
+	str := strings.Join(strLabels, ",")
+
+	return str
 }
 
 // UUIDFromString returns a MetricUUID generated from a string

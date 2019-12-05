@@ -1,9 +1,9 @@
 package types
 
 type Indexer interface {
-	Labels(uuid MetricUUID) []MetricLabel
-	UUID(labels []MetricLabel) MetricUUID
-	UUIDs(matchers []MetricLabelMatcher, all bool) []MetricUUID
+	Labels(uuid MetricUUID) ([]MetricLabel, error)
+	UUID(labels []MetricLabel) (MetricUUID, error)
+	UUIDs(matchers []MetricLabelMatcher, all bool) ([]MetricUUID, error)
 }
 
 type MetricReader interface {

@@ -29,7 +29,20 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	metrics := metricsFromTimeseries(writeRequest.Timeseries, w.indexer.UUID)
+	metrics := metricsFromTimeseries(writeRequest.Timeseries, func(labels []types.MetricLabel) types.MetricUUID {
+		var uuid types.MetricUUID
+
+		retry.Print(func() error {
+			var err error
+			uuid, err = w.indexer.UUID(labels)
+
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't get UUID from the index",
+			"Resolved: Get UUID from the index")
+
+		return uuid
+	})
 
 	retry.Print(func() error {
 		return w.writer.Write(metrics)
