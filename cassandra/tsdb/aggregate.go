@@ -125,6 +125,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	}
 
 	cancel()
+	wg.Wait()
 	c.deleteAggregateLock(name)
 }
 
