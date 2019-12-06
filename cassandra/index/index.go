@@ -167,6 +167,24 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 
 // UUIDs returns a MetricUUIDs list corresponding to the specified MetricLabelMatcher list
 func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([]types.MetricUUID, error) {
+	if all {
+		uuidsTableSelectUUIDsQuery := c.uuidsTableSelectUUIDsQuery()
+		uuidsTableSelectUUIDsIter := uuidsTableSelectUUIDsQuery.Iter()
+
+		var (
+			uuids   []types.MetricUUID
+			cqlUUID gocql.UUID
+		)
+
+		for uuidsTableSelectUUIDsIter.Scan(&cqlUUID) {
+			uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+
+			uuids = append(uuids, uuid)
+		}
+
+		return uuids, nil
+	}
+
 	if len(matchers) == 0 {
 		return nil, nil
 	}
@@ -395,6 +413,17 @@ func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid string) *gocql.Query {
 		SELECT labels FROM $UUIDS_TABLE
 		WHERE uuid = ?
 	`), uuid)
+
+	return query
+}
+
+// Returns uuids table select labels all Query
+func (c *CassandraIndex) uuidsTableSelectUUIDsQuery() *gocql.Query {
+	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
+	query := c.session.Query(replacer.Replace(`
+		SELECT uuid FROM $UUIDS_TABLE
+		ALLOW FILTERING
+	`))
 
 	return query
 }
