@@ -177,8 +177,6 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 
 		rawPartitionData.Points = append(rawPartitionData.Points, points...)
 		rawPartitionData.TimeToLive = compare.MaxInt64(rawPartitionData.TimeToLive, timeToLive)
-
-		start = time.Now()
 	}
 
 	return rawPartitionData, nil

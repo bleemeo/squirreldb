@@ -3,6 +3,7 @@ package index
 import (
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+
 	"regexp"
 	"squirreldb/types"
 	"strings"
@@ -38,6 +39,7 @@ type CassandraIndex struct {
 	mutex sync.Mutex
 }
 
+// New creates a new CassandraIndex object
 func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 	labelsTable := keyspace + "." + "\"" + labelsTableName + "\""
 	labelsTableCreateQuery := labelsTableCreateQuery(session, labelsTable)
@@ -71,6 +73,7 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 	return index, nil
 }
 
+// Labels returns a MetricLabel list corresponding to the specified MetricUUID
 func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -81,7 +84,7 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 		}
 	}
 
-	selectLabelsQuery := c.selectLabelsQuery(uuid.String())
+	selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
 	var m map[string]string
 
@@ -96,6 +99,7 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 	return labels, nil
 }
 
+// UUID returns a MetricUUID corresponding to the specified MetricLabel list
 func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, error) {
 	if len(labels) == 0 {
 		return types.MetricUUID{}, nil
@@ -113,7 +117,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	}
 
 	str := types.StringFromLabels(sortedLabels)
-	selectUUIDQuery := c.selectUUIDQuery(str)
+	selectUUIDQuery := c.labelsTableSelectUUIDQuery(str)
 
 	var cqlUUID gocql.UUID
 
@@ -136,20 +140,20 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 	m := types.MapFromLabels(sortedLabels)
 
-	updateLabelsQuery := c.updateLabelsQuery(uuid.String(), m)
+	updateLabelsQuery := c.uuidsTableUpdateLabelsQuery(uuid.String(), m)
 
 	if err := updateLabelsQuery.Exec(); err != nil {
 		return types.MetricUUID{}, err
 	}
 
-	updateUUIDQuery := c.updateUUIDQuery(str, uuid.String())
+	updateUUIDQuery := c.labelsTableUpdateUUIDQuery(str, uuid.String())
 
 	if err := updateUUIDQuery.Exec(); err != nil {
 		return types.MetricUUID{}, err
 	}
 
 	for _, label := range sortedLabels {
-		updateUUIDsQuery := c.updateUUIDsQuery(label.Name, label.Value, uuid.String())
+		updateUUIDsQuery := c.postingsTableUpdateUUIDsQuery(label.Name, label.Value, uuid.String())
 
 		if err := updateUUIDsQuery.Exec(); err != nil {
 			return types.MetricUUID{}, err
@@ -161,26 +165,19 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	return uuid, nil
 }
 
+// UUIDs returns a MetricUUIDs list corresponding to the specified MetricLabelMatcher list
 func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([]types.MetricUUID, error) {
 	if len(matchers) == 0 {
 		return nil, nil
 	}
 
-	targetLabels, err := c.targetLabels(matchers)
-
-	if err != nil {
-		return nil, err
-	}
+	targetLabels := c.targetLabels(matchers)
 
 	if len(targetLabels) == 0 {
 		return nil, nil
 	}
 
-	uuidsWeight, err := c.uuidsWeight(targetLabels)
-
-	if err != nil {
-		return nil, err
-	}
+	uuidsWeight := c.uuidsWeight(targetLabels)
 
 	if len(uuidsWeight) == 0 {
 		return nil, nil
@@ -197,7 +194,8 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 	return uuids, nil
 }
 
-func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) {
+// Returns labels by target type
+func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) map[int][]types.MetricLabel {
 	targetLabels := make(map[int][]types.MetricLabel)
 
 	for _, matcher := range matchers {
@@ -217,12 +215,15 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 		} else {
 			regex, _ := regexp.Compile("^(?:" + matcher.Value + ")$")
 
-			selectValueQuery := c.selectValueQuery(matcher.Name)
+			selectValueQuery := c.postingsTableSelectValueQuery(matcher.Name)
 			selectValueIter := selectValueQuery.Iter()
 
-			var values []string
+			var (
+				values []string
+				value  string
+			)
 
-			for value := ""; selectValueIter.Scan(&value); {
+			for selectValueIter.Scan(&value) {
 				values = append(values, value)
 			}
 
@@ -239,19 +240,23 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 		}
 	}
 
-	return targetLabels, nil
+	return targetLabels
 }
 
-func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) {
+// Returns uuids with weight
+func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) map[types.MetricUUID]int {
 	uuidsWeight := make(map[types.MetricUUID]int)
 
 	for _, label := range targetLabels[targetTypeFocus] {
-		selectUUIDsQuery := c.selectUUIDsFocusQuery(label.Name, label.Value)
+		selectUUIDsQuery := c.postingsTableSelectUUIDsFocusQuery(label.Name, label.Value)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var labelUUIDs []types.MetricUUID
+		var (
+			labelUUIDs []types.MetricUUID
+			cqlUUIDs   []gocql.UUID
+		)
 
-		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
 				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
@@ -260,17 +265,20 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (
 		}
 
 		for _, uuid := range labelUUIDs {
-			uuidsWeight[uuid] += 1
+			uuidsWeight[uuid]++
 		}
 	}
 
 	for _, label := range targetLabels[targetTypeDefined] {
-		selectUUIDsQuery := c.selectUUIDsQuery(label.Name)
+		selectUUIDsQuery := c.postingsTableSelectUUIDsQuery(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var labelUUIDs []types.MetricUUID
+		var (
+			labelUUIDs []types.MetricUUID
+			cqlUUIDs   []gocql.UUID
+		)
 
-		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
 				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
@@ -279,17 +287,20 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (
 		}
 
 		for _, uuid := range labelUUIDs {
-			uuidsWeight[uuid] += 1
+			uuidsWeight[uuid]++
 		}
 	}
 
 	for _, label := range targetLabels[targetTypeUndefined] {
-		selectUUIDsQuery := c.selectUUIDsQuery(label.Name)
+		selectUUIDsQuery := c.postingsTableSelectUUIDsQuery(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var labelUUIDs []types.MetricUUID
+		var (
+			labelUUIDs []types.MetricUUID
+			cqlUUIDs   []gocql.UUID
+		)
 
-		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
 				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
@@ -299,25 +310,16 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (
 
 		for uuid := range uuidsWeight {
 			if !containsUUIDs(labelUUIDs, uuid) {
-				uuidsWeight[uuid] += 1
+				uuidsWeight[uuid]++
 			}
 		}
 	}
 
-	return uuidsWeight, nil
+	return uuidsWeight
 }
 
-func (c *CassandraIndex) selectLabelsQuery(uuid string) *gocql.Query {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT labels FROM $UUIDS_TABLE
-		WHERE uuid = ?
-	`), uuid)
-
-	return query
-}
-
-func (c *CassandraIndex) selectUUIDQuery(labels string) *gocql.Query {
+// Returns labels table select uuid Query
+func (c *CassandraIndex) labelsTableSelectUUIDQuery(labels string) *gocql.Query {
 	replacer := strings.NewReplacer("$LABELS_TABLE", c.labelsTable)
 	query := c.session.Query(replacer.Replace(`
 		SELECT uuid FROM $LABELS_TABLE
@@ -327,54 +329,8 @@ func (c *CassandraIndex) selectUUIDQuery(labels string) *gocql.Query {
 	return query
 }
 
-func (c *CassandraIndex) selectUUIDsQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-
-	var query *gocql.Query
-
-	query = c.session.Query(replacer.Replace(`
-		SELECT uuids FROM $POSTINGS_TABLE
-		WHERE name = ?
-	`), name)
-
-	return query
-}
-
-func (c *CassandraIndex) selectUUIDsFocusQuery(name, value string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-
-	var query *gocql.Query
-
-	query = c.session.Query(replacer.Replace(`
-		SELECT uuids FROM $POSTINGS_TABLE
-		WHERE name = ? AND value = ?
-	`), name, value)
-
-	return query
-}
-
-func (c *CassandraIndex) selectValueQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT value FROM $POSTINGS_TABLE
-		WHERE name = ?
-	`), name)
-
-	return query
-}
-
-func (c *CassandraIndex) updateLabelsQuery(uuid string, labels map[string]string) *gocql.Query {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
-	query := c.session.Query(replacer.Replace(`
-		UPDATE $UUIDS_TABLE
-		SET labels = ?
-		WHERE uuid = ?
-	`), labels, uuid)
-
-	return query
-}
-
-func (c *CassandraIndex) updateUUIDQuery(labels string, uuid string) *gocql.Query {
+// Returns labels table update uuid Query
+func (c *CassandraIndex) labelsTableUpdateUUIDQuery(labels string, uuid string) *gocql.Query {
 	replacer := strings.NewReplacer("$LABELS_TABLE", c.labelsTable)
 	query := c.session.Query(replacer.Replace(`
 		UPDATE $LABELS_TABLE
@@ -385,7 +341,43 @@ func (c *CassandraIndex) updateUUIDQuery(labels string, uuid string) *gocql.Quer
 	return query
 }
 
-func (c *CassandraIndex) updateUUIDsQuery(name, value, uuid string) *gocql.Query {
+// Returns postings table select uuids Query
+func (c *CassandraIndex) postingsTableSelectUUIDsQuery(name string) *gocql.Query {
+	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
+
+	query := c.session.Query(replacer.Replace(`
+		SELECT uuids FROM $POSTINGS_TABLE
+		WHERE name = ?
+	`), name)
+
+	return query
+}
+
+// Returns postings table select uuids with name focus Query
+func (c *CassandraIndex) postingsTableSelectUUIDsFocusQuery(name, value string) *gocql.Query {
+	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
+
+	query := c.session.Query(replacer.Replace(`
+		SELECT uuids FROM $POSTINGS_TABLE
+		WHERE name = ? AND value = ?
+	`), name, value)
+
+	return query
+}
+
+// Returns postings table select value Query
+func (c *CassandraIndex) postingsTableSelectValueQuery(name string) *gocql.Query {
+	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
+	query := c.session.Query(replacer.Replace(`
+		SELECT value FROM $POSTINGS_TABLE
+		WHERE name = ?
+	`), name)
+
+	return query
+}
+
+// Returns postings table update uuids Query
+func (c *CassandraIndex) postingsTableUpdateUUIDsQuery(name, value, uuid string) *gocql.Query {
 	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable, "$UUID", uuid)
 	query := c.session.Query(replacer.Replace(`
 		UPDATE $POSTINGS_TABLE
@@ -396,6 +388,30 @@ func (c *CassandraIndex) updateUUIDsQuery(name, value, uuid string) *gocql.Query
 	return query
 }
 
+// Returns uuids table select labels Query
+func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid string) *gocql.Query {
+	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
+	query := c.session.Query(replacer.Replace(`
+		SELECT labels FROM $UUIDS_TABLE
+		WHERE uuid = ?
+	`), uuid)
+
+	return query
+}
+
+// Returns uuids table update labels Query
+func (c *CassandraIndex) uuidsTableUpdateLabelsQuery(uuid string, labels map[string]string) *gocql.Query {
+	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
+	query := c.session.Query(replacer.Replace(`
+		UPDATE $UUIDS_TABLE
+		SET labels = ?
+		WHERE uuid = ?
+	`), labels, uuid)
+
+	return query
+}
+
+// Returns labels table create Query
 func labelsTableCreateQuery(session *gocql.Session, labelsTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$LABELS_TABLE", labelsTable)
 	query := session.Query(replacer.Replace(`
@@ -409,6 +425,7 @@ func labelsTableCreateQuery(session *gocql.Session, labelsTable string) *gocql.Q
 	return query
 }
 
+// Returns postings table create Query
 func postingsTableCreateQuery(session *gocql.Session, postingsTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$POSTINGS_TABLE", postingsTable)
 	query := session.Query(replacer.Replace(`
@@ -423,6 +440,7 @@ func postingsTableCreateQuery(session *gocql.Session, postingsTable string) *goc
 	return query
 }
 
+// Returns uuids table create Query
 func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Query {
 	replacer := strings.NewReplacer("$UUIDS_TABLE", uuidsTable)
 	query := session.Query(replacer.Replace(`
@@ -436,6 +454,7 @@ func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Que
 	return query
 }
 
+// Returns a boolean if the uuid list contains the target uuid or not
 func containsUUIDs(list []types.MetricUUID, target types.MetricUUID) bool {
 	if len(list) == 0 {
 		return false

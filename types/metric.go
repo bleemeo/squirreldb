@@ -2,10 +2,10 @@ package types
 
 import (
 	gouuid "github.com/gofrs/uuid"
-	"strings"
 
 	"math/big"
 	"sort"
+	"strings"
 )
 
 type MetricPoint struct {
