@@ -131,7 +131,16 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 // Aggregates metrics belonging to the shard by aggregation batch size
 func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
-	uuids := c.indexer.UUIDs(nil, true)
+	var uuids []types.MetricUUID
+
+	retry.Print(func() error {
+		var err error
+		uuids, err = c.indexer.UUIDs(nil, true)
+
+		return err
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"Error: Can't get UUIDs from the index",
+		"Resolved: Get UUIDs from the index")
 
 	var shardUUIDs []types.MetricUUID
 

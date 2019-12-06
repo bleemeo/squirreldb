@@ -29,7 +29,20 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	requests := requestsFromPromReadRequest(&readRequest, r.indexer.UUIDs)
+	requests := requestsFromPromReadRequest(&readRequest, func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
+		var uuids []types.MetricUUID
+
+		retry.Print(func() error {
+			var err error
+			uuids, err = r.indexer.UUIDs(matchers, false)
+
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't get UUIDs from the index",
+			"Resolved: Get UUIDs from the index")
+
+		return uuids
+	})
 
 	promQueryResults := make([]*prompb.QueryResult, 0, len(requests))
 
@@ -46,7 +59,20 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			"Resolved: Read metrics with the reader")
 
 		promQueryResult := &prompb.QueryResult{
-			Timeseries: promTimeseriesFromMetrics(metrics, r.indexer.Labels),
+			Timeseries: promTimeseriesFromMetrics(metrics, func(uuid types.MetricUUID) []types.MetricLabel {
+				var labels []types.MetricLabel
+
+				retry.Print(func() error {
+					var err error
+					labels, err = r.indexer.Labels(uuid)
+
+					return err
+				}, retry.NewExponentialBackOff(30*time.Second), logger,
+					"Error: Can't get labels from the index",
+					"Resolved: Get labels from the index")
+
+				return labels
+			}),
 		}
 
 		promQueryResults = append(promQueryResults, promQueryResult)
@@ -101,9 +127,9 @@ func matchersFromPromMatchers(promMatchers []*prompb.LabelMatcher) []types.Metri
 }
 
 // Returns a MetricRequest generated from a Query
-func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID) types.MetricRequest {
+func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.MetricLabelMatcher) []types.MetricUUID) types.MetricRequest {
 	matchers := matchersFromPromMatchers(promQuery.Matchers)
-	uuids := fun(matchers, false)
+	uuids := fun(matchers)
 
 	request := types.MetricRequest{
 		UUIDs:         uuids,
@@ -120,7 +146,7 @@ func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.Met
 }
 
 // Returns a MetricRequest list generated from a ReadRequest
-func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, fun func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID) []types.MetricRequest {
+func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, fun func(matchers []types.MetricLabelMatcher) []types.MetricUUID) []types.MetricRequest {
 	if len(promReadRequest.Queries) == 0 {
 		return nil
 	}
