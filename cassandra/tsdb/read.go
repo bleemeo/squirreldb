@@ -92,7 +92,12 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 
 	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)
 
+	start := time.Now()
+
 	tableSelectDataIter := c.tableSelectDataIter(c.options.aggregateDataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+
+	cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+
 	aggregatePartitionData := types.MetricData{}
 
 	var (
@@ -101,13 +106,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 		values          []byte
 	)
 
-	var duration time.Duration
-
-	start := time.Now()
-
 	for tableSelectDataIter.Scan(&offsetTimestamp, &timeToLive, &values) {
-		duration += time.Since(start)
-
 		points, err := pointsFromAggregateValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp, c.options.AggregateResolution, function)
 
 		if err != nil {
@@ -116,11 +115,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 
 		aggregatePartitionData.Points = append(aggregatePartitionData.Points, points...)
 		aggregatePartitionData.TimeToLive = compare.MaxInt64(aggregatePartitionData.TimeToLive, timeToLive)
-
-		start = time.Now()
 	}
-
-	cassandraQueriesSecondsRead.Observe(duration.Seconds())
 
 	return aggregatePartitionData, nil
 }
@@ -159,7 +154,12 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 
 	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)
 
+	start := time.Now()
+
 	tableSelectDataIter := c.tableSelectDataIter(c.options.dataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+
+	cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+
 	rawPartitionData := types.MetricData{}
 
 	var (
@@ -168,13 +168,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 		values          []byte
 	)
 
-	var duration time.Duration
-
-	start := time.Now()
-
 	for tableSelectDataIter.Scan(&offsetTimestamp, &timeToLive, &values) {
-		duration += time.Since(start)
-
 		points, err := pointsFromRawValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp)
 
 		if err != nil {
@@ -186,8 +180,6 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 
 		start = time.Now()
 	}
-
-	cassandraQueriesSecondsRead.Observe(duration.Seconds())
 
 	return rawPartitionData, nil
 }
