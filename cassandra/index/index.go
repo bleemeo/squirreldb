@@ -23,9 +23,9 @@ const (
 )
 
 const (
-	targetTypeAll    = 0
-	targetTypeNotAll = 1
-	targetTypeFocus  = 2
+	targetTypeUndefined = 0
+	targetTypeDefined   = 1
+	targetTypeFocus     = 2
 )
 
 type CassandraIndex struct {
@@ -112,7 +112,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		}
 	}
 
-	str := types.StringFromLabels(labels)
+	str := types.StringFromLabels(sortedLabels)
 	selectUUIDQuery := c.selectUUIDQuery(str)
 
 	var cqlUUID gocql.UUID
@@ -122,7 +122,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	} else if err != gocql.ErrNotFound {
 		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
-		c.pairs[uuid] = labels
+		c.pairs[uuid] = sortedLabels
 
 		return uuid, nil
 	}
@@ -134,8 +134,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	}
 
 	uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-	m := types.MapFromLabels(labels)
+	m := types.MapFromLabels(sortedLabels)
 
 	updateLabelsQuery := c.updateLabelsQuery(uuid.String(), m)
 
@@ -149,7 +148,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return types.MetricUUID{}, err
 	}
 
-	for _, label := range labels {
+	for _, label := range sortedLabels {
 		updateUUIDsQuery := c.updateUUIDsQuery(label.Name, label.Value, uuid.String())
 
 		if err := updateUUIDsQuery.Exec(); err != nil {
@@ -157,7 +156,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		}
 	}
 
-	c.pairs[uuid] = labels
+	c.pairs[uuid] = sortedLabels
 
 	return uuid, nil
 }
@@ -167,7 +166,7 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 		return nil, nil
 	}
 
-	targetLabels, err := c.findTargetLabels(matchers)
+	targetLabels, err := c.targetLabels(matchers)
 
 	if err != nil {
 		return nil, err
@@ -177,7 +176,7 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 		return nil, nil
 	}
 
-	uuidsWeight, err := c.calculateUUIDsWeight(targetLabels)
+	uuidsWeight, err := c.uuidsWeight(targetLabels)
 
 	if err != nil {
 		return nil, err
@@ -198,52 +197,43 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 	return uuids, nil
 }
 
-func (c *CassandraIndex) findTargetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) {
+func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) {
 	targetLabels := make(map[int][]types.MetricLabel)
 
 	for _, matcher := range matchers {
+		targetLabel := types.MetricLabel{
+			Name: matcher.Name,
+		}
+
 		if matcher.Value == "" {
-			label := types.MetricLabel{
-				Name:  matcher.Name,
-				Value: "",
-			}
+			targetLabel.Value = ""
 
 			switch matcher.Type {
 			case matcherTypeEq, matcherTypeRe:
-				targetLabels[targetTypeAll] = append(targetLabels[targetTypeAll], label)
+				targetLabels[targetTypeUndefined] = append(targetLabels[targetTypeUndefined], targetLabel)
 			case matcherTypeNeq, matcherTypeNre:
-				targetLabels[targetTypeNotAll] = append(targetLabels[targetTypeNotAll], label)
+				targetLabels[targetTypeDefined] = append(targetLabels[targetTypeDefined], targetLabel)
 			}
 		} else {
-			regex, err := regexp.Compile("^(?:" + matcher.Value + ")$")
+			regex, _ := regexp.Compile("^(?:" + matcher.Value + ")$")
 
-			if err != nil {
-				return nil, nil
-			}
+			selectValueQuery := c.selectValueQuery(matcher.Name)
+			selectValueIter := selectValueQuery.Iter()
 
-			selectValuesQuery := c.selectValuesQuery(matcher.Name)
-			selectValuesIter := selectValuesQuery.Iter()
+			var values []string
 
-			var (
-				values []string
-				value  string
-			)
-
-			for selectValuesIter.Scan(&value) {
+			for value := ""; selectValueIter.Scan(&value); {
 				values = append(values, value)
 			}
 
 			for _, value := range values {
-				label := types.MetricLabel{
-					Name:  matcher.Name,
-					Value: value,
-				}
+				targetLabel.Value = value
 
 				if ((matcher.Type == matcherTypeEq) && (matcher.Value == value)) ||
 					((matcher.Type == matcherTypeNeq) && (matcher.Value != value)) ||
 					((matcher.Type == matcherTypeRe) && regex.MatchString(value)) ||
 					((matcher.Type == matcherTypeNre) && !regex.MatchString(value)) {
-					targetLabels[targetTypeFocus] = append(targetLabels[targetTypeFocus], label)
+					targetLabels[targetTypeFocus] = append(targetLabels[targetTypeFocus], targetLabel)
 				}
 			}
 		}
@@ -252,21 +242,18 @@ func (c *CassandraIndex) findTargetLabels(matchers []types.MetricLabelMatcher) (
 	return targetLabels, nil
 }
 
-func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) {
+func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) {
 	uuidsWeight := make(map[types.MetricUUID]int)
 
 	for _, label := range targetLabels[targetTypeFocus] {
 		selectUUIDsQuery := c.selectUUIDsFocusQuery(label.Name, label.Value)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var (
-			scanUUIDs  []gocql.UUID
-			labelUUIDs []types.MetricUUID
-		)
+		var labelUUIDs []types.MetricUUID
 
-		for selectUUIDsIter.Scan(&scanUUIDs) {
-			for _, scanUUID := range scanUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
+		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+			for _, cqlUUID := range cqlUUIDs {
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -277,18 +264,15 @@ func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.Metri
 		}
 	}
 
-	for _, label := range targetLabels[targetTypeNotAll] {
+	for _, label := range targetLabels[targetTypeDefined] {
 		selectUUIDsQuery := c.selectUUIDsQuery(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var (
-			scanUUIDs  []gocql.UUID
-			labelUUIDs []types.MetricUUID
-		)
+		var labelUUIDs []types.MetricUUID
 
-		for selectUUIDsIter.Scan(&scanUUIDs) {
-			for _, scanUUID := range scanUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
+		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+			for _, cqlUUID := range cqlUUIDs {
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -299,18 +283,15 @@ func (c *CassandraIndex) calculateUUIDsWeight(targetLabels map[int][]types.Metri
 		}
 	}
 
-	for _, label := range targetLabels[targetTypeAll] {
+	for _, label := range targetLabels[targetTypeUndefined] {
 		selectUUIDsQuery := c.selectUUIDsQuery(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
-		var (
-			scanUUIDs  []gocql.UUID
-			labelUUIDs []types.MetricUUID
-		)
+		var labelUUIDs []types.MetricUUID
 
-		for selectUUIDsIter.Scan(&scanUUIDs) {
-			for _, scanUUID := range scanUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(scanUUID)}
+		for cqlUUIDs := []gocql.UUID{}; selectUUIDsIter.Scan(&cqlUUIDs); {
+			for _, cqlUUID := range cqlUUIDs {
+				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -372,7 +353,7 @@ func (c *CassandraIndex) selectUUIDsFocusQuery(name, value string) *gocql.Query 
 	return query
 }
 
-func (c *CassandraIndex) selectValuesQuery(name string) *gocql.Query {
+func (c *CassandraIndex) selectValueQuery(name string) *gocql.Query {
 	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
 	query := c.session.Query(replacer.Replace(`
 		SELECT value FROM $POSTINGS_TABLE
