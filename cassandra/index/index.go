@@ -97,6 +97,10 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 }
 
 func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, error) {
+	if len(labels) == 0 {
+		return types.MetricUUID{}, nil
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -117,6 +121,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return types.MetricUUID{}, err
 	} else if err != gocql.ErrNotFound {
 		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+
+		c.pairs[uuid] = labels
 
 		return uuid, nil
 	}
@@ -157,16 +163,28 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 }
 
 func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([]types.MetricUUID, error) {
+	if len(matchers) == 0 {
+		return nil, nil
+	}
+
 	targetLabels, err := c.findTargetLabels(matchers)
 
 	if err != nil {
 		return nil, err
 	}
 
+	if len(targetLabels) == 0 {
+		return nil, nil
+	}
+
 	uuidsWeight, err := c.calculateUUIDsWeight(targetLabels)
 
 	if err != nil {
 		return nil, err
+	}
+
+	if len(uuidsWeight) == 0 {
+		return nil, nil
 	}
 
 	var uuids []types.MetricUUID
@@ -438,6 +456,10 @@ func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Que
 }
 
 func containsUUIDs(list []types.MetricUUID, target types.MetricUUID) bool {
+	if len(list) == 0 {
+		return false
+	}
+
 	for _, uuid := range list {
 		if uuid == target {
 			return true
