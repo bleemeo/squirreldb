@@ -82,7 +82,7 @@ func Test_matchersFromPromMatchers(t *testing.T) {
 func Test_requestFromPromQuery(t *testing.T) {
 	type args struct {
 		promQuery *prompb.Query
-		fun       func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID
+		fun       func(matchers []types.MetricLabelMatcher) []types.MetricUUID
 	}
 	tests := []struct {
 		name string
@@ -103,7 +103,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 						EndMs:   50000,
 					},
 				},
-				fun: func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID {
+				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
 					uuids := []types.MetricUUID{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					}
@@ -130,7 +130,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 					Matchers:         nil,
 					Hints:            nil,
 				},
-				fun: func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID {
+				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
 					uuids := []types.MetricUUID{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					}
@@ -161,7 +161,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 func Test_requestsFromPromReadRequest(t *testing.T) {
 	type args struct {
 		promReadRequest *prompb.ReadRequest
-		fun             func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID
+		fun             func(matchers []types.MetricLabelMatcher) []types.MetricUUID
 	}
 	tests := []struct {
 		name string
@@ -197,7 +197,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 						},
 					},
 				},
-				fun: func(matchers []types.MetricLabelMatcher, all bool) []types.MetricUUID {
+				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
 					uuids := []types.MetricUUID{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					}

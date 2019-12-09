@@ -98,6 +98,7 @@ func (c *Config) Validate() bool {
 	aggregateResolution := c.Int64("cassandra.aggregate.resolution")
 	aggregateSize := c.Int64("cassandra.aggregate.size")
 	aggregatePartitionSize := c.Int64("cassandra.partition_size.aggregate")
+	aggregateIntendedDuration := c.Int64("cassandra.aggregate.intended_duration")
 	valid := true
 
 	if keyspace == "" {
@@ -140,6 +141,12 @@ func (c *Config) Validate() bool {
 		valid = false
 
 		logger.Println("Error: Invalid aggregate partition size (must be strictly greater than 0)")
+	}
+
+	if aggregateIntendedDuration <= 0 {
+		valid = false
+
+		logger.Println("Error: Invalid aggregate intended duration (must be strictly greater than 0)")
 	}
 
 	if batchSize > rawPartitionSize {

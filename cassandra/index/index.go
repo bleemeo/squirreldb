@@ -182,23 +182,23 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 			uuids = append(uuids, uuid)
 		}
 
+		if err := uuidsTableSelectUUIDsIter.Close(); err != nil {
+			return nil, err
+		}
+
 		return uuids, nil
 	}
 
-	if len(matchers) == 0 {
-		return nil, nil
+	targetLabels, err := c.targetLabels(matchers)
+
+	if err != nil {
+		return nil, err
 	}
 
-	targetLabels := c.targetLabels(matchers)
+	uuidsWeight, err := c.uuidsWeight(targetLabels)
 
-	if len(targetLabels) == 0 {
-		return nil, nil
-	}
-
-	uuidsWeight := c.uuidsWeight(targetLabels)
-
-	if len(uuidsWeight) == 0 {
-		return nil, nil
+	if err != nil {
+		return nil, err
 	}
 
 	var uuids []types.MetricUUID
@@ -213,7 +213,11 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 }
 
 // Returns labels by target type
-func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) map[int][]types.MetricLabel {
+func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) {
+	if len(matchers) == 0 {
+		return nil, nil
+	}
+
 	targetLabels := make(map[int][]types.MetricLabel)
 
 	for _, matcher := range matchers {
@@ -245,6 +249,10 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) map[i
 				values = append(values, value)
 			}
 
+			if err := selectValueIter.Close(); err != nil {
+				return nil, err
+			}
+
 			for _, value := range values {
 				targetLabel.Value = value
 
@@ -258,11 +266,15 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) map[i
 		}
 	}
 
-	return targetLabels
+	return targetLabels, nil
 }
 
 // Returns uuids with weight
-func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) map[types.MetricUUID]int {
+func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) {
+	if len(targetLabels) == 0 {
+		return nil, nil
+	}
+
 	uuidsWeight := make(map[types.MetricUUID]int)
 
 	for _, label := range targetLabels[targetTypeFocus] {
@@ -280,6 +292,10 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) m
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
+		}
+
+		if err := selectUUIDsIter.Close(); err != nil {
+			return nil, err
 		}
 
 		for _, uuid := range labelUUIDs {
@@ -304,6 +320,10 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) m
 			}
 		}
 
+		if err := selectUUIDsIter.Close(); err != nil {
+			return nil, err
+		}
+
 		for _, uuid := range labelUUIDs {
 			uuidsWeight[uuid]++
 		}
@@ -326,6 +346,10 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) m
 			}
 		}
 
+		if err := selectUUIDsIter.Close(); err != nil {
+			return nil, err
+		}
+
 		for uuid := range uuidsWeight {
 			if !containsUUIDs(labelUUIDs, uuid) {
 				uuidsWeight[uuid]++
@@ -333,7 +357,7 @@ func (c *CassandraIndex) uuidsWeight(targetLabels map[int][]types.MetricLabel) m
 		}
 	}
 
-	return uuidsWeight
+	return uuidsWeight, nil
 }
 
 // Returns labels table select uuid Query

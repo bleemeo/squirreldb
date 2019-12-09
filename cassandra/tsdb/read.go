@@ -117,6 +117,10 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 		aggregatePartitionData.TimeToLive = compare.MaxInt64(aggregatePartitionData.TimeToLive, timeToLive)
 	}
 
+	if err := tableSelectDataIter.Close(); err != nil {
+		return types.MetricData{}, err
+	}
+
 	return aggregatePartitionData, nil
 }
 
@@ -177,6 +181,10 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 
 		rawPartitionData.Points = append(rawPartitionData.Points, points...)
 		rawPartitionData.TimeToLive = compare.MaxInt64(rawPartitionData.TimeToLive, timeToLive)
+	}
+
+	if err := tableSelectDataIter.Close(); err != nil {
+		return types.MetricData{}, err
 	}
 
 	return rawPartitionData, nil
