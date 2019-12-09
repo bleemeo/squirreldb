@@ -104,73 +104,73 @@ func (c *Config) Validate() bool {
 	if keyspace == "" {
 		valid = false
 
-		logger.Println("Error: Invalid keyspace (must be filled)")
+		logger.Println("Error: 'cassandra.keyspace' is invalid (must be filled)")
 	}
 
 	if replicationFactor <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid replication factor (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.replication_factor' is invalid (must be strictly greater than 0)")
 	}
 
 	if batchSize <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid batch size (must be strictly greater than 0)")
+		logger.Println("Error: 'batch.size' is invalid (must be strictly greater than 0)")
 	}
 
 	if rawPartitionSize <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid raw partition size (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.partition_size.raw' (must be strictly greater than 0)")
 	}
 
 	if aggregateResolution <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate resolution: must be strictly greater than 0")
+		logger.Println("Error: 'cassandra.aggregate.resolution' is invalid (must be strictly greater than 0)")
 	}
 
 	if aggregateSize <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate size (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.aggregate.size' is invalid (must be strictly greater than 0)")
 	}
 
 	if aggregatePartitionSize <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate partition size (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.partition_size.aggregate' is invalid (must be strictly greater than 0)")
 	}
 
 	if aggregateIntendedDuration <= 0 {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate intended duration (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.aggregate.intended_duration' is invalid (must be strictly greater than 0)")
 	}
 
 	if batchSize > rawPartitionSize {
 		valid = false
 
-		logger.Println("Error: Invalid batch size (must be greater than raw partition size)")
+		logger.Println("Error: 'batch.size' is invalid (must be greater than 'cassandra.partition_size.raw')")
 	}
 
 	if aggregateResolution > aggregateSize {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate resolution (must be greater than aggregate size)")
+		logger.Println("Error: 'cassandra.aggregate.resolution' is invalid (must be greater than 'cassandra.aggregate.size')")
 	}
 
 	if aggregateSize > aggregatePartitionSize {
 		valid = false
 
-		logger.Println("Error: Invalid aggregate size (must be greater than aggregate partition size)")
+		logger.Println("Error: 'cassandra.aggregate.size' is invalid (must be greater than 'cassandra.partition_size.aggregate')")
 	}
 
 	return valid
 }
 
-// ValidateRemote checks if the configuration is consistent with the remote constant values
+// ValidateRemote checks if the local configuration is consistent with the remote configuration
 func (c *Config) ValidateRemote(states types.Stater) bool {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
@@ -190,7 +190,7 @@ func (c *Config) ValidateRemote(states types.Stater) bool {
 		if local != remote {
 			valid = false
 
-			logger.Printf("Error: Local and remote value for %s doesn't match", name)
+			logger.Printf("Error: '%s' new value (%s) and old value (%s) doesn't match", name, local, remote)
 		}
 	}
 
