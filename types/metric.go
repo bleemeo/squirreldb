@@ -87,6 +87,16 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	return deduplicatedPoints
 }
 
+// DeleteLabelsValue deletes value via its name from a MetricLabel list
+func DeleteLabelsValue(labels *[]MetricLabel, key string) {
+	for i, label := range *labels {
+		if label.Name == key {
+			*labels = append((*labels)[:i], (*labels)[i+1:]...)
+			return
+		}
+	}
+}
+
 // EqualLabels returns a boolean defined by the equality of the specified MetricLabel
 func EqualLabels(labels, reference []MetricLabel) bool {
 	if len(labels) != len(reference) {
@@ -100,6 +110,17 @@ func EqualLabels(labels, reference []MetricLabel) bool {
 	}
 
 	return true
+}
+
+// GetLabelsValue gets value via its name from a MetricLabel list
+func GetLabelsValue(labels []MetricLabel, key string) (string, bool) {
+	for _, label := range labels {
+		if label.Name == key {
+			return label.Value, true
+		}
+	}
+
+	return "", false
 }
 
 // LabelsFromMatchers returns a list of MetricLabel generated from a list of MetricLabelMatcher

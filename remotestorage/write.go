@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"squirreldb/retry"
 	"squirreldb/types"
+	"strconv"
 	"time"
 )
 
@@ -13,6 +14,10 @@ type WriteMetrics struct {
 	indexer types.Indexer
 	writer  types.MetricWriter
 }
+
+const (
+	timeToLiveLabelName = "__ttl__"
+)
 
 // ServeHTTP handles writing requests
 func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -29,7 +34,13 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	metrics := metricsFromTimeseries(writeRequest.Timeseries, func(labels []types.MetricLabel) types.MetricUUID {
+	metrics := metricsFromTimeseries(writeRequest.Timeseries, func(labels []types.MetricLabel) (int64, types.MetricUUID) {
+		timeToLive, err := timeToLiveFromLabels(labels)
+
+		if err != nil {
+			logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+		}
+
 		var uuid types.MetricUUID
 
 		retry.Print(func() error {
@@ -41,7 +52,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 			"Error: Can't get UUID from the index",
 			"Resolved: Get UUID from the index")
 
-		return uuid
+		return timeToLive, uuid
 	})
 
 	retry.Print(func() error {
@@ -51,6 +62,26 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		"Resolved: Read metrics with the writer")
 
 	requestsSecondsWrite.Observe(time.Since(start).Seconds())
+}
+
+// Returns and delete time to live from a MetricLabel list
+func timeToLiveFromLabels(labels []types.MetricLabel) (int64, error) {
+	value, exists := types.GetLabelsValue(labels, timeToLiveLabelName)
+
+	var timeToLive int64
+
+	if exists {
+		var err error
+		timeToLive, err = strconv.ParseInt(value, 10, 64)
+
+		if err != nil {
+			return 0, err
+		}
+
+		types.DeleteLabelsValue(&labels, timeToLiveLabelName)
+	}
+
+	return timeToLive, nil
 }
 
 // Returns a MetricLabel list generated from a Label list
@@ -94,10 +125,9 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a MetricUUID and a MetricData generated from a TimeSeries
-func metricFromPromSeries(promSeries *prompb.TimeSeries, fun func(labels []types.MetricLabel) types.MetricUUID) (types.MetricUUID, types.MetricData) {
+func metricFromPromSeries(promSeries *prompb.TimeSeries, fun func(labels []types.MetricLabel) (int64, types.MetricUUID)) (types.MetricUUID, types.MetricData) {
 	labels := labelsFromPromLabels(promSeries.Labels)
-	uuid := fun(labels)
-	timeToLive := int64(0)
+	timeToLive, uuid := fun(labels)
 	points := pointsFromPromSamples(promSeries.Samples)
 	data := types.MetricData{
 		Points:     points,
@@ -108,7 +138,7 @@ func metricFromPromSeries(promSeries *prompb.TimeSeries, fun func(labels []types
 }
 
 // Returns a metric list generated from a TimeSeries list
-func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels []types.MetricLabel) types.MetricUUID) map[types.MetricUUID]types.MetricData {
+func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels []types.MetricLabel) (int64, types.MetricUUID)) map[types.MetricUUID]types.MetricData {
 	if len(promTimeseries) == 0 {
 		return nil
 	}

@@ -57,10 +57,8 @@ func main() {
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelRedis := createSquirrelRedis(squirrelConfig)
-	squirrelBatchSize := squirrelConfig.Int64("batch.size")
-	squirrelBatch := batch.New(squirrelBatchSize, squirrelRedis, squirrelTSDB, squirrelTSDB)
-	listenAddress := squirrelConfig.String("remote_storage.listen_address")
-	squirrelRemoteStorage := remotestorage.New(listenAddress, squirrelIndex, squirrelBatch, squirrelBatch)
+	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelRedis, squirrelTSDB, squirrelTSDB)
+	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
 
 	squirrelConfig.WriteRemote(squirrelStates)
 
@@ -108,6 +106,7 @@ func main() {
 	go runSquirrelRemoteStorage()
 
 	logger.Println("SquirrelDB is ready")
+	logger.Println("Instance ID:", instance.UUID)
 
 	<-signalChan
 
@@ -247,4 +246,23 @@ func createSquirrelRedis(config *config.Config) *redis.Redis {
 	squirrelRedis := redis.New(options)
 
 	return squirrelRedis
+}
+
+func createSquirrelBatch(config *config.Config, storer batch.Storer, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
+	squirrelBatchSize := config.Int64("batch.size")
+
+	squirrelBatch := batch.New(squirrelBatchSize, storer, reader, writer)
+
+	return squirrelBatch
+}
+
+func createSquirrelRemoteStorage(config *config.Config, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *remotestorage.RemoteStorage {
+	options := remotestorage.Options{
+		ListenAddress: config.String("remote_storage.listen_address"),
+		WithUUID:      config.Bool("remote_storage.with_uuid"),
+	}
+
+	squirrelRemoteStorage := remotestorage.New(options, indexer, reader, writer)
+
+	return squirrelRemoteStorage
 }

@@ -1,7 +1,7 @@
 package types
 
 type Indexer interface {
-	Labels(uuid MetricUUID) ([]MetricLabel, error)
+	Labels(uuid MetricUUID, withUUID bool) ([]MetricLabel, error)
 	UUID(labels []MetricLabel) (MetricUUID, error)
 	UUIDs(matchers []MetricLabelMatcher, all bool) ([]MetricUUID, error)
 }

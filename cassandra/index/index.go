@@ -17,6 +17,10 @@ const (
 )
 
 const (
+	uuidLabelName = "__uuid__"
+)
+
+const (
 	matcherTypeEq  = 0
 	matcherTypeNeq = 1
 	matcherTypeRe  = 2
@@ -74,27 +78,51 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 }
 
 // Labels returns a MetricLabel list corresponding to the specified MetricUUID
-func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
+func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.MetricLabel, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	for uuidIt, labels := range c.pairs {
+	var labels []types.MetricLabel
+
+	for uuidIt, labelsIt := range c.pairs {
 		if uuidIt == uuid {
+			labels = make([]types.MetricLabel, len(labelsIt))
+
+			copy(labels, labelsIt)
+
+			if withUUID {
+				label := types.MetricLabel{
+					Name:  uuidLabelName,
+					Value: uuid.String(),
+				}
+
+				labels = append(labels, label)
+			}
+
 			return labels, nil
 		}
 	}
 
 	selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
-	var m map[string]string
+	var labelsMap map[string]string
 
-	if err := selectLabelsQuery.Scan(&m); (err != nil) && (err != gocql.ErrNotFound) {
+	if err := selectLabelsQuery.Scan(&labelsMap); (err != nil) && (err != gocql.ErrNotFound) {
 		return nil, err
 	}
 
-	labels := types.LabelsFromMap(m)
+	labels = types.LabelsFromMap(labelsMap)
 
 	c.pairs[uuid] = labels
+
+	if withUUID {
+		label := types.MetricLabel{
+			Name:  uuidLabelName,
+			Value: uuid.String(),
+		}
+
+		labels = append(labels, label)
+	}
 
 	return labels, nil
 }
@@ -110,14 +138,14 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 
 	sortedLabels := types.SortLabels(labels)
 
-	for uuid, label := range c.pairs {
-		if types.EqualLabels(label, sortedLabels) {
-			return uuid, nil
+	for uuidIt, LabelsIt := range c.pairs {
+		if types.EqualLabels(LabelsIt, sortedLabels) {
+			return uuidIt, nil
 		}
 	}
 
-	str := types.StringFromLabels(sortedLabels)
-	selectUUIDQuery := c.labelsTableSelectUUIDQuery(str)
+	labelsString := types.StringFromLabels(sortedLabels)
+	selectUUIDQuery := c.labelsTableSelectUUIDQuery(labelsString)
 
 	var cqlUUID gocql.UUID
 
@@ -131,22 +159,20 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return uuid, nil
 	}
 
-	cqlUUID, err := gocql.RandomUUID()
+	uuid, err := uuidFromLabels(sortedLabels)
 
 	if err != nil {
 		return types.MetricUUID{}, err
 	}
 
-	uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-	m := types.MapFromLabels(sortedLabels)
-
-	updateLabelsQuery := c.uuidsTableUpdateLabelsQuery(uuid.String(), m)
+	labelsMap := types.MapFromLabels(sortedLabels)
+	updateLabelsQuery := c.uuidsTableUpdateLabelsQuery(uuid.String(), labelsMap)
 
 	if err := updateLabelsQuery.Exec(); err != nil {
 		return types.MetricUUID{}, err
 	}
 
-	updateUUIDQuery := c.labelsTableUpdateUUIDQuery(str, uuid.String())
+	updateUUIDQuery := c.labelsTableUpdateUUIDQuery(labelsString, uuid.String())
 
 	if err := updateUUIDQuery.Exec(); err != nil {
 		return types.MetricUUID{}, err
@@ -520,4 +546,33 @@ func containsUUIDs(list []types.MetricUUID, target types.MetricUUID) bool {
 	}
 
 	return false
+}
+
+// Returns and delete UUID from a MetricLabel list
+// If no UUID label exists, a random UUID is generated
+func uuidFromLabels(labels []types.MetricLabel) (types.MetricUUID, error) {
+	uuidString, exists := types.GetLabelsValue(labels, uuidLabelName)
+
+	var uuid types.MetricUUID
+
+	if exists {
+		var err error
+		uuid, err = types.UUIDFromString(uuidString)
+
+		if err != nil {
+			return types.MetricUUID{}, err
+		}
+
+		types.DeleteLabelsValue(&labels, uuidLabelName)
+	} else {
+		cqlUUID, err := gocql.RandomUUID()
+
+		if err != nil {
+			return types.MetricUUID{}, err
+		}
+
+		uuid = types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+	}
+
+	return uuid, nil
 }

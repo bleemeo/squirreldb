@@ -10,8 +10,9 @@ import (
 )
 
 type ReadMetrics struct {
-	indexer types.Indexer
-	reader  types.MetricReader
+	withUUID bool
+	indexer  types.Indexer
+	reader   types.MetricReader
 }
 
 // ServeHTTP handles read requests
@@ -64,7 +65,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 				retry.Print(func() error {
 					var err error
-					labels, err = r.indexer.Labels(uuid)
+					labels, err = r.indexer.Labels(uuid, r.withUUID)
 
 					return err
 				}, retry.NewExponentialBackOff(30*time.Second), logger,

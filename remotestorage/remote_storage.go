@@ -21,18 +21,25 @@ const (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
+type Options struct {
+	ListenAddress string
+	WithUUID      bool
+}
+
 type RemoteStorage struct {
+	server *http.Server
+
 	readMetrics  ReadMetrics
 	writeMetrics WriteMetrics
-	server       *http.Server
 }
 
 // New creates a new RemoteStorage object
-func New(listenAddress string, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
+func New(options Options, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
 	router := http.NewServeMux()
 	readMetrics := ReadMetrics{
-		indexer: indexer,
-		reader:  reader,
+		withUUID: options.WithUUID,
+		indexer:  indexer,
+		reader:   reader,
 	}
 	writeMetrics := WriteMetrics{
 		indexer: indexer,
@@ -44,14 +51,14 @@ func New(listenAddress string, indexer types.Indexer, reader types.MetricReader,
 	router.HandleFunc(writePattern, writeMetrics.ServeHTTP)
 
 	server := &http.Server{
-		Addr:    listenAddress,
+		Addr:    options.ListenAddress,
 		Handler: router,
 	}
 
 	remoteStorage := &RemoteStorage{
+		server:       server,
 		readMetrics:  readMetrics,
 		writeMetrics: writeMetrics,
-		server:       server,
 	}
 
 	return remoteStorage
