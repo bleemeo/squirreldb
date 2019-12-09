@@ -215,6 +215,22 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 		return uuids, nil
 	}
 
+	var uuids []types.MetricUUID
+
+	for _, matcher := range matchers {
+		if matcher.Name == uuidLabelName {
+			uuid, err := types.UUIDFromString(matcher.Value)
+
+			if err != nil {
+				break
+			}
+
+			uuids = append(uuids, uuid)
+
+			return uuids, nil
+		}
+	}
+
 	targetLabels, err := c.targetLabels(matchers)
 
 	if err != nil {
@@ -226,8 +242,6 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 	if err != nil {
 		return nil, err
 	}
-
-	var uuids []types.MetricUUID
 
 	for uuid, weight := range uuidsWeight {
 		if weight == len(matchers) {
