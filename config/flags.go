@@ -27,10 +27,16 @@ var flags = []flag{
 		usage: "Set the remote storage listen address",
 	},
 	{
-		name:  "bypass-validate",
+		name:  "ignore-config",
 		short: "",
 		value: false,
-		usage: "Bypass validate",
+		usage: "Ignore the old configuration and use the current configuration",
+	},
+	{
+		name:  "overwrite-config",
+		short: "",
+		value: false,
+		usage: "Overwrite the old configuration with the current configuration",
 	},
 }
 

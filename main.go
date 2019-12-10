@@ -60,14 +60,21 @@ func main() {
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelRedis, squirrelTSDB, squirrelTSDB)
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
 
-	squirrelConfig.WriteRemote(squirrelStates)
+	if valid, exists := squirrelConfig.ValidateRemote(squirrelStates); !valid {
+		if squirrelConfig.Bool("ignore-config") {
+			logger.Println("Warning: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
+				"\t" + "SquirrelDB uses the current configuration")
+		} else if squirrelConfig.Bool("overwrite-config") {
+			squirrelConfig.WriteRemote(squirrelStates)
 
-	if !squirrelConfig.ValidateRemote(squirrelStates) {
-		if squirrelConfig.Bool("bypass-validate") {
-			logger.Println("Warning: Configuration local constant values are not the same as remote constant values")
+			logger.Println("Info: The current configuration has overwritten the previous configuration")
 		} else {
-			logger.Fatalln("Error: Configuration local constant values are not the same as remote constant values")
+			logger.Fatalln("Error: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
+				"\t" + "Run SquirrelDB with the flag --ignore-config to ignore this error" + "\n" +
+				"\t" + "Run SquirrelDB with the flag --overwrite-config to overwrite the previous configuration with the current configuration")
 		}
+	} else if !exists {
+		squirrelConfig.WriteRemote(squirrelStates)
 	}
 
 	signalChan := make(chan os.Signal, 1)
@@ -106,7 +113,7 @@ func main() {
 	go runSquirrelRemoteStorage()
 
 	logger.Println("SquirrelDB is ready")
-	logger.Println("Instance ID:", instance.UUID)
+	logger.Println("Instance UUID:", instance.UUID)
 
 	<-signalChan
 

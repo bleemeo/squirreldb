@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/gocql/gocql"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
@@ -171,30 +172,39 @@ func (c *Config) Validate() bool {
 }
 
 // ValidateRemote checks if the local configuration is consistent with the remote configuration
-func (c *Config) ValidateRemote(states types.Stater) bool {
+func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
 	valid := true
+	exists := false
 
 	for _, name := range names {
 		local := c.String(name)
 
 		var remote string
+		var err error
 
 		retry.Print(func() error {
-			return states.Read(name, &remote)
+			err = states.Read(name, &remote)
+
+			if err == gocql.ErrNotFound {
+				return nil
+			}
+
+			exists = true
+			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't read "+name+" state",
 			"Resolved: Read "+name+" state")
 
-		if local != remote {
+		if exists && (local != remote) {
 			valid = false
 
-			logger.Printf("Error: '%s' new value (%s) and old value (%s) doesn't match", name, local, remote)
+			logger.Printf("Error: '%s' current value (%s) and previous value (%s) doesn't match", name, local, remote)
 		}
 	}
 
-	return valid
+	return valid, exists
 }
 
 // WriteRemote writes the remote constant values if they do not exist
