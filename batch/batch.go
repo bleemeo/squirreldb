@@ -13,7 +13,7 @@ import (
 
 const checkerInterval = 60
 
-const flushMax = 1000
+const flushLimit = 1000
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
@@ -95,6 +95,8 @@ func (b *Batch) runChecker(ctx context.Context) {
 }
 
 // Checks the current states and flush those whose flush date has expired
+// If force is true, each state is flushed
+// If the number of states to be flushed is equal to the flushLimit, they will be flushed
 func (b *Batch) check(now time.Time, force bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -107,7 +109,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 			delete(b.states, uuid)
 
-			if (len(states) % flushMax) == 0 {
+			if (len(states) % flushLimit) == 0 {
 				b.flush(states, now)
 
 				states = make(map[types.MetricUUID][]stateData)
@@ -115,9 +117,7 @@ func (b *Batch) check(now time.Time, force bool) {
 		}
 	}
 
-	if len(states) != 0 {
-		b.flush(states, now)
-	}
+	b.flush(states, now)
 }
 
 // Flushes the points corresponding to the specified metrics state list
@@ -127,8 +127,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	}
 
 	var (
-		readDuration, purgeDuration        time.Duration
-		readPointsCount, purgedPointsCount int
+		readDuration, deleteDuration        time.Duration
+		readPointsCount, deletedPointsCount int
 	)
 
 	uuids := make([]types.MetricUUID, 0, len(states))
@@ -167,7 +167,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		metricsToSet[uuid] = dataToSet
 
 		readPointsCount += len(data.Points)
-		purgedPointsCount += len(data.Points) - len(dataToSet.Points)
+		deletedPointsCount += len(data.Points) - len(dataToSet.Points)
 	}
 
 	requestsPointsTotalRead.Add(float64(readPointsCount))
@@ -186,15 +186,15 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 
 		err := b.storer.Set(metricsToSet, timeToLive)
 
-		purgeDuration += time.Since(start)
+		deleteDuration += time.Since(start)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage")
 
-	requestsPointsTotalDelete.Add(float64(purgedPointsCount))
-	requestsSecondsDelete.Observe(purgeDuration.Seconds())
+	requestsPointsTotalDelete.Add(float64(deletedPointsCount))
+	requestsSecondsDelete.Observe(deleteDuration.Seconds())
 }
 
 // Flushes the points corresponding to the status list of the specified metric
@@ -256,52 +256,64 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		return nil, nil
 	}
 
-	var metrics map[types.MetricUUID]types.MetricData
+	metrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
 
-	retry.Print(func() error {
-		var err error
-		metrics, err = b.readTemporary(request)
+	for _, uuid := range request.UUIDs {
+		uuidRequest := types.MetricRequest{
+			UUIDs:         []types.MetricUUID{uuid},
+			FromTimestamp: request.FromTimestamp,
+			ToTimestamp:   request.ToTimestamp,
+			Step:          request.Step,
+			Function:      request.Function,
+		}
 
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't get metrics from the temporary storage",
-		"Resolved: Get metrics from the temporary storage")
+		var temporaryMetrics map[types.MetricUUID]types.MetricData
 
-	var fromTimestamp int64
+		retry.Print(func() error {
+			var err error
+			temporaryMetrics, err = b.readTemporary(uuidRequest)
 
-	for _, data := range metrics {
-		if len(data.Points) == 0 {
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't get metrics from the temporary storage",
+			"Resolved: Get metrics from the temporary storage")
+
+		var fromTimestamp int64
+
+		for _, data := range metrics {
+			if len(data.Points) == 0 {
+				continue
+			}
+
+			firstPoint := data.Points[0]
+
+			fromTimestamp = compare.MaxInt64(fromTimestamp, firstPoint.Timestamp)
+			uuidRequest.ToTimestamp = fromTimestamp
+		}
+
+		if uuidRequest.ToTimestamp <= uuidRequest.FromTimestamp {
 			continue
 		}
 
-		firstPoint := data.Points[0]
+		var persistentMetrics map[types.MetricUUID]types.MetricData
 
-		fromTimestamp = compare.MaxInt64(fromTimestamp, firstPoint.Timestamp)
-		request.ToTimestamp = fromTimestamp
-	}
+		retry.Print(func() error {
+			var err error
+			persistentMetrics, err = b.reader.Read(uuidRequest)
 
-	if request.ToTimestamp <= request.FromTimestamp {
-		return metrics, nil
-	}
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't get metrics from the persistent storage",
+			"Resolved: Get metrics from the persistent storage")
 
-	var persistentMetrics map[types.MetricUUID]types.MetricData
+		for uuid, persistentData := range persistentMetrics {
+			temporaryData := temporaryMetrics[uuid]
+			data := types.MetricData{
+				Points: append(persistentData.Points, temporaryData.Points...),
+			}
 
-	retry.Print(func() error {
-		var err error
-		persistentMetrics, err = b.reader.Read(request)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't get metrics from the persistent storage",
-		"Resolved: Get metrics from the persistent storage")
-
-	for uuid, persistentData := range persistentMetrics {
-		temporaryData := metrics[uuid]
-		data := types.MetricData{
-			Points: append(persistentData.Points, temporaryData.Points...),
+			metrics[uuid] = data
 		}
-
-		metrics[uuid] = data
 	}
 
 	return metrics, nil

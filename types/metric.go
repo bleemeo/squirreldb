@@ -123,7 +123,18 @@ func GetLabelsValue(labels []MetricLabel, key string) (string, bool) {
 	return "", false
 }
 
-// LabelsFromMatchers returns a list of MetricLabel generated from a list of MetricLabelMatcher
+// GetLabelsValue gets value via its name from a MetricLabelMatcher list
+func GetMatchersValue(matchers []MetricLabelMatcher, key string) (string, bool) {
+	for _, matcher := range matchers {
+		if matcher.Name == key {
+			return matcher.Value, true
+		}
+	}
+
+	return "", false
+}
+
+// LabelsFromMatchers returns a list of MetricLabel generated from a MetricLabelMatcher list
 func LabelsFromMatchers(matchers []MetricLabelMatcher) []MetricLabel {
 	if len(matchers) == 0 {
 		return nil

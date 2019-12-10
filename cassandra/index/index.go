@@ -217,16 +217,13 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher, all bool) ([
 
 	var uuids []types.MetricUUID
 
-	for _, matcher := range matchers {
-		if matcher.Name == uuidLabelName {
-			uuid, err := types.UUIDFromString(matcher.Value)
+	uuidString, exists := types.GetMatchersValue(matchers, uuidLabelName)
 
-			if err != nil {
-				break
-			}
+	if exists {
+		uuid, err := types.UUIDFromString(uuidString)
 
+		if err == nil {
 			uuids = append(uuids, uuid)
-
 			return uuids, nil
 		}
 	}
