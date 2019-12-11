@@ -278,17 +278,10 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			"Error: Can't get metrics from the temporary storage",
 			"Resolved: Get metrics from the temporary storage")
 
-		var fromTimestamp int64
+		temporaryData := temporaryMetrics[uuid]
 
-		for _, data := range metrics {
-			if len(data.Points) == 0 {
-				continue
-			}
-
-			firstPoint := data.Points[0]
-
-			fromTimestamp = compare.MaxInt64(fromTimestamp, firstPoint.Timestamp)
-			uuidRequest.ToTimestamp = fromTimestamp
+		if len(temporaryData.Points) > 0 {
+			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp
 		}
 
 		if uuidRequest.ToTimestamp <= uuidRequest.FromTimestamp {
@@ -306,14 +299,12 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			"Error: Can't get metrics from the persistent storage",
 			"Resolved: Get metrics from the persistent storage")
 
-		for uuid, persistentData := range persistentMetrics {
-			temporaryData := temporaryMetrics[uuid]
-			data := types.MetricData{
-				Points: append(persistentData.Points, temporaryData.Points...),
-			}
-
-			metrics[uuid] = data
+		persistentData := persistentMetrics[uuid]
+		data := types.MetricData{
+			Points: append(persistentData.Points, temporaryData.Points...),
 		}
+
+		metrics[uuid] = data
 	}
 
 	return metrics, nil
