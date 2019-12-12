@@ -135,7 +135,7 @@ func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, res
 
 	retry.Print(func() error {
 		var err error
-		uuids, err = c.indexer.UUIDs(nil, true)
+		uuids, err = c.indexer.AllUUIDs()
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,

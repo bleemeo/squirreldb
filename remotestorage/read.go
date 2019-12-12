@@ -35,7 +35,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		retry.Print(func() error {
 			var err error
-			uuids, err = r.indexer.UUIDs(matchers, false)
+			uuids, err = r.indexer.UUIDs(matchers)
 
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,

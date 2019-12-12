@@ -181,8 +181,10 @@ func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
 	for _, name := range names {
 		local := c.String(name)
 
-		var remote string
-		var err error
+		var (
+			remote string
+			err    error
+		)
 
 		retry.Print(func() error {
 			err = states.Read(name, &remote)

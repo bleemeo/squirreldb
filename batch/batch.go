@@ -281,7 +281,7 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		temporaryData := temporaryMetrics[uuid]
 
 		if len(temporaryData.Points) > 0 {
-			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp
+			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
 		}
 
 		if uuidRequest.ToTimestamp <= uuidRequest.FromTimestamp {
