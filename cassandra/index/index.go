@@ -238,7 +238,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		}
 	}
 
-	if !inPersistent {
+	if !inCache && !inPersistent {
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
