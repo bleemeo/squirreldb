@@ -1,17 +1,17 @@
 package index
 
 import (
-	"context"
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+
+	"context"
 	"log"
 	"os"
-	"sync"
-	"time"
-
 	"regexp"
 	"squirreldb/types"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (

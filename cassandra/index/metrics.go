@@ -5,6 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+//nolint: gochecknoglobals
 var (
 	requestsSecondsLabels = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
