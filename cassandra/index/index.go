@@ -3,6 +3,7 @@ package index
 import (
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+	"time"
 
 	"regexp"
 	"squirreldb/types"
@@ -15,6 +16,8 @@ const (
 	postingsTableName = "postings"
 	uuidsTableName    = "uuids"
 )
+
+const timeToLive = 300
 
 const (
 	uuidLabelName = "__uuid__"
@@ -33,14 +36,25 @@ const (
 	targetTypeValueEqual   = 2
 )
 
+type labelsData struct {
+	labels              []types.MetricLabel
+	expirationTimestamp int64
+}
+
+type uuidData struct {
+	uuid                types.MetricUUID
+	expirationTimestamp int64
+}
+
 type CassandraIndex struct {
 	session       *gocql.Session
 	labelsTable   string
 	postingsTable string
 	uuidsTable    string
 
-	pairs map[types.MetricUUID][]types.MetricLabel
-	mutex sync.Mutex
+	labelsToUUID  map[string]uuidData
+	uuidsToLabels map[types.MetricUUID]labelsData
+	mutex         sync.Mutex
 }
 
 // New creates a new CassandraIndex object
@@ -71,7 +85,8 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 		labelsTable:   labelsTable,
 		postingsTable: postingsTable,
 		uuidsTable:    uuidsTable,
-		pairs:         make(map[types.MetricUUID][]types.MetricLabel),
+		labelsToUUID:  make(map[string]uuidData),
+		uuidsToLabels: make(map[types.MetricUUID]labelsData),
 	}
 
 	return index, nil
@@ -105,38 +120,37 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.M
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	var labels []types.MetricLabel
+	now := time.Now()
 
-	for uuidIt, labelsIt := range c.pairs {
+	var (
+		labelsData labelsData
+		inCache    bool
+	)
+
+	for uuidIt, labelsDataIt := range c.uuidsToLabels {
 		if uuidIt == uuid {
-			labels = make([]types.MetricLabel, len(labelsIt))
-
-			copy(labels, labelsIt)
-
-			if withUUID {
-				label := types.MetricLabel{
-					Name:  uuidLabelName,
-					Value: uuid.String(),
-				}
-
-				labels = append(labels, label)
-			}
-
-			return labels, nil
+			labelsData = labelsDataIt
+			inCache = true
+			break
 		}
 	}
 
-	selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
+	if !inCache {
+		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
-	var labelsMap map[string]string
+		var labelsMap map[string]string
 
-	if err := selectLabelsQuery.Scan(&labelsMap); (err != nil) && (err != gocql.ErrNotFound) {
-		return nil, err
+		if err := selectLabelsQuery.Scan(&labelsMap); (err != nil) && (err != gocql.ErrNotFound) {
+			return nil, err
+		}
+
+		labelsData.labels = types.LabelsFromMap(labelsMap)
 	}
 
-	labels = types.LabelsFromMap(labelsMap)
+	labelsData.expirationTimestamp = now.Unix() + timeToLive
+	c.uuidsToLabels[uuid] = labelsData
 
-	c.pairs[uuid] = labels
+	labels := types.CopyLabels(labelsData.labels)
 
 	if withUUID {
 		label := types.MetricLabel{
@@ -159,59 +173,73 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	sortedLabels := types.SortLabels(labels)
+	now := time.Now()
 
-	for uuidIt, LabelsIt := range c.pairs {
-		if types.EqualLabels(LabelsIt, sortedLabels) {
-			return uuidIt, nil
+	var (
+		uuidData              uuidData
+		inCache, inPersistent bool
+	)
+
+	labelsString := types.StringFromLabels(labels)
+
+	for labelsStringIt, uuidDataIt := range c.labelsToUUID {
+		if labelsStringIt == labelsString {
+			uuidData = uuidDataIt
+			inCache = true
+			break
 		}
 	}
 
-	labelsString := types.StringFromLabels(sortedLabels)
-	selectUUIDQuery := c.labelsTableSelectUUIDQuery(labelsString)
+	if !inCache {
+		selectUUIDQuery := c.labelsTableSelectUUIDQuery(labelsString)
 
-	var cqlUUID gocql.UUID
+		var cqlUUID gocql.UUID
 
-	if err := selectUUIDQuery.Scan(&cqlUUID); err == nil {
+		if err := selectUUIDQuery.Scan(&cqlUUID); err == nil {
+			uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+
+			uuidData.uuid = uuid
+			inPersistent = true
+		} else if err != gocql.ErrNotFound {
+			return types.MetricUUID{}, err
+		}
+	}
+
+	if !inPersistent {
+		cqlUUID, err := gocql.RandomUUID()
+
+		if err != nil {
+			return types.MetricUUID{}, err
+		}
+
+		indexBatch := c.session.NewBatch(gocql.LoggedBatch)
+		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
 		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
-		c.pairs[uuid] = sortedLabels
+		indexBatch.Query(insertUUIDQueryString, labelsString, uuid.String())
 
-		return uuid, nil
-	} else if err != gocql.ErrNotFound {
-		return types.MetricUUID{}, err
+		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
+		labelsMap := types.MapFromLabels(labels)
+
+		indexBatch.Query(insertLabelsQueryString, uuid.String(), labelsMap)
+
+		for _, label := range labels {
+			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString(uuid.String())
+
+			indexBatch.Query(updateUUIDsQueryString, label.Name, label.Value)
+		}
+
+		if err := c.session.ExecuteBatch(indexBatch); err != nil {
+			return types.MetricUUID{}, err
+		}
+
+		uuidData.uuid = uuid
 	}
 
-	cqlUUID, err := gocql.RandomUUID()
+	uuidData.expirationTimestamp = now.Unix() + timeToLive
+	c.labelsToUUID[labelsString] = uuidData
 
-	if err != nil {
-		return types.MetricUUID{}, err
-	}
-
-	indexBatch := c.session.NewBatch(gocql.LoggedBatch)
-	insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
-	uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-	indexBatch.Query(insertUUIDQueryString, labelsString, uuid.String())
-
-	insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
-	labelsMap := types.MapFromLabels(sortedLabels)
-
-	indexBatch.Query(insertLabelsQueryString, uuid.String(), labelsMap)
-
-	for _, label := range sortedLabels {
-		updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString(uuid.String())
-
-		indexBatch.Query(updateUUIDsQueryString, label.Name, label.Value)
-	}
-
-	if err := c.session.ExecuteBatch(indexBatch); err != nil {
-		return types.MetricUUID{}, err
-	}
-
-	c.pairs[uuid] = sortedLabels
-
-	return uuid, nil
+	return uuidData.uuid, nil
 }
 
 // UUIDs returns a MetricUUID list corresponding to the specified MetricLabelMatcher list

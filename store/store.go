@@ -17,7 +17,7 @@ var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
 	types.MetricData
-	ExpirationTimestamp int64
+	expirationTimestamp int64
 }
 
 type Store struct {
@@ -88,7 +88,7 @@ func (s *Store) expire(now time.Time) {
 	defer s.mutex.Unlock()
 
 	for uuid, storeData := range s.metrics {
-		if storeData.ExpirationTimestamp < now.Unix() {
+		if storeData.expirationTimestamp < now.Unix() {
 			delete(s.metrics, uuid)
 		}
 	}
@@ -107,7 +107,7 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-		storeData.ExpirationTimestamp = expirationTimestamp
+		storeData.expirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
 	}
@@ -117,7 +117,7 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-		storeData.ExpirationTimestamp = expirationTimestamp
+		storeData.expirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
 	}
@@ -156,7 +156,7 @@ func (s *Store) set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 		storeData := s.metrics[uuid]
 
 		storeData.MetricData = data
-		storeData.ExpirationTimestamp = expirationTimestamp
+		storeData.expirationTimestamp = expirationTimestamp
 
 		s.metrics[uuid] = storeData
 	}

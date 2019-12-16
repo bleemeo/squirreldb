@@ -69,7 +69,7 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
@@ -85,7 +85,7 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 2400,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 				},
 			},
@@ -182,7 +182,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -218,7 +218,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 2400,
 					},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 			},
 			wantErr: false,
@@ -313,7 +313,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					ExpirationTimestamp: 800,
+					expirationTimestamp: 800,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -341,7 +341,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					ExpirationTimestamp: 800,
+					expirationTimestamp: 800,
 				},
 			},
 			wantErr: false,
@@ -364,7 +364,7 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
@@ -380,7 +380,7 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 2400,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 				},
 			},
@@ -405,7 +405,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 150,
 					},
-					ExpirationTimestamp: 400,
+					expirationTimestamp: 400,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -421,7 +421,7 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 2400,
 					},
-					ExpirationTimestamp: 400,
+					expirationTimestamp: 400,
 				},
 			},
 			wantErr: false,
@@ -475,11 +475,11 @@ func TestStore_expire(t *testing.T) {
 				metrics: map[types.MetricUUID]storeData{
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData:          types.MetricData{},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData:          types.MetricData{},
-						ExpirationTimestamp: 1600,
+						expirationTimestamp: 1600,
 					},
 				},
 			},
@@ -489,11 +489,11 @@ func TestStore_expire(t *testing.T) {
 			want: map[types.MetricUUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData:          types.MetricData{},
-					ExpirationTimestamp: 800,
+					expirationTimestamp: 800,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData:          types.MetricData{},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 			},
 		},
@@ -503,11 +503,11 @@ func TestStore_expire(t *testing.T) {
 				metrics: map[types.MetricUUID]storeData{
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData:          types.MetricData{},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData:          types.MetricData{},
-						ExpirationTimestamp: 1600,
+						expirationTimestamp: 1600,
 					},
 				},
 			},
@@ -517,7 +517,7 @@ func TestStore_expire(t *testing.T) {
 			want: map[types.MetricUUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData:          types.MetricData{},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 			},
 		},
@@ -592,7 +592,7 @@ func TestStore_get(t *testing.T) {
 							},
 							TimeToLive: 300,
 						},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
@@ -620,7 +620,7 @@ func TestStore_get(t *testing.T) {
 							},
 							TimeToLive: 1200,
 						},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 				},
 			},
@@ -710,7 +710,7 @@ func TestStore_set(t *testing.T) {
 							},
 							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
@@ -726,7 +726,7 @@ func TestStore_set(t *testing.T) {
 							},
 							TimeToLive: 2400,
 						},
-						ExpirationTimestamp: 800,
+						expirationTimestamp: 800,
 					},
 				},
 			},
@@ -813,7 +813,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -841,7 +841,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					ExpirationTimestamp: 1600,
+					expirationTimestamp: 1600,
 				},
 			},
 			wantErr: false,
@@ -934,7 +934,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					ExpirationTimestamp: 800,
+					expirationTimestamp: 800,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -962,7 +962,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					ExpirationTimestamp: 800,
+					expirationTimestamp: 800,
 				},
 			},
 			wantErr: false,
@@ -985,7 +985,7 @@ func TestStore_set(t *testing.T) {
 							},
 							TimeToLive: 150,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
@@ -1001,7 +1001,7 @@ func TestStore_set(t *testing.T) {
 							},
 							TimeToLive: 2400,
 						},
-						ExpirationTimestamp: 400,
+						expirationTimestamp: 400,
 					},
 				},
 			},
@@ -1025,7 +1025,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 150,
 					},
-					ExpirationTimestamp: 400,
+					expirationTimestamp: 400,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
@@ -1041,7 +1041,7 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 2400,
 					},
-					ExpirationTimestamp: 400,
+					expirationTimestamp: 400,
 				},
 			},
 			wantErr: false,

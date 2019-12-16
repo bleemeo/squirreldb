@@ -62,6 +62,32 @@ func ContainsLabels(labels []MetricLabel, name string) (bool, string) {
 	return false, ""
 }
 
+// CopyLabels returns a copy of labels
+func CopyLabels(labels []MetricLabel) []MetricLabel {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	copiedLabels := make([]MetricLabel, len(labels))
+
+	copy(copiedLabels, labels)
+
+	return copiedLabels
+}
+
+// CopyPoints returns a copy of points
+func CopyPoints(points []MetricPoint) []MetricPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	copiedPoints := make([]MetricPoint, len(points))
+
+	copy(copiedPoints, points)
+
+	return copiedPoints
+}
+
 // DeduplicatePoints returns the MetricPoint list deduplicated and sorted by timestamp
 func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	if len(points) == 0 {
@@ -117,17 +143,6 @@ func GetLabelsValue(labels []MetricLabel, key string) (string, bool) {
 	for _, label := range labels {
 		if label.Name == key {
 			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// GetLabelsValue gets value via its name from a MetricLabelMatcher list
-func GetMatchersValue(matchers []MetricLabelMatcher, key string) (string, bool) {
-	for _, matcher := range matchers {
-		if matcher.Name == key {
-			return matcher.Value, true
 		}
 	}
 
@@ -190,9 +205,7 @@ func SortLabels(labels []MetricLabel) []MetricLabel {
 		return nil
 	}
 
-	sortedLabels := make([]MetricLabel, len(labels))
-
-	copy(sortedLabels, labels)
+	sortedLabels := CopyLabels(labels)
 
 	sort.Slice(sortedLabels, func(i, j int) bool {
 		return sortedLabels[i].Name < sortedLabels[j].Name
@@ -207,9 +220,7 @@ func SortPoints(points []MetricPoint) []MetricPoint {
 		return nil
 	}
 
-	sortedPoints := make([]MetricPoint, len(points))
-
-	copy(sortedPoints, points)
+	sortedPoints := CopyPoints(points)
 
 	sort.Slice(sortedPoints, func(i, j int) bool {
 		return sortedPoints[i].Timestamp < sortedPoints[j].Timestamp

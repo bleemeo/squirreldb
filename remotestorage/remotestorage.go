@@ -65,17 +65,17 @@ func New(options Options, indexer types.Indexer, reader types.MetricReader, writ
 }
 
 // Run starts all RemoteStorage services
-func (p *RemoteStorage) Run(ctx context.Context) {
-	p.runServer(ctx)
+func (r *RemoteStorage) Run(ctx context.Context) {
+	r.runServer(ctx)
 }
 
 // Starts the server
 // If a stop signal is received, the server will be stopped
 // If 10 seconds after this signal is received, and the server is not stopped, it is forced to stop.
-func (p *RemoteStorage) runServer(ctx context.Context) {
+func (r *RemoteStorage) runServer(ctx context.Context) {
 	go func() {
 		retry.Print(func() error {
-			err := p.server.ListenAndServe()
+			err := r.server.ListenAndServe()
 
 			if err == http.ErrServerClosed {
 				return nil
@@ -87,14 +87,14 @@ func (p *RemoteStorage) runServer(ctx context.Context) {
 			"Resolved: Listen and serve the server")
 	}()
 
-	logger.Printf("Server listening on %s", p.server.Addr)
+	logger.Printf("Server listening on %s", r.server.Addr)
 
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := p.server.Shutdown(shutdownCtx); err != nil {
+	if err := r.server.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("Error: Can't stop the server (%v)", err)
 	}
 
