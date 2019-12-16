@@ -236,7 +236,6 @@ func StringFromLabels(labels []MetricLabel) string {
 	strLabels := make([]string, 0, len(labels))
 
 	for _, label := range sortedLabels {
-		label.Value = strings.ReplaceAll(label.Value, `"`, `\"`)
 		str := label.Name + ":" + label.Value
 
 		strLabels = append(strLabels, str)

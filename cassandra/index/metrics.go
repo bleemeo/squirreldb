@@ -10,21 +10,19 @@ var (
 	requestsSecondsLabels = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "labels_seconds",
+		Name:      "lookup_labels_seconds",
 		Help:      "Total processing time in seconds (including cache processing and Cassandra querying)",
 	})
 	requestsSecondsUUID = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "squirreldb",
-		Subsystem:   "index",
-		Name:        "uuid_seconds",
-		Help:        "Total processing time in seconds (including cache processing and Cassandra querying)",
-		ConstLabels: prometheus.Labels{"operation": "all"},
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "lookup_uuid_seconds",
+		Help:      "Total processing time in seconds (including cache processing and Cassandra querying)",
 	})
 	requestsSecondsUUIDs = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace:   "squirreldb",
-		Subsystem:   "index",
-		Name:        "uuids_seconds",
-		Help:        "Total processing time in seconds (including Cassandra querying and match processing)",
-		ConstLabels: prometheus.Labels{"type": "uuids"},
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "search_uuids_seconds",
+		Help:      "Total processing time in seconds (including Cassandra querying and match processing)",
 	})
 )
