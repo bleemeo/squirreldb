@@ -85,14 +85,23 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	runSquirrelCassandra := func() {
+	runSquirrelIndex := func() {
+		defer wg.Done()
+		squirrelIndex.Run(ctx)
+	}
+
+	wg.Add(1)
+
+	go runSquirrelIndex()
+
+	runSquirrelTSDB := func() {
 		defer wg.Done()
 		squirrelTSDB.Run(ctx)
 	}
 
 	wg.Add(1)
 
-	go runSquirrelCassandra()
+	go runSquirrelTSDB()
 
 	runSquirrelBatch := func() {
 		defer wg.Done()

@@ -1,14 +1,17 @@
 package index
 
 import (
+	"context"
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+	"log"
+	"os"
+	"sync"
 	"time"
 
 	"regexp"
 	"squirreldb/types"
 	"strings"
-	"sync"
 )
 
 const (
@@ -16,6 +19,8 @@ const (
 	postingsTableName = "postings"
 	uuidsTableName    = "uuids"
 )
+
+const expiratorInterval = 60
 
 const timeToLive = 300
 
@@ -36,6 +41,9 @@ const (
 	targetTypeValueEqual   = 2
 )
 
+//nolint: gochecknoglobals
+var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
+
 type labelsData struct {
 	labels              []types.MetricLabel
 	expirationTimestamp int64
@@ -53,8 +61,9 @@ type CassandraIndex struct {
 	uuidsTable    string
 
 	labelsToUUID  map[string]uuidData
+	ltuMutex      sync.Mutex
 	uuidsToLabels map[types.MetricUUID]labelsData
-	mutex         sync.Mutex
+	utlMutex      sync.Mutex
 }
 
 // New creates a new CassandraIndex object
@@ -92,6 +101,30 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 	return index, nil
 }
 
+// Run starts all Cassandra Index services
+func (c *CassandraIndex) Run(ctx context.Context) {
+	c.runExpirator(ctx)
+}
+
+// Starts the expirator service
+// If a stop signal is received, the service is stopped
+func (c *CassandraIndex) runExpirator(ctx context.Context) {
+	interval := expiratorInterval * time.Second
+	ticker := time.NewTicker(interval)
+
+	defer ticker.Stop()
+
+	for ctx.Err() == nil {
+		select {
+		case <-ticker.C:
+			c.expire(time.Now())
+		case <-ctx.Done():
+			logger.Println("Expirator service stopped")
+			return
+		}
+	}
+}
+
 // AllUUIDs returns all UUIDs stored in the UUIDs index
 func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 	uuidsTableSelectUUIDsQuery := c.uuidsTableSelectUUIDsQuery()
@@ -117,8 +150,8 @@ func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 
 // Labels returns a MetricLabel list corresponding to the specified MetricUUID
 func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.MetricLabel, error) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.utlMutex.Lock()
+	defer c.utlMutex.Unlock()
 
 	now := time.Now()
 
@@ -170,8 +203,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return types.MetricUUID{}, nil
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.ltuMutex.Lock()
+	defer c.ltuMutex.Unlock()
 
 	now := time.Now()
 
@@ -265,6 +298,25 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 	}
 
 	return uuids, nil
+}
+
+func (c *CassandraIndex) expire(now time.Time) {
+	c.ltuMutex.Lock()
+	c.utlMutex.Lock()
+	defer c.ltuMutex.Unlock()
+	defer c.utlMutex.Unlock()
+
+	for labelsString, uuidData := range c.labelsToUUID {
+		if uuidData.expirationTimestamp < now.Unix() {
+			delete(c.labelsToUUID, labelsString)
+		}
+	}
+
+	for uuid, labelsData := range c.uuidsToLabels {
+		if labelsData.expirationTimestamp < now.Unix() {
+			delete(c.uuidsToLabels, uuid)
+		}
+	}
 }
 
 // Returns labels by target type
