@@ -150,23 +150,14 @@ func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 
 // Labels returns a MetricLabel list corresponding to the specified MetricUUID
 func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.MetricLabel, error) {
+	start := time.Now()
+
 	c.utlMutex.Lock()
 	defer c.utlMutex.Unlock()
 
 	now := time.Now()
 
-	var (
-		labelsData labelsData
-		inCache    bool
-	)
-
-	for uuidIt, labelsDataIt := range c.uuidsToLabels {
-		if uuidIt == uuid {
-			labelsData = labelsDataIt
-			inCache = true
-			break
-		}
-	}
+	labelsData, inCache := c.uuidsToLabels[uuid]
 
 	if !inCache {
 		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
@@ -194,6 +185,8 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.M
 		labels = append(labels, label)
 	}
 
+	requestsSecondsLabels.Observe(time.Since(start).Seconds())
+
 	return labels, nil
 }
 
@@ -203,25 +196,18 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		return types.MetricUUID{}, nil
 	}
 
+	start := time.Now()
+
 	c.ltuMutex.Lock()
 	defer c.ltuMutex.Unlock()
 
 	now := time.Now()
 
-	var (
-		uuidData              uuidData
-		inCache, inPersistent bool
-	)
-
 	labelsString := types.StringFromLabels(labels)
 
-	for labelsStringIt, uuidDataIt := range c.labelsToUUID {
-		if labelsStringIt == labelsString {
-			uuidData = uuidDataIt
-			inCache = true
-			break
-		}
-	}
+	uuidData, inCache := c.labelsToUUID[labelsString]
+
+	var inPersistent bool
 
 	if !inCache {
 		selectUUIDQuery := c.labelsTableSelectUUIDQuery(labelsString)
@@ -272,11 +258,19 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	uuidData.expirationTimestamp = now.Unix() + timeToLive
 	c.labelsToUUID[labelsString] = uuidData
 
+	requestsSecondsUUID.Observe(time.Since(start).Seconds())
+
 	return uuidData.uuid, nil
 }
 
 // UUIDs returns a MetricUUID list corresponding to the specified MetricLabelMatcher list
 func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
+	if len(matchers) == 0 {
+		return nil, nil
+	}
+
+	start := time.Now()
+
 	targetLabels, err := c.targetLabels(matchers)
 
 	if err != nil {
@@ -296,6 +290,8 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 			uuids = append(uuids, uuid)
 		}
 	}
+
+	requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
 
 	return uuids, nil
 }
