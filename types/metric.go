@@ -47,21 +47,6 @@ func (m *MetricUUID) Uint64() uint64 {
 	return bigInt.Uint64()
 }
 
-// ContainsLabels returns a bool and a string
-func ContainsLabels(labels []MetricLabel, name string) (bool, string) {
-	if len(labels) == 0 {
-		return false, ""
-	}
-
-	for _, label := range labels {
-		if label.Name == name {
-			return true, label.Value
-		}
-	}
-
-	return false, ""
-}
-
 // CopyLabels returns a copy of labels
 func CopyLabels(labels []MetricLabel) []MetricLabel {
 	if len(labels) == 0 {
@@ -139,10 +124,21 @@ func EqualLabels(labels, reference []MetricLabel) bool {
 }
 
 // GetLabelsValue gets value via its name from a MetricLabel list
-func GetLabelsValue(labels []MetricLabel, key string) (string, bool) {
+func GetLabelsValue(labels []MetricLabel, name string) (string, bool) {
 	for _, label := range labels {
-		if label.Name == key {
+		if label.Name == name {
 			return label.Value, true
+		}
+	}
+
+	return "", false
+}
+
+// GetMatchersValue gets value via its name from a MetricLabel list
+func GetMatchersValue(matchers []MetricLabelMatcher, name string) (string, bool) {
+	for _, matcher := range matchers {
+		if matcher.Name == name {
+			return matcher.Value, true
 		}
 	}
 
@@ -231,11 +227,13 @@ func SortPoints(points []MetricPoint) []MetricPoint {
 
 // StringFromLabels returns a string generated from a MetricLabel list
 func StringFromLabels(labels []MetricLabel) string {
-	sortedLabels := SortLabels(labels)
+	if len(labels) == 0 {
+		return ""
+	}
 
 	strLabels := make([]string, 0, len(labels))
 
-	for _, label := range sortedLabels {
+	for _, label := range labels {
 		str := label.Name + ":" + label.Value
 
 		strLabels = append(strLabels, str)

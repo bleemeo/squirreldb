@@ -51,7 +51,7 @@ func main() {
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
-	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace)
+	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace, squirrelConfig)
 	instance := createInstance()
 	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace, instance)
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
@@ -184,12 +184,16 @@ func createSquirrelSession(keyspace string, config *config.Config) *gocql.Sessio
 	return squirrelSession
 }
 
-func createSquirrelIndex(session *gocql.Session, keyspace string) *index.CassandraIndex {
+func createSquirrelIndex(session *gocql.Session, keyspace string, config *config.Config) *index.CassandraIndex {
 	var squirrelIndex *index.CassandraIndex
+
+	options := index.Options{
+		IncludeUUID: config.Bool("index.include_uuid"),
+	}
 
 	retry.Print(func() error {
 		var err error
-		squirrelIndex, err = index.New(session, keyspace)
+		squirrelIndex, err = index.New(session, keyspace, options)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -275,7 +279,6 @@ func createSquirrelBatch(config *config.Config, storer batch.Storer, reader type
 func createSquirrelRemoteStorage(config *config.Config, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *remotestorage.RemoteStorage {
 	options := remotestorage.Options{
 		ListenAddress: config.String("remote_storage.listen_address"),
-		WithUUID:      config.Bool("remote_storage.with_uuid"),
 	}
 
 	squirrelRemoteStorage := remotestorage.New(options, indexer, reader, writer)

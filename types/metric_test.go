@@ -42,513 +42,7 @@ func TestMetricUUID_Uint64(t *testing.T) {
 	}
 }
 
-func TestLabelsContains(t *testing.T) {
-	type args struct {
-		labels []MetricLabel
-		name   string
-	}
-	tests := []struct {
-		name  string
-		args  args
-		want  bool
-		want1 string
-	}{
-		{
-			name: "contains",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				name: "monitor",
-			},
-			want:  true,
-			want1: "codelab",
-		},
-		{
-			name: "contains_empty_value",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "down",
-					},
-					{
-						Name:  "job",
-						Value: "",
-					},
-				},
-				name: "job",
-			},
-			want:  true,
-			want1: "",
-		},
-		{
-			name: "no_contains",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
-				name: "monitor",
-			},
-			want:  false,
-			want1: "",
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []MetricLabel{},
-				name:   "monitor",
-			},
-			want:  false,
-			want1: "",
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-				name:   "monitor",
-			},
-			want:  false,
-			want1: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := ContainsLabels(tt.args.labels, tt.args.name)
-			if got != tt.want {
-				t.Errorf("ContainsLabels() got = %v, want %v", got, tt.want)
-			}
-			if got1 != tt.want1 {
-				t.Errorf("ContainsLabels() got1 = %v, want %v", got1, tt.want1)
-			}
-		})
-	}
-}
-
-func TestLabelsEqual(t *testing.T) {
-	type args struct {
-		labels    []MetricLabel
-		reference []MetricLabel
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			name: "equal",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				reference: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "no_equal_same_length",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				reference: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "job",
-						Value: "",
-					},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no_equal_no_same_length",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				reference: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []MetricLabel{},
-				reference: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-				reference: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "reference_empty",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				reference: []MetricLabel{},
-			},
-			want: false,
-		},
-		{
-			name: "reference_nil",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				reference: nil,
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := EqualLabels(tt.args.labels, tt.args.reference); got != tt.want {
-				t.Errorf("EqualLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestLabelsFromMap(t *testing.T) {
-	type args struct {
-		m map[string]string
-	}
-	tests := []struct {
-		name string
-		args args
-		want []MetricLabel
-	}{
-		{
-			name: "map",
-			args: args{
-				m: map[string]string{
-					"__name__": "up",
-					"monitor":  "codelab",
-				},
-			},
-			want: []MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "map_empty",
-			args: args{
-				m: make(map[string]string),
-			},
-			want: nil,
-		},
-		{
-			name: "map_nil",
-			args: args{
-				m: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := LabelsFromMap(tt.args.m); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("LabelsFromMap() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestLabelsFromMatchers(t *testing.T) {
-	type args struct {
-		matchers []MetricLabelMatcher
-	}
-	tests := []struct {
-		name string
-		args args
-		want []MetricLabel
-	}{
-		{
-			name: "matchers",
-			args: args{
-				matchers: []MetricLabelMatcher{
-					{
-						MetricLabel: MetricLabel{
-							Name:  "__name__",
-							Value: "up",
-						},
-						Type: 1,
-					},
-					{
-						MetricLabel: MetricLabel{
-							Name:  "monitor",
-							Value: "codelab",
-						},
-						Type: 2,
-					},
-				},
-			},
-			want: []MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "matchers_empty",
-			args: args{
-				matchers: []MetricLabelMatcher{},
-			},
-			want: nil,
-		},
-		{
-			name: "matchers_nil",
-			args: args{
-				matchers: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := LabelsFromMatchers(tt.args.matchers); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("LabelsFromMatchers() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestLabelsSort(t *testing.T) {
-	type args struct {
-		labels []MetricLabel
-	}
-	tests := []struct {
-		name string
-		args args
-		want []MetricLabel
-	}{
-		{
-			name: "sorted",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: []MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "no_sorted",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
-			},
-			want: []MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []MetricLabel{},
-			},
-			want: nil,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := SortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SortLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMapFromLabels(t *testing.T) {
-	type args struct {
-		labels []MetricLabel
-	}
-	tests := []struct {
-		name string
-		args args
-		want map[string]string
-	}{
-		{
-			name: "labels",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: map[string]string{
-				"__name__": "up",
-				"monitor":  "codelab",
-			},
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []MetricLabel{},
-			},
-			want: nil,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := MapFromLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("MapFromLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestPointsDeduplicate(t *testing.T) {
+func TestDeduplicatePoints(t *testing.T) {
 	type args struct {
 		points []MetricPoint
 	}
@@ -729,7 +223,616 @@ func TestPointsDeduplicate(t *testing.T) {
 	}
 }
 
-func TestPointsSort(t *testing.T) {
+func TestEqualLabels(t *testing.T) {
+	type args struct {
+		labels    []MetricLabel
+		reference []MetricLabel
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "equal",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				reference: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no_equal_same_length",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				reference: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "job",
+						Value: "",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "no_equal_no_same_length",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				reference: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "labels_empty",
+			args: args{
+				labels: []MetricLabel{},
+				reference: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "labels_nil",
+			args: args{
+				labels: nil,
+				reference: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "reference_empty",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				reference: []MetricLabel{},
+			},
+			want: false,
+		},
+		{
+			name: "reference_nil",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				reference: nil,
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EqualLabels(tt.args.labels, tt.args.reference); got != tt.want {
+				t.Errorf("EqualLabels() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetLabelsValue(t *testing.T) {
+	type args struct {
+		labels []MetricLabel
+		name   string
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  string
+		want1 bool
+	}{
+		{
+			name: "contains",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+				name: "monitor",
+			},
+			want:  "codelab",
+			want1: true,
+		},
+		{
+			name: "contains_empty_value",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "down",
+					},
+					{
+						Name:  "job",
+						Value: "",
+					},
+				},
+				name: "job",
+			},
+			want:  "",
+			want1: true,
+		},
+		{
+			name: "no_contains",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+				},
+				name: "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+		{
+			name: "labels_empty",
+			args: args{
+				labels: []MetricLabel{},
+				name:   "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+		{
+			name: "labels_nil",
+			args: args{
+				labels: nil,
+				name:   "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := GetLabelsValue(tt.args.labels, tt.args.name)
+			if got != tt.want {
+				t.Errorf("GetLabelsValue() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("GetLabelsValue() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}
+
+func TestGetMatchersValue(t *testing.T) {
+	type args struct {
+		matchers []MetricLabelMatcher
+		name     string
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  string
+		want1 bool
+	}{
+		{
+			name: "contains",
+			args: args{
+				matchers: []MetricLabelMatcher{
+					{
+						MetricLabel: MetricLabel{
+							Name:  "__name__",
+							Value: "up",
+						},
+					},
+					{
+						MetricLabel: MetricLabel{
+							Name:  "monitor",
+							Value: "codelab",
+						},
+					},
+				},
+				name: "monitor",
+			},
+			want:  "codelab",
+			want1: true,
+		},
+		{
+			name: "contains_empty_value",
+			args: args{
+				matchers: []MetricLabelMatcher{
+					{
+						MetricLabel: MetricLabel{
+							Name:  "__name__",
+							Value: "down",
+						},
+					},
+					{
+						MetricLabel: MetricLabel{
+							Name:  "job",
+							Value: "",
+						},
+					},
+				},
+				name: "job",
+			},
+			want:  "",
+			want1: true,
+		},
+		{
+			name: "no_contains",
+			args: args{
+				matchers: []MetricLabelMatcher{
+					{
+						MetricLabel: MetricLabel{
+							Name:  "__name__",
+							Value: "up",
+						},
+					},
+				},
+				name: "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+		{
+			name: "labels_empty",
+			args: args{
+				matchers: []MetricLabelMatcher{},
+				name:     "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+		{
+			name: "labels_nil",
+			args: args{
+				matchers: nil,
+				name:     "monitor",
+			},
+			want:  "",
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := GetMatchersValue(tt.args.matchers, tt.args.name)
+			if got != tt.want {
+				t.Errorf("GetMatchersValue() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("GetMatchersValue() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}
+
+func TestLabelsFromMap(t *testing.T) {
+	type args struct {
+		m map[string]string
+	}
+	tests := []struct {
+		name string
+		args args
+		want []MetricLabel
+	}{
+		{
+			name: "map",
+			args: args{
+				m: map[string]string{
+					"__name__": "up",
+					"monitor":  "codelab",
+				},
+			},
+			want: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "up",
+				},
+				{
+					Name:  "monitor",
+					Value: "codelab",
+				},
+			},
+		},
+		{
+			name: "map_empty",
+			args: args{
+				m: make(map[string]string),
+			},
+			want: nil,
+		},
+		{
+			name: "map_nil",
+			args: args{
+				m: nil,
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LabelsFromMap(tt.args.m); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("LabelsFromMap() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLabelsFromMatchers(t *testing.T) {
+	type args struct {
+		matchers []MetricLabelMatcher
+	}
+	tests := []struct {
+		name string
+		args args
+		want []MetricLabel
+	}{
+		{
+			name: "matchers",
+			args: args{
+				matchers: []MetricLabelMatcher{
+					{
+						MetricLabel: MetricLabel{
+							Name:  "__name__",
+							Value: "up",
+						},
+						Type: 1,
+					},
+					{
+						MetricLabel: MetricLabel{
+							Name:  "monitor",
+							Value: "codelab",
+						},
+						Type: 2,
+					},
+				},
+			},
+			want: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "up",
+				},
+				{
+					Name:  "monitor",
+					Value: "codelab",
+				},
+			},
+		},
+		{
+			name: "matchers_empty",
+			args: args{
+				matchers: []MetricLabelMatcher{},
+			},
+			want: nil,
+		},
+		{
+			name: "matchers_nil",
+			args: args{
+				matchers: nil,
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LabelsFromMatchers(tt.args.matchers); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("LabelsFromMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMapFromLabels(t *testing.T) {
+	type args struct {
+		labels []MetricLabel
+	}
+	tests := []struct {
+		name string
+		args args
+		want map[string]string
+	}{
+		{
+			name: "labels",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+			},
+			want: map[string]string{
+				"__name__": "up",
+				"monitor":  "codelab",
+			},
+		},
+		{
+			name: "labels_empty",
+			args: args{
+				labels: []MetricLabel{},
+			},
+			want: nil,
+		},
+		{
+			name: "labels_nil",
+			args: args{
+				labels: nil,
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := MapFromLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("MapFromLabels() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortLabels(t *testing.T) {
+	type args struct {
+		labels []MetricLabel
+	}
+	tests := []struct {
+		name string
+		args args
+		want []MetricLabel
+	}{
+		{
+			name: "sorted",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+				},
+			},
+			want: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "up",
+				},
+				{
+					Name:  "monitor",
+					Value: "codelab",
+				},
+			},
+		},
+		{
+			name: "no_sorted",
+			args: args{
+				labels: []MetricLabel{
+					{
+						Name:  "monitor",
+						Value: "codelab",
+					},
+					{
+						Name:  "__name__",
+						Value: "up",
+					},
+				},
+			},
+			want: []MetricLabel{
+				{
+					Name:  "__name__",
+					Value: "up",
+				},
+				{
+					Name:  "monitor",
+					Value: "codelab",
+				},
+			},
+		},
+		{
+			name: "labels_empty",
+			args: args{
+				labels: []MetricLabel{},
+			},
+			want: nil,
+		},
+		{
+			name: "labels_nil",
+			args: args{
+				labels: nil,
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SortLabels() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortPoints(t *testing.T) {
 	type args struct {
 		points []MetricPoint
 	}

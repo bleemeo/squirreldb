@@ -54,8 +54,13 @@ type uuidData struct {
 	expirationTimestamp int64
 }
 
+type Options struct {
+	IncludeUUID bool
+}
+
 type CassandraIndex struct {
 	session       *gocql.Session
+	options       Options
 	labelsTable   string
 	postingsTable string
 	uuidsTable    string
@@ -67,7 +72,7 @@ type CassandraIndex struct {
 }
 
 // New creates a new CassandraIndex object
-func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
+func New(session *gocql.Session, keyspace string, options Options) (*CassandraIndex, error) {
 	labelsTable := keyspace + "." + "\"" + labelsTableName + "\""
 	labelsTableCreateQuery := labelsTableCreateQuery(session, labelsTable)
 
@@ -91,6 +96,7 @@ func New(session *gocql.Session, keyspace string) (*CassandraIndex, error) {
 
 	index := &CassandraIndex{
 		session:       session,
+		options:       options,
 		labelsTable:   labelsTable,
 		postingsTable: postingsTable,
 		uuidsTable:    uuidsTable,
@@ -149,17 +155,15 @@ func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 }
 
 // Labels returns a MetricLabel list corresponding to the specified MetricUUID
-func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.MetricLabel, error) {
+func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
 	start := time.Now()
 
 	c.utlMutex.Lock()
 	defer c.utlMutex.Unlock()
 
-	now := time.Now()
+	labelsData, found := c.uuidsToLabels[uuid]
 
-	labelsData, inCache := c.uuidsToLabels[uuid]
-
-	if !inCache {
+	if !found {
 		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
 		var labelsMap map[string]string
@@ -171,12 +175,14 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID, withUUID bool) ([]types.M
 		labelsData.labels = types.LabelsFromMap(labelsMap)
 	}
 
+	now := time.Now()
+
 	labelsData.expirationTimestamp = now.Unix() + timeToLive
 	c.uuidsToLabels[uuid] = labelsData
 
 	labels := types.CopyLabels(labelsData.labels)
 
-	if withUUID {
+	if c.options.IncludeUUID {
 		label := types.MetricLabel{
 			Name:  uuidLabelName,
 			Value: uuid.String(),
@@ -201,16 +207,41 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	c.ltuMutex.Lock()
 	defer c.ltuMutex.Unlock()
 
-	now := time.Now()
+	var (
+		uuidData uuidData
+		found    bool
+	)
 
-	labelsString := types.StringFromLabels(labels)
+	if c.options.IncludeUUID {
+		var uuidStr string
+		uuidStr, found = types.GetLabelsValue(labels, uuidLabelName)
 
-	uuidData, inCache := c.labelsToUUID[labelsString]
+		if found {
+			var err error
+			uuidData.uuid, err = types.UUIDFromString(uuidStr)
 
-	var inPersistent bool
+			if err != nil {
+				return types.MetricUUID{}, nil
+			}
+		}
+	}
 
-	if !inCache {
-		selectUUIDQuery := c.labelsTableSelectUUIDQuery(labelsString)
+	var labelsString string
+
+	if !found {
+		labelsString = types.StringFromLabels(labels)
+
+		uuidData, found = c.labelsToUUID[labelsString]
+	}
+
+	var sortedLabelsString string
+
+	if !found {
+		sortedLabels := types.SortLabels(labels)
+
+		sortedLabelsString = types.StringFromLabels(sortedLabels)
+
+		selectUUIDQuery := c.labelsTableSelectUUIDQuery(sortedLabelsString)
 
 		var cqlUUID gocql.UUID
 
@@ -218,13 +249,13 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 			uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
 			uuidData.uuid = uuid
-			inPersistent = true
+			found = true
 		} else if err != gocql.ErrNotFound {
 			return types.MetricUUID{}, err
 		}
 	}
 
-	if !inCache && !inPersistent {
+	if !found {
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
@@ -235,7 +266,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
 		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
 
-		indexBatch.Query(insertUUIDQueryString, labelsString, uuid.String())
+		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, uuid.String())
 
 		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
 		labelsMap := types.MapFromLabels(labels)
@@ -255,6 +286,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		uuidData.uuid = uuid
 	}
 
+	now := time.Now()
+
 	uuidData.expirationTimestamp = now.Unix() + timeToLive
 	c.labelsToUUID[labelsString] = uuidData
 
@@ -271,23 +304,43 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 
 	start := time.Now()
 
-	targetLabels, err := c.targetLabels(matchers)
+	var (
+		uuids []types.MetricUUID
+		found bool
+	)
 
-	if err != nil {
-		return nil, err
-	}
+	if c.options.IncludeUUID {
+		var uuidStr string
+		uuidStr, found = types.GetMatchersValue(matchers, uuidLabelName)
 
-	uuidMatches, err := c.uuidMatches(targetLabels)
+		if found {
+			uuid, err := types.UUIDFromString(uuidStr)
 
-	if err != nil {
-		return nil, err
-	}
+			if err != nil {
+				return nil, nil
+			}
 
-	var uuids []types.MetricUUID
-
-	for uuid, matches := range uuidMatches {
-		if matches == len(matchers) {
 			uuids = append(uuids, uuid)
+		}
+	}
+
+	if !found {
+		targetLabels, err := c.targetLabels(matchers)
+
+		if err != nil {
+			return nil, err
+		}
+
+		uuidMatches, err := c.uuidMatches(targetLabels)
+
+		if err != nil {
+			return nil, err
+		}
+
+		for uuid, matches := range uuidMatches {
+			if matches == len(matchers) {
+				uuids = append(uuids, uuid)
+			}
 		}
 	}
 
@@ -296,6 +349,7 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 	return uuids, nil
 }
 
+// Deletes all expired cache entries
 func (c *CassandraIndex) expire(now time.Time) {
 	c.ltuMutex.Lock()
 	c.utlMutex.Lock()

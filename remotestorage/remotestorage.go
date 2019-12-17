@@ -23,7 +23,6 @@ var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type Options struct {
 	ListenAddress string
-	WithUUID      bool
 }
 
 type RemoteStorage struct {
@@ -37,9 +36,8 @@ type RemoteStorage struct {
 func New(options Options, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
 	router := http.NewServeMux()
 	readMetrics := ReadMetrics{
-		withUUID: options.WithUUID,
-		indexer:  indexer,
-		reader:   reader,
+		indexer: indexer,
+		reader:  reader,
 	}
 	writeMetrics := WriteMetrics{
 		indexer: indexer,
