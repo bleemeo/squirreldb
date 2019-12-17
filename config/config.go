@@ -63,7 +63,15 @@ func New() (*Config, error) {
 	}
 
 	err = instance.Load(env.Provider(envPrefix, delimiter, func(s string) string {
-		return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, envPrefix)), "_", delimiter)
+		s = strings.TrimPrefix(s, envPrefix)
+
+		key, exists := envToKey[s]
+
+		if !exists {
+			logger.Printf("Warning: '%s' environment variable doesn't exist.", s)
+		}
+
+		return key
 	}), nil)
 
 	if err != nil {

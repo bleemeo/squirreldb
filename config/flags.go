@@ -11,19 +11,16 @@ var flags = []flag{
 	{
 		name:  "cassandra.addresses",
 		short: "",
-		value: []string{"localhost:9042"},
 		usage: "Set the Cassandra cluster addresses",
 	},
 	{
 		name:  "redis.address",
 		short: "",
-		value: "localhost:6379",
 		usage: "Set the Redis address",
 	},
 	{
 		name:  "remote_storage.listen_address",
 		short: "",
-		value: "localhost:1234",
 		usage: "Set the remote storage listen address",
 	},
 	{
