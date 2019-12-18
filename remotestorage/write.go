@@ -2,9 +2,9 @@ package remotestorage
 
 import (
 	"github.com/prometheus/prometheus/prompb"
-	"squirreldb/compare"
 
 	"net/http"
+	"squirreldb/compare"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"

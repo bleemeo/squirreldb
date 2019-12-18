@@ -19,15 +19,21 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 
 	start := time.Now()
 
+	var aggregatePointsCount int
+
 	for uuid, data := range metrics {
+		aggregatePointsCount += len(data.Points)
+
 		if err := c.writeRawData(uuid, data); err != nil {
+			requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
+			requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
+
 			return err
 		}
-
-		requestsPointsTotalWriteRaw.Add(float64(len(data.Points)))
 	}
 
 	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
+	requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
 
 	return nil
 }
@@ -40,15 +46,21 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 
 	start := time.Now()
 
+	var aggregatePointsCount int
+
 	for uuid, aggregatedData := range aggregatedMetrics {
+		aggregatePointsCount += len(aggregatedData.Points)
+
 		if err := c.writeAggregateData(uuid, aggregatedData); err != nil {
+			requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
+			requestsPointsTotalWriteAggregated.Add(float64(aggregatePointsCount))
+
 			return err
 		}
-
-		requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
 	}
 
 	requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
+	requestsPointsTotalWriteAggregated.Add(float64(aggregatePointsCount))
 
 	return nil
 }

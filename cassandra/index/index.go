@@ -169,6 +169,8 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 		var labelsMap map[string]string
 
 		if err := selectLabelsQuery.Scan(&labelsMap); (err != nil) && (err != gocql.ErrNotFound) {
+			requestsSecondsLabels.Observe(time.Since(start).Seconds())
+
 			return nil, err
 		}
 
@@ -221,6 +223,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 			uuidData.uuid, err = types.UUIDFromString(uuidStr)
 
 			if err != nil {
+				requestsSecondsUUID.Observe(time.Since(start).Seconds())
+
 				return types.MetricUUID{}, nil
 			}
 		}
@@ -251,6 +255,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 			uuidData.uuid = uuid
 			found = true
 		} else if err != gocql.ErrNotFound {
+			requestsSecondsUUID.Observe(time.Since(start).Seconds())
+
 			return types.MetricUUID{}, err
 		}
 	}
@@ -259,6 +265,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
+			requestsSecondsUUID.Observe(time.Since(start).Seconds())
+
 			return types.MetricUUID{}, err
 		}
 
@@ -280,6 +288,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
+			requestsSecondsUUID.Observe(time.Since(start).Seconds())
+
 			return types.MetricUUID{}, err
 		}
 
@@ -317,6 +327,8 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 			uuid, err := types.UUIDFromString(uuidStr)
 
 			if err != nil {
+				requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
+
 				return nil, nil
 			}
 
@@ -328,12 +340,16 @@ func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.Met
 		targetLabels, err := c.targetLabels(matchers)
 
 		if err != nil {
+			requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
+
 			return nil, err
 		}
 
 		uuidMatches, err := c.uuidMatches(targetLabels)
 
 		if err != nil {
+			requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
+
 			return nil, err
 		}
 

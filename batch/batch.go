@@ -152,6 +152,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		"Error: Can't get metrics from the temporary storage",
 		"Resolved: Get metrics from the temporary storage")
 
+	requestsSecondsRead.Observe(readDuration.Seconds())
+
 	metricsToWrite := make(map[types.MetricUUID][]types.MetricData)
 	metricsToSet := make(map[types.MetricUUID]types.MetricData)
 
@@ -171,7 +173,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	}
 
 	requestsPointsTotalRead.Add(float64(readPointsCount))
-	requestsSecondsRead.Observe(readDuration.Seconds())
+	requestsPointsTotalDelete.Add(float64(deletedPointsCount))
 
 	for uuid, metricDataList := range metricsToWrite {
 		for _, metricData := range metricDataList {
@@ -199,7 +201,6 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		"Error: Can't set metrics in the temporary storage",
 		"Resolved: Set metrics in the temporary storage")
 
-	requestsPointsTotalDelete.Add(float64(deletedPointsCount))
 	requestsSecondsDelete.Observe(deleteDuration.Seconds())
 }
 
@@ -296,7 +297,7 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
 		}
 
-		if uuidRequest.ToTimestamp <= uuidRequest.FromTimestamp {
+		if uuidRequest.ToTimestamp < uuidRequest.FromTimestamp {
 			continue
 		}
 
@@ -324,22 +325,19 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
 func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
-	var (
-		readDuration    time.Duration
-		readPointsCount int
-	)
-
 	start := time.Now()
 
 	metrics, err := b.storer.Get(request.UUIDs)
 
-	readDuration += time.Since(start)
+	requestsSecondsRead.Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		return nil, err
 	}
 
 	temporaryMetrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
+
+	var readPointsCount int
 
 	for uuid, data := range metrics {
 		temporaryData := types.MetricData{
@@ -359,7 +357,6 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 	}
 
 	requestsPointsTotalRead.Add(float64(readPointsCount))
-	requestsSecondsRead.Observe(readDuration.Seconds())
 
 	return temporaryMetrics, nil
 }
@@ -437,6 +434,8 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		addedPointsCount += len(newData.Points) + len(existingData.Points)
 	}
 
+	requestsPointsTotalWrite.Add(float64(addedPointsCount))
+
 	retry.Print(func() error {
 		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
 
@@ -451,7 +450,6 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		"Error: Can't append metrics points in the temporary storage",
 		"Resolved: Append metrics points in the temporary storage")
 
-	requestsPointsTotalWrite.Add(float64(addedPointsCount))
 	requestsSecondsWrite.Observe(addDuration.Seconds())
 
 	if len(states) != 0 {

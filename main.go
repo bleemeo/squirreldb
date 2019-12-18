@@ -20,6 +20,7 @@ import (
 	"squirreldb/redis"
 	"squirreldb/remotestorage"
 	"squirreldb/retry"
+	"squirreldb/store"
 	"squirreldb/types"
 	"sync"
 	"syscall"
@@ -49,6 +50,16 @@ func main() {
 
 	debug.Level = squirrelConfig.Int("debug.level")
 
+	var squirrelStore batch.Storer
+
+	redisEnable := squirrelConfig.Bool("redis.enable")
+
+	if redisEnable {
+		squirrelStore = createSquirrelRedis(squirrelConfig)
+	} else {
+		squirrelStore = store.New()
+	}
+
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
 	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace, squirrelConfig)
@@ -56,8 +67,7 @@ func main() {
 	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace, instance)
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
-	squirrelRedis := createSquirrelRedis(squirrelConfig)
-	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelRedis, squirrelTSDB, squirrelTSDB)
+	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
 
 	if valid, exists := squirrelConfig.ValidateRemote(squirrelStates); !valid {
@@ -102,6 +112,17 @@ func main() {
 	wg.Add(1)
 
 	go runSquirrelTSDB()
+
+	if !redisEnable {
+		runSquirrelStore := func() {
+			defer wg.Done()
+			squirrelStore.(*store.Store).Run(ctx)
+		}
+
+		wg.Add(1)
+
+		go runSquirrelStore()
+	}
 
 	runSquirrelBatch := func() {
 		defer wg.Done()
