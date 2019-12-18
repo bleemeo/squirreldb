@@ -152,7 +152,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		"Error: Can't get metrics from the temporary storage",
 		"Resolved: Get metrics from the temporary storage")
 
-	metricsToWrite := make(map[types.MetricUUID]types.MetricData)
+	metricsToWrite := make(map[types.MetricUUID][]types.MetricData)
 	metricsToSet := make(map[types.MetricUUID]types.MetricData)
 
 	for uuid, statesData := range states {
@@ -162,8 +162,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 			continue
 		}
 
-		dataToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
-		metricsToWrite[uuid] = dataToWrite
+		dataListToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
+		metricsToWrite[uuid] = dataListToWrite
 		metricsToSet[uuid] = dataToSet
 
 		readPointsCount += len(data.Points)
@@ -173,11 +173,17 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	requestsPointsTotalRead.Add(float64(readPointsCount))
 	requestsSecondsRead.Observe(readDuration.Seconds())
 
-	retry.Print(func() error {
-		return b.writer.Write(metricsToWrite)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't write metrics in the persistent storage",
-		"Resolved: Write metrics in the persistent storage")
+	for uuid, metricDataList := range metricsToWrite {
+		for _, metricData := range metricDataList {
+			metric := map[types.MetricUUID]types.MetricData{uuid: metricData}
+
+			retry.Print(func() error {
+				return b.writer.Write(metric)
+			}, retry.NewExponentialBackOff(30*time.Second), logger,
+				"Error: Can't write metrics in the persistent storage",
+				"Resolved: Write metrics in the persistent storage")
+		}
+	}
 
 	timeToLive := (b.batchSize * 2) + 60
 
@@ -200,16 +206,9 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 // Flushes the points corresponding to the status list of the specified metric
 // The points corresponding to the specified state list will be written in the persistent storage
 // The points corresponding to the current metric state and points longer than 5 minutes will be written in the temporary storage
-func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) (types.MetricData, types.MetricData) {
-	dataToWrite := types.MetricData{
-		TimeToLive: data.TimeToLive,
-	}
-	dataToSet := types.MetricData{
-		TimeToLive: data.TimeToLive,
-	}
-
+func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) ([]types.MetricData, types.MetricData) {
 	if len(data.Points) == 0 {
-		return dataToWrite, dataToSet
+		return nil, types.MetricData{}
 	}
 
 	currentStateData, exists := b.states[uuid]
@@ -219,15 +218,24 @@ func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesDa
 		cutoffTimestamp = compare.MinInt64(cutoffTimestamp, currentStateData.firstPointTimestamp)
 	}
 
+	dataToSet := types.MetricData{
+		TimeToLive: data.TimeToLive,
+	}
+	dataListToWrite := make([]types.MetricData, len(statesData))
+
+	for _, metricData := range dataListToWrite {
+		metricData.TimeToLive = data.TimeToLive
+	}
+
 pointsLoop:
 	for _, point := range data.Points {
 		if point.Timestamp >= cutoffTimestamp {
 			dataToSet.Points = append(dataToSet.Points, point)
 		}
 
-		for _, stateData := range statesData {
+		for i, stateData := range statesData {
 			if (point.Timestamp >= stateData.firstPointTimestamp) && (point.Timestamp <= stateData.lastPointTimestamp) {
-				dataToWrite.Points = append(dataToWrite.Points, point)
+				dataListToWrite[i].Points = append(dataListToWrite[i].Points, point)
 
 				continue pointsLoop
 			}
@@ -240,14 +248,18 @@ pointsLoop:
 		expectedPointsCount += stateData.pointCount
 	}
 
-	gotPointsCount := len(dataToWrite.Points)
+	var gotPointsCount int
+
+	for _, metricData := range dataListToWrite {
+		gotPointsCount += len(metricData.Points)
+	}
 
 	if gotPointsCount < expectedPointsCount {
 		logger.Printf("Warning: Metric %v expected at least %d point(s), got %d point(s)",
 			uuid, expectedPointsCount, gotPointsCount)
 	}
 
-	return dataToWrite, dataToSet
+	return dataListToWrite, dataToSet
 }
 
 // Returns the deduplicated and sorted points read from the temporary and persistent storage according to the request

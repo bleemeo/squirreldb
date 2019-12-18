@@ -2,6 +2,7 @@ package remotestorage
 
 import (
 	"github.com/prometheus/prometheus/prompb"
+	"squirreldb/compare"
 
 	"net/http"
 	"squirreldb/retry"
@@ -149,9 +150,12 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels 
 
 	for _, promSeries := range promTimeseries {
 		uuid, data := metricFromPromSeries(promSeries, fun)
+		currentData := metrics[uuid]
 
-		metrics[uuid] = data
+		currentData.Points = append(currentData.Points, data.Points...)
+		currentData.TimeToLive = compare.MaxInt64(currentData.TimeToLive, data.TimeToLive)
 
+		metrics[uuid] = currentData
 		totalPoints += len(data.Points)
 	}
 
