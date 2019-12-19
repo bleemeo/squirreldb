@@ -195,10 +195,7 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.
 	offsetTimestampPoints := make(map[int64][]types.MetricPoint)
 
 	for _, point := range data.Points {
-		offsetTimestamp := point.Timestamp - firstOffsetTimestamp
-
-		offsetTimestamp -= offsetTimestamp % c.options.BatchSize
-		offsetTimestamp += firstOffsetTimestamp
+		offsetTimestamp := (point.Timestamp - baseTimestamp) - ((point.Timestamp - firstOffsetTimestamp) % c.options.BatchSize)
 
 		offsetTimestampPoints[offsetTimestamp] = append(offsetTimestampPoints[offsetTimestamp], point)
 	}
