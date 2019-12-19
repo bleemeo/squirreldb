@@ -13,7 +13,7 @@ import (
 
 const (
 	shardStatePrefix = "shard_"
-	shards           = 60
+	shardNumber      = 60
 )
 
 const (
@@ -33,8 +33,8 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	c.aggregateInit()
 
-	shard := rand.Intn(shards) + 1
-	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shards)
+	shard := rand.Intn(shardNumber) + 1
+	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shardNumber)
 	interval := (time.Duration(aggregateShardIntended)) * time.Second
 	ticker := time.NewTicker(interval)
 
@@ -43,7 +43,7 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	for ctx.Err() == nil {
 		c.aggregate(shard)
 
-		shard = (shard % shards) + 1
+		shard = (shard % shardNumber) + 1
 
 		select {
 		case <-ticker.C:
@@ -59,7 +59,7 @@ func (c *CassandraTSDB) aggregateInit() {
 	now := time.Now()
 	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
 
-	for i := 1; i <= shards; i++ {
+	for i := 1; i <= shardNumber; i++ {
 		name := shardStatePrefix + strconv.Itoa(i)
 		retry.Print(func() error {
 			return c.stater.Write(name, fromTimestamp)
@@ -145,7 +145,7 @@ func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, res
 	var shardUUIDs []types.MetricUUID
 
 	for _, uuid := range uuids {
-		uuidShard := (int(uuid.Uint64() % uint64(shards))) + 1
+		uuidShard := (int(uuid.Uint64() % uint64(shardNumber))) + 1
 
 		if uuidShard == shard {
 			shardUUIDs = append(shardUUIDs, uuid)

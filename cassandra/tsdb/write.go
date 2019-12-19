@@ -6,36 +6,68 @@ import (
 	"bytes"
 	"encoding/binary"
 	"squirreldb/aggregate"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"strings"
+	"sync"
 	"time"
 )
 
+const sliceNumber = 4
+
 // Write writes all specified metrics
-func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) error {
+func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 	if len(metrics) == 0 {
-		return nil
+		return
 	}
 
 	start := time.Now()
+
+	slicesMetrics := make([]map[types.MetricUUID]types.MetricData, sliceNumber)
+
+	for i := 0; i < sliceNumber; i++ {
+		slicesMetrics[i] = make(map[types.MetricUUID]types.MetricData)
+	}
 
 	var aggregatePointsCount int
 
 	for uuid, data := range metrics {
 		aggregatePointsCount += len(data.Points)
 
-		if err := c.writeRawData(uuid, data); err != nil {
-			requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
-			requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
+		sliceIndex := int(uuid.Uint64() % uint64(sliceNumber))
 
-			return err
-		}
+		slicesMetrics[sliceIndex][uuid] = data
 	}
 
-	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
 	requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
 
-	return nil
+	var wg sync.WaitGroup
+
+	wg.Add(sliceNumber)
+
+	for i := 0; i < sliceNumber; i++ {
+		i := i
+
+		go func(index int) {
+			defer wg.Done()
+			c.writeMetrics(slicesMetrics[i])
+		}(i)
+	}
+
+	wg.Wait()
+
+	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
+}
+
+// Write writes all specified metrics of the slice
+func (c *CassandraTSDB) writeMetrics(metrics map[types.MetricUUID]types.MetricData) {
+	for uuid, data := range metrics {
+		retry.Print(func() error {
+			return c.writeRawData(uuid, data)
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"Error: Can't write metric",
+			"Resolved: Write metric")
+	}
 }
 
 // Writes all specified aggregated metrics
@@ -130,8 +162,6 @@ func (c *CassandraTSDB) writeRawData(uuid types.MetricUUID, data types.MetricDat
 
 	baseTimestampPoints := make(map[int64][]types.MetricPoint)
 
-	data.Points = types.DeduplicatePoints(data.Points)
-
 	for _, point := range data.Points {
 		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
 
@@ -158,8 +188,40 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.
 		return nil
 	}
 
+	data.Points = types.DeduplicatePoints(data.Points)
+
 	firstPoint := data.Points[0]
-	offsetTimestamp := firstPoint.Timestamp - baseTimestamp
+	firstOffsetTimestamp := firstPoint.Timestamp - baseTimestamp
+	offsetTimestampPoints := make(map[int64][]types.MetricPoint)
+
+	for _, point := range data.Points {
+		offsetTimestamp := point.Timestamp - firstOffsetTimestamp
+
+		offsetTimestamp -= offsetTimestamp % c.options.BatchSize
+		offsetTimestamp += firstOffsetTimestamp
+
+		offsetTimestampPoints[offsetTimestamp] = append(offsetTimestampPoints[offsetTimestamp], point)
+	}
+
+	for offsetTimestamp, points := range offsetTimestampPoints {
+		batchData := types.MetricData{
+			Points:     points,
+			TimeToLive: data.TimeToLive,
+		}
+
+		if err := c.writeRawBatchData(uuid, batchData, baseTimestamp, offsetTimestamp); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *CassandraTSDB) writeRawBatchData(uuid types.MetricUUID, data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
+	if len(data.Points) == 0 {
+		return nil
+	}
+
 	rawValues, err := rawValuesFromPoints(data.Points, baseTimestamp, offsetTimestamp)
 
 	if err != nil {

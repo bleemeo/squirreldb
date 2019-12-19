@@ -56,11 +56,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return timeToLive, uuid
 	})
 
-	retry.Print(func() error {
-		return w.writer.Write(metrics)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't write metrics with the writer",
-		"Resolved: Read metrics with the writer")
+	w.writer.Write(metrics)
 
 	requestsSecondsWrite.Observe(time.Since(start).Seconds())
 }

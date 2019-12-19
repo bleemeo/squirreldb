@@ -68,7 +68,7 @@ func Test_labelsFromPromLabels(t *testing.T) {
 func Test_metricFromPromSeries(t *testing.T) {
 	type args struct {
 		promSeries *prompb.TimeSeries
-		fun        func(labels []types.MetricLabel) types.MetricUUID
+		fun        func(labels []types.MetricLabel) (int64, types.MetricUUID)
 	}
 	tests := []struct {
 		name  string
@@ -117,8 +117,8 @@ func Test_metricFromPromSeries(t *testing.T) {
 						},
 					},
 				},
-				fun: func(labels []types.MetricLabel) types.MetricUUID {
-					return uuidFromStringOrNil("00000000-0000-0000-0000-000000000001")
+				fun: func(labels []types.MetricLabel) (int64, types.MetricUUID) {
+					return 0, uuidFromStringOrNil("00000000-0000-0000-0000-000000000001")
 				},
 			},
 			want: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
@@ -169,7 +169,7 @@ func Test_metricFromPromSeries(t *testing.T) {
 func Test_metricsFromTimeseries(t *testing.T) {
 	type args struct {
 		promTimeseries []*prompb.TimeSeries
-		fun            func(labels []types.MetricLabel) types.MetricUUID
+		fun            func(labels []types.MetricLabel) (int64, types.MetricUUID)
 	}
 	tests := []struct {
 		name string
@@ -219,8 +219,8 @@ func Test_metricsFromTimeseries(t *testing.T) {
 						},
 					},
 				},
-				fun: func(labels []types.MetricLabel) types.MetricUUID {
-					return uuidFromStringOrNil("00000000-0000-0000-0000-000000000001")
+				fun: func(labels []types.MetricLabel) (int64, types.MetricUUID) {
+					return 0, uuidFromStringOrNil("00000000-0000-0000-0000-000000000001")
 				},
 			},
 			want: map[types.MetricUUID]types.MetricData{
