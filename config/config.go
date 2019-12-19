@@ -218,7 +218,7 @@ func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
 }
 
 // WriteRemote writes the remote constant values if they do not exist
-func (c *Config) WriteRemote(states types.Stater) {
+func (c *Config) WriteRemote(states types.Stater, overwrite bool) {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
 
@@ -226,7 +226,11 @@ func (c *Config) WriteRemote(states types.Stater) {
 		value := c.String(name)
 
 		retry.Print(func() error {
-			return states.Write(name, value)
+			if overwrite {
+				return states.Update(name, value)
+			} else {
+				return states.Write(name, value)
+			}
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")

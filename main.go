@@ -75,7 +75,7 @@ func main() {
 			logger.Println("Warning: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
 				"\t" + "SquirrelDB uses the current configuration")
 		} else if squirrelConfig.Bool("overwrite-config") {
-			squirrelConfig.WriteRemote(squirrelStates)
+			squirrelConfig.WriteRemote(squirrelStates, true)
 
 			logger.Println("Info: The current configuration has overwritten the previous configuration")
 		} else {
@@ -84,7 +84,7 @@ func main() {
 				"\t" + "Run SquirrelDB with the flag --overwrite-config to overwrite the previous configuration with the current configuration")
 		}
 	} else if !exists {
-		squirrelConfig.WriteRemote(squirrelStates)
+		squirrelConfig.WriteRemote(squirrelStates, false)
 	}
 
 	signalChan := make(chan os.Signal, 1)
