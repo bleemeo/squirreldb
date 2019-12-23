@@ -48,10 +48,10 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 	for i := 0; i < sliceNumber; i++ {
 		i := i
 
-		go func(index int) {
+		go func() {
 			defer wg.Done()
 			c.writeMetrics(slicesMetrics[i])
-		}(i)
+		}()
 	}
 
 	wg.Wait()

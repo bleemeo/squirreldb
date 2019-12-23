@@ -228,9 +228,9 @@ func (c *Config) WriteRemote(states types.Stater, overwrite bool) {
 		retry.Print(func() error {
 			if overwrite {
 				return states.Update(name, value)
-			} else {
-				return states.Write(name, value)
 			}
+
+			return states.Write(name, value)
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")
