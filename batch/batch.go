@@ -300,8 +300,9 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		data := types.MetricData{
 			Points: append(persistentData.Points, temporaryData.Points...),
 		}
-
-		metrics[uuid] = data
+		if len(data.Points) > 0 {
+			metrics[uuid] = data
+		}
 	}
 
 	return metrics, nil
