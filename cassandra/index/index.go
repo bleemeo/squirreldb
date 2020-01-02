@@ -386,7 +386,7 @@ func (c *CassandraIndex) expire(now time.Time) {
 }
 
 // Returns labels by target type
-func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) {
+func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) { // nolint:gocognit
 	if len(matchers) == 0 {
 		return nil, nil
 	}
@@ -452,7 +452,7 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 }
 
 // Returns a list of uuid associated with the number of times it has corresponded to a targeted label
-func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) {
+func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) { // nolint:gocognit
 	if len(targetLabels) == 0 {
 		return nil, nil
 	}

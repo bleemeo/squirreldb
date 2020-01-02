@@ -37,7 +37,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			uuids, err = r.indexer.UUIDs(matchers)
 
 			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't get UUIDs from the index",
 			"Resolved: Get UUIDs from the index")
 
@@ -51,10 +51,10 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		retry.Print(func() error {
 			var err error
-			metrics, err = r.reader.Read(request)
+			metrics, err = r.reader.Read(request) // nolint: scopelint
 
 			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't read metrics with the reader",
 			"Resolved: Read metrics with the reader")
 
@@ -67,7 +67,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 					labels, err = r.indexer.Labels(uuid)
 
 					return err
-				}, retry.NewExponentialBackOff(30*time.Second), logger,
+				}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 					"Error: Can't get labels from the index",
 					"Resolved: Get labels from the index")
 

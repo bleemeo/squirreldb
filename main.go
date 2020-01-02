@@ -72,14 +72,15 @@ func main() {
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
 
 	if valid, exists := squirrelConfig.ValidateRemote(squirrelStates); !valid {
-		if squirrelConfig.Bool("ignore-config") {
+		switch {
+		case squirrelConfig.Bool("ignore-config"):
 			logger.Println("Warning: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
 				"\t" + "SquirrelDB uses the current configuration")
-		} else if squirrelConfig.Bool("overwrite-config") {
+		case squirrelConfig.Bool("overwrite-config"):
 			squirrelConfig.WriteRemote(squirrelStates, true)
 
 			logger.Println("Info: The current configuration has overwritten the previous configuration")
-		} else {
+		default:
 			logger.Fatalln("Error: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
 				"\t" + "Run SquirrelDB with the flag --ignore-config to ignore this error" + "\n" +
 				"\t" + "Run SquirrelDB with the flag --overwrite-config to overwrite the previous configuration with the current configuration")
@@ -96,52 +97,27 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	runSquirrelIndex := func() {
-		defer wg.Done()
-		squirrelIndex.Run(ctx)
+	tasks := []func(context.Context){
+		squirrelIndex.Run,
+		squirrelTSDB.Run,
+		squirrelBatch.Run,
+		squirrelRemoteStorage.Run,
 	}
-
-	wg.Add(1)
-
-	go runSquirrelIndex()
-
-	runSquirrelTSDB := func() {
-		defer wg.Done()
-		squirrelTSDB.Run(ctx)
-	}
-
-	wg.Add(1)
-
-	go runSquirrelTSDB()
 
 	if !redisEnable {
-		runSquirrelStore := func() {
+		tasks = append(tasks, squirrelStore.(*store.Store).Run)
+	}
+
+	wg.Add(len(tasks))
+
+	for _, runner := range tasks {
+		runner := runner
+
+		go func() {
 			defer wg.Done()
-			squirrelStore.(*store.Store).Run(ctx)
-		}
-
-		wg.Add(1)
-
-		go runSquirrelStore()
+			runner(ctx)
+		}()
 	}
-
-	runSquirrelBatch := func() {
-		defer wg.Done()
-		squirrelBatch.Run(ctx)
-	}
-
-	wg.Add(1)
-
-	go runSquirrelBatch()
-
-	runSquirrelRemoteStorage := func() {
-		defer wg.Done()
-		squirrelRemoteStorage.Run(ctx)
-	}
-
-	wg.Add(1)
-
-	go runSquirrelRemoteStorage()
 
 	logger.Println("SquirrelDB is ready")
 	logger.Println("Instance UUID:", instance.UUID)

@@ -63,8 +63,8 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 func (c *CassandraTSDB) writeMetrics(metrics map[types.MetricUUID]types.MetricData) {
 	for uuid, data := range metrics {
 		retry.Print(func() error {
-			return c.writeRawData(uuid, data)
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			return c.writeRawData(uuid, data) // nolint: scopelint
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't write metric",
 			"Resolved: Write metric")
 	}

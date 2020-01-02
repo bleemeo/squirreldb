@@ -1,6 +1,8 @@
 package tsdb
 
 import (
+	"time"
+
 	"github.com/gocql/gocql"
 
 	"log"
@@ -13,6 +15,7 @@ import (
 const (
 	dataTableName          = "data"
 	aggregateDataTableName = "data_aggregated"
+	retryMaxDelay          = 30 * time.Second
 )
 
 //nolint: gochecknoglobals

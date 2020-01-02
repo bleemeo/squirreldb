@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	metricsPattern = "/metrics"
-	readPattern    = "/read"
-	writePattern   = "/write"
+	metricsPattern            = "/metrics"
+	readPattern               = "/read"
+	writePattern              = "/write"
+	retryMaxDelay             = 30 * time.Second
+	httpServerShutdownTimeout = 10 * time.Second
 )
 
 //nolint: gochecknoglobals
@@ -80,7 +82,7 @@ func (r *RemoteStorage) runServer(ctx context.Context) {
 			}
 
 			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't listen and serve the server",
 			"Resolved: Listen and serve the server")
 	}()
@@ -89,7 +91,7 @@ func (r *RemoteStorage) runServer(ctx context.Context) {
 
 	<-ctx.Done()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
 	defer cancel()
 
 	if err := r.server.Shutdown(shutdownCtx); err != nil {

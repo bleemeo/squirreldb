@@ -63,7 +63,7 @@ func (c *CassandraTSDB) aggregateInit() {
 		name := shardStatePrefix + strconv.Itoa(i)
 		retry.Print(func() error {
 			return c.stater.Write(name, fromTimestamp)
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")
 	}
@@ -81,20 +81,18 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 	var wg sync.WaitGroup
 
-	runAggregateLockUpdate := func() {
-		defer wg.Done()
-		c.updateAggregateLock(ctx, name)
-	}
-
 	wg.Add(1)
 
-	go runAggregateLockUpdate()
+	go func() {
+		defer wg.Done()
+		c.updateAggregateLock(ctx, name)
+	}()
 
 	var fromTimestamp int64
 
 	retry.Print(func() error {
 		return c.stater.Read(name, &fromTimestamp)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"Error: Can't read "+name+" state",
 		"Resolved: Read "+name+" state")
 
@@ -116,7 +114,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 
 		retry.Print(func() error {
 			return c.stater.Update(name, toTimestamp)
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't update "+name+" state",
 			"Resolved: update "+name+" state")
 	} else {
@@ -138,7 +136,7 @@ func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, res
 		uuids, err = c.indexer.AllUUIDs()
 
 		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"Error: Can't get UUIDs from the index",
 		"Resolved: Get UUIDs from the index")
 
@@ -185,7 +183,7 @@ func (c *CassandraTSDB) readAggregateWrite(uuids []types.MetricUUID, fromTimesta
 func (c *CassandraTSDB) deleteAggregateLock(name string) {
 	retry.Print(func() error {
 		return c.locker.Delete(name)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"Error: Can't delete "+name+" lock",
 		"Resolved: Delete "+name+" lock")
 }
@@ -199,7 +197,7 @@ func (c *CassandraTSDB) writeAggregateLock(name string) bool {
 		applied, err = c.locker.Write(name, lockTimeToLive)
 
 		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"Error: Can't write "+name+" lock",
 		"Resolved: Write "+name+" lock")
 
@@ -218,7 +216,7 @@ func (c *CassandraTSDB) updateAggregateLock(ctx context.Context, name string) {
 		case <-ticker.C:
 			retry.Print(func() error {
 				return c.locker.Update(name, lockTimeToLive)
-			}, retry.NewExponentialBackOff(30*time.Second), logger,
+			}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 				"Error: Can't update "+name+" lock",
 				"Resolved: Update "+name+" lock")
 		case <-ctx.Done():
