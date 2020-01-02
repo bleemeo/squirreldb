@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"squirreldb/types"
 	"testing"
+	"time"
 )
 
 func uuidFromStringOrNil(s string) types.MetricUUID {
@@ -385,6 +386,57 @@ func Test_aggregatePoints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := aggregatePoints(tt.args.points, tt.args.timestamp); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("aggregatePoints() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Benchmark_aggregateData(b *testing.B) {
+	tests := []struct {
+		Name       string
+		Size       int
+		PointStep  int
+		Resolution int64
+	}{
+		{
+			Name:       "small-300",
+			Size:       30,
+			PointStep:  10,
+			Resolution: 300,
+		},
+		{
+			Name:       "small-900",
+			Size:       90,
+			PointStep:  10,
+			Resolution: 900,
+		},
+		{
+			Name:       "medium-900",
+			Size:       180,
+			PointStep:  10,
+			Resolution: 900,
+		},
+		{
+			Name:       "large-900",
+			Size:       1000,
+			PointStep:  10,
+			Resolution: 900,
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.Name, func(b *testing.B) {
+			startTS := time.Now().Unix()
+			data := types.MetricData{
+				Points: make([]types.MetricPoint, tt.Size),
+			}
+			for i := range data.Points {
+				data.Points[i].Timestamp = startTS + int64(tt.PointStep*i)
+				data.Points[i].Value = float64(i)
+			}
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				_ = aggregateData(data, tt.Resolution)
 			}
 		})
 	}

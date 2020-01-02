@@ -20,6 +20,7 @@ type AggregatedData struct {
 }
 
 // Aggregate returns an aggregated metric list from a metric list
+// points must be sorted in ascending order
 func Aggregate(metrics map[types.MetricUUID]types.MetricData, resolution int64) map[types.MetricUUID]AggregatedData {
 	if len(metrics) == 0 {
 		return nil
@@ -59,21 +60,25 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 		return AggregatedData{}
 	}
 
-	resolutionTimestampPoints := make(map[int64][]types.MetricPoint)
-
-	for _, point := range data.Points {
-		resolutionTimestamp := point.Timestamp - (point.Timestamp % resolution)
-
-		resolutionTimestampPoints[resolutionTimestamp] = append(resolutionTimestampPoints[resolutionTimestamp], point)
-	}
+	workingPoints := make([]types.MetricPoint, 0)
+	var currentAggregatedTimestamp int64
 
 	aggregatedData := AggregatedData{
 		TimeToLive: data.TimeToLive,
 	}
 
-	for resolutionTimestamp, points := range resolutionTimestampPoints {
-		aggregatedPoint := aggregatePoints(points, resolutionTimestamp)
-
+	for _, point := range data.Points {
+		aggregatedTimestamp := point.Timestamp - (point.Timestamp % resolution)
+		if currentAggregatedTimestamp != aggregatedTimestamp {
+			aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
+			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
+			workingPoints = workingPoints[:0]
+			currentAggregatedTimestamp = aggregatedTimestamp
+		}
+		workingPoints = append(workingPoints, point)
+	}
+	if len(workingPoints) > 0 {
+		aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
 		aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
 	}
 
