@@ -166,15 +166,11 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 	if !found {
 		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
-		var labelsMap map[string]string
-
-		if err := selectLabelsQuery.Scan(&labelsMap); (err != nil) && (err != gocql.ErrNotFound) {
+		if err := selectLabelsQuery.Scan(&labelsData.labels); (err != nil) && (err != gocql.ErrNotFound) {
 			requestsSecondsLabels.Observe(time.Since(start).Seconds())
 
 			return nil, err
 		}
-
-		labelsData.labels = types.LabelsFromMap(labelsMap)
 	}
 
 	now := time.Now()
@@ -239,9 +235,10 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	}
 
 	var sortedLabelsString string
+	var sortedLabels []types.MetricLabel
 
 	if !found {
-		sortedLabels := types.SortLabels(labels)
+		sortedLabels = types.SortLabels(labels)
 
 		sortedLabelsString = types.StringFromLabels(sortedLabels)
 
@@ -277,11 +274,10 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, uuid.String())
 
 		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
-		labelsMap := types.MapFromLabels(labels)
 
-		indexBatch.Query(insertLabelsQueryString, uuid.String(), labelsMap)
+		indexBatch.Query(insertLabelsQueryString, uuid.String(), sortedLabels)
 
-		for _, label := range labels {
+		for _, label := range sortedLabels {
 			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString(uuid.String())
 
 			indexBatch.Query(updateUUIDsQueryString, label.Name, label.Value)
@@ -679,7 +675,7 @@ func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Que
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS $UUIDS_TABLE (
 			uuid uuid,
-			labels map<text, text>,
+			labels frozen<list<tuple<text, text>>>,
 			PRIMARY KEY (uuid)
 		)
 	`))

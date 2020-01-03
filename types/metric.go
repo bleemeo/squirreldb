@@ -160,41 +160,6 @@ func LabelsFromMatchers(matchers []MetricLabelMatcher) []MetricLabel {
 	return labels
 }
 
-// LabelsFromMap returns a list of MetricLabel generated from a map
-func LabelsFromMap(m map[string]string) []MetricLabel {
-	if len(m) == 0 {
-		return nil
-	}
-
-	labels := make([]MetricLabel, 0, len(m))
-
-	for name, value := range m {
-		label := MetricLabel{
-			Name:  name,
-			Value: value,
-		}
-
-		labels = append(labels, label)
-	}
-
-	return labels
-}
-
-// MapFromLabels returns a map generated from a MetricLabel list
-func MapFromLabels(labels []MetricLabel) map[string]string {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	m := make(map[string]string, len(labels))
-
-	for _, label := range labels {
-		m[label.Name] = label.Value
-	}
-
-	return m
-}
-
 // SortLabels returns the MetricLabel list sorted by name
 func SortLabels(labels []MetricLabel) []MetricLabel {
 	if len(labels) == 0 {

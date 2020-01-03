@@ -581,58 +581,6 @@ func TestGetMatchersValue(t *testing.T) {
 	}
 }
 
-func TestLabelsFromMap(t *testing.T) {
-	type args struct {
-		m map[string]string
-	}
-	tests := []struct {
-		name string
-		args args
-		want []MetricLabel
-	}{
-		{
-			name: "map",
-			args: args{
-				m: map[string]string{
-					"__name__": "up",
-					"monitor":  "codelab",
-				},
-			},
-			want: []MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "map_empty",
-			args: args{
-				m: make(map[string]string),
-			},
-			want: nil,
-		},
-		{
-			name: "map_nil",
-			args: args{
-				m: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := LabelsFromMap(tt.args.m); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("LabelsFromMap() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLabelsFromMatchers(t *testing.T) {
 	type args struct {
 		matchers []MetricLabelMatcher
@@ -692,58 +640,6 @@ func TestLabelsFromMatchers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := LabelsFromMatchers(tt.args.matchers); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("LabelsFromMatchers() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMapFromLabels(t *testing.T) {
-	type args struct {
-		labels []MetricLabel
-	}
-	tests := []struct {
-		name string
-		args args
-		want map[string]string
-	}{
-		{
-			name: "labels",
-			args: args{
-				labels: []MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: map[string]string{
-				"__name__": "up",
-				"monitor":  "codelab",
-			},
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []MetricLabel{},
-			},
-			want: nil,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := MapFromLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("MapFromLabels() = %v, want %v", got, tt.want)
 			}
 		})
 	}
