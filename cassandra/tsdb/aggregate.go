@@ -30,7 +30,7 @@ const backlogMargin = 3600
 func (c *CassandraTSDB) Run(ctx context.Context) {
 	c.aggregateInit()
 
-	shard := rand.Intn(shardNumber) + 1
+	shard := rand.Intn(shardNumber)
 	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shardNumber)
 	interval := (time.Duration(aggregateShardIntended)) * time.Second
 	ticker := time.NewTicker(interval)
@@ -40,7 +40,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		c.aggregateShard(shard)
 
-		shard = (shard % shardNumber) + 1
+		shard = (shard + 1) % shardNumber
 
 		select {
 		case <-ticker.C:
@@ -56,7 +56,7 @@ func (c *CassandraTSDB) aggregateInit() {
 	now := time.Now()
 	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
 
-	for i := 1; i <= shardNumber; i++ {
+	for i := 0; i < shardNumber; i++ {
 		name := shardStatePrefix + strconv.Itoa(i)
 		retry.Print(func() error {
 			return c.state.Write(name, fromTimestamp)
@@ -119,7 +119,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 	var shardUUIDs []types.MetricUUID
 
 	for _, uuid := range uuids {
-		uuidShard := (int(uuid.Uint64() % uint64(shardNumber))) + 1
+		uuidShard := (int(uuid.Uint64() % uint64(shardNumber)))
 
 		if uuidShard == shard {
 			shardUUIDs = append(shardUUIDs, uuid)
