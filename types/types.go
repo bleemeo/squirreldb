@@ -22,7 +22,7 @@ type Locker interface {
 }
 
 type State interface {
-	Read(name string, value interface{}) error
+	Read(name string, value interface{}) (bool, error)
 	Update(name string, value interface{}) error
 	Write(name string, value interface{}) error
 }

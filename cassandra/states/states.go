@@ -34,15 +34,19 @@ func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
 }
 
 // Read reads value of the state from the states table
-func (c *CassandraStates) Read(name string, value interface{}) error {
+func (c *CassandraStates) Read(name string, value interface{}) (found bool, err error) {
 	statesTableSelectStateQuery := c.statesTableSelectStateQuery(name)
 
 	var valueString string
 
-	err := statesTableSelectStateQuery.Scan(&valueString)
+	err = statesTableSelectStateQuery.Scan(&valueString)
+
+	if err == gocql.ErrNotFound {
+		return false, nil
+	}
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	switch v := value.(type) {
@@ -58,10 +62,10 @@ func (c *CassandraStates) Read(name string, value interface{}) error {
 	case *string:
 		*v = valueString
 	default:
-		return fmt.Errorf("unknown type")
+		return false, fmt.Errorf("unknown type")
 	}
 
-	return nil
+	return true, nil
 }
 
 // Update updates the state in the states table

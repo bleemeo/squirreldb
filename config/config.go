@@ -1,7 +1,6 @@
 package config
 
 import (
-	"github.com/gocql/gocql"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
@@ -183,13 +182,7 @@ func (c *Config) ValidateRemote(state types.State) (bool, bool) {
 		)
 
 		retry.Print(func() error {
-			err = state.Read(name, &remote) // nolint: scopelint
-
-			if err == gocql.ErrNotFound {
-				return nil
-			}
-
-			exists = true
+			exists, err = state.Read(name, &remote) // nolint: scopelint
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"read config state "+name,

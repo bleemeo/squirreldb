@@ -28,19 +28,28 @@ const backlogMargin = 3600
 
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
-	c.aggregateInit()
-
 	shard := rand.Intn(shardNumber)
 	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shardNumber)
 	interval := (time.Duration(aggregateShardIntended)) * time.Second
 	ticker := time.NewTicker(interval)
+	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
 
 	defer ticker.Stop()
 
 	for ctx.Err() == nil {
-		c.aggregateShard(shard)
+		workDone := c.aggregateShard(shard)
 
 		shard = (shard + 1) % shardNumber
+
+		if !workDone {
+			consecutiveNothingDone++
+		} else {
+			consecutiveNothingDone = 0
+		}
+
+		if !workDone && consecutiveNothingDone < shardNumber {
+			continue
+		}
 
 		select {
 		case <-ticker.C:
@@ -51,27 +60,12 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 	}
 }
 
-// Initializes the aggregate shard states
-func (c *CassandraTSDB) aggregateInit() {
-	now := time.Now()
-	fromTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
-
-	for i := 0; i < shardNumber; i++ {
-		name := shardStatePrefix + strconv.Itoa(i)
-		retry.Print(func() error {
-			return c.state.Write(name, fromTimestamp)
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"set state for shard "+name,
-		)
-	}
-}
-
 // aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.
-func (c *CassandraTSDB) aggregateShard(shard int) {
+func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	if applied := c.writeAggregateLock(name); !applied {
-		return
+		return false
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -88,10 +82,22 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 	var fromTimestamp int64
 
 	retry.Print(func() error {
-		return c.state.Read(name, &fromTimestamp)
+		_, err := c.state.Read(name, &fromTimestamp)
+		return err
 	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"get state for shard "+name,
 	)
+
+	if fromTimestamp == 0 {
+		now := time.Now()
+		fromTimestamp = now.Unix() - (now.Unix() % c.options.AggregateSize)
+
+		retry.Print(func() error {
+			return c.state.Update(name, fromTimestamp)
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+			"update state for shard "+name,
+		)
+	}
 
 	now := time.Now()
 	maxTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
@@ -102,7 +108,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 		cancel()
 		c.deleteAggregateLock(name)
 
-		return
+		return false
 	}
 
 	var uuids []types.MetricUUID
@@ -143,6 +149,8 @@ func (c *CassandraTSDB) aggregateShard(shard int) {
 	cancel()
 	wg.Wait()
 	c.deleteAggregateLock(name)
+
+	return true
 }
 
 // doAggregation perform the aggregation for given parameter
