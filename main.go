@@ -17,10 +17,10 @@ import (
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
 	"squirreldb/debug"
+	"squirreldb/memorystore"
 	"squirreldb/redis"
 	"squirreldb/remotestorage"
 	"squirreldb/retry"
-	"squirreldb/store"
 	"squirreldb/types"
 	"sync"
 	"syscall"
@@ -57,7 +57,7 @@ func main() {
 	if redisEnable {
 		squirrelStore = createSquirrelRedis(squirrelConfig)
 	} else {
-		squirrelStore = store.New()
+		squirrelStore = memorystore.New()
 	}
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
@@ -104,7 +104,7 @@ func main() {
 	}
 
 	if !redisEnable {
-		tasks = append(tasks, squirrelStore.(*store.Store).Run)
+		tasks = append(tasks, squirrelStore.(*memorystore.Store).Run)
 	}
 
 	wg.Add(len(tasks))
