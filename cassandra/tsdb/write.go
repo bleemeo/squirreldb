@@ -141,7 +141,7 @@ func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggre
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertDataQuery(c.options.aggregateDataTable, uuid.String(), baseTimestamp, offsetTimestamp, aggregatedData.TimeToLive, aggregateValues)
+	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetTimestamp, aggregatedData.TimeToLive, aggregateValues)
 
 	start := time.Now()
 
@@ -225,7 +225,7 @@ func (c *CassandraTSDB) writeRawBatchData(uuid types.MetricUUID, data types.Metr
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertDataQuery(c.options.dataTable, uuid.String(), baseTimestamp, offsetTimestamp, data.TimeToLive, rawValues)
+	tableInsertDataQuery := c.tableInsertRawDataQuery(uuid.String(), baseTimestamp, offsetTimestamp, data.TimeToLive, rawValues)
 
 	start := time.Now()
 
@@ -238,12 +238,24 @@ func (c *CassandraTSDB) writeRawBatchData(uuid types.MetricUUID, data types.Metr
 	return nil
 }
 
-// Returns table insert data Query
-func (c *CassandraTSDB) tableInsertDataQuery(table, uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
-	replacer := strings.NewReplacer("$TABLE", table)
+// Returns table insert raw data Query
+func (c *CassandraTSDB) tableInsertRawDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
+	replacer := strings.NewReplacer("$TABLE", c.options.dataTable)
 	query := c.session.Query(replacer.Replace(`
 		INSERT INTO $TABLE (metric_uuid, base_ts, offset_ts, insert_time, values)
 		VALUES (?, ?, ?, now(), ?)
+		USING TTL ?
+	`), uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
+
+	return query
+}
+
+// Returns table insert aggregated data Query
+func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
+	replacer := strings.NewReplacer("$TABLE", c.options.aggregateDataTable)
+	query := c.session.Query(replacer.Replace(`
+		INSERT INTO $TABLE (metric_uuid, base_ts, offset_ts, values)
+		VALUES (?, ?, ?, ?)
 		USING TTL ?
 	`), uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
 

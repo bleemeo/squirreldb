@@ -107,9 +107,8 @@ func aggregateDataTableCreateQuery(session *gocql.Session, aggregateDataTable, d
 			metric_uuid uuid,
 			base_ts bigint,
 			offset_ts int,
-			insert_time timeuuid,
 			values blob,
-			PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)
+			PRIMARY KEY ((metric_uuid, base_ts), offset_ts)
 		)
 		WITH CLUSTERING ORDER BY (offset_ts DESC)
 		AND COMPRESSION = {
