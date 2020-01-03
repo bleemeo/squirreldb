@@ -136,7 +136,7 @@ func main() {
 
 	select {
 	case <-waitChan:
-		logger.Println("All services have been successfully stopped")
+		debug.Print(2, logger, "All services have been successfully stopped")
 	case <-signalChan:
 		logger.Println("Force stop")
 	}
@@ -145,7 +145,7 @@ func main() {
 	signal.Stop(signalChan)
 	close(signalChan)
 
-	logger.Println("SquirrelDB is stopped")
+	debug.Print(1, logger, "SquirrelDB is stopped")
 }
 
 func createInstance() types.Instance {

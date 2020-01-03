@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"squirreldb/compare"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -93,7 +94,7 @@ func (b *Batch) Run(ctx context.Context) {
 			b.check(time.Now(), false)
 		case <-ctx.Done():
 			b.check(time.Now(), true)
-			logger.Println("Checker service stopped")
+			debug.Print(2, logger, "Batch service stopped")
 
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"squirreldb/aggregate"
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
@@ -44,7 +45,7 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			logger.Println("Aggregator service stopped")
+			debug.Print(2, logger, "Cassandra TSDB service stopped")
 			return
 		}
 	}

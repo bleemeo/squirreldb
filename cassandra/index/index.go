@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"squirreldb/debug"
 	"squirreldb/types"
 	"strings"
 	"sync"
@@ -119,7 +120,7 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 		case <-ticker.C:
 			c.expire(time.Now())
 		case <-ctx.Done():
-			logger.Println("Expirator service stopped")
+			debug.Print(2, logger, "Cassandra index service stopped")
 			return
 		}
 	}

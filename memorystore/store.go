@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"squirreldb/compare"
+	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
 	"time"
@@ -70,7 +71,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			logger.Println("Expirator service stopped")
+			debug.Print(2, logger, "Expirator service stopped")
 			return
 		}
 	}

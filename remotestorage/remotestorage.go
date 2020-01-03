@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"squirreldb/debug"
 	"squirreldb/types"
 	"time"
 )
@@ -98,5 +99,5 @@ func (r *RemoteStorage) runServer(ctx context.Context) {
 	case <-serverStopped:
 	}
 
-	logger.Println("Server stopped")
+	debug.Print(2, logger, "Server stopped")
 }
