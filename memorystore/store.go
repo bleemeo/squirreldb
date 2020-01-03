@@ -60,12 +60,6 @@ func (s *Store) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive in
 
 // Run starts all Store services
 func (s *Store) Run(ctx context.Context) {
-	s.runExpirator(ctx)
-}
-
-// Starts the expirator service
-// If a stop signal is received, the service is stopped
-func (s *Store) runExpirator(ctx context.Context) {
 	interval := expiratorInterval * time.Second
 	ticker := time.NewTicker(interval)
 

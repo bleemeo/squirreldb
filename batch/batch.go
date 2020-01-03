@@ -82,12 +82,6 @@ func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) error {
 
 // Run starts Batch service (e.g. flushing points after a deadline)
 func (b *Batch) Run(ctx context.Context) {
-	b.runChecker(ctx)
-}
-
-// Starts the checker service
-// If a stop signal is received, the service is stopped
-func (b *Batch) runChecker(ctx context.Context) {
 	interval := checkerInterval * time.Second
 	ticker := time.NewTicker(interval)
 

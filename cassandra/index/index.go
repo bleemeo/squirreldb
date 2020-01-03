@@ -109,12 +109,6 @@ func New(session *gocql.Session, keyspace string, options Options) (*CassandraIn
 
 // Run starts all Cassandra Index services
 func (c *CassandraIndex) Run(ctx context.Context) {
-	c.runExpirator(ctx)
-}
-
-// Starts the expirator service
-// If a stop signal is received, the service is stopped
-func (c *CassandraIndex) runExpirator(ctx context.Context) {
 	interval := expiratorInterval * time.Second
 	ticker := time.NewTicker(interval)
 

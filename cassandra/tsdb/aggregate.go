@@ -27,12 +27,6 @@ const backlogMargin = 3600
 
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
-	c.runAggregator(ctx)
-}
-
-// Starts the aggregator service
-// If a stop signal is received, the service is stopped
-func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	c.aggregateInit()
 
 	shard := rand.Intn(shardNumber) + 1
