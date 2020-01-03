@@ -18,12 +18,14 @@ const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
+// Store is an interface to store points associated to metrics. Batch use a memory store (i.e. temporary)
 type Store interface {
 	Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
 	Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error)
 	Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
 }
 
+// stateData contains information about points stored in memory store for one metrics
 type stateData struct {
 	pointCount          int
 	firstPointTimestamp int64
@@ -31,36 +33,46 @@ type stateData struct {
 	flushTimestamp      int64
 }
 
+// Batch receive a stream of points and send batch for points to the writer. It use a memory store to keep points before
+// flushing them to the writer.
+// It also allow to read points merging value from the persistent store (reader) and the memory store.
 type Batch struct {
 	batchSize int64
 
 	states map[types.MetricUUID]stateData
 	mutex  sync.Mutex
 
-	memoryStore Store
-	reader      types.MetricReader
-	writer      types.MetricWriter
+	memoryStore           Store
+	memoryStoreTimeToLive int64
+	reader                types.MetricReader
+	writer                types.MetricWriter
 }
 
 // New creates a new Batch object
 func New(batchSize int64, memoryStore Store, reader types.MetricReader, writer types.MetricWriter) *Batch {
+	// When adding metrics, the maximum deadline is now + batchSize
+	// Every checkerInterval when ensure that metrics expired are flushed
+	// Give a 60 second safe margin
+	memoryStoreTimeToLive := batchSize + checkerInterval + 60
+
 	batch := &Batch{
-		batchSize:   batchSize,
-		states:      make(map[types.MetricUUID]stateData),
-		memoryStore: memoryStore,
-		reader:      reader,
-		writer:      writer,
+		batchSize:             batchSize,
+		states:                make(map[types.MetricUUID]stateData),
+		memoryStore:           memoryStore,
+		memoryStoreTimeToLive: memoryStoreTimeToLive,
+		reader:                reader,
+		writer:                writer,
 	}
 
 	return batch
 }
 
-// Read is the public method of read
+// Read implements MetricReader
 func (b *Batch) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
 	return b.read(request)
 }
 
-// Write is the public method of write
+// Write implements MetricWriter
 func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -68,7 +80,7 @@ func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) {
 	b.write(metrics, time.Now())
 }
 
-// Run starts all Batch services
+// Run starts Batch service (e.g. flushing points after a deadline)
 func (b *Batch) Run(ctx context.Context) {
 	b.runChecker(ctx)
 }
@@ -96,7 +108,6 @@ func (b *Batch) runChecker(ctx context.Context) {
 
 // Checks the current states and flush those whose flush date has expired
 // If force is true, each state is flushed
-// If the number of states to be flushed is equal to the flushMetricLimit, they will be flushed
 func (b *Batch) check(now time.Time, force bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -177,12 +188,10 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 
 	b.writer.Write(metricsToWrite)
 
-	timeToLive := (b.batchSize * 2) + 60
-
 	retry.Print(func() error {
 		start := time.Now()
 
-		err := b.memoryStore.Set(metricsToSet, timeToLive)
+		err := b.memoryStore.Set(metricsToSet, b.memoryStoreTimeToLive)
 
 		deleteDuration += time.Since(start)
 
@@ -423,11 +432,9 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 	requestsPointsTotalWrite.Add(float64(addedPointsCount))
 
 	retry.Print(func() error {
-		timeToLive := (b.batchSize * 2) + 60 // Add 60 seconds as safety margin
-
 		start := time.Now()
 
-		err := b.memoryStore.Append(newMetrics, existingMetrics, timeToLive)
+		err := b.memoryStore.Append(newMetrics, existingMetrics, b.memoryStoreTimeToLive)
 
 		addDuration += time.Since(start)
 

@@ -94,44 +94,6 @@ func uuidFromStringOrNil(s string) types.MetricUUID {
 	return uuid
 }
 
-func TestNew(t *testing.T) {
-	type args struct {
-		batchSize   int64
-		memoryStore Store
-		reader      types.MetricReader
-		writer      types.MetricWriter
-	}
-	tests := []struct {
-		name string
-		args args
-		want *Batch
-	}{
-		{
-			name: "new",
-			args: args{
-				batchSize:   50,
-				memoryStore: nil,
-				reader:      nil,
-				writer:      nil,
-			},
-			want: &Batch{
-				batchSize:   50,
-				states:      make(map[types.MetricUUID]stateData),
-				memoryStore: nil,
-				reader:      nil,
-				writer:      nil,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := New(tt.args.batchSize, tt.args.memoryStore, tt.args.reader, tt.args.writer); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("New() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBatch_check(t *testing.T) {
 	type fields struct {
 		batchSize   int64
