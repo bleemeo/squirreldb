@@ -1,63 +1,71 @@
 package redis
 
 import (
+	goredis "github.com/go-redis/redis"
+
 	"bytes"
 	"encoding/binary"
-	"github.com/go-redis/redis"
 	"io"
-	"squirreldb/config"
+	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
 )
 
+const keyPrefix = "squirreldb-"
+
+type Options struct {
+	Address string
+}
+
 type Redis struct {
-	client *redis.Client
+	client *goredis.Client
 }
 
-func NewRedis() *Redis {
-	return &Redis{}
-}
-
-func (r *Redis) Append(newPoints, existingPoints map[string][]types.Point) error {
-	return r.append(newPoints, existingPoints, config.StorageTimeToLive)
-}
-
-func (r *Redis) Get(keys []string) (map[string][]types.Point, error) {
-	return r.get(keys)
-}
-
-func (r *Redis) InitClient(address string) {
-	r.client = redis.NewClient(&redis.Options{
-		Addr: address,
+// New creates a new Redis object
+func New(options Options) *Redis {
+	client := goredis.NewClient(&goredis.Options{
+		Addr: options.Address,
 	})
-}
 
-func (r *Redis) Set(newPoints, existingPoints map[string][]types.Point) error {
-	return r.set(newPoints, existingPoints, config.StorageTimeToLive)
-}
-
-func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
-	pipe := r.client.Pipeline()
-
-	for key, points := range newPoints {
-		data, err := encode(points)
-
-		if err != nil {
-			return err
-		}
-
-		pipe.Append(key, string(data))
-		pipe.Expire(key, timeToLive)
+	redis := &Redis{
+		client: client,
 	}
 
-	for key, points := range existingPoints {
-		data, err := encode(points)
+	return redis
+}
+
+// Append appends the specified metrics
+func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
+		return nil
+	}
+
+	pipe := r.client.Pipeline()
+	timeToLiveDuration := time.Duration(timeToLive) * time.Second
+
+	for uuid, data := range newMetrics {
+		values, err := valuesFromData(data)
 
 		if err != nil {
 			return err
 		}
 
-		pipe.Append(key, string(data))
+		key := keyPrefix + uuid.String()
+
+		pipe.Append(key, string(values))
+		pipe.Expire(key, timeToLiveDuration)
+	}
+
+	for uuid, data := range existingMetrics {
+		values, err := valuesFromData(data)
+
+		if err != nil {
+			return err
+		}
+
+		key := keyPrefix + uuid.String()
+
+		pipe.Append(key, string(values))
 	}
 
 	if _, err := pipe.Exec(); err != nil {
@@ -67,54 +75,53 @@ func (r *Redis) append(newPoints, existingPoints map[string][]types.Point, timeT
 	return nil
 }
 
-func (r *Redis) get(keys []string) (map[string][]types.Point, error) {
-	keysPoints := make(map[string][]types.Point)
-	pipe := r.client.Pipeline()
-
-	for _, key := range keys {
-		data, err := pipe.Get(key).Bytes()
-
-		if err != nil {
-			return nil, err
-		}
-
-		if _, err := pipe.Exec(); err != nil {
-			return nil, err
-		}
-
-		points, err := decode(data)
-
-		if err != nil {
-			return nil, err
-		}
-
-		keysPoints[key] = points
+// Get return the requested metrics
+func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+	if len(uuids) == 0 {
+		return nil, nil
 	}
 
-	return keysPoints, nil
+	metrics := make(map[types.MetricUUID]types.MetricData)
+
+	for _, uuid := range uuids {
+		key := keyPrefix + uuid.String()
+		values, err := r.client.Get(key).Bytes()
+
+		if (err != nil) && (err != goredis.Nil) {
+			return nil, err
+		}
+
+		data, err := dataFromValues(values)
+
+		if err != nil {
+			return nil, err
+		}
+
+		metrics[uuid] = data
+	}
+
+	return metrics, nil
 }
 
-func (r *Redis) set(newPoints, existingPoints map[string][]types.Point, timeToLive time.Duration) error {
-	pipe := r.client.Pipeline()
-
-	for key, points := range newPoints {
-		data, err := encode(points)
-
-		if err != nil {
-			return err
-		}
-
-		pipe.Set(key, data, timeToLive)
+// Set sets the specified metrics
+func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+	if len(metrics) == 0 {
+		return nil
 	}
 
-	for key, points := range existingPoints {
-		data, err := encode(points)
+	pipe := r.client.Pipeline()
+	timeToLiveDuration := time.Duration(timeToLive) * time.Second
+
+	for uuid, data := range metrics {
+		values, err := valuesFromData(data)
 
 		if err != nil {
 			return err
 		}
 
-		pipe.Set(key, data, timeToLive)
+		key := keyPrefix + uuid.String()
+
+		pipe.Set(key, string(values), timeToLiveDuration)
 	}
 
 	if _, err := pipe.Exec(); err != nil {
@@ -124,13 +131,49 @@ func (r *Redis) set(newPoints, existingPoints map[string][]types.Point, timeToLi
 	return nil
 }
 
-func encode(points []types.Point) ([]byte, error) {
+// Return data from bytes values
+func dataFromValues(values []byte) (types.MetricData, error) {
+	data := types.MetricData{}
+	buffer := bytes.NewReader(values)
+
+forLoop:
+	for {
+		var pointData struct {
+			Timestamp  int64
+			Value      float64
+			TimeToLive int64
+		}
+
+		err := binary.Read(buffer, binary.BigEndian, &pointData)
+
+		switch err {
+		case nil:
+			point := types.MetricPoint{
+				Timestamp: pointData.Timestamp,
+				Value:     pointData.Value,
+			}
+
+			data.Points = append(data.Points, point)
+			data.TimeToLive = compare.MaxInt64(data.TimeToLive, pointData.TimeToLive)
+		case io.EOF:
+			break forLoop
+		default:
+			return types.MetricData{}, err
+		}
+	}
+
+	return data, nil
+}
+
+// Return bytes values from data
+func valuesFromData(data types.MetricData) ([]byte, error) {
 	buffer := new(bytes.Buffer)
 
-	for _, point := range points {
+	for _, point := range data.Points {
 		pointData := []interface{}{
-			point.Time.Unix(),
+			point.Timestamp,
 			point.Value,
+			data.TimeToLive,
 		}
 
 		for _, element := range pointData {
@@ -141,33 +184,4 @@ func encode(points []types.Point) ([]byte, error) {
 	}
 
 	return buffer.Bytes(), nil
-}
-
-func decode(data []byte) ([]types.Point, error) {
-	var points []types.Point
-	buffer := bytes.NewReader(data)
-
-	for {
-		var pointData struct {
-			Timestamp int64
-			Value     float64
-		}
-
-		err := binary.Read(buffer, binary.BigEndian, &pointData)
-
-		if err == nil {
-			pointTime := time.Unix(pointData.Timestamp, 0)
-
-			point := types.Point{
-				Time:  pointTime,
-				Value: pointData.Value,
-			}
-
-			points = append(points, point)
-		} else if err != io.EOF {
-			return nil, err
-		} else {
-			return points, nil
-		}
-	}
 }

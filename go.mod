@@ -3,19 +3,33 @@ module squirreldb
 go 1.12
 
 require (
+	github.com/bitly/go-hostpool v0.1.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible
-	github.com/go-redis/redis v6.15.5+incompatible
-	github.com/gocql/gocql v0.0.0-20190910075112-d63913db787c
+	github.com/go-redis/redis v6.15.6+incompatible
+	github.com/gocql/gocql v0.0.0-20200103014340-68f928edb90a
 	github.com/gofrs/uuid v3.2.0+incompatible
-	github.com/gogo/protobuf v1.3.0
-	github.com/golang/snappy v0.0.0-20170215233205-553a64147049
-	github.com/google/uuid v1.1.1 // indirect
-	github.com/grpc-ecosystem/grpc-gateway v1.11.1 // indirect
-	github.com/onsi/ginkgo v1.10.1 // indirect
-	github.com/onsi/gomega v1.7.0 // indirect
+	github.com/gogo/protobuf v1.3.1
+	github.com/golang/snappy v0.0.1
+	github.com/grpc-ecosystem/grpc-gateway v1.12.1 // indirect
+	github.com/knadh/koanf v0.6.0
+	github.com/kr/pretty v0.2.0 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.1 // indirect
+	github.com/onsi/ginkgo v1.11.0 // indirect
+	github.com/onsi/gomega v1.8.1 // indirect
+	github.com/pelletier/go-toml v1.6.0 // indirect
+	github.com/prometheus/client_golang v1.3.0
 	github.com/prometheus/prometheus v2.5.0+incompatible
-	golang.org/x/net v0.0.0-20190912160710-24e19bdeb0f2 // indirect
-	google.golang.org/appengine v1.4.0 // indirect
-	google.golang.org/genproto v0.0.0-20190911173649-1774047e7e51 // indirect
-	google.golang.org/grpc v1.23.1 // indirect
+	github.com/spf13/pflag v1.0.5
+	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect
+	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
+	golang.org/x/sys v0.0.0-20200102141924-c96a22e43c9c // indirect
+	golang.org/x/text v0.3.2 // indirect
+	golang.org/x/tools v0.0.0-20190524140312-2c0ae7006135 // indirect
+	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
+	google.golang.org/genproto v0.0.0-20191230161307-f3c370f40bfb // indirect
+	google.golang.org/grpc v1.26.0 // indirect
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
+	gopkg.in/yaml.v2 v2.2.7 // indirect
+	honnef.co/go/tools v0.0.0-20190523083050-ea95bdfd59fc // indirect
 )

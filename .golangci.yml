@@ -1,0 +1,8 @@
+linters:
+  enable-all: true
+  disable:
+    - lll
+    - funlen
+    - gomnd  # too picky. For example it say that 1000 (used in number of ms in one second) is a magic number.
+run:
+  tests: false
