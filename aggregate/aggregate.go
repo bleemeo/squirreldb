@@ -61,6 +61,7 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 	}
 
 	workingPoints := make([]types.MetricPoint, 0)
+
 	var currentAggregatedTimestamp int64
 
 	aggregatedData := AggregatedData{
@@ -75,8 +76,10 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 			workingPoints = workingPoints[:0]
 			currentAggregatedTimestamp = aggregatedTimestamp
 		}
+
 		workingPoints = append(workingPoints, point)
 	}
+
 	if len(workingPoints) > 0 {
 		aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
 		aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)

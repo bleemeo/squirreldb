@@ -234,8 +234,10 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 		uuidData, found = c.labelsToUUID[labelsString]
 	}
 
-	var sortedLabelsString string
-	var sortedLabels []types.MetricLabel
+	var (
+		sortedLabelsString string
+		sortedLabels       []types.MetricLabel
+	)
 
 	if !found {
 		sortedLabels = types.SortLabels(labels)
