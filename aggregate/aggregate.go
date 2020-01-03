@@ -37,23 +37,6 @@ func Aggregate(metrics map[types.MetricUUID]types.MetricData, resolution int64) 
 	return aggregatedMetrics
 }
 
-// SortPoints returns the AggregatedPoint list sorted by timestamp
-func SortPoints(aggregatedPoints []AggregatedPoint) []AggregatedPoint {
-	if len(aggregatedPoints) == 0 {
-		return nil
-	}
-
-	sortedAggregatedPoints := make([]AggregatedPoint, len(aggregatedPoints))
-
-	copy(sortedAggregatedPoints, aggregatedPoints)
-
-	sort.Slice(sortedAggregatedPoints, func(i, j int) bool {
-		return sortedAggregatedPoints[i].Timestamp < sortedAggregatedPoints[j].Timestamp
-	})
-
-	return sortedAggregatedPoints
-}
-
 // Returns aggregated data from data
 func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 	if len(data.Points) == 0 {
