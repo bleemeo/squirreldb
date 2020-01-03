@@ -22,7 +22,6 @@ import (
 	"squirreldb/retry"
 	"squirreldb/store"
 	"squirreldb/types"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -162,9 +161,8 @@ func createInstance() types.Instance {
 }
 
 func createSquirrelSession(keyspace string, config *config.Config) *gocql.Session {
-	addressesStr := config.String("cassandra.addresses")
 	options := session.Options{
-		Addresses:         strings.Split(addressesStr, ","),
+		Addresses:         config.Strings("cassandra.addresses"),
 		ReplicationFactor: config.Int("cassandra.replication_factor"),
 		Keyspace:          keyspace,
 	}

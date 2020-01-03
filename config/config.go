@@ -5,7 +5,6 @@ import (
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/spf13/pflag"
@@ -17,7 +16,6 @@ import (
 	"sort"
 	"squirreldb/retry"
 	"squirreldb/types"
-	"strings"
 	"time"
 )
 
@@ -62,17 +60,7 @@ func New() (*Config, error) {
 		}
 	}
 
-	err = instance.Load(env.Provider(envPrefix, delimiter, func(s string) string {
-		s = strings.TrimPrefix(s, envPrefix)
-
-		key, exists := envToKey[s]
-
-		if !exists {
-			logger.Printf("Warning: '%s' environment variable doesn't exist.", s)
-		}
-
-		return key
-	}), nil)
+	err = instance.Load(newEnvProvider(), nil)
 
 	if err != nil {
 		return nil, err
