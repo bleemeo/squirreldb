@@ -1,10 +1,10 @@
 package types
 
-type Indexer interface {
+type Index interface {
 	AllUUIDs() ([]MetricUUID, error)
-	Labels(uuid MetricUUID) ([]MetricLabel, error)
-	UUID(labels []MetricLabel) (MetricUUID, error)
-	UUIDs(matchers []MetricLabelMatcher) ([]MetricUUID, error)
+	LookupLabels(uuid MetricUUID) ([]MetricLabel, error)
+	LookupUUID(labels []MetricLabel) (MetricUUID, error)
+	Search(matchers []MetricLabelMatcher) ([]MetricUUID, error)
 }
 
 type MetricReader interface {
@@ -21,7 +21,7 @@ type Locker interface {
 	Update(name string, timeToLive int64) error
 }
 
-type Stater interface {
+type State interface {
 	Read(name string, value interface{}) error
 	Update(name string, value interface{}) error
 	Write(name string, value interface{}) error

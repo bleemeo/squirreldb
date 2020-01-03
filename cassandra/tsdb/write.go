@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const sliceNumber = 4
+const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
 func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
@@ -23,9 +23,9 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 
 	start := time.Now()
 
-	slicesMetrics := make([]map[types.MetricUUID]types.MetricData, sliceNumber)
+	slicesMetrics := make([]map[types.MetricUUID]types.MetricData, concurrentWriterCount)
 
-	for i := 0; i < sliceNumber; i++ {
+	for i := 0; i < concurrentWriterCount; i++ {
 		slicesMetrics[i] = make(map[types.MetricUUID]types.MetricData)
 	}
 
@@ -34,7 +34,7 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 	for uuid, data := range metrics {
 		aggregatePointsCount += len(data.Points)
 
-		sliceIndex := int(uuid.Uint64() % uint64(sliceNumber))
+		sliceIndex := int(uuid.Uint64() % uint64(concurrentWriterCount))
 
 		slicesMetrics[sliceIndex][uuid] = data
 	}
@@ -43,9 +43,9 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(sliceNumber)
+	wg.Add(concurrentWriterCount)
 
-	for i := 0; i < sliceNumber; i++ {
+	for i := 0; i < concurrentWriterCount; i++ {
 		i := i
 
 		go func() {

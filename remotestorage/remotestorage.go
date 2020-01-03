@@ -35,15 +35,15 @@ type RemoteStorage struct {
 }
 
 // New creates a new RemoteStorage object
-func New(options Options, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
+func New(options Options, index types.Index, reader types.MetricReader, writer types.MetricWriter) *RemoteStorage {
 	router := http.NewServeMux()
 	readMetrics := ReadMetrics{
-		indexer: indexer,
-		reader:  reader,
+		index:  index,
+		reader: reader,
 	}
 	writeMetrics := WriteMetrics{
-		indexer: indexer,
-		writer:  writer,
+		index:  index,
+		writer: writer,
 	}
 
 	router.Handle(metricsPattern, promhttp.Handler())

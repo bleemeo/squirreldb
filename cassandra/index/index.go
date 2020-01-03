@@ -22,7 +22,7 @@ const (
 
 const expiratorInterval = 60
 
-const timeToLive = 300
+const cacheExpirationDelay = 300
 
 const (
 	uuidLabelName = "__uuid__"
@@ -154,8 +154,8 @@ func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 	return uuids, nil
 }
 
-// Labels returns a MetricLabel list corresponding to the specified MetricUUID
-func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
+// LookupLabels returns a MetricLabel list corresponding to the specified MetricUUID
+func (c *CassandraIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
 	start := time.Now()
 
 	c.utlMutex.Lock()
@@ -175,7 +175,7 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 
 	now := time.Now()
 
-	labelsData.expirationTimestamp = now.Unix() + timeToLive
+	labelsData.expirationTimestamp = now.Unix() + cacheExpirationDelay
 	c.uuidsToLabels[uuid] = labelsData
 
 	labels := types.CopyLabels(labelsData.labels)
@@ -194,8 +194,8 @@ func (c *CassandraIndex) Labels(uuid types.MetricUUID) ([]types.MetricLabel, err
 	return labels, nil
 }
 
-// UUID returns a MetricUUID corresponding to the specified MetricLabel list
-func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, error) {
+// LookupUUID returns a MetricUUID corresponding to the specified MetricLabel list
+func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUID, error) {
 	if len(labels) == 0 {
 		return types.MetricUUID{}, nil
 	}
@@ -296,7 +296,7 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 
 	now := time.Now()
 
-	uuidData.expirationTimestamp = now.Unix() + timeToLive
+	uuidData.expirationTimestamp = now.Unix() + cacheExpirationDelay
 	c.labelsToUUID[labelsString] = uuidData
 
 	requestsSecondsUUID.Observe(time.Since(start).Seconds())
@@ -304,8 +304,8 @@ func (c *CassandraIndex) UUID(labels []types.MetricLabel) (types.MetricUUID, err
 	return uuidData.uuid, nil
 }
 
-// UUIDs returns a MetricUUID list corresponding to the specified MetricLabelMatcher list
-func (c *CassandraIndex) UUIDs(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
+// Search returns a list of MetricUUID corresponding to the specified MetricLabelMatcher list
+func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
 	if len(matchers) == 0 {
 		return nil, nil
 	}

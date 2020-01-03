@@ -10,8 +10,8 @@ import (
 )
 
 type ReadMetrics struct {
-	indexer types.Indexer
-	reader  types.MetricReader
+	index  types.Index
+	reader types.MetricReader
 }
 
 // ServeHTTP handles read requests
@@ -34,7 +34,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		retry.Print(func() error {
 			var err error
-			uuids, err = r.indexer.UUIDs(matchers)
+			uuids, err = r.index.Search(matchers)
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
@@ -64,7 +64,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 				retry.Print(func() error {
 					var err error
-					labels, err = r.indexer.Labels(uuid)
+					labels, err = r.index.LookupLabels(uuid)
 
 					return err
 				}, retry.NewExponentialBackOff(retryMaxDelay), logger,
@@ -127,9 +127,9 @@ func matchersFromPromMatchers(promMatchers []*prompb.LabelMatcher) []types.Metri
 }
 
 // Returns a MetricRequest generated from a Query
-func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.MetricLabelMatcher) []types.MetricUUID) types.MetricRequest {
+func requestFromPromQuery(promQuery *prompb.Query, searchMetrics func(matchers []types.MetricLabelMatcher) []types.MetricUUID) types.MetricRequest {
 	matchers := matchersFromPromMatchers(promQuery.Matchers)
-	uuids := fun(matchers)
+	uuids := searchMetrics(matchers)
 
 	request := types.MetricRequest{
 		UUIDs:         uuids,
@@ -146,7 +146,7 @@ func requestFromPromQuery(promQuery *prompb.Query, fun func(matchers []types.Met
 }
 
 // Returns a MetricRequest list generated from a ReadRequest
-func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, fun func(matchers []types.MetricLabelMatcher) []types.MetricUUID) []types.MetricRequest {
+func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, searchMetrics func(matchers []types.MetricLabelMatcher) []types.MetricUUID) []types.MetricRequest {
 	if len(promReadRequest.Queries) == 0 {
 		return nil
 	}
@@ -154,7 +154,7 @@ func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, fun func(m
 	requests := make([]types.MetricRequest, 0, len(promReadRequest.Queries))
 
 	for _, query := range promReadRequest.Queries {
-		request := requestFromPromQuery(query, fun)
+		request := requestFromPromQuery(query, searchMetrics)
 
 		requests = append(requests, request)
 	}
@@ -203,8 +203,8 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 }
 
 // Returns a pointer of a TimeSeries generated from a MetricUUID and a MetricData
-func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, fun func(uuid types.MetricUUID) []types.MetricLabel) *prompb.TimeSeries {
-	labels := fun(uuid)
+func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, lookupLabels func(uuid types.MetricUUID) []types.MetricLabel) *prompb.TimeSeries {
+	labels := lookupLabels(uuid)
 	promLabels := promLabelsFromLabels(labels)
 	promSample := promSamplesFromPoints(data.Points)
 
@@ -217,7 +217,7 @@ func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, fun func
 }
 
 // Returns a TimeSeries pointer list generated from a metric list
-func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, fun func(uuid types.MetricUUID) []types.MetricLabel) []*prompb.TimeSeries {
+func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, lookupLabels func(uuid types.MetricUUID) []types.MetricLabel) []*prompb.TimeSeries {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -227,7 +227,7 @@ func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, fu
 	promTimeseries := make([]*prompb.TimeSeries, 0, len(metrics))
 
 	for uuid, data := range metrics {
-		promSeries := promSeriesFromMetric(uuid, data, fun)
+		promSeries := promSeriesFromMetric(uuid, data, lookupLabels)
 
 		promTimeseries = append(promTimeseries, promSeries)
 

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type mockStorer struct {
+type mockStore struct {
 	metrics map[types.MetricUUID]types.MetricData
 }
 
@@ -20,7 +20,7 @@ type mockMetricWriter struct {
 	metrics map[types.MetricUUID]types.MetricData
 }
 
-func (m *mockStorer) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, _ int64) error {
+func (m *mockStore) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, _ int64) error {
 	for uuid, data := range newMetrics {
 		storeData := m.metrics[uuid]
 
@@ -42,7 +42,7 @@ func (m *mockStorer) Append(newMetrics, existingMetrics map[types.MetricUUID]typ
 	return nil
 }
 
-func (m *mockStorer) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+func (m *mockStore) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
 	metrics := make(map[types.MetricUUID]types.MetricData)
 
 	for _, uuid := range uuids {
@@ -56,7 +56,7 @@ func (m *mockStorer) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.M
 	return metrics, nil
 }
 
-func (m *mockStorer) Set(metrics map[types.MetricUUID]types.MetricData, _ int64) error {
+func (m *mockStore) Set(metrics map[types.MetricUUID]types.MetricData, _ int64) error {
 	for uuid, data := range metrics {
 		m.metrics[uuid] = data
 	}
@@ -96,10 +96,10 @@ func uuidFromStringOrNil(s string) types.MetricUUID {
 
 func TestNew(t *testing.T) {
 	type args struct {
-		batchSize int64
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	tests := []struct {
 		name string
@@ -109,23 +109,23 @@ func TestNew(t *testing.T) {
 		{
 			name: "new",
 			args: args{
-				batchSize: 50,
-				storer:    nil,
-				reader:    nil,
-				writer:    nil,
+				batchSize:   50,
+				memoryStore: nil,
+				reader:      nil,
+				writer:      nil,
 			},
 			want: &Batch{
-				batchSize: 50,
-				states:    make(map[types.MetricUUID]stateData),
-				storer:    nil,
-				reader:    nil,
-				writer:    nil,
+				batchSize:   50,
+				states:      make(map[types.MetricUUID]stateData),
+				memoryStore: nil,
+				reader:      nil,
+				writer:      nil,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New(tt.args.batchSize, tt.args.storer, tt.args.reader, tt.args.writer); !reflect.DeepEqual(got, tt.want) {
+			if got := New(tt.args.batchSize, tt.args.memoryStore, tt.args.reader, tt.args.writer); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
@@ -134,11 +134,11 @@ func TestNew(t *testing.T) {
 
 func TestBatch_check(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		now   time.Time
@@ -163,7 +163,7 @@ func TestBatch_check(t *testing.T) {
 						flushTimestamp:      50,
 					},
 				},
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -278,7 +278,7 @@ func TestBatch_check(t *testing.T) {
 						flushTimestamp:      100,
 					},
 				},
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -381,7 +381,7 @@ func TestBatch_check(t *testing.T) {
 						flushTimestamp:      50,
 					},
 				},
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -399,7 +399,7 @@ func TestBatch_check(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    make(map[types.MetricUUID]stateData),
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -416,14 +416,14 @@ func TestBatch_check(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			b.check(tt.args.now, tt.args.force)
-			gotStorer := b.storer.(*mockStorer).metrics
+			gotStorer := b.memoryStore.(*mockStore).metrics
 			gotWriter := b.writer.(*mockMetricWriter).metrics
 			if !reflect.DeepEqual(gotStorer, tt.wantStorer) {
 				t.Errorf("check() gotStorer = %v, wantStorer %v", gotStorer, tt.wantStorer)
@@ -437,11 +437,11 @@ func TestBatch_check(t *testing.T) {
 
 func TestBatch_flush(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		states map[types.MetricUUID][]stateData
@@ -472,7 +472,7 @@ func TestBatch_flush(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -703,7 +703,7 @@ func TestBatch_flush(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -744,7 +744,7 @@ func TestBatch_flush(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    make(map[types.MetricUUID]stateData),
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -785,7 +785,7 @@ func TestBatch_flush(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    make(map[types.MetricUUID]stateData),
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -802,14 +802,14 @@ func TestBatch_flush(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			b.flush(tt.args.states, tt.args.now)
-			storerGot := b.storer.(*mockStorer).metrics
+			storerGot := b.memoryStore.(*mockStore).metrics
 			writerGot := b.writer.(*mockMetricWriter).metrics
 			if !reflect.DeepEqual(storerGot, tt.storerWant) {
 				t.Errorf("flush() storerGot = %v, storerWant %v", storerGot, tt.storerWant)
@@ -823,11 +823,11 @@ func TestBatch_flush(t *testing.T) {
 
 func TestBatch_flushData(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		uuid       types.MetricUUID
@@ -860,9 +860,9 @@ func TestBatch_flushData(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				storer: nil,
-				reader: nil,
-				writer: nil,
+				memoryStore: nil,
+				reader:      nil,
+				writer:      nil,
 			},
 			args: args{
 				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
@@ -982,9 +982,9 @@ func TestBatch_flushData(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				storer: nil,
-				reader: nil,
-				writer: nil,
+				memoryStore: nil,
+				reader:      nil,
+				writer:      nil,
 			},
 			args: args{
 				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
@@ -1015,11 +1015,11 @@ func TestBatch_flushData(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			got, got1 := b.flushData(tt.args.uuid, tt.args.data, tt.args.statesData, tt.args.now)
 			if !reflect.DeepEqual(got, tt.want) {
@@ -1034,11 +1034,11 @@ func TestBatch_flushData(t *testing.T) {
 
 func TestBatch_read(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		request types.MetricRequest
@@ -1055,7 +1055,7 @@ func TestBatch_read(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -1222,7 +1222,7 @@ func TestBatch_read(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -1300,7 +1300,7 @@ func TestBatch_read(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: nil,
 				},
 				reader: &mockMetricReader{
@@ -1426,7 +1426,7 @@ func TestBatch_read(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: nil,
 				},
 				reader: &mockMetricReader{
@@ -1453,11 +1453,11 @@ func TestBatch_read(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			got, err := b.read(tt.args.request)
 			if (err != nil) != tt.wantErr {
@@ -1473,11 +1473,11 @@ func TestBatch_read(t *testing.T) {
 
 func TestBatch_readTemporary(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		request types.MetricRequest
@@ -1494,7 +1494,7 @@ func TestBatch_readTemporary(t *testing.T) {
 			fields: fields{
 				batchSize: 0,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: map[types.MetricUUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
@@ -1570,7 +1570,7 @@ func TestBatch_readTemporary(t *testing.T) {
 			fields: fields{
 				batchSize: 0,
 				states:    nil,
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: nil,
 				},
 				reader: nil,
@@ -1595,11 +1595,11 @@ func TestBatch_readTemporary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			got, err := b.readTemporary(tt.args.request)
 			if (err != nil) != tt.wantErr {
@@ -1615,11 +1615,11 @@ func TestBatch_readTemporary(t *testing.T) {
 
 func TestBatch_write(t *testing.T) {
 	type fields struct {
-		batchSize int64
-		states    map[types.MetricUUID]stateData
-		storer    Storer
-		reader    types.MetricReader
-		writer    types.MetricWriter
+		batchSize   int64
+		states      map[types.MetricUUID]stateData
+		memoryStore Store
+		reader      types.MetricReader
+		writer      types.MetricWriter
 	}
 	type args struct {
 		metrics map[types.MetricUUID]types.MetricData
@@ -1638,7 +1638,7 @@ func TestBatch_write(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    make(map[types.MetricUUID]stateData),
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -1851,7 +1851,7 @@ func TestBatch_write(t *testing.T) {
 			fields: fields{
 				batchSize: 50,
 				states:    make(map[types.MetricUUID]stateData),
-				storer: &mockStorer{
+				memoryStore: &mockStore{
 					metrics: make(map[types.MetricUUID]types.MetricData),
 				},
 				reader: nil,
@@ -1869,15 +1869,15 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize: tt.fields.batchSize,
-				states:    tt.fields.states,
-				storer:    tt.fields.storer,
-				reader:    tt.fields.reader,
-				writer:    tt.fields.writer,
+				batchSize:   tt.fields.batchSize,
+				states:      tt.fields.states,
+				memoryStore: tt.fields.memoryStore,
+				reader:      tt.fields.reader,
+				writer:      tt.fields.writer,
 			}
 			b.write(tt.args.metrics, tt.args.now)
 			gotStates := b.states
-			gotStorer := b.storer.(*mockStorer).metrics
+			gotStorer := b.memoryStore.(*mockStore).metrics
 			gotWriter := b.writer.(*mockMetricWriter).metrics
 			if !reflect.DeepEqual(gotStates, tt.wantStates) {
 				t.Errorf("write() gotStates = %v, wantStates %v", gotStates, tt.wantStates)

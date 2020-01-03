@@ -21,7 +21,9 @@ const (
 	lockUpdateInterval = 300
 )
 
-const safeMargin = 3600
+// Processed with aggregation for data older than backlogMargin seconds. If data older than this delay are received,
+// they won't be aggregated.
+const backlogMargin = 3600
 
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
@@ -41,7 +43,7 @@ func (c *CassandraTSDB) runAggregator(ctx context.Context) {
 	defer ticker.Stop()
 
 	for ctx.Err() == nil {
-		c.aggregate(shard)
+		c.aggregateShard(shard)
 
 		shard = (shard % shardNumber) + 1
 
@@ -62,15 +64,15 @@ func (c *CassandraTSDB) aggregateInit() {
 	for i := 1; i <= shardNumber; i++ {
 		name := shardStatePrefix + strconv.Itoa(i)
 		retry.Print(func() error {
-			return c.stater.Write(name, fromTimestamp)
+			return c.state.Write(name, fromTimestamp)
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")
 	}
 }
 
-// Aggregates metrics belonging to the shard
-func (c *CassandraTSDB) aggregate(shard int) {
+// aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.
+func (c *CassandraTSDB) aggregateShard(shard int) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	if applied := c.writeAggregateLock(name); !applied {
@@ -91,7 +93,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	var fromTimestamp int64
 
 	retry.Print(func() error {
-		return c.stater.Read(name, &fromTimestamp)
+		return c.state.Read(name, &fromTimestamp)
 	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 		"Error: Can't read "+name+" state",
 		"Resolved: Read "+name+" state")
@@ -99,7 +101,7 @@ func (c *CassandraTSDB) aggregate(shard int) {
 	now := time.Now()
 	maxTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
 	toTimestamp := fromTimestamp + c.options.AggregateSize
-	isSafeMargin := (now.Unix() % 86400) >= safeMargin // Authorizes aggregation if it is more than 1 a.m.
+	isSafeMargin := (now.Unix() % 86400) >= backlogMargin
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
 		cancel()
@@ -108,32 +110,11 @@ func (c *CassandraTSDB) aggregate(shard int) {
 		return
 	}
 
-	if err := c.aggregateSize(shard, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
-		logger.Printf("Aggregate shard %d from [%v] to [%v]",
-			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
-
-		retry.Print(func() error {
-			return c.stater.Update(name, toTimestamp)
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't update "+name+" state",
-			"Resolved: update "+name+" state")
-	} else {
-		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
-			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
-	}
-
-	cancel()
-	wg.Wait()
-	c.deleteAggregateLock(name)
-}
-
-// Aggregates metrics belonging to the shard by aggregation batch size
-func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, resolution int64) error {
 	var uuids []types.MetricUUID
 
 	retry.Print(func() error {
 		var err error
-		uuids, err = c.indexer.AllUUIDs()
+		uuids, err = c.index.AllUUIDs()
 
 		return err
 	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
@@ -150,13 +131,27 @@ func (c *CassandraTSDB) aggregateSize(shard int, fromTimestamp, toTimestamp, res
 		}
 	}
 
-	err := c.readAggregateWrite(shardUUIDs, fromTimestamp, toTimestamp, resolution)
+	if err := c.doAggregation(shardUUIDs, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
+		logger.Printf("Aggregate shard %d from [%v] to [%v]",
+			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
-	return err
+		retry.Print(func() error {
+			return c.state.Update(name, toTimestamp)
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+			"Error: Can't update "+name+" state",
+			"Resolved: update "+name+" state")
+	} else {
+		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
+			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
+	}
+
+	cancel()
+	wg.Wait()
+	c.deleteAggregateLock(name)
 }
 
-// Reads all metrics contained between timestamps, generates aggregate data and writes it
-func (c *CassandraTSDB) readAggregateWrite(uuids []types.MetricUUID, fromTimestamp, toTimestamp, resolution int64) error {
+// doAggregation perform the aggregation for given parameter
+func (c *CassandraTSDB) doAggregation(uuids []types.MetricUUID, fromTimestamp, toTimestamp, resolution int64) error {
 	if len(uuids) == 0 {
 		return nil
 	}

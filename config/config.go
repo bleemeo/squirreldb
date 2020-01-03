@@ -168,7 +168,7 @@ func (c *Config) Validate() bool {
 }
 
 // ValidateRemote checks if the local configuration is consistent with the remote configuration
-func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
+func (c *Config) ValidateRemote(state types.State) (bool, bool) {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
 	valid := true
@@ -183,7 +183,7 @@ func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
 		)
 
 		retry.Print(func() error {
-			err = states.Read(name, &remote) // nolint: scopelint
+			err = state.Read(name, &remote) // nolint: scopelint
 
 			if err == gocql.ErrNotFound {
 				return nil
@@ -206,7 +206,7 @@ func (c *Config) ValidateRemote(states types.Stater) (bool, bool) {
 }
 
 // WriteRemote writes the remote constant values if they do not exist
-func (c *Config) WriteRemote(states types.Stater, overwrite bool) {
+func (c *Config) WriteRemote(state types.State, overwrite bool) {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
 
@@ -215,10 +215,10 @@ func (c *Config) WriteRemote(states types.Stater, overwrite bool) {
 
 		retry.Print(func() error {
 			if overwrite {
-				return states.Update(name, value) // nolint: scopelint
+				return state.Update(name, value) // nolint: scopelint
 			}
 
-			return states.Write(name, value) // nolint: scopelint
+			return state.Write(name, value) // nolint: scopelint
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"Error: Can't write "+name+" state",
 			"Resolved: Write "+name+" state")

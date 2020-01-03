@@ -50,7 +50,7 @@ func main() {
 
 	debug.Level = squirrelConfig.Int("debug.level")
 
-	var squirrelStore batch.Storer
+	var squirrelStore batch.Store
 
 	redisEnable := squirrelConfig.Bool("redis.enable")
 
@@ -230,7 +230,7 @@ func createSquirrelStates(session *gocql.Session, keyspace string) *states.Cassa
 	return squirrelStates
 }
 
-func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, indexer types.Indexer, locker types.Locker, stater types.Stater) *tsdb.CassandraTSDB {
+func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, index types.Index, locker types.Locker, state types.State) *tsdb.CassandraTSDB {
 	options := tsdb.Options{
 		DefaultTimeToLive:         config.Int64("cassandra.default_time_to_live"),
 		BatchSize:                 config.Int64("batch.size"),
@@ -245,7 +245,7 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 
 	retry.Print(func() error {
 		var err error
-		squirrelTSDB, err = tsdb.New(session, keyspace, options, indexer, locker, stater)
+		squirrelTSDB, err = tsdb.New(session, keyspace, options, index, locker, state)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -265,20 +265,20 @@ func createSquirrelRedis(config *config.Config) *redis.Redis {
 	return squirrelRedis
 }
 
-func createSquirrelBatch(config *config.Config, storer batch.Storer, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
+func createSquirrelBatch(config *config.Config, store batch.Store, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
 	squirrelBatchSize := config.Int64("batch.size")
 
-	squirrelBatch := batch.New(squirrelBatchSize, storer, reader, writer)
+	squirrelBatch := batch.New(squirrelBatchSize, store, reader, writer)
 
 	return squirrelBatch
 }
 
-func createSquirrelRemoteStorage(config *config.Config, indexer types.Indexer, reader types.MetricReader, writer types.MetricWriter) *remotestorage.RemoteStorage {
+func createSquirrelRemoteStorage(config *config.Config, index types.Index, reader types.MetricReader, writer types.MetricWriter) *remotestorage.RemoteStorage {
 	options := remotestorage.Options{
 		ListenAddress: config.String("remote_storage.listen_address"),
 	}
 
-	squirrelRemoteStorage := remotestorage.New(options, indexer, reader, writer)
+	squirrelRemoteStorage := remotestorage.New(options, index, reader, writer)
 
 	return squirrelRemoteStorage
 }

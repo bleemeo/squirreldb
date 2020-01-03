@@ -13,12 +13,12 @@ import (
 
 const checkerInterval = 60
 
-const flushLimit = 1000
+const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
-type Storer interface {
+type Store interface {
 	Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
 	Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error)
 	Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
@@ -37,19 +37,19 @@ type Batch struct {
 	states map[types.MetricUUID]stateData
 	mutex  sync.Mutex
 
-	storer Storer
-	reader types.MetricReader
-	writer types.MetricWriter
+	memoryStore Store
+	reader      types.MetricReader
+	writer      types.MetricWriter
 }
 
 // New creates a new Batch object
-func New(batchSize int64, storer Storer, reader types.MetricReader, writer types.MetricWriter) *Batch {
+func New(batchSize int64, memoryStore Store, reader types.MetricReader, writer types.MetricWriter) *Batch {
 	batch := &Batch{
-		batchSize: batchSize,
-		states:    make(map[types.MetricUUID]stateData),
-		storer:    storer,
-		reader:    reader,
-		writer:    writer,
+		batchSize:   batchSize,
+		states:      make(map[types.MetricUUID]stateData),
+		memoryStore: memoryStore,
+		reader:      reader,
+		writer:      writer,
 	}
 
 	return batch
@@ -96,7 +96,7 @@ func (b *Batch) runChecker(ctx context.Context) {
 
 // Checks the current states and flush those whose flush date has expired
 // If force is true, each state is flushed
-// If the number of states to be flushed is equal to the flushLimit, they will be flushed
+// If the number of states to be flushed is equal to the flushMetricLimit, they will be flushed
 func (b *Batch) check(now time.Time, force bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -109,7 +109,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 			delete(b.states, uuid)
 
-			if (len(states) % flushLimit) == 0 {
+			if (len(states) % flushMetricLimit) == 0 {
 				b.flush(states, now)
 
 				states = make(map[types.MetricUUID][]stateData)
@@ -143,7 +143,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		start := time.Now()
 
 		var err error
-		metrics, err = b.storer.Get(uuids)
+		metrics, err = b.memoryStore.Get(uuids)
 
 		readDuration += time.Since(start)
 
@@ -182,7 +182,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	retry.Print(func() error {
 		start := time.Now()
 
-		err := b.storer.Set(metricsToSet, timeToLive)
+		err := b.memoryStore.Set(metricsToSet, timeToLive)
 
 		deleteDuration += time.Since(start)
 
@@ -313,7 +313,7 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
 	start := time.Now()
 
-	metrics, err := b.storer.Get(request.UUIDs)
+	metrics, err := b.memoryStore.Get(request.UUIDs)
 
 	requestsSecondsRead.Observe(time.Since(start).Seconds())
 
@@ -427,7 +427,7 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 
 		start := time.Now()
 
-		err := b.storer.Append(newMetrics, existingMetrics, timeToLive)
+		err := b.memoryStore.Append(newMetrics, existingMetrics, timeToLive)
 
 		addDuration += time.Since(start)
 

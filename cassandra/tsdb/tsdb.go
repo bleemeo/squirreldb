@@ -38,13 +38,13 @@ type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
 
-	indexer types.Indexer
-	locker  types.Locker
-	stater  types.Stater
+	index  types.Index
+	locker types.Locker
+	state  types.State
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, indexer types.Indexer, locker types.Locker, stater types.Stater) (*CassandraTSDB, error) {
+func New(session *gocql.Session, keyspace string, options Options, index types.Index, locker types.Locker, state types.State) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + dataTableName
 	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
@@ -63,9 +63,9 @@ func New(session *gocql.Session, keyspace string, options Options, indexer types
 	tsdb := &CassandraTSDB{
 		session: session,
 		options: options,
-		indexer: indexer,
+		index:   index,
 		locker:  locker,
-		stater:  stater,
+		state:   state,
 	}
 
 	return tsdb, nil

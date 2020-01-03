@@ -2,7 +2,6 @@ package aggregate
 
 import (
 	"math"
-	"sort"
 	"squirreldb/types"
 )
 

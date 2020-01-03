@@ -12,8 +12,8 @@ import (
 )
 
 type WriteMetrics struct {
-	indexer types.Indexer
-	writer  types.MetricWriter
+	index  types.Index
+	writer types.MetricWriter
 }
 
 const (
@@ -46,7 +46,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 		retry.Print(func() error {
 			var err error
-			uuid, err = w.indexer.UUID(labels)
+			uuid, err = w.index.LookupUUID(labels)
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
