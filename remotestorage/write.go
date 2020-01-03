@@ -50,8 +50,8 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't get UUID from the index",
-			"Resolved: Get UUID from the index")
+			"lookup Metric UUID",
+		)
 
 		return timeToLive, uuid
 	})

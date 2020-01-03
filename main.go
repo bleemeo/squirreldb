@@ -175,8 +175,8 @@ func createSquirrelSession(keyspace string, config *config.Config) *gocql.Sessio
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't create the session",
-		"Resolved: Create the session")
+		"create Cassandra session",
+	)
 
 	return squirrelSession
 }
@@ -194,8 +194,8 @@ func createSquirrelIndex(session *gocql.Session, keyspace string, config *config
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't create Cassandra index",
-		"Resolved: Create Cassandra index")
+		"create Cassandra index",
+	)
 
 	return squirrelIndex
 }
@@ -209,8 +209,8 @@ func createSquirrelLocks(session *gocql.Session, keyspace string, instance types
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't create Cassandra locks",
-		"Resolved: Create Cassandra locks")
+		"create Cassandra locks",
+	)
 
 	return squirrelLocks
 }
@@ -224,8 +224,8 @@ func createSquirrelStates(session *gocql.Session, keyspace string) *states.Cassa
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't create Cassandra states",
-		"Resolved: Create Cassandra states")
+		"create Cassandra state",
+	)
 
 	return squirrelStates
 }
@@ -249,8 +249,8 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't create Cassandra TSDB",
-		"Resolved: Create Cassandra TSDB")
+		"create Cassandra TSDB",
+	)
 
 	return squirrelTSDB
 }

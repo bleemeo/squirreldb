@@ -192,8 +192,8 @@ func (c *Config) ValidateRemote(state types.State) (bool, bool) {
 			exists = true
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't read "+name+" state",
-			"Resolved: Read "+name+" state")
+			"read config state "+name,
+		)
 
 		if exists && (local != remote) {
 			valid = false
@@ -220,8 +220,8 @@ func (c *Config) WriteRemote(state types.State, overwrite bool) {
 
 			return state.Write(name, value) // nolint: scopelint
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't write "+name+" state",
-			"Resolved: Write "+name+" state")
+			"write config state "+name,
+		)
 	}
 }
 

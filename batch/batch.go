@@ -160,8 +160,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't get metrics from the temporary storage",
-		"Resolved: Get metrics from the temporary storage")
+		"get points from the memory store",
+	)
 
 	requestsSecondsRead.Observe(readDuration.Seconds())
 
@@ -197,8 +197,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't set metrics in the temporary storage",
-		"Resolved: Set metrics in the temporary storage")
+		"get points from the memory store",
+	)
 
 	requestsSecondsDelete.Observe(deleteDuration.Seconds())
 }
@@ -281,8 +281,8 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't get metrics from the temporary storage",
-			"Resolved: Get metrics from the temporary storage")
+			"get points from the memory store",
+		)
 
 		temporaryData := temporaryMetrics[uuid]
 
@@ -302,8 +302,8 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"Error: Can't get metrics from the persistent storage",
-			"Resolved: Get metrics from the persistent storage")
+			"get points from the persistent store",
+		)
 
 		persistentData := persistentMetrics[uuid]
 		data := types.MetricData{
@@ -440,8 +440,8 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"Error: Can't append metrics points in the temporary storage",
-		"Resolved: Append metrics points in the temporary storage")
+		"add points to memory store",
+	)
 
 	requestsSecondsWrite.Observe(addDuration.Seconds())
 

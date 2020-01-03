@@ -83,8 +83,8 @@ func (r *RemoteStorage) runServer(ctx context.Context) {
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't listen and serve the server",
-			"Resolved: Listen and serve the server")
+			"start the HTTP server",
+		)
 	}()
 
 	logger.Printf("Server listening on %s", r.server.Addr)

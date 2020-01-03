@@ -38,8 +38,8 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't get UUIDs from the index",
-			"Resolved: Get UUIDs from the index")
+			"search metrics with the index",
+		)
 
 		return uuids
 	})
@@ -55,8 +55,8 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 			return err
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't read metrics with the reader",
-			"Resolved: Read metrics with the reader")
+			"read metric points",
+		)
 
 		promQueryResult := &prompb.QueryResult{
 			Timeseries: promTimeseriesFromMetrics(metrics, func(uuid types.MetricUUID) []types.MetricLabel {
@@ -68,8 +68,8 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 					return err
 				}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-					"Error: Can't get labels from the index",
-					"Resolved: Get labels from the index")
+					"lookup labels",
+				)
 
 				return labels
 			}),

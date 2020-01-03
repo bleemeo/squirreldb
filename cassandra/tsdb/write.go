@@ -65,8 +65,8 @@ func (c *CassandraTSDB) writeMetrics(metrics map[types.MetricUUID]types.MetricDa
 		retry.Print(func() error {
 			return c.writeRawData(uuid, data) // nolint: scopelint
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"Error: Can't write metric",
-			"Resolved: Write metric")
+			"write points to Cassandra",
+		)
 	}
 }
 
