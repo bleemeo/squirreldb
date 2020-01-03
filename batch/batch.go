@@ -73,11 +73,11 @@ func (b *Batch) Read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 }
 
 // Write implements MetricWriter
-func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) {
+func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	b.write(metrics, time.Now())
+	return b.write(metrics, time.Now())
 }
 
 // Run starts Batch service (e.g. flushing points after a deadline)
@@ -186,7 +186,13 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	requestsPointsTotalRead.Add(float64(readPointsCount))
 	requestsPointsTotalDelete.Add(float64(deletedPointsCount))
 
-	b.writer.Write(metricsToWrite)
+	retry.Print(func() error {
+		return b.writer.Write(metricsToWrite)
+	},
+		retry.NewExponentialBackOff(30*time.Second),
+		logger,
+		"write points in persistent store",
+	)
 
 	retry.Print(func() error {
 		start := time.Now()
@@ -273,16 +279,10 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			Function:      request.Function,
 		}
 
-		var temporaryMetrics map[types.MetricUUID]types.MetricData
-
-		retry.Print(func() error {
-			var err error
-			temporaryMetrics, err = b.readTemporary(uuidRequest)
-
-			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"get points from the memory store",
-		)
+		temporaryMetrics, err := b.readTemporary(uuidRequest)
+		if err != nil {
+			return nil, err
+		}
 
 		temporaryData := temporaryMetrics[uuid]
 
@@ -294,16 +294,10 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			continue
 		}
 
-		var persistentMetrics map[types.MetricUUID]types.MetricData
-
-		retry.Print(func() error {
-			var err error
-			persistentMetrics, err = b.reader.Read(uuidRequest)
-
-			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"get points from the persistent store",
-		)
+		persistentMetrics, err := b.reader.Read(uuidRequest)
+		if err != nil {
+			return nil, err
+		}
 
 		persistentData := persistentMetrics[uuid]
 		data := types.MetricData{
@@ -359,9 +353,9 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
 // If this is the case, the state is added to the list of states to flush
-func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Time) {
+func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Time) error {
 	if len(metrics) == 0 {
-		return
+		return nil
 	}
 
 	var (
@@ -431,23 +425,21 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 
 	requestsPointsTotalWrite.Add(float64(addedPointsCount))
 
-	retry.Print(func() error {
-		start := time.Now()
+	start := time.Now()
 
-		err := b.memoryStore.Append(newMetrics, existingMetrics, b.memoryStoreTimeToLive)
-
-		addDuration += time.Since(start)
-
+	if err := b.memoryStore.Append(newMetrics, existingMetrics, b.memoryStoreTimeToLive); err != nil {
 		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"add points to memory store",
-	)
+	}
+
+	addDuration += time.Since(start)
 
 	requestsSecondsWrite.Observe(addDuration.Seconds())
 
 	if len(states) != 0 {
 		b.flush(states, now)
 	}
+
+	return nil
 }
 
 // Returns a flush date

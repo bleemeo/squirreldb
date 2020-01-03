@@ -78,14 +78,14 @@ func (m *mockMetricReader) Read(request types.MetricRequest) (map[types.MetricUU
 	return metrics, nil
 }
 
-func (m *mockMetricWriter) Write(metrics map[types.MetricUUID]types.MetricData) {
+func (m *mockMetricWriter) Write(metrics map[types.MetricUUID]types.MetricData) error {
 	if len(metrics) == 0 {
-		return
+		return nil
 	}
 
 	m.metrics = metrics
 
-	return
+	return nil
 }
 
 func uuidFromStringOrNil(s string) types.MetricUUID {

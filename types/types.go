@@ -12,7 +12,7 @@ type MetricReader interface {
 }
 
 type MetricWriter interface {
-	Write(metrics map[MetricUUID]MetricData)
+	Write(metrics map[MetricUUID]MetricData) error
 }
 
 type Locker interface {

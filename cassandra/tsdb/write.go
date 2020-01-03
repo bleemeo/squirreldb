@@ -16,9 +16,9 @@ import (
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
-func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
+func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) error {
 	if len(metrics) == 0 {
-		return
+		return nil
 	}
 
 	start := time.Now()
@@ -57,6 +57,8 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) {
 	wg.Wait()
 
 	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
+
+	return nil
 }
 
 // Write writes all specified metrics of the slice

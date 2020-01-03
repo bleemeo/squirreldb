@@ -5,7 +5,6 @@ import (
 
 	"net/http"
 	"squirreldb/compare"
-	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
 	"time"
@@ -35,28 +34,16 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	metrics := metricsFromTimeseries(writeRequest.Timeseries, func(labels []types.MetricLabel) (int64, types.MetricUUID) {
-		timeToLive, err := timeToLiveFromLabels(labels)
+	metrics, err := metricsFromTimeseries(writeRequest.Timeseries, w.index)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-		if err != nil {
-			logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
-		}
-
-		var uuid types.MetricUUID
-
-		retry.Print(func() error {
-			var err error
-			uuid, err = w.index.LookupUUID(labels)
-
-			return err
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"lookup Metric UUID",
-		)
-
-		return timeToLive, uuid
-	})
-
-	w.writer.Write(metrics)
+	if err := w.writer.Write(metrics); err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	requestsSecondsWrite.Observe(time.Since(start).Seconds())
 }
@@ -122,22 +109,32 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a MetricUUID and a MetricData generated from a TimeSeries
-func metricFromPromSeries(promSeries *prompb.TimeSeries, fun func(labels []types.MetricLabel) (int64, types.MetricUUID)) (types.MetricUUID, types.MetricData) {
+func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (types.MetricUUID, types.MetricData, error) {
 	labels := labelsFromPromLabels(promSeries.Labels)
-	timeToLive, uuid := fun(labels)
+	timeToLive, err := timeToLiveFromLabels(labels)
+
+	if err != nil {
+		logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+	}
+
+	uuid, err := index.LookupUUID(labels)
+	if err != nil {
+		return uuid, types.MetricData{}, err
+	}
+
 	points := pointsFromPromSamples(promSeries.Samples)
 	data := types.MetricData{
 		Points:     points,
 		TimeToLive: timeToLive,
 	}
 
-	return uuid, data
+	return uuid, data, nil
 }
 
 // Returns a metric list generated from a TimeSeries list
-func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels []types.MetricLabel) (int64, types.MetricUUID)) map[types.MetricUUID]types.MetricData {
+func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) (map[types.MetricUUID]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	totalPoints := 0
@@ -145,7 +142,11 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels 
 	metrics := make(map[types.MetricUUID]types.MetricData, len(promTimeseries))
 
 	for _, promSeries := range promTimeseries {
-		uuid, data := metricFromPromSeries(promSeries, fun)
+		uuid, data, err := metricFromPromSeries(promSeries, index)
+		if err != nil {
+			return nil, err
+		}
+
 		currentData := metrics[uuid]
 
 		currentData.Points = append(currentData.Points, data.Points...)
@@ -157,5 +158,5 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, fun func(labels 
 
 	requestsPointsTotalWrite.Add(float64(totalPoints))
 
-	return metrics
+	return metrics, nil
 }

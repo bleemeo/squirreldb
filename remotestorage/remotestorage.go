@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
 )
@@ -16,7 +15,6 @@ const (
 	metricsPattern            = "/metrics"
 	readPattern               = "/read"
 	writePattern              = "/write"
-	retryMaxDelay             = 30 * time.Second
 	httpServerShutdownTimeout = 10 * time.Second
 )
 
@@ -73,29 +71,31 @@ func (r *RemoteStorage) Run(ctx context.Context) {
 // If a stop signal is received, the server will be stopped
 // If 10 seconds after this signal is received, and the server is not stopped, it is forced to stop.
 func (r *RemoteStorage) runServer(ctx context.Context) {
+	serverStopped := make(chan interface{})
+
 	go func() {
-		retry.Print(func() error {
-			err := r.server.ListenAndServe()
+		err := r.server.ListenAndServe()
 
-			if err == http.ErrServerClosed {
-				return nil
-			}
+		if err != nil && err != http.ErrServerClosed {
+			logger.Printf("Failed to listen on %s", r.server.Addr)
+		}
 
-			return err
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-			"start the HTTP server",
-		)
+		close(serverStopped)
 	}()
 
 	logger.Printf("Server listening on %s", r.server.Addr)
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
+		defer cancel()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
-	defer cancel()
+		if err := r.server.Shutdown(shutdownCtx); err != nil {
+			logger.Printf("Error: Can't stop the server (%v)", err)
+		}
 
-	if err := r.server.Shutdown(shutdownCtx); err != nil {
-		logger.Printf("Error: Can't stop the server (%v)", err)
+		<-serverStopped
+	case <-serverStopped:
 	}
 
 	logger.Println("Server stopped")

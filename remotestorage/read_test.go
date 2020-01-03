@@ -1,10 +1,11 @@
 package remotestorage
 
 import (
-	"github.com/prometheus/prometheus/prompb"
 	"reflect"
 	"squirreldb/types"
 	"testing"
+
+	"github.com/prometheus/prometheus/prompb"
 )
 
 func uuidFromStringOrNil(s string) types.MetricUUID {
@@ -82,7 +83,7 @@ func Test_matchersFromPromMatchers(t *testing.T) {
 func Test_requestFromPromQuery(t *testing.T) {
 	type args struct {
 		promQuery *prompb.Query
-		fun       func(matchers []types.MetricLabelMatcher) []types.MetricUUID
+		index     types.Index
 	}
 	tests := []struct {
 		name string
@@ -103,13 +104,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 						EndMs:   50000,
 					},
 				},
-				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
-					uuids := []types.MetricUUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-					}
-
-					return uuids
-				},
+				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
 			},
 			want: types.MetricRequest{
 				UUIDs: []types.MetricUUID{
@@ -130,13 +125,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 					Matchers:         nil,
 					Hints:            nil,
 				},
-				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
-					uuids := []types.MetricUUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-					}
-
-					return uuids
-				},
+				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
 			},
 			want: types.MetricRequest{
 				UUIDs: []types.MetricUUID{
@@ -151,7 +140,11 @@ func Test_requestFromPromQuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := requestFromPromQuery(tt.args.promQuery, tt.args.fun); !reflect.DeepEqual(got, tt.want) {
+			got, err := requestFromPromQuery(tt.args.promQuery, tt.args.index)
+			if err != nil {
+				t.Errorf("requestFromPromQuery() failed: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("requestFromPromQuery() = %v, want %v", got, tt.want)
 			}
 		})
@@ -161,7 +154,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 func Test_requestsFromPromReadRequest(t *testing.T) {
 	type args struct {
 		promReadRequest *prompb.ReadRequest
-		fun             func(matchers []types.MetricLabelMatcher) []types.MetricUUID
+		index           types.Index
 	}
 	tests := []struct {
 		name string
@@ -197,13 +190,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 						},
 					},
 				},
-				fun: func(matchers []types.MetricLabelMatcher) []types.MetricUUID {
-					uuids := []types.MetricUUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-					}
-
-					return uuids
-				},
+				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
 			},
 			want: []types.MetricRequest{
 				{
@@ -232,7 +219,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 				promReadRequest: &prompb.ReadRequest{
 					Queries: []*prompb.Query{},
 				},
-				fun: nil,
+				index: nil,
 			},
 			want: nil,
 		},
@@ -242,14 +229,18 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 				promReadRequest: &prompb.ReadRequest{
 					Queries: nil,
 				},
-				fun: nil,
+				index: nil,
 			},
 			want: nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := requestsFromPromReadRequest(tt.args.promReadRequest, tt.args.fun); !reflect.DeepEqual(got, tt.want) {
+			got, err := requestsFromPromReadRequest(tt.args.promReadRequest, tt.args.index)
+			if err != nil {
+				t.Errorf("requestsFromPromReadRequest() failed: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("requestsFromPromReadRequest() = %v, want %v", got, tt.want)
 			}
 		})
@@ -406,9 +397,9 @@ func Test_promSamplesFromPoints(t *testing.T) {
 
 func Test_promSeriesFromMetric(t *testing.T) {
 	type args struct {
-		uuid types.MetricUUID
-		data types.MetricData
-		fun  func(uuid types.MetricUUID) []types.MetricLabel
+		uuid  types.MetricUUID
+		data  types.MetricData
+		index types.Index
 	}
 	tests := []struct {
 		name string
@@ -447,8 +438,8 @@ func Test_promSeriesFromMetric(t *testing.T) {
 						},
 					},
 				},
-				fun: func(uuid types.MetricUUID) []types.MetricLabel {
-					labels := []types.MetricLabel{
+				index: mockIndex{
+					fixedLabels: []types.MetricLabel{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -457,9 +448,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 							Name:  "monitor",
 							Value: "codelab",
 						},
-					}
-
-					return labels
+					},
 				},
 			},
 			want: &prompb.TimeSeries{
@@ -504,7 +493,11 @@ func Test_promSeriesFromMetric(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := promSeriesFromMetric(tt.args.uuid, tt.args.data, tt.args.fun); !reflect.DeepEqual(got, tt.want) {
+			got, err := promSeriesFromMetric(tt.args.uuid, tt.args.data, tt.args.index)
+			if err != nil {
+				t.Errorf("promSeriesFromMetric() failed: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("promSeriesFromMetric() = %v, want %v", got, tt.want)
 			}
 		})
@@ -514,7 +507,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 func Test_promTimeseriesFromMetrics(t *testing.T) {
 	type args struct {
 		metrics map[types.MetricUUID]types.MetricData
-		fun     func(uuid types.MetricUUID) []types.MetricLabel
+		index   types.Index
 	}
 	tests := []struct {
 		name string
@@ -554,8 +547,8 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 						},
 					},
 				},
-				fun: func(uuid types.MetricUUID) []types.MetricLabel {
-					labels := []types.MetricLabel{
+				index: mockIndex{
+					fixedLabels: []types.MetricLabel{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -564,9 +557,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 							Name:  "monitor",
 							Value: "codelab",
 						},
-					}
-
-					return labels
+					},
 				},
 			},
 			want: []*prompb.TimeSeries{
@@ -614,7 +605,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 			name: "metrics_empty",
 			args: args{
 				metrics: make(map[types.MetricUUID]types.MetricData),
-				fun:     nil,
+				index:   nil,
 			},
 			want: nil,
 		},
@@ -622,14 +613,18 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 			name: "metrics_nil",
 			args: args{
 				metrics: nil,
-				fun:     nil,
+				index:   nil,
 			},
 			want: nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := promTimeseriesFromMetrics(tt.args.metrics, tt.args.fun); !reflect.DeepEqual(got, tt.want) {
+			got, err := promTimeseriesFromMetrics(tt.args.metrics, tt.args.index)
+			if err != nil {
+				t.Errorf("promTimeseriesFromMetrics() failed: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("promTimeseriesFromMetrics() = %v, want %v", got, tt.want)
 			}
 		})
