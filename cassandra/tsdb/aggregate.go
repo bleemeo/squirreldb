@@ -106,6 +106,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
 		cancel()
+		wg.Wait()
 		c.deleteAggregateLock(name)
 
 		return false
