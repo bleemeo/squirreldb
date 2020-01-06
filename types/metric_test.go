@@ -913,3 +913,107 @@ func TestUUIDFromString(t *testing.T) {
 		})
 	}
 }
+
+func TestStringFromLabelsCollision(t *testing.T) {
+	tests := []struct {
+		input1 []MetricLabel
+		input2 []MetricLabel
+	}{
+		{
+			input1: []MetricLabel{
+				{
+					Name:  "label1",
+					Value: "value1",
+				},
+				{
+					Name:  "label2",
+					Value: "value2",
+				},
+			},
+			input2: []MetricLabel{
+				{
+					Name:  "label1",
+					Value: "value1,label2=value2",
+				},
+			},
+		},
+		{
+			input1: []MetricLabel{
+				{
+					Name:  "label1",
+					Value: "value1",
+				},
+				{
+					Name:  "label2",
+					Value: "value2",
+				},
+			},
+			input2: []MetricLabel{
+				{
+					Name:  "label1",
+					Value: `value1",label2="value2`,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		got1 := StringFromLabels(tt.input1)
+		got2 := StringFromLabels(tt.input2)
+		if got1 == got2 {
+			t.Errorf("StringFromLabels(%v) == StringFromLabels(%v) want not equal", tt.input1, tt.input2)
+		}
+	}
+}
+
+func TestStringFromLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []MetricLabel
+		want   string
+	}{
+		{
+			name: "simple",
+			labels: []MetricLabel{
+				{Name: "test", Value: "value"},
+			},
+			want: `test="value"`,
+		},
+		{
+			name: "two",
+			labels: []MetricLabel{
+				{Name: "label1", Value: "value1"},
+				{Name: "label2", Value: "value2"},
+			},
+			want: `label1="value1",label2="value2"`,
+		},
+		{
+			name: "two-unordered",
+			labels: []MetricLabel{
+				{Name: "label2", Value: "value2"},
+				{Name: "label1", Value: "value1"},
+			},
+			want: `label2="value2",label1="value1"`,
+		},
+		{
+			name: "need-quoting",
+			labels: []MetricLabel{
+				{Name: "label1", Value: `value1",label2="value2`},
+			},
+			want: `label1="value1\",label2=\"value2"`,
+		},
+		{
+			name: "need-quoting2",
+			labels: []MetricLabel{
+				{Name: "label1", Value: `value1\",label2=\"value2`},
+			},
+			want: `label1="value1\\\",label2=\\\"value2"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StringFromLabels(tt.labels); got != tt.want {
+				t.Errorf("StringFromLabels() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

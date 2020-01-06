@@ -197,9 +197,10 @@ func StringFromLabels(labels []MetricLabel) string {
 	}
 
 	strLabels := make([]string, 0, len(labels))
+	quoter := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
 	for _, label := range labels {
-		str := label.Name + ":" + label.Value
+		str := label.Name + "=\"" + quoter.Replace(label.Value) + "\""
 
 		strLabels = append(strLabels, str)
 	}
