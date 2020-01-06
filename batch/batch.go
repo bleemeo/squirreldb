@@ -115,7 +115,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 			delete(b.states, uuid)
 
-			if (len(states) % flushMetricLimit) == 0 {
+			if len(states) > flushMetricLimit {
 				b.flush(states, now)
 
 				states = make(map[types.MetricUUID][]stateData)
@@ -388,6 +388,11 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 				if (currentState.flushTimestamp < now.Unix()) || (nextDelta >= b.batchSize) {
 					states[uuid] = append(states[uuid], currentState)
 					delete(b.states, uuid)
+
+					if len(states) > flushMetricLimit {
+						b.flush(states, now)
+						states = make(map[types.MetricUUID][]stateData)
+					}
 					exists = false
 
 					currentState = stateData{
