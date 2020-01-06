@@ -1411,6 +1411,108 @@ func TestBatch_read(t *testing.T) {
 			want:    map[types.MetricUUID]types.MetricData{},
 			wantErr: false,
 		},
+		{
+			name: "temporary_has_all_points",
+			fields: fields{
+				batchSize: 50,
+				states:    nil,
+				memoryStore: &mockStore{
+					metrics: map[types.MetricUUID]types.MetricData{
+						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     10,
+								},
+								{
+									Timestamp: 10,
+									Value:     20,
+								},
+								{
+									Timestamp: 20,
+									Value:     30,
+								},
+								{
+									Timestamp: 30,
+									Value:     40,
+								},
+								{
+									Timestamp: 40,
+									Value:     50,
+								},
+							},
+						},
+					},
+				},
+				reader: &mockMetricReader{
+					metrics: map[types.MetricUUID]types.MetricData{
+						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+							Points: []types.MetricPoint{
+								{
+									Timestamp: 0,
+									Value:     10,
+								},
+								{
+									Timestamp: 10,
+									Value:     20,
+								},
+								{
+									Timestamp: 20,
+									Value:     30,
+								},
+								{
+									Timestamp: 30,
+									Value:     40,
+								},
+								{
+									Timestamp: 40,
+									Value:     50,
+								},
+							},
+						},
+					},
+				},
+				writer: nil,
+			},
+			args: args{
+				request: types.MetricRequest{
+					UUIDs: []types.MetricUUID{
+						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					},
+					FromTimestamp: 0,
+					ToTimestamp:   100,
+					Step:          0,
+					Function:      "",
+				},
+			},
+			want: map[types.MetricUUID]types.MetricData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 0,
+							Value:     10,
+						},
+						{
+							Timestamp: 10,
+							Value:     20,
+						},
+						{
+							Timestamp: 20,
+							Value:     30,
+						},
+						{
+							Timestamp: 30,
+							Value:     40,
+						},
+						{
+							Timestamp: 40,
+							Value:     50,
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

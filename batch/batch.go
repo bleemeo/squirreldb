@@ -285,18 +285,18 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
 		}
 
-		if uuidRequest.ToTimestamp < uuidRequest.FromTimestamp {
-			continue
-		}
-
-		persistentMetrics, err := b.reader.Read(uuidRequest)
-		if err != nil {
-			return nil, err
-		}
-
-		persistentData := persistentMetrics[uuid]
 		data := types.MetricData{
-			Points: append(persistentData.Points, temporaryData.Points...),
+			Points: temporaryData.Points,
+		}
+
+		if uuidRequest.ToTimestamp >= uuidRequest.FromTimestamp {
+			persistentMetrics, err := b.reader.Read(uuidRequest)
+			if err != nil {
+				return nil, err
+			}
+
+			persistentData := persistentMetrics[uuid]
+			data.Points = append(persistentData.Points, data.Points...)
 		}
 
 		if len(data.Points) > 0 {
