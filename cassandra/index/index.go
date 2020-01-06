@@ -275,9 +275,9 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		indexBatch.Query(insertLabelsQueryString, uuid.String(), sortedLabels)
 
 		for _, label := range sortedLabels {
-			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString(uuid.String())
+			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString()
 
-			indexBatch.Query(updateUUIDsQueryString, label.Name, label.Value)
+			indexBatch.Query(updateUUIDsQueryString, []string{uuid.String()}, label.Name, label.Value)
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
@@ -593,11 +593,11 @@ func (c *CassandraIndex) postingsTableSelectValueQuery(name string) *gocql.Query
 }
 
 // Returns postings table update uuids Query as string
-func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString(uuid string) string {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable, "$UUID", uuid)
+func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString() string {
+	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
 	queryString := replacer.Replace(`
 		UPDATE $POSTINGS_TABLE
-		SET uuids = uuids + {$UUID}
+		SET uuids = uuids + ?
 		WHERE name = ? AND value = ?
 	`)
 
