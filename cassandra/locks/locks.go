@@ -172,8 +172,8 @@ func (c *CassandraLocks) locksTableDeleteLockQuery(name string) *gocql.Query {
 	query := c.session.Query(replacer.Replace(`
 		DELETE FROM $LOCKS_TABLE
 		WHERE name = ?
-		IF EXISTS
-	`), name)
+		IF instance_uuid = ?
+	`), name, c.instance.UUID)
 
 	return query
 }
@@ -198,8 +198,8 @@ func (c *CassandraLocks) locksTableUpdateLockQuery(name string, timeToLive int64
 		UPDATE $LOCKS_TABLE USING TTL ?
 		SET instance_hostname = ?, instance_uuid = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
-		IF EXISTS
-	`), timeToLive, c.instance.Hostname, c.instance.UUID, name)
+		IF instance_uuid = ?
+	`), timeToLive, c.instance.Hostname, c.instance.UUID, name, c.instance.UUID)
 
 	return query
 }
