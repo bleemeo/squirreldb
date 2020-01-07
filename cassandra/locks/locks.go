@@ -2,7 +2,9 @@ package locks
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"sync"
 	"time"
@@ -24,14 +26,13 @@ var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
 type CassandraLocks struct {
 	session    *gocql.Session
 	locksTable string
-
-	instance types.Instance
 }
 
 type Lock struct {
 	name       string
 	timeToLive time.Duration
 	c          CassandraLocks
+	lockID     string
 
 	mutex    sync.Mutex
 	acquired bool
@@ -40,7 +41,7 @@ type Lock struct {
 }
 
 // New creates a new CassandraLocks object
-func New(session *gocql.Session, keyspace string, instance types.Instance) (*CassandraLocks, error) {
+func New(session *gocql.Session, keyspace string) (*CassandraLocks, error) {
 	locksTable := keyspace + "." + tableName
 
 	locksTableCreateQuery := locksTableCreateQuery(session, locksTable)
@@ -48,11 +49,9 @@ func New(session *gocql.Session, keyspace string, instance types.Instance) (*Cas
 	if err := locksTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
-
 	locks := &CassandraLocks{
 		session:    session,
 		locksTable: locksTable,
-		instance:   instance,
 	}
 
 	return locks, nil
@@ -63,10 +62,12 @@ func New(session *gocql.Session, keyspace string, instance types.Instance) (*Cas
 // same Cassandra.
 // If the instance holder crash, the lock will be released after timeToLive
 func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
+	hostname, _ := os.Hostname()
 	return &Lock{
 		name:       name,
 		timeToLive: timeToLive,
 		c:          c,
+		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)),
 	}
 }
 
@@ -79,7 +80,7 @@ func (l *Lock) TryLock() bool {
 		return false
 	}
 
-	locksTableInsertLockQuery := l.c.locksTableInsertLockQuery(l.name, int64(l.timeToLive.Seconds()))
+	locksTableInsertLockQuery := l.locksTableInsertLockQuery()
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
 	applied, err := locksTableInsertLockQuery.ScanCAS(nil, nil, nil, nil)
 
@@ -127,7 +128,7 @@ func (l *Lock) Unlock() {
 	l.cancel()
 	l.wg.Wait()
 
-	locksTableDeleteLockQuery := l.c.locksTableDeleteLockQuery(l.name)
+	locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
 
 	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
 	retry.Print(locksTableDeleteLockQuery.Exec, retry.NewExponentialBackOff(retryMaxDelay), logger, "free lock")
@@ -145,7 +146,13 @@ func (l *Lock) updateLock(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			retry.Print(func() error {
-				return l.c.Update(l.name, int64(l.timeToLive.Seconds()))
+				locksTableUpdateLockQuery := l.locksTableUpdateLockQuery()
+
+				locksTableUpdateLockQuery.SerialConsistency(gocql.LocalSerial)
+
+				err := locksTableUpdateLockQuery.Exec()
+
+				return err
 			}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 				"refresh lock "+l.name,
 			)
@@ -155,51 +162,40 @@ func (l *Lock) updateLock(ctx context.Context) {
 	}
 }
 
-// Update updates a lock
-func (c *CassandraLocks) Update(name string, timeToLive int64) error {
-	locksTableUpdateLockQuery := c.locksTableUpdateLockQuery(name, timeToLive)
-
-	locksTableUpdateLockQuery.SerialConsistency(gocql.LocalSerial)
-
-	err := locksTableUpdateLockQuery.Exec()
-
-	return err
-}
-
 // Returns locks table delete lock Query
-func (c *CassandraLocks) locksTableDeleteLockQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
-	query := c.session.Query(replacer.Replace(`
+func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
+	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
+	query := l.c.session.Query(replacer.Replace(`
 		DELETE FROM $LOCKS_TABLE
 		WHERE name = ?
-		IF instance_uuid = ?
-	`), name, c.instance.UUID)
+		IF lock_id = ?
+	`), l.name, l.lockID)
 
 	return query
 }
 
 // Returns locks table insert lock Query
-func (c *CassandraLocks) locksTableInsertLockQuery(name string, timeToLive int64) *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
-	query := c.session.Query(replacer.Replace(`
-		INSERT INTO $LOCKS_TABLE (name, instance_hostname, instance_uuid, timestamp)
-		VALUES (?, ?, ?, toUnixTimestamp(now()))
+func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
+	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
+	query := l.c.session.Query(replacer.Replace(`
+		INSERT INTO $LOCKS_TABLE (name, lock_id, timestamp)
+		VALUES (?, ?, toUnixTimestamp(now()))
 		IF NOT EXISTS
 		USING TTL ?
-	`), name, c.instance.Hostname, c.instance.UUID, timeToLive)
+	`), l.name, l.lockID, int64(l.timeToLive.Seconds()))
 
 	return query
 }
 
 // Returns locks table update lock Query
-func (c *CassandraLocks) locksTableUpdateLockQuery(name string, timeToLive int64) *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", c.locksTable)
-	query := c.session.Query(replacer.Replace(`
+func (l *Lock) locksTableUpdateLockQuery() *gocql.Query {
+	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
+	query := l.c.session.Query(replacer.Replace(`
 		UPDATE $LOCKS_TABLE USING TTL ?
-		SET instance_hostname = ?, instance_uuid = ?, timestamp = toUnixTimestamp(now())
+		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
-		IF instance_uuid = ?
-	`), timeToLive, c.instance.Hostname, c.instance.UUID, name, c.instance.UUID)
+		IF lock_id = ?
+	`), int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
 
 	return query
 }
@@ -210,8 +206,7 @@ func locksTableCreateQuery(session *gocql.Session, locksTable string) *gocql.Que
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS $LOCKS_TABLE (
 			name text,
-			instance_hostname text,
-			instance_uuid uuid,
+			lock_id text,
 			timestamp timestamp,
 			PRIMARY KEY (name)
 		)

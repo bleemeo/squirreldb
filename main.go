@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/gocql/gocql"
-	gouuid "github.com/gofrs/uuid"
 
 	"context"
 	"log"
@@ -63,8 +62,7 @@ func main() {
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
 	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace, squirrelConfig)
-	instance := createInstance()
-	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace, instance)
+	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace)
 	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
@@ -119,7 +117,6 @@ func main() {
 	}
 
 	logger.Println("SquirrelDB is ready")
-	logger.Println("Instance UUID:", instance.UUID)
 
 	<-signalChan
 
@@ -146,18 +143,6 @@ func main() {
 	close(signalChan)
 
 	debug.Print(1, logger, "SquirrelDB is stopped")
-}
-
-func createInstance() types.Instance {
-	hostname, _ := os.Hostname()
-	uuid, _ := gouuid.NewV4()
-
-	instance := types.Instance{
-		Hostname: hostname,
-		UUID:     uuid.String(),
-	}
-
-	return instance
 }
 
 func createSquirrelSession(keyspace string, config *config.Config) *gocql.Session {
@@ -200,12 +185,12 @@ func createSquirrelIndex(session *gocql.Session, keyspace string, config *config
 	return squirrelIndex
 }
 
-func createSquirrelLocks(session *gocql.Session, keyspace string, instance types.Instance) *locks.CassandraLocks {
+func createSquirrelLocks(session *gocql.Session, keyspace string) *locks.CassandraLocks {
 	var squirrelLocks *locks.CassandraLocks
 
 	retry.Print(func() error {
 		var err error
-		squirrelLocks, err = locks.New(session, keyspace, instance)
+		squirrelLocks, err = locks.New(session, keyspace)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
