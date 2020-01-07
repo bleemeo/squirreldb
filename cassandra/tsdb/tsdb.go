@@ -34,17 +34,21 @@ type Options struct {
 	aggregateDataTable string
 }
 
+type lockFactory interface {
+	CreateLock(name string, timeToLive time.Duration) types.TryLocker
+}
+
 type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
 
-	index  types.Index
-	locker types.Locker
-	state  types.State
+	index       types.Index
+	lockFactory lockFactory
+	state       types.State
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, index types.Index, locker types.Locker, state types.State) (*CassandraTSDB, error) {
+func New(session *gocql.Session, keyspace string, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
 	options.dataTable = keyspace + "." + dataTableName
 	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
@@ -61,11 +65,11 @@ func New(session *gocql.Session, keyspace string, options Options, index types.I
 	}
 
 	tsdb := &CassandraTSDB{
-		session: session,
-		options: options,
-		index:   index,
-		locker:  locker,
-		state:   state,
+		session:     session,
+		options:     options,
+		index:       index,
+		lockFactory: lockFactory,
+		state:       state,
 	}
 
 	return tsdb, nil

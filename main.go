@@ -230,7 +230,7 @@ func createSquirrelStates(session *gocql.Session, keyspace string) *states.Cassa
 	return squirrelStates
 }
 
-func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, index types.Index, locker types.Locker, state types.State) *tsdb.CassandraTSDB {
+func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, index types.Index, lockFactory *locks.CassandraLocks, state types.State) *tsdb.CassandraTSDB {
 	options := tsdb.Options{
 		DefaultTimeToLive:         config.Int64("cassandra.default_time_to_live"),
 		BatchSize:                 config.Int64("batch.size"),
@@ -245,7 +245,7 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 
 	retry.Print(func() error {
 		var err error
-		squirrelTSDB, err = tsdb.New(session, keyspace, options, index, locker, state)
+		squirrelTSDB, err = tsdb.New(session, keyspace, options, index, lockFactory, state)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,

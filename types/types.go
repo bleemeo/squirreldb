@@ -1,5 +1,7 @@
 package types
 
+import "sync"
+
 type Index interface {
 	AllUUIDs() ([]MetricUUID, error)
 	LookupLabels(uuid MetricUUID) ([]MetricLabel, error)
@@ -15,10 +17,11 @@ type MetricWriter interface {
 	Write(metrics map[MetricUUID]MetricData) error
 }
 
-type Locker interface {
-	Delete(name string) error
-	Write(name string, timeToLive int64) (bool, error)
-	Update(name string, timeToLive int64) error
+// TryLocker is a Locker with an additional TryLock() method
+type TryLocker interface {
+	sync.Locker
+	// TryLock try to acquire a lock but return false if unable to acquire it.
+	TryLock() bool
 }
 
 type State interface {

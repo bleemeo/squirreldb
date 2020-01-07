@@ -8,7 +8,6 @@ import (
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -18,8 +17,7 @@ const (
 )
 
 const (
-	lockTimeToLive     = 600
-	lockUpdateInterval = 300
+	lockTimeToLive = 10 * time.Minute
 )
 
 // Processed with aggregation for data older than backlogMargin seconds. If data older than this delay are received,
@@ -64,20 +62,11 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
-	if applied := c.writeAggregateLock(name); !applied {
+	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
+	if acquired := lock.TryLock(); !acquired {
 		return false
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		c.updateAggregateLock(ctx, name)
-	}()
+	defer lock.Unlock()
 
 	var fromTimestamp int64
 
@@ -105,10 +94,6 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	isSafeMargin := (now.Unix() % 86400) >= backlogMargin
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
-		cancel()
-		wg.Wait()
-		c.deleteAggregateLock(name)
-
 		return false
 	}
 
@@ -147,10 +132,6 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
 	}
 
-	cancel()
-	wg.Wait()
-	c.deleteAggregateLock(name)
-
 	return true
 }
 
@@ -178,48 +159,3 @@ func (c *CassandraTSDB) doAggregation(uuids []types.MetricUUID, fromTimestamp, t
 	return err
 }
 
-// Deletes the specified lock
-func (c *CassandraTSDB) deleteAggregateLock(name string) {
-	retry.Print(func() error {
-		return c.locker.Delete(name)
-	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-		"delete lock for shard "+name,
-	)
-}
-
-// Returns a boolean if the specified lock was written or not
-func (c *CassandraTSDB) writeAggregateLock(name string) bool {
-	var applied bool
-
-	retry.Print(func() error {
-		var err error
-		applied, err = c.locker.Write(name, lockTimeToLive)
-
-		return err
-	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-		"acquire lock for shard "+name,
-	)
-
-	return applied
-}
-
-// Updates the specified lock until a signal is received
-func (c *CassandraTSDB) updateAggregateLock(ctx context.Context, name string) {
-	interval := lockUpdateInterval * time.Second
-	ticker := time.NewTicker(interval)
-
-	defer ticker.Stop()
-
-	for ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			retry.Print(func() error {
-				return c.locker.Update(name, lockTimeToLive)
-			}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-				"refresh lock for shard "+name,
-			)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
