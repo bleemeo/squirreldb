@@ -49,6 +49,7 @@ func New(session *gocql.Session, keyspace string) (*CassandraLocks, error) {
 	if err := locksTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
+
 	locks := &CassandraLocks{
 		session:    session,
 		locksTable: locksTable,
@@ -63,6 +64,7 @@ func New(session *gocql.Session, keyspace string) (*CassandraLocks, error) {
 // If the instance holder crash, the lock will be released after timeToLive
 func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
 	hostname, _ := os.Hostname()
+
 	return &Lock{
 		name:       name,
 		timeToLive: timeToLive,
