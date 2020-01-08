@@ -158,4 +158,3 @@ func (c *CassandraTSDB) doAggregation(uuids []types.MetricUUID, fromTimestamp, t
 
 	return err
 }
-
