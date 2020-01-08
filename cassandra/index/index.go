@@ -221,12 +221,12 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		}
 	}
 
-	var labelsString string
+	var labelsKey string
 
 	if !found {
-		labelsString = types.StringFromLabels(labels)
+		labelsKey = keyFromLabels(labels)
 
-		uuidData, found = c.labelsToUUID[labelsString]
+		uuidData, found = c.labelsToUUID[labelsKey]
 	}
 
 	var (
@@ -292,7 +292,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 	now := time.Now()
 
 	uuidData.expirationTimestamp = now.Unix() + cacheExpirationDelay
-	c.labelsToUUID[labelsString] = uuidData
+	c.labelsToUUID[labelsKey] = uuidData
 
 	requestsSecondsUUID.Observe(time.Since(start).Seconds())
 
@@ -693,4 +693,22 @@ func containsUUIDs(list []types.MetricUUID, target types.MetricUUID) bool {
 	}
 
 	return false
+}
+
+// keyFromLabels returns a string key generated from a MetricLabel list
+func keyFromLabels(labels []types.MetricLabel) string {
+	if len(labels) == 0 {
+		return ""
+	}
+
+	strLabels := make([]string, len(labels)*2)
+
+	for i, label := range labels {
+		strLabels[i*2] = label.Name
+		strLabels[i*2+1] = label.Value
+	}
+
+	str := strings.Join(strLabels, "\x00")
+
+	return str
 }
