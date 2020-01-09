@@ -114,12 +114,6 @@ func (b *Batch) check(now time.Time, force bool) {
 			states[uuid] = append(states[uuid], data)
 
 			delete(b.states, uuid)
-
-			if len(states) > flushMetricLimit {
-				b.flush(states, now)
-
-				states = make(map[types.MetricUUID][]stateData)
-			}
 		}
 	}
 
@@ -143,65 +137,73 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		uuids = append(uuids, uuid)
 	}
 
-	var metrics map[types.MetricUUID]types.MetricData
+	for startIndex := 0; startIndex < len(uuids); startIndex += flushMetricLimit {
+		var metrics map[types.MetricUUID]types.MetricData
 
-	retry.Print(func() error {
-		start := time.Now()
-
-		var err error
-		metrics, err = b.memoryStore.Get(uuids)
-
-		readDuration += time.Since(start)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"get points from the memory store",
-	)
-
-	requestsSecondsRead.Observe(readDuration.Seconds())
-
-	metricsToWrite := make(map[types.MetricUUID]types.MetricData)
-	metricsToSet := make(map[types.MetricUUID]types.MetricData)
-
-	for uuid, statesData := range states {
-		data, exists := metrics[uuid]
-
-		if !exists {
-			continue
+		endIndex := startIndex + flushMetricLimit
+		if endIndex > len(uuids) {
+			endIndex = len(uuids)
 		}
 
-		dataToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
-		metricsToWrite[uuid] = dataToWrite
-		metricsToSet[uuid] = dataToSet
+		retry.Print(func() error {
+			start := time.Now()
 
-		readPointsCount += len(data.Points)
-		deletedPointsCount += len(data.Points) - len(dataToSet.Points)
+			var err error
+			metrics, err = b.memoryStore.Get(uuids[startIndex:endIndex]) // nolint: scopelint
+
+			readDuration += time.Since(start)
+
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"get points from the memory store",
+		)
+
+		requestsSecondsRead.Observe(readDuration.Seconds())
+
+		metricsToWrite := make(map[types.MetricUUID]types.MetricData)
+		metricsToSet := make(map[types.MetricUUID]types.MetricData)
+
+		for _, uuid := range uuids[startIndex:endIndex] {
+			statesData := states[uuid]
+			data, exists := metrics[uuid]
+
+			if !exists {
+				continue
+			}
+
+			dataToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
+			metricsToWrite[uuid] = dataToWrite
+			metricsToSet[uuid] = dataToSet
+
+			readPointsCount += len(data.Points)
+			deletedPointsCount += len(data.Points) - len(dataToSet.Points)
+		}
+
+		requestsPointsTotalRead.Add(float64(readPointsCount))
+		requestsPointsTotalDelete.Add(float64(deletedPointsCount))
+
+		retry.Print(func() error {
+			return b.writer.Write(metricsToWrite)
+		},
+			retry.NewExponentialBackOff(30*time.Second),
+			logger,
+			"write points in persistent store",
+		)
+
+		retry.Print(func() error {
+			start := time.Now()
+
+			err := b.memoryStore.Set(metricsToSet, b.memoryStoreTimeToLive)
+
+			deleteDuration += time.Since(start)
+
+			return err
+		}, retry.NewExponentialBackOff(30*time.Second), logger,
+			"get points from the memory store",
+		)
+
+		requestsSecondsDelete.Observe(deleteDuration.Seconds())
 	}
-
-	requestsPointsTotalRead.Add(float64(readPointsCount))
-	requestsPointsTotalDelete.Add(float64(deletedPointsCount))
-
-	retry.Print(func() error {
-		return b.writer.Write(metricsToWrite)
-	},
-		retry.NewExponentialBackOff(30*time.Second),
-		logger,
-		"write points in persistent store",
-	)
-
-	retry.Print(func() error {
-		start := time.Now()
-
-		err := b.memoryStore.Set(metricsToSet, b.memoryStoreTimeToLive)
-
-		deleteDuration += time.Since(start)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"get points from the memory store",
-	)
-
-	requestsSecondsDelete.Observe(deleteDuration.Seconds())
 }
 
 // Flushes the points corresponding to the status list of the specified metric
@@ -389,10 +391,6 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 					states[uuid] = append(states[uuid], currentState)
 					delete(b.states, uuid)
 
-					if len(states) > flushMetricLimit {
-						b.flush(states, now)
-						states = make(map[types.MetricUUID][]stateData)
-					}
 					exists = false
 
 					currentState = stateData{
