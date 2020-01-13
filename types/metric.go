@@ -75,27 +75,26 @@ func CopyPoints(points []MetricPoint) []MetricPoint {
 
 // DeduplicatePoints returns the MetricPoint list deduplicated and sorted by timestamp
 func DeduplicatePoints(points []MetricPoint) []MetricPoint {
-	if len(points) == 0 {
-		return nil
+	if len(points) <= 1 {
+		return points
 	}
 
-	sortedPoints := SortPoints(points)
+	sortPoints(points)
 
-	i := 0
+	j := 0
 
-	for j, length := 0, len(sortedPoints); j < length; j++ {
-		if sortedPoints[i].Timestamp == sortedPoints[j].Timestamp {
+	for i := 1; i < len(points); i++ {
+		if points[j].Timestamp == points[i].Timestamp {
 			continue
 		}
+		j++
 
-		i++
-
-		sortedPoints[i] = sortedPoints[j]
+		points[j] = points[i]
 	}
 
-	deduplicatedPoints := sortedPoints[:(i + 1)]
+	result := points[:j+1]
 
-	return deduplicatedPoints
+	return result
 }
 
 // DeleteLabelsValue deletes value via its name from a MetricLabel list
@@ -145,19 +144,15 @@ func SortLabels(labels []MetricLabel) []MetricLabel {
 	return sortedLabels
 }
 
-// SortPoints returns the MetricPoint list sorted by timestamp
-func SortPoints(points []MetricPoint) []MetricPoint {
-	if len(points) == 0 {
-		return nil
+// sortPoints returns the MetricPoint list sorted by timestamp
+func sortPoints(points []MetricPoint) {
+	if len(points) <= 1 {
+		return
 	}
 
-	sortedPoints := CopyPoints(points)
-
-	sort.Slice(sortedPoints, func(i, j int) bool {
-		return sortedPoints[i].Timestamp < sortedPoints[j].Timestamp
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].Timestamp < points[j].Timestamp
 	})
-
-	return sortedPoints
 }
 
 // StringFromLabels returns a string generated from a MetricLabel list

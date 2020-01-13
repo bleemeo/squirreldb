@@ -1,11 +1,54 @@
 package types
 
 import (
+	"math/rand"
 	"reflect"
+	"sort"
 	"testing"
 
 	gouuid "github.com/gofrs/uuid"
 )
+
+func makePoints(size int) []MetricPoint {
+	result := make([]MetricPoint, size)
+	for i := 0; i < size; i++ {
+		result[i].Timestamp = int64(1568706164 + i*10)
+		result[i].Value = float64(i)
+	}
+	return result
+}
+
+func addDuplicate(input []MetricPoint, numberDuplicate int) []MetricPoint {
+	duplicates := make([]int, numberDuplicate)
+	for i := 0; i < numberDuplicate; i++ {
+		duplicates[i] = rand.Intn(len(input))
+	}
+	sort.Ints(duplicates)
+	result := make([]MetricPoint, len(input)+numberDuplicate)
+
+	inputIndex := 0
+	duplicatesIndex := 0
+
+	for i := 0; i < len(input)+numberDuplicate; i++ {
+		result[i] = input[inputIndex]
+		if duplicatesIndex < len(duplicates) && inputIndex == duplicates[duplicatesIndex] {
+			duplicatesIndex++
+		} else {
+			inputIndex++
+		}
+	}
+	if duplicatesIndex != len(duplicates) || inputIndex != len(input) {
+		panic("Unexpected value for inputIndex or duplicatesIndex")
+	}
+	return result
+}
+
+func shuffle(input []MetricPoint) []MetricPoint {
+	rand.Shuffle(len(input), func(i, j int) {
+		input[i], input[j] = input[j], input[i]
+	})
+	return input
+}
 
 func TestMetricUUID_Uint64(t *testing.T) {
 	type fields struct {
@@ -205,7 +248,7 @@ func TestDeduplicatePoints(t *testing.T) {
 			args: args{
 				points: []MetricPoint{},
 			},
-			want: nil,
+			want: []MetricPoint{},
 		},
 		{
 			name: "points_nil",
@@ -615,7 +658,7 @@ func TestSortPoints(t *testing.T) {
 			args: args{
 				points: []MetricPoint{},
 			},
-			want: nil,
+			want: []MetricPoint{},
 		},
 		{
 			name: "points_nil",
@@ -626,9 +669,15 @@ func TestSortPoints(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		var result []MetricPoint
+		if tt.args.points != nil {
+			result = make([]MetricPoint, len(tt.args.points))
+			copy(result, tt.args.points)
+		}
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SortPoints(tt.args.points); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SortPoints() = %v, want %v", got, tt.want)
+			sortPoints(result)
+			if !reflect.DeepEqual(result, tt.want) {
+				t.Errorf("sortPoints() = %v, want %v", result, tt.want)
 			}
 		})
 	}
@@ -847,6 +896,46 @@ func BenchmarkStringFromLabels(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				_ = StringFromLabels(tt.labels)
+			}
+		})
+	}
+}
+
+func BenchmarkDeduplicatePoints(b *testing.B) {
+	rand.Seed(42)
+	tests := []struct {
+		name   string
+		points []MetricPoint
+	}{
+		{
+			name:   "no_duplicated_sorted_30",
+			points: makePoints(30),
+		},
+		{
+			name:   "no_duplicated_sorted_1000",
+			points: makePoints(1000),
+		},
+		{
+			name:   "no_duplicated_sorted_10000",
+			points: makePoints(10000),
+		},
+		{
+			name:   "duplicated_sorted_1100",
+			points: addDuplicate(makePoints(1000), 100),
+		},
+		{
+			name:   "duplicated_1100",
+			points: shuffle(addDuplicate(makePoints(1000), 100)),
+		},
+		{
+			name:   "two_duplicated_block_2000",
+			points: append(makePoints(1000), makePoints(1000)...),
+		},
+	}
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				_ = DeduplicatePoints(tt.points)
 			}
 		})
 	}
