@@ -35,4 +35,18 @@ var (
 		Help:        "Total processing time in seconds (including sending response to client)",
 		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
+	requestsErrorRead = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "remote_storage",
+		Name:        "requests_error_total",
+		Help:        "Total number of errors while processing requests",
+		ConstLabels: prometheus.Labels{"operation": "read"},
+	})
+	requestsErrorWrite = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "remote_storage",
+		Name:        "requests_error_total",
+		Help:        "Total number of errors while processing requests",
+		ConstLabels: prometheus.Labels{"operation": "write"},
+	})
 )

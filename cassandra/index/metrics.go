@@ -7,22 +7,40 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	requestsSecondsLabels = promauto.NewSummary(prometheus.SummaryOpts{
+	lookupLabelsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
 		Name:      "lookup_labels_seconds",
-		Help:      "Total processing time in seconds (including cache processing and Cassandra querying)",
+		Help:      "Total lookup for labels (from UUID) time in seconds",
 	})
-	requestsSecondsUUID = promauto.NewSummary(prometheus.SummaryOpts{
+	lookupUUIDSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
 		Name:      "lookup_uuid_seconds",
-		Help:      "Total processing time in seconds (including cache processing and Cassandra querying)",
+		Help:      "Total lookup for metric UUID (from labels) time in seconds",
 	})
-	requestsSecondsUUIDs = promauto.NewSummary(prometheus.SummaryOpts{
+	lookupUUIDMisses = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "search_uuids_seconds",
-		Help:      "Total processing time in seconds (including Cassandra querying and match processing)",
+		Name:      "lookup_uuid_misses_total",
+		Help:      "Total lookup for metric UUID that missed the cache (including new metrics)",
+	})
+	lookupUUIDNew = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "lookup_uuid_new_total",
+		Help:      "Total lookup for metric UUID for new metrics",
+	})
+	searchMetricsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "search_metrics_seconds",
+		Help:      "Total search of metrics (from labels selector) time in seconds",
+	})
+	searchMetricsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "search_metrics_totals",
+		Help:      "Total number of metrics matching a serch from labels selector",
 	})
 )

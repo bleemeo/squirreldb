@@ -17,6 +17,10 @@ type ReadMetrics struct {
 func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
+	defer func() {
+		requestsSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	var readRequest prompb.ReadRequest
 
 	err := decodeRequest(request, &readRequest)
@@ -24,6 +28,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Printf("Error: Can't decode the read request (%v)", err)
 		http.Error(writer, "Can't decode the read request", http.StatusBadRequest)
+		requestsErrorRead.Inc()
 
 		return
 	}
@@ -31,6 +36,8 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	requests, err := requestsFromPromReadRequest(&readRequest, r.index)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		requestsErrorRead.Inc()
+
 		return
 	}
 
@@ -40,12 +47,16 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		metrics, err := r.reader.Read(request)
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
+			requestsErrorRead.Inc()
+
 			return
 		}
 
 		timeseries, err := promTimeseriesFromMetrics(metrics, r.index)
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
+			requestsErrorRead.Inc()
+
 			return
 		}
 
@@ -65,6 +76,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Printf("Error: Can't encode the read response (%v)", err)
 		http.Error(writer, "Can't encode the read response", http.StatusBadRequest)
+		requestsErrorRead.Inc()
 
 		return
 	}
@@ -74,11 +86,10 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Printf("Error: Can't write the read response (%v)", err)
 		http.Error(writer, "Can't write the read response", http.StatusBadRequest)
+		requestsErrorRead.Inc()
 
 		return
 	}
-
-	requestsSecondsRead.Observe(time.Since(start).Seconds())
 }
 
 // Returns a MetricLabelMatcher list- generated from LabelMatcher

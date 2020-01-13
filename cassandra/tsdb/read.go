@@ -118,7 +118,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 		points, err := pointsFromAggregateValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp, c.options.AggregateResolution, function)
 
 		if err != nil {
-			cassandraQueriesSecondsRead.Observe(queryDuration.Seconds())
+			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
 			return types.MetricData{}, err
 		}
@@ -129,7 +129,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 		start = time.Now()
 	}
 
-	cassandraQueriesSecondsRead.Observe(queryDuration.Seconds())
+	cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
 		return types.MetricData{}, err
@@ -198,7 +198,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 		points, err := pointsFromRawValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp)
 
 		if err != nil {
-			cassandraQueriesSecondsRead.Observe(queryDuration.Seconds())
+			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
 			return types.MetricData{}, err
 		}
@@ -209,7 +209,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestam
 		start = time.Now()
 	}
 
-	cassandraQueriesSecondsRead.Observe(queryDuration.Seconds())
+	cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
 		return types.MetricData{}, err

@@ -23,6 +23,10 @@ const (
 func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
+	defer func() {
+		requestsSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	var writeRequest prompb.WriteRequest
 
 	err := decodeRequest(request, &writeRequest)
@@ -30,6 +34,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	if err != nil {
 		logger.Printf("Error: Can't decode the write request (%v)", err)
 		http.Error(writer, "Can't decode the write request", http.StatusBadRequest)
+		requestsErrorWrite.Inc()
 
 		return
 	}
@@ -37,15 +42,17 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	metrics, err := metricsFromTimeseries(writeRequest.Timeseries, w.index)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		requestsErrorWrite.Inc()
+
 		return
 	}
 
 	if err := w.writer.Write(metrics); err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		requestsErrorWrite.Inc()
+
 		return
 	}
-
-	requestsSecondsWrite.Observe(time.Since(start).Seconds())
 }
 
 // Returns and delete time to live from a MetricLabel list

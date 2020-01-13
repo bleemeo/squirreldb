@@ -162,7 +162,7 @@ func (c *CassandraIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabe
 		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
 
 		if err := selectLabelsQuery.Scan(&labelsData.labels); (err != nil) && (err != gocql.ErrNotFound) {
-			requestsSecondsLabels.Observe(time.Since(start).Seconds())
+			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 			return nil, err
 		}
@@ -184,18 +184,22 @@ func (c *CassandraIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabe
 		labels = append(labels, label)
 	}
 
-	requestsSecondsLabels.Observe(time.Since(start).Seconds())
+	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 	return labels, nil
 }
 
 // LookupUUID returns a MetricUUID corresponding to the specified MetricLabel list
 func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUID, error) {
+	start := time.Now()
+
+	defer func() {
+		lookupUUIDSeconds.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(labels) == 0 {
 		return types.MetricUUID{}, nil
 	}
-
-	start := time.Now()
 
 	c.ltuMutex.Lock()
 	defer c.ltuMutex.Unlock()
@@ -214,8 +218,6 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 			uuidData.uuid, err = types.UUIDFromString(uuidStr)
 
 			if err != nil {
-				requestsSecondsUUID.Observe(time.Since(start).Seconds())
-
 				return types.MetricUUID{}, nil
 			}
 		}
@@ -235,6 +237,8 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 	)
 
 	if !found {
+		lookupUUIDMisses.Inc()
+
 		sortedLabels = types.SortLabels(labels)
 
 		sortedLabelsString = types.StringFromLabels(sortedLabels)
@@ -249,18 +253,16 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 			uuidData.uuid = uuid
 			found = true
 		} else if err != gocql.ErrNotFound {
-			requestsSecondsUUID.Observe(time.Since(start).Seconds())
-
 			return types.MetricUUID{}, err
 		}
 	}
 
 	if !found {
+		lookupUUIDNew.Inc()
+
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
-			requestsSecondsUUID.Observe(time.Since(start).Seconds())
-
 			return types.MetricUUID{}, err
 		}
 
@@ -281,8 +283,6 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
-			requestsSecondsUUID.Observe(time.Since(start).Seconds())
-
 			return types.MetricUUID{}, err
 		}
 
@@ -294,18 +294,20 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 	uuidData.expirationTimestamp = now.Unix() + cacheExpirationDelay
 	c.labelsToUUID[labelsKey] = uuidData
 
-	requestsSecondsUUID.Observe(time.Since(start).Seconds())
-
 	return uuidData.uuid, nil
 }
 
 // Search returns a list of MetricUUID corresponding to the specified MetricLabelMatcher list
 func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
+	start := time.Now()
+
+	defer func() {
+		searchMetricsSeconds.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(matchers) == 0 {
 		return nil, nil
 	}
-
-	start := time.Now()
 
 	var (
 		uuids []types.MetricUUID
@@ -320,8 +322,6 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.Me
 			uuid, err := types.UUIDFromString(uuidStr)
 
 			if err != nil {
-				requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
-
 				return nil, nil
 			}
 
@@ -333,16 +333,12 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.Me
 		targetLabels, err := c.targetLabels(matchers)
 
 		if err != nil {
-			requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
-
 			return nil, err
 		}
 
 		uuidMatches, err := c.uuidMatches(targetLabels)
 
 		if err != nil {
-			requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
-
 			return nil, err
 		}
 
@@ -353,7 +349,7 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.Me
 		}
 	}
 
-	requestsSecondsUUIDs.Observe(time.Since(start).Seconds())
+	searchMetricsTotal.Add(float64(len(uuids)))
 
 	return uuids, nil
 }

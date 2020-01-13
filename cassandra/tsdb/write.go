@@ -149,7 +149,7 @@ func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggre
 		return err
 	}
 
-	cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	cassandraQueriesSecondsWriteAggregated.Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -233,7 +233,7 @@ func (c *CassandraTSDB) writeRawBatchData(uuid types.MetricUUID, data types.Metr
 		return err
 	}
 
-	cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	cassandraQueriesSecondsWriteRaw.Observe(time.Since(start).Seconds())
 
 	return nil
 }

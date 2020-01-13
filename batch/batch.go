@@ -107,6 +107,8 @@ func (b *Batch) check(now time.Time, force bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
+	start := time.Now()
+
 	states := make(map[types.MetricUUID][]stateData)
 
 	for uuid, data := range b.states {
@@ -118,6 +120,8 @@ func (b *Batch) check(now time.Time, force bool) {
 	}
 
 	b.flush(states, now)
+
+	BackgroundSeconds.Observe(time.Since(start).Seconds())
 }
 
 // Flushes the points corresponding to the specified metrics state list
@@ -127,7 +131,6 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	}
 
 	var (
-		readDuration, deleteDuration        time.Duration
 		readPointsCount, deletedPointsCount int
 	)
 
@@ -146,19 +149,13 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		}
 
 		retry.Print(func() error {
-			start := time.Now()
-
 			var err error
 			metrics, err = b.memoryStore.Get(uuids[startIndex:endIndex]) // nolint: scopelint
-
-			readDuration += time.Since(start)
 
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"get points from the memory store",
 		)
-
-		requestsSecondsRead.Observe(readDuration.Seconds())
 
 		metricsToWrite := make(map[types.MetricUUID]types.MetricData)
 		metricsToSet := make(map[types.MetricUUID]types.MetricData)
@@ -179,8 +176,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 			deletedPointsCount += len(data.Points) - len(dataToSet.Points)
 		}
 
-		requestsPointsTotalRead.Add(float64(readPointsCount))
-		requestsPointsTotalDelete.Add(float64(deletedPointsCount))
+		FlushPointsTotalRead.Add(float64(readPointsCount))
+		FlushPointsTotalDelete.Add(float64(deletedPointsCount))
 
 		retry.Print(func() error {
 			return b.writer.Write(metricsToWrite)
@@ -191,18 +188,11 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		)
 
 		retry.Print(func() error {
-			start := time.Now()
-
 			err := b.memoryStore.Set(metricsToSet, b.memoryStoreTimeToLive)
-
-			deleteDuration += time.Since(start)
-
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"get points from the memory store",
 		)
-
-		requestsSecondsDelete.Observe(deleteDuration.Seconds())
 	}
 }
 
@@ -261,11 +251,19 @@ pointsLoop:
 
 // Returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
 func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+	start := time.Now()
+
+	defer func() {
+		requestsSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(request.UUIDs) == 0 {
 		return nil, nil
 	}
 
 	metrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
+
+	var readPointsCount int
 
 	for _, uuid := range request.UUIDs {
 		uuidRequest := types.MetricRequest{
@@ -303,27 +301,24 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 
 		if len(data.Points) > 0 {
 			metrics[uuid] = data
+			readPointsCount += len(data.Points)
 		}
 	}
+
+	requestsPointsTotalRead.Add(float64(readPointsCount))
 
 	return metrics, nil
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
 func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
-	start := time.Now()
-
 	metrics, err := b.memoryStore.Get(request.UUIDs)
-
-	requestsSecondsRead.Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		return nil, err
 	}
 
 	temporaryMetrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
-
-	var readPointsCount int
 
 	for uuid, data := range metrics {
 		temporaryData := types.MetricData{
@@ -338,11 +333,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 
 		temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
 		temporaryMetrics[uuid] = temporaryData
-
-		readPointsCount += len(data.Points)
 	}
-
-	requestsPointsTotalRead.Add(float64(readPointsCount))
 
 	return temporaryMetrics, nil
 }
@@ -351,14 +342,17 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
 // If this is the case, the state is added to the list of states to flush
 func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Time) error {
+	start := time.Now()
+
+	defer func() {
+		requestsSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(metrics) == 0 {
 		return nil
 	}
 
-	var (
-		addDuration      time.Duration
-		addedPointsCount int
-	)
+	var writtenPointsCount int
 
 	states := make(map[types.MetricUUID][]stateData)
 	newMetrics := make(map[types.MetricUUID]types.MetricData)
@@ -418,20 +412,14 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		newMetrics[uuid] = newData
 		existingMetrics[uuid] = existingData
 
-		addedPointsCount += len(newData.Points) + len(existingData.Points)
+		writtenPointsCount += len(data.Points)
 	}
 
-	requestsPointsTotalWrite.Add(float64(addedPointsCount))
-
-	start := time.Now()
+	requestsPointsTotalWrite.Add(float64(writtenPointsCount))
 
 	if err := b.memoryStore.Append(newMetrics, existingMetrics, b.memoryStoreTimeToLive); err != nil {
 		return err
 	}
-
-	addDuration += time.Since(start)
-
-	requestsSecondsWrite.Observe(addDuration.Seconds())
 
 	if len(states) != 0 {
 		b.flush(states, now)
