@@ -1105,6 +1105,76 @@ func TestBatch_flushData(t *testing.T) {
 				TimeToLive: 300,
 			},
 		},
+		{
+			name: "unsorted_duplicate",
+			fields: fields{
+				batchSize: 50,
+				states:    nil,
+			},
+			args: args{
+				data: types.MetricData{
+					Points: []types.MetricPoint{
+						{Timestamp: 10},
+						{Timestamp: 20},
+						{Timestamp: 30},
+						{Timestamp: 10},
+						{Timestamp: 20},
+						{Timestamp: 40},
+						{Timestamp: 50},
+						{Timestamp: 50},
+						{Timestamp: 60},
+						{Timestamp: 70},
+						{Timestamp: 80},
+						{Timestamp: 100},
+						{Timestamp: 110},
+						{Timestamp: 90},
+						{Timestamp: 120},
+						{Timestamp: 130},
+					},
+					TimeToLive: 300,
+				},
+				statesData: []stateData{
+					{
+						pointCount:          3,
+						firstPointTimestamp: 0,
+						lastPointTimestamp:  30,
+					},
+					{
+						pointCount:          5,
+						firstPointTimestamp: 42,
+						lastPointTimestamp:  90,
+					},
+					{
+						pointCount:          5,
+						firstPointTimestamp: 80,
+						lastPointTimestamp:  120,
+					},
+				},
+				now: time.Unix(130+50, 0),
+			},
+			wantWrite: types.MetricData{
+				Points: []types.MetricPoint{
+					{Timestamp: 10},
+					{Timestamp: 20},
+					{Timestamp: 30},
+					{Timestamp: 50},
+					{Timestamp: 60},
+					{Timestamp: 70},
+					{Timestamp: 80},
+					{Timestamp: 90},
+					{Timestamp: 100},
+					{Timestamp: 110},
+					{Timestamp: 120},
+				},
+				TimeToLive: 300,
+			},
+			wantKeep: types.MetricData{
+				Points: []types.MetricPoint{
+					{Timestamp: 130},
+				},
+				TimeToLive: 300,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2015,16 +2085,16 @@ func TestBatch_write(t *testing.T) {
 							Value:     50,
 						},
 						{
-							Timestamp: 60,
-							Value:     200,
-						},
-						{
 							Timestamp: 20,
 							Value:     100,
 						},
 						{
 							Timestamp: 40,
 							Value:     150,
+						},
+						{
+							Timestamp: 60,
+							Value:     200,
 						},
 						{
 							Timestamp: 80,

@@ -16,6 +16,7 @@ import (
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
+// metrics points should be sorted and deduplicated
 func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
@@ -187,8 +188,6 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.
 	if len(data.Points) == 0 {
 		return nil
 	}
-
-	data.Points = types.DeduplicatePoints(data.Points)
 
 	firstPoint := data.Points[0]
 	firstOffsetTimestamp := firstPoint.Timestamp - baseTimestamp

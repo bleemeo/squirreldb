@@ -201,6 +201,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 // * dataToWrite: points to write in persistent storage
 //
 // Points may be in the two list (e.g. points less than 5 minutes of age)
+// dataToWrite is sorted & deduplicated
 func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
 	if len(data.Points) == 0 {
 		return types.MetricData{}, types.MetricData{}
@@ -220,15 +221,26 @@ func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesDa
 		TimeToLive: data.TimeToLive,
 	}
 
+	var (
+		maxTS    int64
+		needSort bool
+	)
+
 pointsLoop:
-	for _, point := range data.Points {
+	for i, point := range data.Points {
 		if point.Timestamp >= cutoffTimestamp {
 			dataToSet.Points = append(dataToSet.Points, point)
 		}
 
 		for _, stateData := range statesData {
 			if (point.Timestamp >= stateData.firstPointTimestamp) && (point.Timestamp <= stateData.lastPointTimestamp) {
-				dataToWrite.Points = append(dataToWrite.Points, point)
+				if i == 0 || point.Timestamp > maxTS {
+					dataToWrite.Points = append(dataToWrite.Points, point)
+					maxTS = point.Timestamp
+				} else if point.Timestamp < maxTS {
+					dataToWrite.Points = append(dataToWrite.Points, point)
+					needSort = true
+				}
 
 				continue pointsLoop
 			}
@@ -246,6 +258,10 @@ pointsLoop:
 	if gotPointsCount < expectedPointsCount {
 		logger.Printf("Warning: Metric %v expected at least %d point(s), got %d point(s)",
 			uuid, expectedPointsCount, gotPointsCount)
+	}
+
+	if needSort {
+		dataToWrite.Points = types.DeduplicatePoints(dataToWrite.Points)
 	}
 
 	return dataToWrite, dataToSet
@@ -323,17 +339,31 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 	temporaryMetrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
 
 	for uuid, data := range metrics {
+		var (
+			maxTS    int64
+			needSort bool
+		)
+
 		temporaryData := types.MetricData{
 			TimeToLive: data.TimeToLive,
 		}
 
-		for _, point := range data.Points {
+		for i, point := range data.Points {
 			if (point.Timestamp >= request.FromTimestamp) && (point.Timestamp <= request.ToTimestamp) {
-				temporaryData.Points = append(temporaryData.Points, point)
+				if i == 0 || point.Timestamp > maxTS {
+					temporaryData.Points = append(temporaryData.Points, point)
+					maxTS = point.Timestamp
+				} else if point.Timestamp < maxTS {
+					temporaryData.Points = append(temporaryData.Points, point)
+					needSort = true
+				}
 			}
 		}
 
-		temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
+		if needSort {
+			temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
+		}
+
 		temporaryMetrics[uuid] = temporaryData
 	}
 
