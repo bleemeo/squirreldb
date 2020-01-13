@@ -108,21 +108,6 @@ func DeleteLabelsValue(labels *[]MetricLabel, key string) {
 	}
 }
 
-// EqualLabels returns a boolean defined by the equality of the specified MetricLabel
-func EqualLabels(labels, reference []MetricLabel) bool {
-	if len(labels) != len(reference) {
-		return false
-	}
-
-	for i := range labels {
-		if labels[i] != reference[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
 // GetLabelsValue gets value via its name from a MetricLabel list
 func GetLabelsValue(labels []MetricLabel, name string) (string, bool) {
 	for _, label := range labels {
@@ -143,21 +128,6 @@ func GetMatchersValue(matchers []MetricLabelMatcher, name string) (string, bool)
 	}
 
 	return "", false
-}
-
-// LabelsFromMatchers returns a list of MetricLabel generated from a MetricLabelMatcher list
-func LabelsFromMatchers(matchers []MetricLabelMatcher) []MetricLabel {
-	if len(matchers) == 0 {
-		return nil
-	}
-
-	labels := make([]MetricLabel, 0, len(matchers))
-
-	for _, matcher := range matchers {
-		labels = append(labels, matcher.MetricLabel)
-	}
-
-	return labels
 }
 
 // SortLabels returns the MetricLabel list sorted by name
