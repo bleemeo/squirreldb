@@ -121,7 +121,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 	b.flush(states, now)
 
-	BackgroundSeconds.Observe(time.Since(start).Seconds())
+	backgroundSeconds.Observe(time.Since(start).Seconds())
 }
 
 // Flushes the points corresponding to the specified metrics state list
@@ -176,8 +176,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 			deletedPointsCount += len(data.Points) - len(dataToSet.Points)
 		}
 
-		FlushPointsTotalRead.Add(float64(readPointsCount))
-		FlushPointsTotalDelete.Add(float64(deletedPointsCount))
+		flushPointsTotalRead.Add(float64(readPointsCount))
+		flushPointsTotalDelete.Add(float64(deletedPointsCount))
 
 		retry.Print(func() error {
 			return b.writer.Write(metricsToWrite)

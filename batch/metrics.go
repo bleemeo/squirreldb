@@ -41,20 +41,20 @@ var (
 		Name:      "duplicated_points_total",
 		Help:      "Total duplicated points eliminated by batcher during write request",
 	})
-	BackgroundSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	backgroundSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "batch",
 		Name:      "background_seconds",
 		Help:      "Total background processing time in seconds",
 	})
-	FlushPointsTotalDelete = promauto.NewCounter(prometheus.CounterOpts{
+	flushPointsTotalDelete = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "batch",
 		Name:        "points_total",
 		Help:        "Total points processed by the flush() method from/to memory-store",
 		ConstLabels: prometheus.Labels{"operation": "delete"},
 	})
-	FlushPointsTotalRead = promauto.NewCounter(prometheus.CounterOpts{
+	flushPointsTotalRead = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "batch",
 		Name:        "points_total",
