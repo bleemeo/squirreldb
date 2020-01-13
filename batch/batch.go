@@ -384,7 +384,10 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		return nil
 	}
 
-	var writtenPointsCount int
+	var (
+		writtenPointsCount int
+		duplicatedPoints   int
+	)
 
 	states := make(map[types.MetricUUID][]stateData)
 	newMetrics := make(map[types.MetricUUID]types.MetricData)
@@ -409,6 +412,11 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 					flushTimestamp:      flushTimestamp(uuid, now, b.batchSize),
 				}
 			} else {
+				if point.Timestamp == currentState.lastPointTimestamp {
+					duplicatedPoints++
+					continue
+				}
+
 				nextFirstPointTimestamp := compare.MinInt64(currentState.firstPointTimestamp, point.Timestamp)
 				nextLastPointTimestamp := compare.MaxInt64(currentState.lastPointTimestamp, point.Timestamp)
 				nextDelta := nextLastPointTimestamp - nextFirstPointTimestamp
@@ -448,6 +456,7 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 	}
 
 	requestsPointsTotalWrite.Add(float64(writtenPointsCount))
+	duplicatedPointsTotal.Add(float64(duplicatedPoints))
 
 	if err := b.memoryStore.Append(newMetrics, existingMetrics, b.memoryStoreTimeToLive); err != nil {
 		return err
