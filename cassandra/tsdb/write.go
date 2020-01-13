@@ -24,20 +24,18 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 
 	start := time.Now()
 
-	slicesMetrics := make([]map[types.MetricUUID]types.MetricData, concurrentWriterCount)
-
-	for i := 0; i < concurrentWriterCount; i++ {
-		slicesMetrics[i] = make(map[types.MetricUUID]types.MetricData)
-	}
+	slicesMetrics := make([]types.MetricData, len(metrics))
+	slicesUUIDs := make([]types.MetricUUID, len(metrics))
 
 	var aggregatePointsCount int
 
+	i := 0
+
 	for uuid, data := range metrics {
 		aggregatePointsCount += len(data.Points)
-
-		sliceIndex := int(uuid.Uint64() % uint64(concurrentWriterCount))
-
-		slicesMetrics[sliceIndex][uuid] = data
+		slicesUUIDs[i] = uuid
+		slicesMetrics[i] = data
+		i++
 	}
 
 	requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
@@ -46,12 +44,19 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 
 	wg.Add(concurrentWriterCount)
 
+	step := len(slicesMetrics) / concurrentWriterCount
+
 	for i := 0; i < concurrentWriterCount; i++ {
-		i := i
+		startIndex := i * step
+		endIndex := (i + 1) * step
+
+		if endIndex > len(slicesMetrics) || i == concurrentWriterCount-1 {
+			endIndex = len(slicesMetrics)
+		}
 
 		go func() {
 			defer wg.Done()
-			c.writeMetrics(slicesMetrics[i])
+			c.writeMetrics(slicesUUIDs[startIndex:endIndex], slicesMetrics[startIndex:endIndex])
 		}()
 	}
 
@@ -63,10 +68,10 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 }
 
 // Write writes all specified metrics of the slice
-func (c *CassandraTSDB) writeMetrics(metrics map[types.MetricUUID]types.MetricData) {
-	for uuid, data := range metrics {
+func (c *CassandraTSDB) writeMetrics(uuids []types.MetricUUID, metrics []types.MetricData) {
+	for i, data := range metrics {
 		retry.Print(func() error {
-			return c.writeRawData(uuid, data) // nolint: scopelint
+			return c.writeRawData(uuids[i], data) // nolint: scopelint
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"write points to Cassandra",
 		)
