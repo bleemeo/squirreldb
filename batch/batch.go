@@ -196,10 +196,12 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 	}
 }
 
-// Flushes the points corresponding to the status list of the specified metric
-// The points corresponding to the specified state list will be written in the persistent storage
-// The points corresponding to the current metric state and points longer than 5 minutes will be written in the temporary storage
-func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) (types.MetricData, types.MetricData) {
+// flushData split points from memory store into two list:
+// * dataToKeep: points to keep in memory store
+// * dataToWrite: points to write in persistent storage
+//
+// Points may be in the two list (e.g. points less than 5 minutes of age)
+func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
 	if len(data.Points) == 0 {
 		return types.MetricData{}, types.MetricData{}
 	}
@@ -214,7 +216,7 @@ func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesDa
 	dataToSet := types.MetricData{
 		TimeToLive: data.TimeToLive,
 	}
-	dataToWrite := types.MetricData{
+	dataToWrite = types.MetricData{
 		TimeToLive: data.TimeToLive,
 	}
 

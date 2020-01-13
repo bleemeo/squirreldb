@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"math/rand"
 	"reflect"
 	"squirreldb/compare"
 	"squirreldb/types"
@@ -785,11 +786,8 @@ func TestBatch_flush(t *testing.T) {
 
 func TestBatch_flushData(t *testing.T) {
 	type fields struct {
-		batchSize   int64
-		states      map[types.MetricUUID]stateData
-		memoryStore Store
-		reader      types.MetricReader
-		writer      types.MetricWriter
+		batchSize int64
+		states    map[types.MetricUUID]stateData
 	}
 	type args struct {
 		uuid       types.MetricUUID
@@ -798,11 +796,11 @@ func TestBatch_flushData(t *testing.T) {
 		now        time.Time
 	}
 	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   types.MetricData
-		want1  types.MetricData
+		name      string
+		fields    fields
+		args      args
+		wantWrite types.MetricData
+		wantKeep  types.MetricData
 	}{
 		{
 			name: "states_filled_points_filled_statesData_filled",
@@ -822,9 +820,6 @@ func TestBatch_flushData(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				memoryStore: nil,
-				reader:      nil,
-				writer:      nil,
 			},
 			args: args{
 				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
@@ -871,7 +866,7 @@ func TestBatch_flushData(t *testing.T) {
 				},
 				now: time.Unix(60, 0),
 			},
-			want: types.MetricData{
+			wantWrite: types.MetricData{
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 0,
@@ -896,7 +891,7 @@ func TestBatch_flushData(t *testing.T) {
 				},
 				TimeToLive: 300,
 			},
-			want1: types.MetricData{
+			wantKeep: types.MetricData{
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 10,
@@ -944,9 +939,6 @@ func TestBatch_flushData(t *testing.T) {
 						flushTimestamp:      150,
 					},
 				},
-				memoryStore: nil,
-				reader:      nil,
-				writer:      nil,
 			},
 			args: args{
 				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
@@ -964,31 +956,168 @@ func TestBatch_flushData(t *testing.T) {
 				},
 				now: time.Unix(60, 0),
 			},
-			want: types.MetricData{
+			wantKeep: types.MetricData{
 				Points:     nil,
 				TimeToLive: 0,
 			},
-			want1: types.MetricData{
+			wantWrite: types.MetricData{
 				Points:     nil,
 				TimeToLive: 0,
+			},
+		},
+		{
+			name: "current_states_need_data",
+			fields: fields{
+				batchSize: 50,
+				states: map[types.MetricUUID]stateData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						pointCount:          2,
+						firstPointTimestamp: 50,
+						lastPointTimestamp:  60,
+						flushTimestamp:      100,
+					},
+				},
+			},
+			args: args{
+				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				data: types.MetricData{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 40,
+							Value:     50,
+						},
+						{
+							Timestamp: 50,
+							Value:     60,
+						},
+						{
+							Timestamp: 60,
+							Value:     70,
+						},
+						{
+							Timestamp: 70,
+							Value:     80,
+						},
+					},
+					TimeToLive: 300,
+				},
+				statesData: []stateData{
+					{
+						pointCount:          1,
+						firstPointTimestamp: 0,
+						lastPointTimestamp:  49,
+						flushTimestamp:      50,
+					},
+				},
+				now: time.Unix(6000, 0),
+			},
+			wantWrite: types.MetricData{
+				Points: []types.MetricPoint{
+					{
+						Timestamp: 40,
+						Value:     50,
+					},
+				},
+				TimeToLive: 300,
+			},
+			wantKeep: types.MetricData{
+				Points: []types.MetricPoint{
+					{
+						Timestamp: 50,
+						Value:     60,
+					},
+					{
+						Timestamp: 60,
+						Value:     70,
+					},
+					{
+						Timestamp: 70,
+						Value:     80,
+					},
+				},
+				TimeToLive: 300,
+			},
+		},
+		{
+			name: "three_state",
+			fields: fields{
+				batchSize: 50,
+				states:    nil,
+			},
+			args: args{
+				data: types.MetricData{
+					Points: []types.MetricPoint{
+						{Timestamp: 10},
+						{Timestamp: 20},
+						{Timestamp: 30},
+						{Timestamp: 40},
+						{Timestamp: 50},
+						{Timestamp: 60},
+						{Timestamp: 70},
+						{Timestamp: 80},
+						{Timestamp: 90},
+						{Timestamp: 100},
+						{Timestamp: 110},
+						{Timestamp: 120},
+						{Timestamp: 130},
+					},
+					TimeToLive: 300,
+				},
+				statesData: []stateData{
+					{
+						pointCount:          3,
+						firstPointTimestamp: 0,
+						lastPointTimestamp:  30,
+					},
+					{
+						pointCount:          5,
+						firstPointTimestamp: 42,
+						lastPointTimestamp:  90,
+					},
+					{
+						pointCount:          5,
+						firstPointTimestamp: 80,
+						lastPointTimestamp:  120,
+					},
+				},
+				now: time.Unix(130+50, 0),
+			},
+			wantWrite: types.MetricData{
+				Points: []types.MetricPoint{
+					{Timestamp: 10},
+					{Timestamp: 20},
+					{Timestamp: 30},
+					{Timestamp: 50},
+					{Timestamp: 60},
+					{Timestamp: 70},
+					{Timestamp: 80},
+					{Timestamp: 90},
+					{Timestamp: 100},
+					{Timestamp: 110},
+					{Timestamp: 120},
+				},
+				TimeToLive: 300,
+			},
+			wantKeep: types.MetricData{
+				Points: []types.MetricPoint{
+					{Timestamp: 130},
+				},
+				TimeToLive: 300,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
-				batchSize:   tt.fields.batchSize,
-				states:      tt.fields.states,
-				memoryStore: tt.fields.memoryStore,
-				reader:      tt.fields.reader,
-				writer:      tt.fields.writer,
+				batchSize: tt.fields.batchSize,
+				states:    tt.fields.states,
 			}
-			got, got1 := b.flushData(tt.args.uuid, tt.args.data, tt.args.statesData, tt.args.now)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("flushData() got = %v, want %v", got, tt.want)
+			gotWrite, gotKeep := b.flushData(tt.args.uuid, tt.args.data, tt.args.statesData, tt.args.now)
+			if !reflect.DeepEqual(gotWrite, tt.wantWrite) {
+				t.Errorf("flushData() gotWrite = %v, want %v", gotWrite, tt.wantWrite)
 			}
-			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("flushData() got1 = %v, want %v", got1, tt.want1)
+			if !reflect.DeepEqual(gotKeep, tt.wantKeep) {
+				t.Errorf("flushData() gotKeep = %v, want %v", gotKeep, tt.wantKeep)
 			}
 		})
 	}
@@ -1990,6 +2119,82 @@ func Test_flushTimestamp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := flushTimestamp(tt.args.uuid, tt.args.now, tt.args.batchSize); got != tt.want {
 				t.Errorf("flushTimestamp() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Benchmark_flushData(b *testing.B) {
+	rand.Seed(42)
+	tests := []struct {
+		name      string
+		data      types.MetricData
+		states    []stateData
+		now       time.Time
+		batchSize int64
+	}{
+		{
+			name: "one_state_first_5_30",
+			data: types.MetricData{
+				Points: types.MakePointsForTest(30),
+			},
+			states: []stateData{
+				{
+					pointCount:          5,
+					firstPointTimestamp: 1568706164,
+					lastPointTimestamp:  1568706164 + 5*10,
+				},
+			},
+			now:       time.Unix(1568706164+30*10, 0),
+			batchSize: 300,
+		},
+		{
+			name: "one_state_first_30_60",
+			data: types.MetricData{
+				Points: types.MakePointsForTest(60),
+			},
+			states: []stateData{
+				{
+					pointCount:          30,
+					firstPointTimestamp: 1568706164,
+					lastPointTimestamp:  1568706164 + 30*10,
+				},
+			},
+			now:       time.Unix(1568706164+60*10, 0),
+			batchSize: 300,
+		},
+		{
+			name: "three_state_90",
+			data: types.MetricData{
+				Points: types.MakePointsForTest(90),
+			},
+			states: []stateData{
+				{
+					pointCount:          30,
+					firstPointTimestamp: 1568706164,
+					lastPointTimestamp:  1568706164 + 30*10 - 1,
+				},
+				{
+					pointCount:          30,
+					firstPointTimestamp: 1568706164 + 30*10,
+					lastPointTimestamp:  1568706164 + 60*10 - 1,
+				},
+				{
+					pointCount:          30,
+					firstPointTimestamp: 1568706164 + 60*10,
+					lastPointTimestamp:  1568706164 + 90*10 - 1,
+				},
+			},
+			now:       time.Unix(1568706164+90*10, 0),
+			batchSize: 300,
+		},
+	}
+	now := time.Now()
+	for _, tt := range tests {
+		batch := Batch{}
+		b.Run(tt.name, func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				_, _ = batch.flushData(types.MetricUUID{}, tt.data, nil, now)
 			}
 		})
 	}
