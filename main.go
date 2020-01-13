@@ -35,11 +35,7 @@ func main() {
 	squirrelConfig, err := config.New()
 
 	if err != nil {
-		logger.Fatalf("Error: Can't create config (%v)", err)
-	}
-
-	if !squirrelConfig.Validate() {
-		logger.Fatalf("Error: Invalid configuration")
+		logger.Fatalf("Error: Can't load config: %v", err)
 	}
 
 	if squirrelConfig.Bool("help") {
@@ -47,7 +43,19 @@ func main() {
 		return
 	}
 
+	if !squirrelConfig.Validate() {
+		os.Exit(1)
+	}
+
 	debug.Level = squirrelConfig.Int("debug.level")
+
+	keyspace := squirrelConfig.String("cassandra.keyspace")
+	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
+	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
+
+	if !squirrelConfig.ValidateRemote(squirrelStates) {
+		os.Exit(1)
+	}
 
 	var squirrelStore batch.Store
 
@@ -59,32 +67,11 @@ func main() {
 		squirrelStore = memorystore.New()
 	}
 
-	keyspace := squirrelConfig.String("cassandra.keyspace")
-	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
 	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace, squirrelConfig)
 	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace)
-	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
-
-	if valid, exists := squirrelConfig.ValidateRemote(squirrelStates); !valid {
-		switch {
-		case squirrelConfig.Bool("ignore-config"):
-			logger.Println("Warning: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
-				"\t" + "SquirrelDB uses the current configuration")
-		case squirrelConfig.Bool("overwrite-config"):
-			squirrelConfig.WriteRemote(squirrelStates, true)
-
-			logger.Println("Info: The current configuration has overwritten the previous configuration")
-		default:
-			logger.Fatalln("Error: The current configuration constant values are not the same as the previous configuration constant values" + "\n" +
-				"\t" + "Run SquirrelDB with the flag --ignore-config to ignore this error" + "\n" +
-				"\t" + "Run SquirrelDB with the flag --overwrite-config to overwrite the previous configuration with the current configuration")
-		}
-	} else if !exists {
-		squirrelConfig.WriteRemote(squirrelStates, false)
-	}
 
 	signalChan := make(chan os.Signal, 1)
 

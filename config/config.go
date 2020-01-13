@@ -100,78 +100,61 @@ func (c *Config) Validate() bool {
 	if keyspace == "" {
 		valid = false
 
-		logger.Println("Error: 'cassandra.keyspace' is invalid (must be filled)")
+		logger.Println("Error: 'cassandra.keyspace' must be set")
 	}
 
 	if replicationFactor <= 0 {
 		valid = false
 
-		logger.Println("Error: 'cassandra.replication_factor' is invalid (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.replication_factor' must be strictly greater than 0")
 	}
 
 	if batchSize <= 0 {
 		valid = false
 
-		logger.Println("Error: 'batch.size' is invalid (must be strictly greater than 0)")
-	}
-
-	if rawPartitionSize <= 0 {
-		valid = false
-
-		logger.Println("Error: 'cassandra.partition_size.raw' (must be strictly greater than 0)")
+		logger.Println("Error: 'batch.size' must be strictly greater than 0")
 	}
 
 	if aggregateResolution <= 0 {
 		valid = false
 
-		logger.Println("Error: 'cassandra.aggregate.resolution' is invalid (must be strictly greater than 0)")
-	}
-
-	if aggregateSize <= 0 {
-		valid = false
-
-		logger.Println("Error: 'cassandra.aggregate.size' is invalid (must be strictly greater than 0)")
-	}
-
-	if aggregatePartitionSize <= 0 {
-		valid = false
-
-		logger.Println("Error: 'cassandra.partition_size.aggregate' is invalid (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.aggregate.resolution' must be strictly greater than 0")
 	}
 
 	if aggregateIntendedDuration <= 0 {
 		valid = false
 
-		logger.Println("Error: 'cassandra.aggregate.intended_duration' is invalid (must be strictly greater than 0)")
+		logger.Println("Error: 'cassandra.aggregate.intended_duration' must be strictly greater than 0")
 	}
 
-	if batchSize > rawPartitionSize {
+	if rawPartitionSize < batchSize {
 		valid = false
 
-		logger.Println("Error: 'batch.size' is invalid (must be greater than 'cassandra.partition_size.raw')")
+		logger.Printf("Error: 'cassandra.rawPartitionSize' (current value %d) must be greater than 'batch.size' (current value %d)", rawPartitionSize, batchSize)
 	}
 
-	if aggregateResolution > aggregateSize {
+	if aggregateSize < aggregateResolution {
 		valid = false
 
-		logger.Println("Error: 'cassandra.aggregate.resolution' is invalid (must be greater than 'cassandra.aggregate.size')")
+		logger.Printf("Error: 'cassandra.aggregate.size' (current value %d) must be greater than 'cassandra.aggregate.resolution' (current value %d)", aggregateSize, aggregateResolution)
 	}
 
-	if aggregateSize > aggregatePartitionSize {
+	if aggregatePartitionSize < aggregateSize {
 		valid = false
 
-		logger.Println("Error: 'cassandra.aggregate.size' is invalid (must be greater than 'cassandra.partition_size.aggregate')")
+		logger.Printf("Error: 'cassandra.partition_size.aggregate' (current value %d) must be greater than 'cassandra.aggregate.size' (current value %d)", aggregatePartitionSize, aggregateSize)
 	}
 
 	return valid
 }
 
 // ValidateRemote checks if the local configuration is consistent with the remote configuration
-func (c *Config) ValidateRemote(state types.State) (bool, bool) {
+func (c *Config) ValidateRemote(state types.State) bool {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
 	valid := true
 	exists := false
+	force := c.Bool("overwite-previous-config")
 
 	for _, name := range names {
 		local := c.String(name)
@@ -190,32 +173,43 @@ func (c *Config) ValidateRemote(state types.State) (bool, bool) {
 
 		if exists && (local != remote) {
 			valid = false
+			level := "Error"
 
-			logger.Printf("Error: '%s' current value (%s) and previous value (%s) doesn't match", name, local, remote)
+			if force {
+				level = "Warning"
+
+				c.writeRemote(state, name, local)
+			}
+
+			logger.Printf("%s: option '%s' changed from \"%s\" to \"%s\" since last SquirrelDB start", level, name, remote, local)
+		} else if !exists {
+			c.writeRemote(state, name, local)
 		}
 	}
 
-	return valid, exists
+	if !valid {
+		logger.Printf("Changing thoses values is not (yet) supported and could result in lost of previously ingested data")
+
+		if force {
+			logger.Printf("Since --overwite-previous-config is set, ignoring this warning and updating previous config")
+			logger.Printf("This SquirrelDB will now use those values (if using multiple SquirrelDB instance restart the other with new config also)")
+
+			valid = true
+		} else {
+			logger.Printf("If you want to ignore this error and continue with new option (potentially losing all data already ingested) use the option --overwite-previous-config")
+		}
+	}
+
+	return valid
 }
 
-// WriteRemote writes the remote constant values if they do not exist
-func (c *Config) WriteRemote(state types.State, overwrite bool) {
-	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
-		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
-
-	for _, name := range names {
-		value := c.String(name)
-
-		retry.Print(func() error {
-			if overwrite {
-				return state.Update(name, value) // nolint: scopelint
-			}
-
-			return state.Write(name, value) // nolint: scopelint
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
-			"write config state "+name,
-		)
-	}
+// writeRemote writes the remote constant value
+func (c *Config) writeRemote(state types.State, name string, value string) {
+	retry.Print(func() error {
+		return state.Update(name, value) // nolint: scopelint
+	}, retry.NewExponentialBackOff(30*time.Second), logger,
+		"write config state "+name,
+	)
 }
 
 // Return file paths
