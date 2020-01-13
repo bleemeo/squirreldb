@@ -41,7 +41,7 @@ type MetricRequest struct {
 }
 
 // Uint64 returns an uint64 generated from the UUID
-func (m *MetricUUID) Uint64() uint64 {
+func (m MetricUUID) Uint64() uint64 {
 	bigInt := big.NewInt(0).SetBytes(m.Bytes())
 
 	return bigInt.Uint64()
