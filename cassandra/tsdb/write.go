@@ -161,23 +161,43 @@ func (c *CassandraTSDB) writeRawData(uuid types.MetricUUID, data types.MetricDat
 		return nil
 	}
 
-	baseTimestampPoints := make(map[int64][]types.MetricPoint)
+	// data.Points is sorted
+	n := len(data.Points)
+	startBaseTimestamp := data.Points[0].Timestamp - (data.Points[0].Timestamp % c.options.RawPartitionSize)
+	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % c.options.RawPartitionSize)
 
-	for _, point := range data.Points {
-		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
-
-		baseTimestampPoints[baseTimestamp] = append(baseTimestampPoints[baseTimestamp], point)
+	if startBaseTimestamp == endBaseTimestamp {
+		err := c.writeRawPartitionData(uuid, data, startBaseTimestamp)
+		return err
 	}
 
-	for baseTimestamp, points := range baseTimestampPoints {
-		partitionData := types.MetricData{
-			Points:     points,
-			TimeToLive: data.TimeToLive,
-		}
+	currentBaseTimestamp := startBaseTimestamp
+	currentStartIndex := 0
 
-		if err := c.writeRawPartitionData(uuid, partitionData, baseTimestamp); err != nil {
-			return err
+	for i, point := range data.Points {
+		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
+		if currentBaseTimestamp != baseTimestamp {
+			partitionData := types.MetricData{
+				Points:     data.Points[currentStartIndex:i],
+				TimeToLive: data.TimeToLive,
+			}
+
+			if err := c.writeRawPartitionData(uuid, partitionData, currentBaseTimestamp); err != nil {
+				return err
+			}
+
+			currentStartIndex = i
+			currentBaseTimestamp = baseTimestamp
 		}
+	}
+
+	partitionData := types.MetricData{
+		Points:     data.Points[currentStartIndex:],
+		TimeToLive: data.TimeToLive,
+	}
+
+	if err := c.writeRawPartitionData(uuid, partitionData, currentBaseTimestamp); err != nil {
+		return err
 	}
 
 	return nil
