@@ -157,7 +157,7 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 	labelsData, found := c.uuidsToLabels[uuid]
 
 	if !found {
-		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(uuid.String())
+		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(gocql.UUID(uuid))
 
 		if err := selectLabelsQuery.Scan(&labelsData.labels); (err != nil) && (err != gocql.ErrNotFound) {
 			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
@@ -266,16 +266,16 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, er
 		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
 		uuid := gouuid.UUID(cqlUUID)
 
-		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, uuid.String())
+		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, gocql.UUID(uuid))
 
 		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
 
-		indexBatch.Query(insertLabelsQueryString, uuid.String(), sortedLabels)
+		indexBatch.Query(insertLabelsQueryString, gocql.UUID(uuid), sortedLabels)
 
 		for _, label := range sortedLabels {
 			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString()
 
-			indexBatch.Query(updateUUIDsQueryString, []string{uuid.String()}, label.Name, label.Value)
+			indexBatch.Query(updateUUIDsQueryString, []gocql.UUID{gocql.UUID(uuid)}, label.Name, label.Value)
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
@@ -604,7 +604,7 @@ func (c *CassandraIndex) uuidsTableInsertLabelsQueryString() string {
 }
 
 // Returns uuids table select labels Query
-func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid string) *gocql.Query {
+func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid gocql.UUID) *gocql.Query {
 	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
 	query := c.session.Query(replacer.Replace(`
 		SELECT labels FROM $UUIDS_TABLE
