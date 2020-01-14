@@ -16,6 +16,19 @@ import (
 
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
+type serializedAggregatedPoint struct {
+	Timestamp uint16
+	Min       float64
+	Max       float64
+	Average   float64
+	Count     float64
+}
+
+type serializedPoint struct {
+	Timestamp uint16
+	Value     float64
+}
+
 // Write writes all specified metrics
 // metrics points should be sorted and deduplicated
 func (c *CassandraTSDB) Write(metrics map[gouuid.UUID]types.MetricData) error {
@@ -290,22 +303,23 @@ func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestam
 // Return bytes aggregated values from aggregated points
 func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetTimestamp, resolution int64) ([]byte, error) {
 	buffer := new(bytes.Buffer)
+	buffer.Grow(len(aggregatedPoints) * 34)
 
-	for _, aggregatedPoint := range aggregatedPoints {
+	serializedPoints := make([]serializedAggregatedPoint, len(aggregatedPoints))
+
+	for i, aggregatedPoint := range aggregatedPoints {
 		pointTimestamp := (aggregatedPoint.Timestamp - baseTimestamp - offsetTimestamp) / resolution
-		pointData := []interface{}{
-			uint16(pointTimestamp),
-			aggregatedPoint.Min,
-			aggregatedPoint.Max,
-			aggregatedPoint.Average,
-			aggregatedPoint.Count,
+		serializedPoints[i] = serializedAggregatedPoint{
+			Timestamp: uint16(pointTimestamp),
+			Min:       aggregatedPoint.Min,
+			Max:       aggregatedPoint.Max,
+			Average:   aggregatedPoint.Average,
+			Count:     aggregatedPoint.Count,
 		}
+	}
 
-		for _, element := range pointData {
-			if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
-				return nil, err
-			}
-		}
+	if err := binary.Write(buffer, binary.BigEndian, serializedPoints); err != nil {
+		return nil, err
 	}
 
 	aggregateValues := buffer.Bytes()
@@ -316,19 +330,20 @@ func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.Aggregated
 // Return bytes raw values from points
 func rawValuesFromPoints(points []types.MetricPoint, baseTimestamp, offsetTimestamp int64) ([]byte, error) {
 	buffer := new(bytes.Buffer)
+	buffer.Grow(len(points) * 10)
 
-	for _, point := range points {
+	serializedPoints := make([]serializedPoint, len(points))
+
+	for i, point := range points {
 		pointTimestamp := point.Timestamp - baseTimestamp - offsetTimestamp
-		pointData := []interface{}{
-			uint16(pointTimestamp),
-			point.Value,
+		serializedPoints[i] = serializedPoint{
+			Timestamp: uint16(pointTimestamp),
+			Value:     point.Value,
 		}
+	}
 
-		for _, element := range pointData {
-			if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
-				return nil, err
-			}
-		}
+	if err := binary.Write(buffer, binary.BigEndian, serializedPoints); err != nil {
+		return nil, err
 	}
 
 	rawValues := buffer.Bytes()
