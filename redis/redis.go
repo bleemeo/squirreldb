@@ -5,7 +5,6 @@ import (
 
 	"bytes"
 	"encoding/binary"
-	"io"
 	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
@@ -19,6 +18,12 @@ type Options struct {
 
 type Redis struct {
 	client *goredis.Client
+}
+
+type serializedPoints struct {
+	Timestamp  int64
+	Value      float64
+	TimeToLive int64
 }
 
 // New creates a new Redis object
@@ -136,30 +141,20 @@ func dataFromValues(values []byte) (types.MetricData, error) {
 	data := types.MetricData{}
 	buffer := bytes.NewReader(values)
 
-forLoop:
-	for {
-		var pointData struct {
-			Timestamp  int64
-			Value      float64
-			TimeToLive int64
+	dataSerialized := make([]serializedPoints, len(values)/24)
+
+	err := binary.Read(buffer, binary.BigEndian, &dataSerialized)
+	if err != nil {
+		return data, err
+	}
+
+	data.Points = make([]types.MetricPoint, len(dataSerialized))
+	for i, point := range dataSerialized {
+		data.Points[i] = types.MetricPoint{
+			Timestamp: point.Timestamp,
+			Value:     point.Value,
 		}
-
-		err := binary.Read(buffer, binary.BigEndian, &pointData)
-
-		switch err {
-		case nil:
-			point := types.MetricPoint{
-				Timestamp: pointData.Timestamp,
-				Value:     pointData.Value,
-			}
-
-			data.Points = append(data.Points, point)
-			data.TimeToLive = compare.MaxInt64(data.TimeToLive, pointData.TimeToLive)
-		case io.EOF:
-			break forLoop
-		default:
-			return types.MetricData{}, err
-		}
+		data.TimeToLive = compare.MaxInt64(data.TimeToLive, point.TimeToLive)
 	}
 
 	return data, nil
@@ -168,19 +163,19 @@ forLoop:
 // Return bytes values from data
 func valuesFromData(data types.MetricData) ([]byte, error) {
 	buffer := new(bytes.Buffer)
+	buffer.Grow(len(data.Points) * 24)
 
-	for _, point := range data.Points {
-		pointData := []interface{}{
-			point.Timestamp,
-			point.Value,
-			data.TimeToLive,
+	dataSerialized := make([]serializedPoints, len(data.Points))
+	for i, point := range data.Points {
+		dataSerialized[i] = serializedPoints{
+			Timestamp:  point.Timestamp,
+			Value:      point.Value,
+			TimeToLive: data.TimeToLive,
 		}
+	}
 
-		for _, element := range pointData {
-			if err := binary.Write(buffer, binary.BigEndian, element); err != nil {
-				return nil, err
-			}
-		}
+	if err := binary.Write(buffer, binary.BigEndian, dataSerialized); err != nil {
+		return nil, err
 	}
 
 	return buffer.Bytes(), nil
