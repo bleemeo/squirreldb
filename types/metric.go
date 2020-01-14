@@ -29,21 +29,17 @@ type MetricLabelMatcher struct {
 	Type uint8
 }
 
-type MetricUUID struct {
-	gouuid.UUID
-}
-
 type MetricRequest struct {
-	UUIDs         []MetricUUID
+	UUIDs         []gouuid.UUID
 	FromTimestamp int64
 	ToTimestamp   int64
 	Step          int64
 	Function      string
 }
 
-// Uint64 returns an uint64 generated from the UUID
-func (m MetricUUID) Uint64() uint64 {
-	bigInt := big.NewInt(0).SetBytes(m.Bytes())
+// UintFromUUID returns an uint64 from the UUID
+func UintFromUUID(uuid gouuid.UUID) uint64 {
+	bigInt := big.NewInt(0).SetBytes(uuid.Bytes())
 
 	return bigInt.Uint64()
 }
@@ -174,21 +170,6 @@ func StringFromLabels(labels []MetricLabel) string {
 	str := strings.Join(strLabels, ",")
 
 	return str
-}
-
-// UUIDFromString returns a MetricUUID generated from a string
-func UUIDFromString(s string) (MetricUUID, error) {
-	u, err := gouuid.FromString(s)
-
-	if err != nil {
-		return MetricUUID{}, err
-	}
-
-	uuid := MetricUUID{
-		UUID: u,
-	}
-
-	return uuid, nil
 }
 
 // MakePointsForTest generate a list a MetricPoint for testing

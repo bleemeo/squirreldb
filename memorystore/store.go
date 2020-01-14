@@ -9,6 +9,8 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	gouuid "github.com/gofrs/uuid"
 )
 
 const expiratorInterval = 60
@@ -22,21 +24,21 @@ type storeData struct {
 }
 
 type Store struct {
-	metrics map[types.MetricUUID]storeData
+	metrics map[gouuid.UUID]storeData
 	mutex   sync.Mutex
 }
 
 // New creates a new Store object
 func New() *Store {
 	store := &Store{
-		metrics: make(map[types.MetricUUID]storeData),
+		metrics: make(map[gouuid.UUID]storeData),
 	}
 
 	return store
 }
 
 // Append is the public method of append
-func (s *Store) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+func (s *Store) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -44,7 +46,7 @@ func (s *Store) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 }
 
 // Get is the public method of get
-func (s *Store) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+func (s *Store) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -52,7 +54,7 @@ func (s *Store) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 }
 
 // Set is the public method of set
-func (s *Store) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+func (s *Store) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -90,7 +92,7 @@ func (s *Store) expire(now time.Time) {
 }
 
 // Appends the specified metrics
-func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64, now time.Time) error {
+func (s *Store) append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64, now time.Time) error {
 	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
 		return nil
 	}
@@ -121,12 +123,12 @@ func (s *Store) append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 }
 
 // Return the requested metrics
-func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+func (s *Store) get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
 	if len(uuids) == 0 {
 		return nil, nil
 	}
 
-	metrics := make(map[types.MetricUUID]types.MetricData, len(uuids))
+	metrics := make(map[gouuid.UUID]types.MetricData, len(uuids))
 
 	for _, uuid := range uuids {
 		storeData, exists := s.metrics[uuid]
@@ -140,7 +142,7 @@ func (s *Store) get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 }
 
 // Sets the specified metrics
-func (s *Store) set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64, now time.Time) error {
+func (s *Store) set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64, now time.Time) error {
 	if len(metrics) == 0 {
 		return nil
 	}

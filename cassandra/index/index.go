@@ -51,7 +51,7 @@ type labelsData struct {
 }
 
 type uuidData struct {
-	uuid                types.MetricUUID
+	uuid                gouuid.UUID
 	expirationTimestamp int64
 }
 
@@ -68,7 +68,7 @@ type CassandraIndex struct {
 
 	labelsToUUID  map[string]uuidData
 	ltuMutex      sync.Mutex
-	uuidsToLabels map[types.MetricUUID]labelsData
+	uuidsToLabels map[gouuid.UUID]labelsData
 	utlMutex      sync.Mutex
 }
 
@@ -102,7 +102,7 @@ func New(session *gocql.Session, keyspace string, options Options) (*CassandraIn
 		postingsTable: postingsTable,
 		uuidsTable:    uuidsTable,
 		labelsToUUID:  make(map[string]uuidData),
-		uuidsToLabels: make(map[types.MetricUUID]labelsData),
+		uuidsToLabels: make(map[gouuid.UUID]labelsData),
 	}
 
 	return index, nil
@@ -127,19 +127,17 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 }
 
 // AllUUIDs returns all UUIDs stored in the UUIDs index
-func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
+func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
 	uuidsTableSelectUUIDsQuery := c.uuidsTableSelectUUIDsQuery()
 	uuidsTableSelectUUIDsIter := uuidsTableSelectUUIDsQuery.Iter()
 
 	var (
-		uuids   []types.MetricUUID
+		uuids   []gouuid.UUID
 		cqlUUID gocql.UUID
 	)
 
 	for uuidsTableSelectUUIDsIter.Scan(&cqlUUID) {
-		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-		uuids = append(uuids, uuid)
+		uuids = append(uuids, gouuid.UUID(cqlUUID))
 	}
 
 	if err := uuidsTableSelectUUIDsIter.Close(); err != nil {
@@ -149,8 +147,8 @@ func (c *CassandraIndex) AllUUIDs() ([]types.MetricUUID, error) {
 	return uuids, nil
 }
 
-// LookupLabels returns a MetricLabel list corresponding to the specified MetricUUID
-func (c *CassandraIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
+// LookupLabels returns a MetricLabel list corresponding to the specified UUID
+func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, error) {
 	start := time.Now()
 
 	c.utlMutex.Lock()
@@ -189,8 +187,8 @@ func (c *CassandraIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabe
 	return labels, nil
 }
 
-// LookupUUID returns a MetricUUID corresponding to the specified MetricLabel list
-func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUID, error) {
+// LookupUUID returns a UUID corresponding to the specified MetricLabel list
+func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, error) {
 	start := time.Now()
 
 	defer func() {
@@ -198,7 +196,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 	}()
 
 	if len(labels) == 0 {
-		return types.MetricUUID{}, nil
+		return gouuid.UUID{}, nil
 	}
 
 	c.ltuMutex.Lock()
@@ -215,10 +213,10 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 
 		if found {
 			var err error
-			uuidData.uuid, err = types.UUIDFromString(uuidStr)
+			uuidData.uuid, err = gouuid.FromString(uuidStr)
 
 			if err != nil {
-				return types.MetricUUID{}, nil
+				return gouuid.UUID{}, nil
 			}
 		}
 	}
@@ -248,12 +246,10 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		var cqlUUID gocql.UUID
 
 		if err := selectUUIDQuery.Scan(&cqlUUID); err == nil {
-			uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-			uuidData.uuid = uuid
+			uuidData.uuid = gouuid.UUID(cqlUUID)
 			found = true
 		} else if err != gocql.ErrNotFound {
-			return types.MetricUUID{}, err
+			return gouuid.UUID{}, err
 		}
 	}
 
@@ -263,12 +259,12 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
-			return types.MetricUUID{}, err
+			return gouuid.UUID{}, err
 		}
 
 		indexBatch := c.session.NewBatch(gocql.LoggedBatch)
 		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
-		uuid := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+		uuid := gouuid.UUID(cqlUUID)
 
 		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, uuid.String())
 
@@ -283,7 +279,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
-			return types.MetricUUID{}, err
+			return gouuid.UUID{}, err
 		}
 
 		uuidData.uuid = uuid
@@ -297,8 +293,8 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUI
 	return uuidData.uuid, nil
 }
 
-// Search returns a list of MetricUUID corresponding to the specified MetricLabelMatcher list
-func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
+// Search returns a list of UUID corresponding to the specified MetricLabelMatcher list
+func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]gouuid.UUID, error) {
 	start := time.Now()
 
 	defer func() {
@@ -310,7 +306,7 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.Me
 	}
 
 	var (
-		uuids []types.MetricUUID
+		uuids []gouuid.UUID
 		found bool
 	)
 
@@ -319,7 +315,7 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]types.Me
 		uuidStr, found = types.GetMatchersValue(matchers, uuidLabelName)
 
 		if found {
-			uuid, err := types.UUIDFromString(uuidStr)
+			uuid, err := gouuid.FromString(uuidStr)
 
 			if err != nil {
 				return nil, nil
@@ -441,27 +437,25 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 }
 
 // Returns a list of uuid associated with the number of times it has corresponded to a targeted label
-func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (map[types.MetricUUID]int, error) { // nolint:gocognit
+func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (map[gouuid.UUID]int, error) { // nolint:gocognit
 	if len(targetLabels) == 0 {
 		return nil, nil
 	}
 
-	uuidMatches := make(map[types.MetricUUID]int)
+	uuidMatches := make(map[gouuid.UUID]int)
 
 	for _, label := range targetLabels[targetTypeValueEqual] {
 		selectUUIDsQuery := c.postingsTableSelectUUIDsFocusQuery(label.Name, label.Value)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
-			labelUUIDs []types.MetricUUID
+			labelUUIDs []gouuid.UUID
 			cqlUUIDs   []gocql.UUID
 		)
 
 		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-				labelUUIDs = append(labelUUIDs, labelUUID)
+				labelUUIDs = append(labelUUIDs, gouuid.UUID(cqlUUID))
 			}
 		}
 
@@ -479,13 +473,13 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
-			labelUUIDs []types.MetricUUID
+			labelUUIDs []gouuid.UUID
 			cqlUUIDs   []gocql.UUID
 		)
 
 		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
+				labelUUID := gouuid.UUID(cqlUUID)
 
 				labelUUIDs = append(labelUUIDs, labelUUID)
 			}
@@ -505,15 +499,13 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
-			labelUUIDs []types.MetricUUID
+			labelUUIDs []gouuid.UUID
 			cqlUUIDs   []gocql.UUID
 		)
 
 		for selectUUIDsIter.Scan(&cqlUUIDs) {
 			for _, cqlUUID := range cqlUUIDs {
-				labelUUID := types.MetricUUID{UUID: gouuid.UUID(cqlUUID)}
-
-				labelUUIDs = append(labelUUIDs, labelUUID)
+				labelUUIDs = append(labelUUIDs, gouuid.UUID(cqlUUID))
 			}
 		}
 
@@ -677,7 +669,7 @@ func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Que
 }
 
 // Returns a boolean if the uuid list contains the target uuid or not
-func containsUUIDs(list []types.MetricUUID, target types.MetricUUID) bool {
+func containsUUIDs(list []gouuid.UUID, target gouuid.UUID) bool {
 	if len(list) == 0 {
 		return false
 	}

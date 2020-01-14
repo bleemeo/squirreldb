@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -198,8 +199,8 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	return promSamples
 }
 
-// Returns a pointer of a TimeSeries generated from a MetricUUID and a MetricData
-func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
+// Returns a pointer of a TimeSeries generated from a UUID and a MetricData
+func promSeriesFromMetric(uuid gouuid.UUID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
 	labels, err := index.LookupLabels(uuid)
 	if err != nil {
 		return nil, err
@@ -217,7 +218,7 @@ func promSeriesFromMetric(uuid types.MetricUUID, data types.MetricData, index ty
 }
 
 // Returns a TimeSeries pointer list generated from a metric list
-func promTimeseriesFromMetrics(metrics map[types.MetricUUID]types.MetricData, index types.Index) ([]*prompb.TimeSeries, error) {
+func promTimeseriesFromMetrics(metrics map[gouuid.UUID]types.MetricData, index types.Index) ([]*prompb.TimeSeries, error) {
 	if len(metrics) == 0 {
 		return nil, nil
 	}

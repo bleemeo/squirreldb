@@ -34,10 +34,7 @@ func TestMetricUUID_Uint64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &MetricUUID{
-				UUID: tt.fields.UUID,
-			}
-			if got := m.Uint64(); got != tt.want {
+			if got := UintFromUUID(tt.fields.UUID); got != tt.want {
 				t.Errorf("Uint64() = %v, want %v", got, tt.want)
 			}
 		})
@@ -636,61 +633,6 @@ func TestSortPoints(t *testing.T) {
 			sortPoints(result)
 			if !reflect.DeepEqual(result, tt.want) {
 				t.Errorf("sortPoints() = %v, want %v", result, tt.want)
-			}
-		})
-	}
-}
-
-func TestUUIDFromString(t *testing.T) {
-	type args struct {
-		s string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    MetricUUID
-		wantErr bool
-	}{
-		{
-			name: "valid",
-			args: args{
-				s: "00000000-0000-0000-0000-000000000001",
-			},
-			want: MetricUUID{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid_no_dash",
-			args: args{
-				s: "00000000000000000000000000000001",
-			},
-			want: MetricUUID{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid",
-			args: args{
-				s: "invalid",
-			},
-			want: MetricUUID{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
-			},
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := UUIDFromString(tt.args.s)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UUIDFromString() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UUIDFromString() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package redis
 
 import (
 	goredis "github.com/go-redis/redis"
+	gouuid "github.com/gofrs/uuid"
 
 	"bytes"
 	"encoding/binary"
@@ -40,7 +41,7 @@ func New(options Options) *Redis {
 }
 
 // Append appends the specified metrics
-func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
 	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
 		return nil
 	}
@@ -81,12 +82,12 @@ func (r *Redis) Append(newMetrics, existingMetrics map[types.MetricUUID]types.Me
 }
 
 // Get return the requested metrics
-func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error) {
+func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
 	if len(uuids) == 0 {
 		return nil, nil
 	}
 
-	metrics := make(map[types.MetricUUID]types.MetricData)
+	metrics := make(map[gouuid.UUID]types.MetricData)
 
 	for _, uuid := range uuids {
 		key := keyPrefix + uuid.String()
@@ -109,7 +110,7 @@ func (r *Redis) Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.Metric
 }
 
 // Set sets the specified metrics
-func (r *Redis) Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error {
+func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
 	if len(metrics) == 0 {
 		return nil
 	}

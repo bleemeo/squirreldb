@@ -6,6 +6,7 @@ import (
 	"squirreldb/types"
 	"testing"
 
+	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -15,22 +16,22 @@ type mockIndex struct {
 	fixedLabels     []types.MetricLabel
 }
 
-func (i mockIndex) AllUUIDs() ([]types.MetricUUID, error) {
+func (i mockIndex) AllUUIDs() ([]gouuid.UUID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(uuid types.MetricUUID) ([]types.MetricLabel, error) {
+func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupUUID(labels []types.MetricLabel) (types.MetricUUID, error) {
+func (i mockIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, error) {
 	return uuidFromStringOrNil(i.fixedLookupUUID), nil
 }
 
-func (i mockIndex) Search(matchers []types.MetricLabelMatcher) ([]types.MetricUUID, error) {
+func (i mockIndex) Search(matchers []types.MetricLabelMatcher) ([]gouuid.UUID, error) {
 	if i.fixedSearchUUID == "" {
 		return nil, nil
 	}
-	return []types.MetricUUID{uuidFromStringOrNil(i.fixedSearchUUID)}, nil
+	return []gouuid.UUID{uuidFromStringOrNil(i.fixedSearchUUID)}, nil
 }
 
 func Test_labelsFromPromLabels(t *testing.T) {
@@ -99,7 +100,7 @@ func Test_metricFromPromSeries(t *testing.T) {
 	tests := []struct {
 		name  string
 		args  args
-		want  types.MetricUUID
+		want  gouuid.UUID
 		want1 types.MetricData
 	}{
 		{
@@ -201,7 +202,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want map[types.MetricUUID]types.MetricData
+		want map[gouuid.UUID]types.MetricData
 	}{
 		{
 			name: "promTimeseries_filled",
@@ -248,7 +249,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 				},
 				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
 			},
-			want: map[types.MetricUUID]types.MetricData{
+			want: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{

@@ -10,6 +10,8 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	gouuid "github.com/gofrs/uuid"
 )
 
 const checkerInterval = 60
@@ -21,9 +23,9 @@ var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 // Store is an interface to store points associated to metrics. Batch use a memory store (i.e. temporary)
 type Store interface {
-	Append(newMetrics, existingMetrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
-	Get(uuids []types.MetricUUID) (map[types.MetricUUID]types.MetricData, error)
-	Set(metrics map[types.MetricUUID]types.MetricData, timeToLive int64) error
+	Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error
+	Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error)
+	Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error
 }
 
 // stateData contains information about points stored in memory store for one metrics
@@ -40,7 +42,7 @@ type stateData struct {
 type Batch struct {
 	batchSize int64
 
-	states map[types.MetricUUID]stateData
+	states map[gouuid.UUID]stateData
 	mutex  sync.Mutex
 
 	memoryStore           Store
@@ -58,7 +60,7 @@ func New(batchSize int64, memoryStore Store, reader types.MetricReader, writer t
 
 	batch := &Batch{
 		batchSize:             batchSize,
-		states:                make(map[types.MetricUUID]stateData),
+		states:                make(map[gouuid.UUID]stateData),
 		memoryStore:           memoryStore,
 		memoryStoreTimeToLive: memoryStoreTimeToLive,
 		reader:                reader,
@@ -69,12 +71,12 @@ func New(batchSize int64, memoryStore Store, reader types.MetricReader, writer t
 }
 
 // Read implements MetricReader
-func (b *Batch) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+func (b *Batch) Read(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
 	return b.read(request)
 }
 
 // Write implements MetricWriter
-func (b *Batch) Write(metrics map[types.MetricUUID]types.MetricData) error {
+func (b *Batch) Write(metrics map[gouuid.UUID]types.MetricData) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -109,7 +111,7 @@ func (b *Batch) check(now time.Time, force bool) {
 
 	start := time.Now()
 
-	states := make(map[types.MetricUUID][]stateData)
+	states := make(map[gouuid.UUID][]stateData)
 
 	for uuid, data := range b.states {
 		if (data.flushTimestamp <= now.Unix()) || force {
@@ -125,7 +127,7 @@ func (b *Batch) check(now time.Time, force bool) {
 }
 
 // Flushes the points corresponding to the specified metrics state list
-func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
+func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 	if len(states) == 0 {
 		return
 	}
@@ -134,14 +136,14 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 		readPointsCount, deletedPointsCount int
 	)
 
-	uuids := make([]types.MetricUUID, 0, len(states))
+	uuids := make([]gouuid.UUID, 0, len(states))
 
 	for uuid := range states {
 		uuids = append(uuids, uuid)
 	}
 
 	for startIndex := 0; startIndex < len(uuids); startIndex += flushMetricLimit {
-		var metrics map[types.MetricUUID]types.MetricData
+		var metrics map[gouuid.UUID]types.MetricData
 
 		endIndex := startIndex + flushMetricLimit
 		if endIndex > len(uuids) {
@@ -157,8 +159,8 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 			"get points from the memory store",
 		)
 
-		metricsToWrite := make(map[types.MetricUUID]types.MetricData)
-		metricsToSet := make(map[types.MetricUUID]types.MetricData)
+		metricsToWrite := make(map[gouuid.UUID]types.MetricData)
+		metricsToSet := make(map[gouuid.UUID]types.MetricData)
 
 		for _, uuid := range uuids[startIndex:endIndex] {
 			statesData := states[uuid]
@@ -202,7 +204,7 @@ func (b *Batch) flush(states map[types.MetricUUID][]stateData, now time.Time) {
 //
 // Points may be in the two list (e.g. points less than 5 minutes of age)
 // dataToWrite is sorted & deduplicated
-func (b *Batch) flushData(uuid types.MetricUUID, data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
+func (b *Batch) flushData(uuid gouuid.UUID, data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
 	if len(data.Points) == 0 {
 		return types.MetricData{}, types.MetricData{}
 	}
@@ -268,7 +270,7 @@ pointsLoop:
 }
 
 // Returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
-func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+func (b *Batch) read(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
 	start := time.Now()
 
 	defer func() {
@@ -279,13 +281,13 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 		return nil, nil
 	}
 
-	metrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
+	metrics := make(map[gouuid.UUID]types.MetricData, len(request.UUIDs))
 
 	var readPointsCount int
 
 	for _, uuid := range request.UUIDs {
 		uuidRequest := types.MetricRequest{
-			UUIDs:         []types.MetricUUID{uuid},
+			UUIDs:         []gouuid.UUID{uuid},
 			FromTimestamp: request.FromTimestamp,
 			ToTimestamp:   request.ToTimestamp,
 			Step:          request.Step,
@@ -329,14 +331,14 @@ func (b *Batch) read(request types.MetricRequest) (map[types.MetricUUID]types.Me
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
-func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+func (b *Batch) readTemporary(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
 	metrics, err := b.memoryStore.Get(request.UUIDs)
 
 	if err != nil {
 		return nil, err
 	}
 
-	temporaryMetrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
+	temporaryMetrics := make(map[gouuid.UUID]types.MetricData, len(request.UUIDs))
 
 	for uuid, data := range metrics {
 		var (
@@ -373,7 +375,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricUUID
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
 // If this is the case, the state is added to the list of states to flush
-func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Time) error {
+func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) error {
 	start := time.Now()
 
 	defer func() {
@@ -389,9 +391,9 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 		duplicatedPoints   int
 	)
 
-	states := make(map[types.MetricUUID][]stateData)
-	newMetrics := make(map[types.MetricUUID]types.MetricData)
-	existingMetrics := make(map[types.MetricUUID]types.MetricData)
+	states := make(map[gouuid.UUID][]stateData)
+	newMetrics := make(map[gouuid.UUID]types.MetricData)
+	existingMetrics := make(map[gouuid.UUID]types.MetricData)
 
 	for uuid, data := range metrics {
 		newData := types.MetricData{
@@ -472,9 +474,9 @@ func (b *Batch) write(metrics map[types.MetricUUID]types.MetricData, now time.Ti
 // Returns a flush date
 // It follows the formula:
 // timestamp = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
-func flushTimestamp(uuid types.MetricUUID, now time.Time, batchSize int64) int64 {
+func flushTimestamp(uuid gouuid.UUID, now time.Time, batchSize int64) int64 {
 	timestamp := now.Unix() + batchSize
-	offset := int64(uuid.Uint64() % uint64(batchSize))
+	offset := int64(types.UintFromUUID(uuid) % uint64(batchSize))
 
 	timestamp -= (timestamp + offset) % batchSize
 

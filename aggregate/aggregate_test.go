@@ -1,32 +1,33 @@
 package aggregate
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 	"time"
 )
 
-func uuidFromStringOrNil(s string) types.MetricUUID {
-	uuid, _ := types.UUIDFromString(s)
+func uuidFromStringOrNil(s string) gouuid.UUID {
+	uuid, _ := gouuid.FromString(s)
 
 	return uuid
 }
 
 func TestAggregate(t *testing.T) {
 	type args struct {
-		metrics    map[types.MetricUUID]types.MetricData
+		metrics    map[gouuid.UUID]types.MetricData
 		resolution int64
 	}
 	tests := []struct {
 		name string
 		args args
-		want map[types.MetricUUID]AggregatedData
+		want map[gouuid.UUID]AggregatedData
 	}{
 		{
 			name: "test",
 			args: args{
-				metrics: map[types.MetricUUID]types.MetricData{
+				metrics: map[gouuid.UUID]types.MetricData{
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						Points: []types.MetricPoint{
 							{
@@ -80,7 +81,7 @@ func TestAggregate(t *testing.T) {
 				},
 				resolution: 50,
 			},
-			want: map[types.MetricUUID]AggregatedData{
+			want: map[gouuid.UUID]AggregatedData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []AggregatedPoint{
 						{

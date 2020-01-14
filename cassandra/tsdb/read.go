@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"github.com/gocql/gocql"
+	gouuid "github.com/gofrs/uuid"
 
 	"bytes"
 	"encoding/binary"
@@ -13,13 +14,13 @@ import (
 )
 
 // Read returns metrics according to the request made
-func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricUUID]types.MetricData, error) {
+func (c *CassandraTSDB) Read(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
 	if len(request.UUIDs) == 0 {
 		return nil, nil
 	}
 
 	readAggregate := request.Step >= c.options.AggregateResolution
-	metrics := make(map[types.MetricUUID]types.MetricData, len(request.UUIDs))
+	metrics := make(map[gouuid.UUID]types.MetricData, len(request.UUIDs))
 
 	for _, uuid := range request.UUIDs {
 		data := types.MetricData{}
@@ -59,7 +60,7 @@ func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricUUID]
 }
 
 // Returns aggregated data between the specified timestamps of the requested metric
-func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
+func (c *CassandraTSDB) readAggregateData(uuid gouuid.UUID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.AggregatePartitionSize)
@@ -90,7 +91,7 @@ func (c *CassandraTSDB) readAggregateData(uuid types.MetricUUID, fromTimestamp, 
 }
 
 // Returns aggregated partition data between the specified timestamps of the requested metric
-func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTimestamp, toTimestamp, baseTimestamp int64, function string) (types.MetricData, error) {
+func (c *CassandraTSDB) readAggregatePartitionData(uuid gouuid.UUID, fromTimestamp, toTimestamp, baseTimestamp int64, function string) (types.MetricData, error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.AggregateSize
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 
@@ -139,7 +140,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid types.MetricUUID, fromTi
 }
 
 // Returns raw data between the specified timestamps of the requested metric
-func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
+func (c *CassandraTSDB) readRawData(uuid gouuid.UUID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize)
@@ -170,7 +171,7 @@ func (c *CassandraTSDB) readRawData(uuid types.MetricUUID, fromTimestamp, toTime
 }
 
 // Returns raw partition data between the specified timestamps of the requested metric
-func (c *CassandraTSDB) readRawPartitionData(uuid types.MetricUUID, fromTimestamp, toTimestamp, baseTimestamp int64) (types.MetricData, error) {
+func (c *CassandraTSDB) readRawPartitionData(uuid gouuid.UUID, fromTimestamp, toTimestamp, baseTimestamp int64) (types.MetricData, error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.BatchSize
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 

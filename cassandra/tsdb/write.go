@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"github.com/gocql/gocql"
+	gouuid "github.com/gofrs/uuid"
 
 	"bytes"
 	"encoding/binary"
@@ -17,7 +18,7 @@ const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
 // metrics points should be sorted and deduplicated
-func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) error {
+func (c *CassandraTSDB) Write(metrics map[gouuid.UUID]types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -25,7 +26,7 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 	start := time.Now()
 
 	slicesMetrics := make([]types.MetricData, len(metrics))
-	slicesUUIDs := make([]types.MetricUUID, len(metrics))
+	slicesUUIDs := make([]gouuid.UUID, len(metrics))
 
 	var aggregatePointsCount int
 
@@ -68,7 +69,7 @@ func (c *CassandraTSDB) Write(metrics map[types.MetricUUID]types.MetricData) err
 }
 
 // Write writes all specified metrics of the slice
-func (c *CassandraTSDB) writeMetrics(uuids []types.MetricUUID, metrics []types.MetricData) {
+func (c *CassandraTSDB) writeMetrics(uuids []gouuid.UUID, metrics []types.MetricData) {
 	for i, data := range metrics {
 		retry.Print(func() error {
 			return c.writeRawData(uuids[i], data) // nolint: scopelint
@@ -79,7 +80,7 @@ func (c *CassandraTSDB) writeMetrics(uuids []types.MetricUUID, metrics []types.M
 }
 
 // Writes all specified aggregated metrics
-func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]aggregate.AggregatedData) error {
+func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[gouuid.UUID]aggregate.AggregatedData) error {
 	if len(aggregatedMetrics) == 0 {
 		return nil
 	}
@@ -106,7 +107,7 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricUUID]ag
 }
 
 // Write aggregated data per partition
-func (c *CassandraTSDB) writeAggregateData(uuid types.MetricUUID, aggregatedData aggregate.AggregatedData) error {
+func (c *CassandraTSDB) writeAggregateData(uuid gouuid.UUID, aggregatedData aggregate.AggregatedData) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
 	}
@@ -134,7 +135,7 @@ func (c *CassandraTSDB) writeAggregateData(uuid types.MetricUUID, aggregatedData
 }
 
 // Write aggregated partition data
-func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggregatedData aggregate.AggregatedData, baseTimestamp int64) error {
+func (c *CassandraTSDB) writeAggregatePartitionData(uuid gouuid.UUID, aggregatedData aggregate.AggregatedData, baseTimestamp int64) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
 	}
@@ -161,7 +162,7 @@ func (c *CassandraTSDB) writeAggregatePartitionData(uuid types.MetricUUID, aggre
 }
 
 // Write raw data per partition
-func (c *CassandraTSDB) writeRawData(uuid types.MetricUUID, data types.MetricData) error {
+func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -209,7 +210,7 @@ func (c *CassandraTSDB) writeRawData(uuid types.MetricUUID, data types.MetricDat
 }
 
 // Write raw partition data
-func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.MetricData, baseTimestamp int64) error {
+func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.MetricData, baseTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -238,7 +239,7 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid types.MetricUUID, data types.
 	return nil
 }
 
-func (c *CassandraTSDB) writeRawBatchData(uuid types.MetricUUID, data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
+func (c *CassandraTSDB) writeRawBatchData(uuid gouuid.UUID, data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
 	}

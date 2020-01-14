@@ -1,20 +1,24 @@
 package types
 
-import "sync"
+import (
+	"sync"
+
+	gouuid "github.com/gofrs/uuid"
+)
 
 type Index interface {
-	AllUUIDs() ([]MetricUUID, error)
-	LookupLabels(uuid MetricUUID) ([]MetricLabel, error)
-	LookupUUID(labels []MetricLabel) (MetricUUID, error)
-	Search(matchers []MetricLabelMatcher) ([]MetricUUID, error)
+	AllUUIDs() ([]gouuid.UUID, error)
+	LookupLabels(uuid gouuid.UUID) ([]MetricLabel, error)
+	LookupUUID(labels []MetricLabel) (gouuid.UUID, error)
+	Search(matchers []MetricLabelMatcher) ([]gouuid.UUID, error)
 }
 
 type MetricReader interface {
-	Read(request MetricRequest) (map[MetricUUID]MetricData, error)
+	Read(request MetricRequest) (map[gouuid.UUID]MetricData, error)
 }
 
 type MetricWriter interface {
-	Write(metrics map[MetricUUID]MetricData) error
+	Write(metrics map[gouuid.UUID]MetricData) error
 }
 
 // TryLocker is a Locker with an additional TryLock() method

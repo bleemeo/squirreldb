@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -115,8 +116,8 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	return points
 }
 
-// Returns a MetricUUID and a MetricData generated from a TimeSeries
-func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (types.MetricUUID, types.MetricData, error) {
+// Returns a UUID and a MetricData generated from a TimeSeries
+func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (gouuid.UUID, types.MetricData, error) {
 	labels := labelsFromPromLabels(promSeries.Labels)
 	timeToLive, err := timeToLiveFromLabels(labels)
 
@@ -139,14 +140,14 @@ func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (typ
 }
 
 // Returns a metric list generated from a TimeSeries list
-func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) (map[types.MetricUUID]types.MetricData, error) {
+func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) (map[gouuid.UUID]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil
 	}
 
 	totalPoints := 0
 
-	metrics := make(map[types.MetricUUID]types.MetricData, len(promTimeseries))
+	metrics := make(map[gouuid.UUID]types.MetricData, len(promTimeseries))
 
 	for _, promSeries := range promTimeseries {
 		uuid, data, err := metricFromPromSeries(promSeries, index)

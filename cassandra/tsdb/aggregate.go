@@ -9,6 +9,8 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"time"
+
+	gouuid "github.com/gofrs/uuid"
 )
 
 const (
@@ -97,7 +99,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		return false
 	}
 
-	var uuids []types.MetricUUID
+	var uuids []gouuid.UUID
 
 	retry.Print(func() error {
 		var err error
@@ -108,10 +110,10 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		"get UUIDs from the index",
 	)
 
-	var shardUUIDs []types.MetricUUID
+	var shardUUIDs []gouuid.UUID
 
 	for _, uuid := range uuids {
-		uuidShard := (int(uuid.Uint64() % uint64(shardNumber)))
+		uuidShard := (int(types.UintFromUUID(uuid) % uint64(shardNumber)))
 
 		if uuidShard == shard {
 			shardUUIDs = append(shardUUIDs, uuid)
@@ -136,7 +138,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 }
 
 // doAggregation perform the aggregation for given parameter
-func (c *CassandraTSDB) doAggregation(uuids []types.MetricUUID, fromTimestamp, toTimestamp, resolution int64) error {
+func (c *CassandraTSDB) doAggregation(uuids []gouuid.UUID, fromTimestamp, toTimestamp, resolution int64) error {
 	if len(uuids) == 0 {
 		return nil
 	}
