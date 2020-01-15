@@ -12,7 +12,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
