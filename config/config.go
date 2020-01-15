@@ -235,8 +235,6 @@ filesLoop:
 		}
 	}
 
-	sort.Strings(filePaths)
-
 	return filePaths, nil
 }
 
