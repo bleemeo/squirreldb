@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"squirreldb/compare"
 	"squirreldb/types"
-	"strconv"
 	"time"
 )
 
@@ -15,10 +14,6 @@ type WriteMetrics struct {
 	index  types.Index
 	writer types.MetricWriter
 }
-
-const (
-	timeToLiveLabelName = "__ttl__"
-)
 
 // ServeHTTP handles writing requests
 func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -54,24 +49,6 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 		return
 	}
-}
-
-// Returns and delete time to live from a MetricLabel list
-func timeToLiveFromLabels(labels *[]types.MetricLabel) (int64, error) {
-	value, exists := types.PopLabelsValue(labels, timeToLiveLabelName)
-
-	var timeToLive int64
-
-	if exists {
-		var err error
-		timeToLive, err = strconv.ParseInt(value, 10, 64)
-
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	return timeToLive, nil
 }
 
 // Returns a MetricLabel list generated from a Label list
@@ -117,13 +94,8 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 // Returns a UUID and a MetricData generated from a TimeSeries
 func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (gouuid.UUID, types.MetricData, error) {
 	labels := labelsFromPromLabels(promSeries.Labels)
-	timeToLive, err := timeToLiveFromLabels(&labels)
 
-	if err != nil {
-		logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
-	}
-
-	uuid, err := index.LookupUUID(labels)
+	uuid, timeToLive, err := index.LookupUUID(labels)
 	if err != nil {
 		return uuid, types.MetricData{}, err
 	}

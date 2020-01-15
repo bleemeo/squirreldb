@@ -31,6 +31,12 @@ var (
 		Name:      "lookup_uuid_new_total",
 		Help:      "Total lookup for metric UUID for new metrics",
 	})
+	lookupUUIDRefresh = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "lookup_uuid_refresh_total",
+		Help:      "Total lookup for metric UUID that caused a refresh of TTL",
+	})
 	searchMetricsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",

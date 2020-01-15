@@ -157,7 +157,8 @@ func createSquirrelIndex(session *gocql.Session, keyspace string, config *config
 	var squirrelIndex *index.CassandraIndex
 
 	options := index.Options{
-		IncludeUUID: config.Bool("index.include_uuid"),
+		DefaultTimeToLive: config.Int64("cassandra.default_time_to_live"),
+		IncludeUUID:       config.Bool("index.include_uuid"),
 	}
 
 	retry.Print(func() error {

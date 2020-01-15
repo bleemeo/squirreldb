@@ -9,7 +9,7 @@ import (
 type Index interface {
 	AllUUIDs() ([]gouuid.UUID, error)
 	LookupLabels(uuid gouuid.UUID) ([]MetricLabel, error)
-	LookupUUID(labels []MetricLabel) (gouuid.UUID, error)
+	LookupUUID(labels []MetricLabel) (gouuid.UUID, int64, error)
 	Search(matchers []MetricLabelMatcher) ([]gouuid.UUID, error)
 }
 

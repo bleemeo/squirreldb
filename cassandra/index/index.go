@@ -1,6 +1,8 @@
 package index
 
 import (
+	"strconv"
+
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
 
@@ -25,8 +27,16 @@ const expiratorInterval = 60
 
 const cacheExpirationDelay = 300
 
+// Update TTL of index entries in Cassandra every update delay.
+// The actual TTL used in Cassanra is the metric data TTL + update delay.
 const (
-	uuidLabelName = "__uuid__"
+	cassandraTTLUpdateDelay = time.Hour
+	cassandraTTLSafeMargin  = 10 * time.Minute
+)
+
+const (
+	timeToLiveLabelName = "__ttl__"
+	uuidLabelName       = "__uuid__"
 )
 
 const (
@@ -51,12 +61,14 @@ type labelsData struct {
 }
 
 type uuidData struct {
-	uuid                gouuid.UUID
-	expirationTimestamp int64
+	uuid                     gouuid.UUID
+	cassandraEntryExpiration time.Time
+	expirationTimestamp      int64
 }
 
 type Options struct {
-	IncludeUUID bool
+	DefaultTimeToLive int64
+	IncludeUUID       bool
 }
 
 type CassandraIndex struct {
@@ -188,15 +200,17 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 }
 
 // LookupUUID returns a UUID corresponding to the specified MetricLabel list
-func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, error) {
+// It also return the metric TTL
+func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, int64, error) {
 	start := time.Now()
+	now := time.Now()
 
 	defer func() {
 		lookupUUIDSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	if len(labels) == 0 {
-		return gouuid.UUID{}, nil
+		return gouuid.UUID{}, 0, nil
 	}
 
 	c.ltuMutex.Lock()
@@ -207,6 +221,11 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, er
 		found    bool
 	)
 
+	ttl := timeToLiveFromLabels(&labels)
+	if ttl == 0 {
+		ttl = c.options.DefaultTimeToLive
+	}
+
 	if c.options.IncludeUUID {
 		var uuidStr string
 		uuidStr, found = types.GetLabelsValue(labels, uuidLabelName)
@@ -216,9 +235,11 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, er
 			uuidData.uuid, err = gouuid.FromString(uuidStr)
 
 			if err != nil {
-				return gouuid.UUID{}, nil
+				return gouuid.UUID{}, 0, nil
 			}
 		}
+		// Broken for TTL :( Force not using it due to TTL
+		found = false
 	}
 
 	var labelsKey string
@@ -243,13 +264,17 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, er
 
 		selectUUIDQuery := c.labelsTableSelectUUIDQuery(sortedLabelsString)
 
-		var cqlUUID gocql.UUID
+		var (
+			cqlUUID      gocql.UUID
+			cassandraTTL int64
+		)
 
-		if err := selectUUIDQuery.Scan(&cqlUUID); err == nil {
+		if err := selectUUIDQuery.Scan(&cqlUUID, &cassandraTTL); err == nil {
 			uuidData.uuid = gouuid.UUID(cqlUUID)
+			uuidData.cassandraEntryExpiration = now.Add(time.Duration(cassandraTTL) * time.Second)
 			found = true
 		} else if err != gocql.ErrNotFound {
-			return gouuid.UUID{}, err
+			return gouuid.UUID{}, 0, err
 		}
 	}
 
@@ -259,38 +284,56 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, er
 		cqlUUID, err := gocql.RandomUUID()
 
 		if err != nil {
-			return gouuid.UUID{}, err
+			return gouuid.UUID{}, 0, err
 		}
+
+		uuidData.uuid = gouuid.UUID(cqlUUID)
+	}
+
+	wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
+	needTTLUpdate := uuidData.cassandraEntryExpiration.Before(wantedEntryExpiration)
+
+	if !found || needTTLUpdate {
+		if needTTLUpdate {
+			lookupUUIDRefresh.Inc()
+		}
+
+		if sortedLabelsString == "" {
+			sortedLabels = types.SortLabels(labels)
+			sortedLabelsString = types.StringFromLabels(sortedLabels)
+		}
+		// The Cassandra TTL is a little longer because we only update the TTL
+		// every cassandraTTLUpdateDelay. By adding cassandraTTLUpdateDelay to the TTL
+		// we won't drop the metric from the index even for value receive in
+		// cassandraTTLUpdateDelay - 1 seconds
+		cassandraTTL := ttl + int64(cassandraTTLUpdateDelay.Seconds())
+		actualTTL := cassandraTTL + int64(cassandraTTLSafeMargin.Seconds())
 
 		indexBatch := c.session.NewBatch(gocql.LoggedBatch)
 		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
-		uuid := gouuid.UUID(cqlUUID)
-
-		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, gocql.UUID(uuid))
+		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, gocql.UUID(uuidData.uuid), actualTTL)
 
 		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
 
-		indexBatch.Query(insertLabelsQueryString, gocql.UUID(uuid), sortedLabels)
+		indexBatch.Query(insertLabelsQueryString, gocql.UUID(uuidData.uuid), sortedLabels, actualTTL)
 
 		for _, label := range sortedLabels {
 			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString()
 
-			indexBatch.Query(updateUUIDsQueryString, []gocql.UUID{gocql.UUID(uuid)}, label.Name, label.Value)
+			indexBatch.Query(updateUUIDsQueryString, actualTTL, []gocql.UUID{gocql.UUID(uuidData.uuid)}, label.Name, label.Value)
 		}
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
-			return gouuid.UUID{}, err
+			return gouuid.UUID{}, 0, err
 		}
 
-		uuidData.uuid = uuid
+		uuidData.cassandraEntryExpiration = now.Add(time.Duration(cassandraTTL) * time.Second)
 	}
-
-	now := time.Now()
 
 	uuidData.expirationTimestamp = now.Unix() + cacheExpirationDelay
 	c.labelsToUUID[labelsKey] = uuidData
 
-	return uuidData.uuid, nil
+	return uuidData.uuid, ttl, nil
 }
 
 // Search returns a list of UUID corresponding to the specified MetricLabelMatcher list
@@ -529,6 +572,7 @@ func (c *CassandraIndex) labelsTableInsertUUIDQueryString() string {
 	queryString := replacer.Replace(`
 		INSERT INTO $LABELS_TABLE (labels, uuid)
 		VALUES (?, ?)
+		USING TTL ?
 	`)
 
 	return queryString
@@ -538,7 +582,7 @@ func (c *CassandraIndex) labelsTableInsertUUIDQueryString() string {
 func (c *CassandraIndex) labelsTableSelectUUIDQuery(labels string) *gocql.Query {
 	replacer := strings.NewReplacer("$LABELS_TABLE", c.labelsTable)
 	query := c.session.Query(replacer.Replace(`
-		SELECT uuid FROM $LABELS_TABLE
+		SELECT uuid, ttl(uuid) FROM $LABELS_TABLE
 		WHERE labels = ?
 	`), labels)
 
@@ -585,6 +629,7 @@ func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString() string {
 	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
 	queryString := replacer.Replace(`
 		UPDATE $POSTINGS_TABLE
+		USING TTL ?
 		SET uuids = uuids + ?
 		WHERE name = ? AND value = ?
 	`)
@@ -598,6 +643,7 @@ func (c *CassandraIndex) uuidsTableInsertLabelsQueryString() string {
 	queryString := replacer.Replace(`
 		INSERT INTO $UUIDS_TABLE (uuid, labels)
 		VALUES (?, ?)
+		USING TTL ?
 	`)
 
 	return queryString
@@ -699,4 +745,23 @@ func keyFromLabels(labels []types.MetricLabel) string {
 	str := strings.Join(strLabels, "\x00")
 
 	return str
+}
+
+// Returns and delete time to live from a MetricLabel list
+func timeToLiveFromLabels(labels *[]types.MetricLabel) int64 {
+	value, exists := types.PopLabelsValue(labels, timeToLiveLabelName)
+
+	var timeToLive int64
+
+	if exists {
+		var err error
+		timeToLive, err = strconv.ParseInt(value, 10, 64)
+
+		if err != nil {
+			logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+			return 0
+		}
+	}
+
+	return timeToLive
 }
