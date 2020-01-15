@@ -94,14 +94,16 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	return result
 }
 
-// DeleteLabelsValue deletes value via its name from a MetricLabel list
-func DeleteLabelsValue(labels *[]MetricLabel, key string) {
+// PopLabelsValue get and delete value via its name from a MetricLabel list
+func PopLabelsValue(labels *[]MetricLabel, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {
 			*labels = append((*labels)[:i], (*labels)[i+1:]...)
-			return
+			return label.Value, true
 		}
 	}
+
+	return "", false
 }
 
 // GetLabelsValue gets value via its name from a MetricLabel list

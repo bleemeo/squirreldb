@@ -57,8 +57,8 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 }
 
 // Returns and delete time to live from a MetricLabel list
-func timeToLiveFromLabels(labels []types.MetricLabel) (int64, error) {
-	value, exists := types.GetLabelsValue(labels, timeToLiveLabelName)
+func timeToLiveFromLabels(labels *[]types.MetricLabel) (int64, error) {
+	value, exists := types.PopLabelsValue(labels, timeToLiveLabelName)
 
 	var timeToLive int64
 
@@ -69,8 +69,6 @@ func timeToLiveFromLabels(labels []types.MetricLabel) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-
-		types.DeleteLabelsValue(&labels, timeToLiveLabelName)
 	}
 
 	return timeToLive, nil
@@ -119,7 +117,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 // Returns a UUID and a MetricData generated from a TimeSeries
 func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (gouuid.UUID, types.MetricData, error) {
 	labels := labelsFromPromLabels(promSeries.Labels)
-	timeToLive, err := timeToLiveFromLabels(labels)
+	timeToLive, err := timeToLiveFromLabels(&labels)
 
 	if err != nil {
 		logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
