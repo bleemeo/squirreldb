@@ -118,7 +118,7 @@ func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[gouuid.UUID]aggrega
 	return nil
 }
 
-// Write aggregated data per partition
+// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together
 func (c *CassandraTSDB) writeAggregateData(uuid gouuid.UUID, aggregatedData aggregate.AggregatedData) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
@@ -138,7 +138,7 @@ func (c *CassandraTSDB) writeAggregateData(uuid gouuid.UUID, aggregatedData aggr
 			TimeToLive: aggregatedData.TimeToLive,
 		}
 
-		if err := c.writeAggregatePartitionData(uuid, aggregatedPartitionData, baseTimestamp); err != nil {
+		if err := c.writeAggregateRow(uuid, aggregatedPartitionData, baseTimestamp); err != nil {
 			return err
 		}
 	}
@@ -146,8 +146,8 @@ func (c *CassandraTSDB) writeAggregateData(uuid gouuid.UUID, aggregatedData aggr
 	return nil
 }
 
-// Write aggregated partition data
-func (c *CassandraTSDB) writeAggregatePartitionData(uuid gouuid.UUID, aggregatedData aggregate.AggregatedData, baseTimestamp int64) error {
+// writeAggregateRow writes one aggregated row
+func (c *CassandraTSDB) writeAggregateRow(uuid gouuid.UUID, aggregatedData aggregate.AggregatedData, baseTimestamp int64) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
 	}
