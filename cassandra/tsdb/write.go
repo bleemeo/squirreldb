@@ -9,7 +9,6 @@ import (
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
-	"strings"
 	"sync"
 	"time"
 )
@@ -278,24 +277,22 @@ func (c *CassandraTSDB) writeRawBatchData(uuid gouuid.UUID, data types.MetricDat
 
 // Returns table insert raw data Query
 func (c *CassandraTSDB) tableInsertRawDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
-	replacer := strings.NewReplacer("$TABLE", c.options.dataTable)
-	query := c.session.Query(replacer.Replace(`
-		INSERT INTO $TABLE (metric_uuid, base_ts, offset_ts, insert_time, values)
+	query := c.session.Query(`
+		INSERT INTO data (metric_uuid, base_ts, offset_ts, insert_time, values)
 		VALUES (?, ?, ?, now(), ?)
 		USING TTL ?
-	`), uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
+	`, uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
 
 	return query
 }
 
 // Returns table insert aggregated data Query
 func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
-	replacer := strings.NewReplacer("$TABLE", c.options.aggregateDataTable)
-	query := c.session.Query(replacer.Replace(`
-		INSERT INTO $TABLE (metric_uuid, base_ts, offset_ts, values)
+	query := c.session.Query(`
+		INSERT INTO data_aggregated (metric_uuid, base_ts, offset_ts, values)
 		VALUES (?, ?, ?, ?)
 		USING TTL ?
-	`), uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
+	`, uuid, baseTimestamp, offsetTimestamp, values, timeToLive)
 
 	return query
 }

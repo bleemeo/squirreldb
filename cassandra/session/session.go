@@ -32,7 +32,8 @@ func New(options Options) (*gocql.Session, error) {
 		return nil, err
 	}
 
-	return session, nil
+	cluster.Keyspace = options.Keyspace
+	return cluster.CreateSession()
 }
 
 // Returns keyspace create query

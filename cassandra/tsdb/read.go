@@ -9,7 +9,6 @@ import (
 	"io"
 	"squirreldb/compare"
 	"squirreldb/types"
-	"strings"
 	"time"
 )
 
@@ -99,7 +98,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid gouuid.UUID, fromTimesta
 
 	start := time.Now()
 
-	tableSelectDataIter := c.tableSelectDataIter(c.options.aggregateDataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	tableSelectDataIter := c.aggregatedTableSelectDataIter(uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 
 	queryDuration := time.Since(start)
 
@@ -179,7 +178,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid gouuid.UUID, fromTimestamp, to
 
 	start := time.Now()
 
-	tableSelectDataIter := c.tableSelectDataIter(c.options.dataTable, uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	tableSelectDataIter := c.rawTableSelectDataIter(uuid.String(), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 
 	queryDuration := time.Since(start)
 
@@ -220,12 +219,21 @@ func (c *CassandraTSDB) readRawPartitionData(uuid gouuid.UUID, fromTimestamp, to
 }
 
 // Returns table select data Query
-func (c *CassandraTSDB) tableSelectDataIter(table string, uuid string, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
-	replacer := strings.NewReplacer("$TABLE", table)
-	query := c.session.Query(replacer.Replace(`
-		SELECT offset_ts, TTL(values), values FROM $TABLE
+func (c *CassandraTSDB) rawTableSelectDataIter(uuid string, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	query := c.session.Query(`
+		SELECT offset_ts, TTL(values), values FROM data
 		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
-	`), uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	`, uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	iter := query.Iter()
+
+	return iter
+}
+
+func (c *CassandraTSDB) aggregatedTableSelectDataIter(uuid string, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp int64) *gocql.Iter {
+	query := c.session.Query(`
+		SELECT offset_ts, TTL(values), values FROM data_aggregated
+		WHERE metric_uuid = ? AND base_ts = ? AND offset_ts >= ? AND offset_ts <= ?
+	`, uuid, baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
 	iter := query.Iter()
 
 	return iter

@@ -5,29 +5,22 @@ import (
 
 	"fmt"
 	"strconv"
-	"strings"
 )
 
-const tableName = "states"
-
 type CassandraStates struct {
-	session     *gocql.Session
-	statesTable string
+	session *gocql.Session
 }
 
 // New creates a new CassandraStates object
-func New(session *gocql.Session, keyspace string) (*CassandraStates, error) {
-	statesTable := keyspace + "." + tableName
-
-	statesTableCreateQuery := statesTableCreateQuery(session, statesTable)
+func New(session *gocql.Session) (*CassandraStates, error) {
+	statesTableCreateQuery := statesTableCreateQuery(session)
 
 	if err := statesTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
 	states := &CassandraStates{
-		session:     session,
-		statesTable: statesTable,
+		session: session,
 	}
 
 	return states, nil
@@ -80,36 +73,33 @@ func (c *CassandraStates) Write(name string, value interface{}) error {
 
 // Returns states table insert state Query
 func (c *CassandraStates) statesTableInsertStateQuery(name string, value string) *gocql.Query {
-	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
-	query := c.session.Query(replacer.Replace(`
-		INSERT INTO $STATES_TABLE (name, value)
+	query := c.session.Query(`
+		INSERT INTO states (name, value)
 		VALUES (?, ?)
-	`), name, value)
+	`, name, value)
 
 	return query
 }
 
 // Returns states table select state Query
 func (c *CassandraStates) statesTableSelectStateQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT value FROM $STATES_TABLE
+	query := c.session.Query(`
+		SELECT value FROM states
 		WHERE name = ?
-	`), name)
+	`, name)
 
 	return query
 }
 
 // Returns states table create Query
-func statesTableCreateQuery(session *gocql.Session, statesTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$STATES_TABLE", statesTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $STATES_TABLE (
+func statesTableCreateQuery(session *gocql.Session) *gocql.Query {
+	query := session.Query(`
+		CREATE TABLE IF NOT EXISTS states (
 			name text,
 			value text,
 			PRIMARY KEY (name)
 		)
-	`))
+	`)
 
 	return query
 }

@@ -13,9 +13,7 @@ import (
 )
 
 const (
-	dataTableName          = "data"
-	aggregateDataTableName = "data_aggregated"
-	retryMaxDelay          = 30 * time.Second
+	retryMaxDelay = 30 * time.Second
 )
 
 //nolint: gochecknoglobals
@@ -29,9 +27,6 @@ type Options struct {
 	AggregateResolution       int64
 	AggregateSize             int64
 	AggregateIntendedDuration int64
-
-	dataTable          string
-	aggregateDataTable string
 }
 
 type lockFactory interface {
@@ -48,17 +43,15 @@ type CassandraTSDB struct {
 }
 
 // New created a new CassandraTSDB object
-func New(session *gocql.Session, keyspace string, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
-	options.dataTable = keyspace + "." + dataTableName
-	options.aggregateDataTable = keyspace + "." + aggregateDataTableName
+func New(session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
 	defaultTimeToLive := strconv.FormatInt(options.DefaultTimeToLive, 10)
-	dataTableCreateQuery := dataTableCreateQuery(session, options.dataTable, defaultTimeToLive)
+	dataTableCreateQuery := dataTableCreateQuery(session, defaultTimeToLive)
 
 	if err := dataTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
-	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, options.aggregateDataTable, defaultTimeToLive)
+	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, defaultTimeToLive)
 
 	if err := aggregateDataTableCreateQuery.Exec(); err != nil {
 		return nil, err
@@ -76,10 +69,10 @@ func New(session *gocql.Session, keyspace string, options Options, index types.I
 }
 
 // Returns data table create Query
-func dataTableCreateQuery(session *gocql.Session, dataTable, defaultTimeToLive string) *gocql.Query {
-	replacer := strings.NewReplacer("$DATA_TABLE", dataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive string) *gocql.Query {
+	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $DATA_TABLE (
+		CREATE TABLE IF NOT EXISTS data (
 			metric_uuid uuid,
 			base_ts bigint,
 			offset_ts int,
@@ -104,10 +97,10 @@ func dataTableCreateQuery(session *gocql.Session, dataTable, defaultTimeToLive s
 }
 
 // Returns aggregate data table create Query
-func aggregateDataTableCreateQuery(session *gocql.Session, aggregateDataTable, defaultTimeToLive string) *gocql.Query {
-	replacer := strings.NewReplacer("$AGGREGATED_DATA_TABLE", aggregateDataTable, "$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
+func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive string) *gocql.Query {
+	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", defaultTimeToLive)
 	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $AGGREGATED_DATA_TABLE (
+		CREATE TABLE IF NOT EXISTS data_aggregated (
 			metric_uuid uuid,
 			base_ts bigint,
 			offset_ts int,

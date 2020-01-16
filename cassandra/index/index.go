@@ -18,12 +18,6 @@ import (
 	"time"
 )
 
-const (
-	labelsTableName   = "labels"
-	postingsTableName = "postings"
-	uuidsTableName    = "uuids"
-)
-
 const expiratorInterval = 60
 
 const cacheExpirationDelay = 300
@@ -73,11 +67,8 @@ type Options struct {
 }
 
 type CassandraIndex struct {
-	session       *gocql.Session
-	options       Options
-	labelsTable   string
-	postingsTable string
-	uuidsTable    string
+	session *gocql.Session
+	options Options
 
 	labelsToUUID  map[string]uuidData
 	ltuMutex      sync.Mutex
@@ -86,23 +77,20 @@ type CassandraIndex struct {
 }
 
 // New creates a new CassandraIndex object
-func New(session *gocql.Session, keyspace string, options Options) (*CassandraIndex, error) {
-	labelsTable := keyspace + "." + "\"" + labelsTableName + "\""
-	labelsTableCreateQuery := labelsTableCreateQuery(session, labelsTable)
+func New(session *gocql.Session, options Options) (*CassandraIndex, error) {
+	labelsTableCreateQuery := labelsTableCreateQuery(session)
 
 	if err := labelsTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
-	postingsTable := keyspace + "." + "\"" + postingsTableName + "\""
-	postingsTableCreateQuery := postingsTableCreateQuery(session, postingsTable)
+	postingsTableCreateQuery := postingsTableCreateQuery(session)
 
 	if err := postingsTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
-	uuidsTable := keyspace + "." + "\"" + uuidsTableName + "\""
-	uuidsTableCreateQuery := uuidsTableCreateQuery(session, uuidsTable)
+	uuidsTableCreateQuery := uuidsTableCreateQuery(session)
 
 	if err := uuidsTableCreateQuery.Exec(); err != nil {
 		return nil, err
@@ -111,9 +99,6 @@ func New(session *gocql.Session, keyspace string, options Options) (*CassandraIn
 	index := &CassandraIndex{
 		session:       session,
 		options:       options,
-		labelsTable:   labelsTable,
-		postingsTable: postingsTable,
-		uuidsTable:    uuidsTable,
 		labelsToUUID:  make(map[string]uuidData),
 		uuidsToLabels: make(map[gouuid.UUID]labelsData),
 	}
@@ -562,9 +547,8 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 
 // Returns labels table insert uuid Query
 func (c *CassandraIndex) labelsTableInsertUUIDQueryString() string {
-	replacer := strings.NewReplacer("$LABELS_TABLE", c.labelsTable)
-	queryString := replacer.Replace(`
-		INSERT INTO $LABELS_TABLE (labels, uuid)
+	queryString := (`
+		INSERT INTO labels (labels, uuid)
 		VALUES (?, ?)
 		USING TTL ?
 	`)
@@ -574,55 +558,48 @@ func (c *CassandraIndex) labelsTableInsertUUIDQueryString() string {
 
 // Returns labels table select uuid Query
 func (c *CassandraIndex) labelsTableSelectUUIDQuery(labels string) *gocql.Query {
-	replacer := strings.NewReplacer("$LABELS_TABLE", c.labelsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT uuid, ttl(uuid) FROM $LABELS_TABLE
+	query := c.session.Query(`
+		SELECT uuid, ttl(uuid) FROM labels
 		WHERE labels = ?
-	`), labels)
+	`, labels)
 
 	return query
 }
 
 // Returns postings table select uuids Query
 func (c *CassandraIndex) postingsTableSelectUUIDsQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-
-	query := c.session.Query(replacer.Replace(`
-		SELECT uuids FROM $POSTINGS_TABLE
+	query := c.session.Query(`
+		SELECT uuids FROM postings
 		WHERE name = ?
-	`), name)
+	`, name)
 
 	return query
 }
 
 // Returns postings table select uuids with name focus Query
 func (c *CassandraIndex) postingsTableSelectUUIDsFocusQuery(name, value string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-
-	query := c.session.Query(replacer.Replace(`
-		SELECT uuids FROM $POSTINGS_TABLE
+	query := c.session.Query(`
+		SELECT uuids FROM postings
 		WHERE name = ? AND value = ?
-	`), name, value)
+	`, name, value)
 
 	return query
 }
 
 // Returns postings table select value Query
 func (c *CassandraIndex) postingsTableSelectValueQuery(name string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT value FROM $POSTINGS_TABLE
+	query := c.session.Query(`
+		SELECT value FROM postings
 		WHERE name = ?
-	`), name)
+	`, name)
 
 	return query
 }
 
 // Returns postings table update uuids Query as string
 func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString() string {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", c.postingsTable)
-	queryString := replacer.Replace(`
-		UPDATE $POSTINGS_TABLE
+	queryString := (`
+		UPDATE postings
 		USING TTL ?
 		SET uuids = uuids + ?
 		WHERE name = ? AND value = ?
@@ -633,9 +610,8 @@ func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString() string {
 
 // Returns uuids table insert labels Query as string
 func (c *CassandraIndex) uuidsTableInsertLabelsQueryString() string {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
-	queryString := replacer.Replace(`
-		INSERT INTO $UUIDS_TABLE (uuid, labels)
+	queryString := (`
+		INSERT INTO uuids (uuid, labels)
 		VALUES (?, ?)
 		USING TTL ?
 	`)
@@ -645,65 +621,60 @@ func (c *CassandraIndex) uuidsTableInsertLabelsQueryString() string {
 
 // Returns uuids table select labels Query
 func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid gocql.UUID) *gocql.Query {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT labels FROM $UUIDS_TABLE
+	query := c.session.Query(`
+		SELECT labels FROM uuids
 		WHERE uuid = ?
-	`), uuid)
+	`, uuid)
 
 	return query
 }
 
 // Returns uuids table select labels all Query
 func (c *CassandraIndex) uuidsTableSelectUUIDsQuery() *gocql.Query {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", c.uuidsTable)
-	query := c.session.Query(replacer.Replace(`
-		SELECT uuid FROM $UUIDS_TABLE
+	query := c.session.Query(`
+		SELECT uuid FROM uuids
 		ALLOW FILTERING
-	`))
+	`)
 
 	return query
 }
 
 // Returns labels table create Query
-func labelsTableCreateQuery(session *gocql.Session, labelsTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$LABELS_TABLE", labelsTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $LABELS_TABLE (
+func labelsTableCreateQuery(session *gocql.Session) *gocql.Query {
+	query := session.Query(`
+		CREATE TABLE IF NOT EXISTS labels (
 			labels text,
 			uuid uuid,
 			PRIMARY KEY (labels)
 		)
-	`))
+	`)
 
 	return query
 }
 
 // Returns postings table create Query
-func postingsTableCreateQuery(session *gocql.Session, postingsTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$POSTINGS_TABLE", postingsTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $POSTINGS_TABLE (
+func postingsTableCreateQuery(session *gocql.Session) *gocql.Query {
+	query := session.Query(`
+		CREATE TABLE IF NOT EXISTS postings (
 			name text,
 			value text,
 			uuids set<uuid>,
 			PRIMARY KEY (name, value)
 		)
-	`))
+	`)
 
 	return query
 }
 
 // Returns uuids table create Query
-func uuidsTableCreateQuery(session *gocql.Session, uuidsTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$UUIDS_TABLE", uuidsTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $UUIDS_TABLE (
+func uuidsTableCreateQuery(session *gocql.Session) *gocql.Query {
+	query := session.Query(`
+		CREATE TABLE IF NOT EXISTS uuids (
 			uuid uuid,
 			labels frozen<list<tuple<text, text>>>,
 			PRIMARY KEY (uuid)
 		)
-	`))
+	`)
 
 	return query
 }

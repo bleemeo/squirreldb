@@ -51,7 +51,7 @@ func main() {
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
-	squirrelStates := createSquirrelStates(squirrelSession, keyspace)
+	squirrelStates := createSquirrelStates(squirrelSession)
 
 	if !squirrelConfig.ValidateRemote(squirrelStates) {
 		os.Exit(1)
@@ -67,9 +67,9 @@ func main() {
 		squirrelStore = memorystore.New()
 	}
 
-	squirrelIndex := createSquirrelIndex(squirrelSession, keyspace, squirrelConfig)
-	squirrelLocks := createSquirrelLocks(squirrelSession, keyspace)
-	squirrelTSDB := createSquirrelTSDB(squirrelSession, keyspace, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
+	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig)
+	squirrelLocks := createSquirrelLocks(squirrelSession)
+	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
 
@@ -153,7 +153,7 @@ func createSquirrelSession(keyspace string, config *config.Config) *gocql.Sessio
 	return squirrelSession
 }
 
-func createSquirrelIndex(session *gocql.Session, keyspace string, config *config.Config) *index.CassandraIndex {
+func createSquirrelIndex(session *gocql.Session, config *config.Config) *index.CassandraIndex {
 	var squirrelIndex *index.CassandraIndex
 
 	options := index.Options{
@@ -163,7 +163,7 @@ func createSquirrelIndex(session *gocql.Session, keyspace string, config *config
 
 	retry.Print(func() error {
 		var err error
-		squirrelIndex, err = index.New(session, keyspace, options)
+		squirrelIndex, err = index.New(session, options)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -173,12 +173,12 @@ func createSquirrelIndex(session *gocql.Session, keyspace string, config *config
 	return squirrelIndex
 }
 
-func createSquirrelLocks(session *gocql.Session, keyspace string) *locks.CassandraLocks {
+func createSquirrelLocks(session *gocql.Session) *locks.CassandraLocks {
 	var squirrelLocks *locks.CassandraLocks
 
 	retry.Print(func() error {
 		var err error
-		squirrelLocks, err = locks.New(session, keyspace)
+		squirrelLocks, err = locks.New(session)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -188,12 +188,12 @@ func createSquirrelLocks(session *gocql.Session, keyspace string) *locks.Cassand
 	return squirrelLocks
 }
 
-func createSquirrelStates(session *gocql.Session, keyspace string) *states.CassandraStates {
+func createSquirrelStates(session *gocql.Session) *states.CassandraStates {
 	var squirrelStates *states.CassandraStates
 
 	retry.Print(func() error {
 		var err error
-		squirrelStates, err = states.New(session, keyspace)
+		squirrelStates, err = states.New(session)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -203,7 +203,7 @@ func createSquirrelStates(session *gocql.Session, keyspace string) *states.Cassa
 	return squirrelStates
 }
 
-func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.Config, index types.Index, lockFactory *locks.CassandraLocks, state types.State) *tsdb.CassandraTSDB {
+func createSquirrelTSDB(session *gocql.Session, config *config.Config, index types.Index, lockFactory *locks.CassandraLocks, state types.State) *tsdb.CassandraTSDB {
 	options := tsdb.Options{
 		DefaultTimeToLive:         config.Int64("cassandra.default_time_to_live"),
 		BatchSize:                 config.Int64("batch.size"),
@@ -218,7 +218,7 @@ func createSquirrelTSDB(session *gocql.Session, keyspace string, config *config.
 
 	retry.Print(func() error {
 		var err error
-		squirrelTSDB, err = tsdb.New(session, keyspace, options, index, lockFactory, state)
+		squirrelTSDB, err = tsdb.New(session, options, index, lockFactory, state)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,

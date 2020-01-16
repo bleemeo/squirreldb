@@ -13,10 +13,7 @@ import (
 
 	"squirreldb/retry"
 	"squirreldb/types"
-	"strings"
 )
-
-const tableName = "locks"
 
 const retryMaxDelay = 30 * time.Second
 
@@ -24,8 +21,7 @@ const retryMaxDelay = 30 * time.Second
 var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
 
 type CassandraLocks struct {
-	session    *gocql.Session
-	locksTable string
+	session *gocql.Session
 }
 
 type Lock struct {
@@ -41,18 +37,15 @@ type Lock struct {
 }
 
 // New creates a new CassandraLocks object
-func New(session *gocql.Session, keyspace string) (*CassandraLocks, error) {
-	locksTable := keyspace + "." + tableName
-
-	locksTableCreateQuery := locksTableCreateQuery(session, locksTable)
+func New(session *gocql.Session) (*CassandraLocks, error) {
+	locksTableCreateQuery := locksTableCreateQuery(session)
 
 	if err := locksTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
 	locks := &CassandraLocks{
-		session:    session,
-		locksTable: locksTable,
+		session: session,
 	}
 
 	return locks, nil
@@ -166,53 +159,49 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 // Returns locks table delete lock Query
 func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
-	query := l.c.session.Query(replacer.Replace(`
-		DELETE FROM $LOCKS_TABLE
+	query := l.c.session.Query(`
+		DELETE FROM "locks"
 		WHERE name = ?
 		IF lock_id = ?
-	`), l.name, l.lockID)
+	`, l.name, l.lockID)
 
 	return query
 }
 
 // Returns locks table insert lock Query
 func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
-	query := l.c.session.Query(replacer.Replace(`
-		INSERT INTO $LOCKS_TABLE (name, lock_id, timestamp)
+	query := l.c.session.Query(`
+		INSERT INTO locks (name, lock_id, timestamp)
 		VALUES (?, ?, toUnixTimestamp(now()))
 		IF NOT EXISTS
 		USING TTL ?
-	`), l.name, l.lockID, int64(l.timeToLive.Seconds()))
+	`, l.name, l.lockID, int64(l.timeToLive.Seconds()))
 
 	return query
 }
 
 // Returns locks table update lock Query
 func (l *Lock) locksTableUpdateLockQuery() *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", l.c.locksTable)
-	query := l.c.session.Query(replacer.Replace(`
-		UPDATE $LOCKS_TABLE USING TTL ?
+	query := l.c.session.Query(`
+		UPDATE locks USING TTL ?
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
 		IF lock_id = ?
-	`), int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
+	`, int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
 
 	return query
 }
 
 // Returns locks table create Query
-func locksTableCreateQuery(session *gocql.Session, locksTable string) *gocql.Query {
-	replacer := strings.NewReplacer("$LOCKS_TABLE", locksTable)
-	query := session.Query(replacer.Replace(`
-		CREATE TABLE IF NOT EXISTS $LOCKS_TABLE (
+func locksTableCreateQuery(session *gocql.Session) *gocql.Query {
+	query := session.Query(`
+		CREATE TABLE IF NOT EXISTS locks (
 			name text,
 			lock_id text,
 			timestamp timestamp,
 			PRIMARY KEY (name)
 		)
-	`))
+	`)
 
 	return query
 }
