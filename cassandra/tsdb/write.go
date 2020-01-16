@@ -227,25 +227,42 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.Metri
 		return nil
 	}
 
-	firstPoint := data.Points[0]
-	firstOffsetTimestamp := firstPoint.Timestamp - baseTimestamp
-	offsetTimestampPoints := make(map[int64][]types.MetricPoint)
+	n := len(data.Points)
+	startOffsetTimestamp := data.Points[0].Timestamp - baseTimestamp
 
-	for _, point := range data.Points {
-		offsetTimestamp := (point.Timestamp - baseTimestamp) - ((point.Timestamp - firstOffsetTimestamp) % c.options.BatchSize)
-
-		offsetTimestampPoints[offsetTimestamp] = append(offsetTimestampPoints[offsetTimestamp], point)
+	// The sub-offset timestamp is encoded as uint16. It first, no need to split in multiple write
+	if data.Points[n-1].Timestamp-startOffsetTimestamp < 1<<16 {
+		err := c.writeRawBatchData(uuid, data, baseTimestamp, startOffsetTimestamp)
+		return err
 	}
 
-	for offsetTimestamp, points := range offsetTimestampPoints {
-		batchData := types.MetricData{
-			Points:     points,
-			TimeToLive: data.TimeToLive,
-		}
+	currentOffsetTimestamp := startOffsetTimestamp
+	currentStartIndex := 0
 
-		if err := c.writeRawBatchData(uuid, batchData, baseTimestamp, offsetTimestamp); err != nil {
-			return err
+	for i, point := range data.Points {
+		subOffset := point.Timestamp - baseTimestamp - currentOffsetTimestamp
+		if subOffset >= 1<<16 {
+			rowData := types.MetricData{
+				Points:     data.Points[currentStartIndex:i],
+				TimeToLive: data.TimeToLive,
+			}
+
+			if err := c.writeRawBatchData(uuid, rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+				return err
+			}
+
+			currentStartIndex = i
+			currentOffsetTimestamp = point.Timestamp - baseTimestamp
 		}
+	}
+
+	rowData := types.MetricData{
+		Points:     data.Points[currentStartIndex:],
+		TimeToLive: data.TimeToLive,
+	}
+
+	if err := c.writeRawBatchData(uuid, rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+		return err
 	}
 
 	return nil
