@@ -23,7 +23,7 @@ func newEnvProvider() koanf.Provider {
 		key, exists := envToKey[s]
 
 		if !exists {
-			logger.Printf("Warning: '%s' environment variable doesn't exist.", s)
+			logger.Printf("Warning: '%s%s' environment variable doesn't exist.", envPrefix, s)
 		}
 
 		return key
