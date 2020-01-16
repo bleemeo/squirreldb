@@ -523,19 +523,19 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 // Returns uuids table insert labels Query as string
 func (c *CassandraIndex) batchAddEntry(batch *gocql.Batch, uuid gocql.UUID, labelsString string, labels []types.MetricLabel, ttl int64) {
 	batch.Query(`
-		INSERT INTO labels (labels, uuid)
+		INSERT INTO index_labels2uuid (labels, uuid)
 		VALUES (?, ?)
 		USING TTL ?
 	`, labelsString, uuid, ttl)
 	batch.Query(`
-		INSERT INTO uuids (uuid, labels)
+		INSERT INTO index_uuid2labels (uuid, labels)
 		VALUES (?, ?)
 		USING TTL ?
 	`, uuid, labels, ttl)
 
 	for _, label := range labels {
 		batch.Query(`
-			UPDATE postings
+			UPDATE index_postings
 			USING TTL ?
 			SET uuids = uuids + ?
 			WHERE name = ? AND value = ?
@@ -546,7 +546,7 @@ func (c *CassandraIndex) batchAddEntry(batch *gocql.Batch, uuid gocql.UUID, labe
 // queryUUIDForLabel query UUID for stringified labels list
 func (c *CassandraIndex) queryUUIDFromLabels(labels string) *gocql.Query {
 	query := c.session.Query(`
-		SELECT uuid, ttl(uuid) FROM labels
+		SELECT uuid, ttl(uuid) FROM index_labels2uuid
 		WHERE labels = ?
 	`, labels)
 
@@ -556,7 +556,7 @@ func (c *CassandraIndex) queryUUIDFromLabels(labels string) *gocql.Query {
 // queryUUIDsForLabelName query UUIDs for given label name
 func (c *CassandraIndex) queryUUIDsFromLabelName(name string) *gocql.Query {
 	query := c.session.Query(`
-		SELECT uuids FROM postings
+		SELECT uuids FROM index_postings
 		WHERE name = ?
 	`, name)
 
@@ -566,7 +566,7 @@ func (c *CassandraIndex) queryUUIDsFromLabelName(name string) *gocql.Query {
 // queryUUIDsForLabel query UUIDs for given label name + value
 func (c *CassandraIndex) queryUUIDsFromLabel(name, value string) *gocql.Query {
 	query := c.session.Query(`
-		SELECT uuids FROM postings
+		SELECT uuids FROM index_postings
 		WHERE name = ? AND value = ?
 	`, name, value)
 
@@ -576,7 +576,7 @@ func (c *CassandraIndex) queryUUIDsFromLabel(name, value string) *gocql.Query {
 // queryLabelValues query values for given label name
 func (c *CassandraIndex) queryLabelValues(name string) *gocql.Query {
 	query := c.session.Query(`
-		SELECT value FROM postings
+		SELECT value FROM index_postings
 		WHERE name = ?
 	`, name)
 
@@ -586,7 +586,7 @@ func (c *CassandraIndex) queryLabelValues(name string) *gocql.Query {
 // queryLabelsFromUUID query labels of one uuid
 func (c *CassandraIndex) queryLabelsFromUUID(uuid gocql.UUID) *gocql.Query {
 	query := c.session.Query(`
-		SELECT labels FROM uuids
+		SELECT labels FROM index_uuid2labels
 		WHERE uuid = ?
 	`, uuid)
 
@@ -596,7 +596,7 @@ func (c *CassandraIndex) queryLabelsFromUUID(uuid gocql.UUID) *gocql.Query {
 // queryAllUUIDs query all UUIDs of metrics
 func (c *CassandraIndex) queryAllUUIDs() *gocql.Query {
 	query := c.session.Query(`
-		SELECT uuid FROM uuids
+		SELECT uuid FROM index_uuid2labels
 		ALLOW FILTERING
 	`)
 
@@ -606,18 +606,18 @@ func (c *CassandraIndex) queryAllUUIDs() *gocql.Query {
 // createTables create all Cassandra tables
 func (c *CassandraIndex) createTables() error {
 	queries := []string{
-		`CREATE TABLE IF NOT EXISTS labels (
+		`CREATE TABLE IF NOT EXISTS index_labels2uuid (
 			labels text,
 			uuid uuid,
 			PRIMARY KEY (labels)
 		)`,
-		`CREATE TABLE IF NOT EXISTS postings (
+		`CREATE TABLE IF NOT EXISTS index_postings (
 			name text,
 			value text,
 			uuids set<uuid>,
 			PRIMARY KEY (name, value)
 		)`,
-		`CREATE TABLE IF NOT EXISTS uuids (
+		`CREATE TABLE IF NOT EXISTS index_uuid2labels (
 			uuid uuid,
 			labels frozen<list<tuple<text, text>>>,
 			PRIMARY KEY (uuid)
