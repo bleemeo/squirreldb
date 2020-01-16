@@ -17,6 +17,15 @@ type listEnvProvider struct {
 
 func newEnvProvider() koanf.Provider {
 	ep := listEnvProvider{}
+
+	envToKey := make(map[string]string, len(defaults))
+	dotToUnderscore := strings.NewReplacer(".", "_")
+
+	for k := range defaults {
+		envName := dotToUnderscore.Replace(strings.ToUpper(k))
+		envToKey[envName] = k
+	}
+
 	ep.Provider = env.Provider(envPrefix, delimiter, func(s string) string {
 		s = strings.TrimPrefix(s, envPrefix)
 
