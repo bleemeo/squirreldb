@@ -69,31 +69,11 @@ func (c *CassandraStates) Read(name string, value interface{}) (found bool, err 
 }
 
 // Update updates the state in the states table
-func (c *CassandraStates) Update(name string, value interface{}) error {
+func (c *CassandraStates) Write(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
-	statesTableUpdateStateQuery := c.statesTableUpdateStateQuery(name, valueString)
+	statesTableUpdateStateQuery := c.statesTableInsertStateQuery(name, valueString)
 
 	err := statesTableUpdateStateQuery.Exec()
-
-	return err
-}
-
-// Write writes the state in the states table only if it does not exist
-func (c *CassandraStates) Write(name string, value interface{}) error {
-	statesTableSelectStateQuery := c.statesTableSelectStateQuery(name)
-
-	err := statesTableSelectStateQuery.Scan(nil)
-
-	if (err != nil) && (err != gocql.ErrNotFound) {
-		return err
-	} else if err != gocql.ErrNotFound {
-		return nil
-	}
-
-	valueString := fmt.Sprint(value)
-	statesTableInsertStateQuery := c.statesTableInsertStateQuery(name, valueString)
-
-	err = statesTableInsertStateQuery.Exec()
 
 	return err
 }
@@ -116,18 +96,6 @@ func (c *CassandraStates) statesTableSelectStateQuery(name string) *gocql.Query 
 		SELECT value FROM $STATES_TABLE
 		WHERE name = ?
 	`), name)
-
-	return query
-}
-
-// Returns states table update state Query
-func (c *CassandraStates) statesTableUpdateStateQuery(name string, value string) *gocql.Query {
-	replacer := strings.NewReplacer("$STATES_TABLE", c.statesTable)
-	query := c.session.Query(replacer.Replace(`
-		UPDATE $STATES_TABLE
-		SET value = ?
-		WHERE name = ?
-	`), value, name)
 
 	return query
 }

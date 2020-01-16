@@ -205,7 +205,7 @@ func (c *Config) ValidateRemote(state types.State) bool {
 // writeRemote writes the remote constant value
 func (c *Config) writeRemote(state types.State, name string, value string) {
 	retry.Print(func() error {
-		return state.Update(name, value) // nolint: scopelint
+		return state.Write(name, value) // nolint: scopelint
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"write config state "+name,
 	)

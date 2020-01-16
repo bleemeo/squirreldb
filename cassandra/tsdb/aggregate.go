@@ -84,7 +84,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		fromTimestamp = now.Unix() - (now.Unix() % c.options.AggregateSize)
 
 		retry.Print(func() error {
-			return c.state.Update(name, fromTimestamp)
+			return c.state.Write(name, fromTimestamp)
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
@@ -125,7 +125,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
 
 		retry.Print(func() error {
-			return c.state.Update(name, toTimestamp)
+			return c.state.Write(name, toTimestamp)
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
