@@ -3,7 +3,6 @@ package config
 import (
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/spf13/pflag"
@@ -38,7 +37,7 @@ type Config struct {
 func New() (*Config, error) {
 	instance := koanf.New(delimiter)
 
-	err := instance.Load(confmap.Provider(defaults, delimiter), nil)
+	err := instance.Load(ConfMapProvider(defaults, delimiter), nil)
 
 	if err != nil {
 		return nil, err
