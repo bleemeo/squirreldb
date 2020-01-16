@@ -78,29 +78,15 @@ type CassandraIndex struct {
 
 // New creates a new CassandraIndex object
 func New(session *gocql.Session, options Options) (*CassandraIndex, error) {
-	labelsTableCreateQuery := labelsTableCreateQuery(session)
-
-	if err := labelsTableCreateQuery.Exec(); err != nil {
-		return nil, err
-	}
-
-	postingsTableCreateQuery := postingsTableCreateQuery(session)
-
-	if err := postingsTableCreateQuery.Exec(); err != nil {
-		return nil, err
-	}
-
-	uuidsTableCreateQuery := uuidsTableCreateQuery(session)
-
-	if err := uuidsTableCreateQuery.Exec(); err != nil {
-		return nil, err
-	}
-
 	index := &CassandraIndex{
 		session:       session,
 		options:       options,
 		labelsToUUID:  make(map[string]uuidData),
 		uuidsToLabels: make(map[gouuid.UUID]labelsData),
+	}
+
+	if err := index.createTables(); err != nil {
+		return nil, err
 	}
 
 	return index, nil
@@ -126,19 +112,18 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 
 // AllUUIDs returns all UUIDs stored in the UUIDs index
 func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
-	uuidsTableSelectUUIDsQuery := c.uuidsTableSelectUUIDsQuery()
-	uuidsTableSelectUUIDsIter := uuidsTableSelectUUIDsQuery.Iter()
+	iter := c.queryAllUUIDs().Iter()
 
 	var (
 		uuids   []gouuid.UUID
 		cqlUUID gocql.UUID
 	)
 
-	for uuidsTableSelectUUIDsIter.Scan(&cqlUUID) {
+	for iter.Scan(&cqlUUID) {
 		uuids = append(uuids, gouuid.UUID(cqlUUID))
 	}
 
-	if err := uuidsTableSelectUUIDsIter.Close(); err != nil {
+	if err := iter.Close(); err != nil {
 		return nil, err
 	}
 
@@ -155,9 +140,9 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 	labelsData, found := c.uuidsToLabels[uuid]
 
 	if !found {
-		selectLabelsQuery := c.uuidsTableSelectLabelsQuery(gocql.UUID(uuid))
+		query := c.queryLabelsFromUUID(gocql.UUID(uuid))
 
-		if err := selectLabelsQuery.Scan(&labelsData.labels); (err != nil) && (err != gocql.ErrNotFound) {
+		if err := query.Scan(&labelsData.labels); (err != nil) && (err != gocql.ErrNotFound) {
 			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 			return nil, err
@@ -237,7 +222,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 			sortedLabelsString = types.StringFromLabels(sortedLabels)
 		}
 
-		selectUUIDQuery := c.labelsTableSelectUUIDQuery(sortedLabelsString)
+		selectUUIDQuery := c.queryUUIDFromLabels(sortedLabelsString)
 
 		var (
 			cqlUUID      gocql.UUID
@@ -289,18 +274,8 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 		actualTTL := cassandraTTL + int64(cassandraTTLSafeMargin.Seconds())
 
 		indexBatch := c.session.NewBatch(gocql.LoggedBatch)
-		insertUUIDQueryString := c.labelsTableInsertUUIDQueryString()
-		indexBatch.Query(insertUUIDQueryString, sortedLabelsString, gocql.UUID(uuidData.uuid), actualTTL)
 
-		insertLabelsQueryString := c.uuidsTableInsertLabelsQueryString()
-
-		indexBatch.Query(insertLabelsQueryString, gocql.UUID(uuidData.uuid), sortedLabels, actualTTL)
-
-		for _, label := range sortedLabels {
-			updateUUIDsQueryString := c.postingsTableUpdateUUIDsQueryString()
-
-			indexBatch.Query(updateUUIDsQueryString, actualTTL, []gocql.UUID{gocql.UUID(uuidData.uuid)}, label.Name, label.Value)
-		}
+		c.batchAddEntry(indexBatch, gocql.UUID(uuidData.uuid), sortedLabelsString, sortedLabels, actualTTL)
 
 		if err := c.session.ExecuteBatch(indexBatch); err != nil {
 			return gouuid.UUID{}, 0, err
@@ -415,7 +390,7 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], targetLabel)
 			}
 		} else {
-			selectValueQuery := c.postingsTableSelectValueQuery(matcher.Name)
+			selectValueQuery := c.queryLabelValues(matcher.Name)
 			selectValueIter := selectValueQuery.Iter()
 
 			var (
@@ -467,7 +442,7 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 	uuidMatches := make(map[gouuid.UUID]int)
 
 	for _, label := range targetLabels[targetTypeValueEqual] {
-		selectUUIDsQuery := c.postingsTableSelectUUIDsFocusQuery(label.Name, label.Value)
+		selectUUIDsQuery := c.queryUUIDsFromLabel(label.Name, label.Value)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
@@ -491,7 +466,7 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 	}
 
 	for _, label := range targetLabels[targetTypeKeyDefined] {
-		selectUUIDsQuery := c.postingsTableSelectUUIDsQuery(label.Name)
+		selectUUIDsQuery := c.queryUUIDsFromLabelName(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
@@ -517,7 +492,7 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 	}
 
 	for _, label := range targetLabels[targetTypeKeyUndefined] {
-		selectUUIDsQuery := c.postingsTableSelectUUIDsQuery(label.Name)
+		selectUUIDsQuery := c.queryUUIDsFromLabelName(label.Name)
 		selectUUIDsIter := selectUUIDsQuery.Iter()
 
 		var (
@@ -545,19 +520,31 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 	return uuidMatches, nil
 }
 
-// Returns labels table insert uuid Query
-func (c *CassandraIndex) labelsTableInsertUUIDQueryString() string {
-	queryString := (`
+// Returns uuids table insert labels Query as string
+func (c *CassandraIndex) batchAddEntry(batch *gocql.Batch, uuid gocql.UUID, labelsString string, labels []types.MetricLabel, ttl int64) {
+	batch.Query(`
 		INSERT INTO labels (labels, uuid)
 		VALUES (?, ?)
 		USING TTL ?
-	`)
+	`, labelsString, uuid, ttl)
+	batch.Query(`
+		INSERT INTO uuids (uuid, labels)
+		VALUES (?, ?)
+		USING TTL ?
+	`, uuid, labels, ttl)
 
-	return queryString
+	for _, label := range labels {
+		batch.Query(`
+			UPDATE postings
+			USING TTL ?
+			SET uuids = uuids + ?
+			WHERE name = ? AND value = ?
+		`, ttl, []gocql.UUID{uuid}, label.Name, label.Value)
+	}
 }
 
-// Returns labels table select uuid Query
-func (c *CassandraIndex) labelsTableSelectUUIDQuery(labels string) *gocql.Query {
+// queryUUIDForLabel query UUID for stringified labels list
+func (c *CassandraIndex) queryUUIDFromLabels(labels string) *gocql.Query {
 	query := c.session.Query(`
 		SELECT uuid, ttl(uuid) FROM labels
 		WHERE labels = ?
@@ -566,8 +553,8 @@ func (c *CassandraIndex) labelsTableSelectUUIDQuery(labels string) *gocql.Query 
 	return query
 }
 
-// Returns postings table select uuids Query
-func (c *CassandraIndex) postingsTableSelectUUIDsQuery(name string) *gocql.Query {
+// queryUUIDsForLabelName query UUIDs for given label name
+func (c *CassandraIndex) queryUUIDsFromLabelName(name string) *gocql.Query {
 	query := c.session.Query(`
 		SELECT uuids FROM postings
 		WHERE name = ?
@@ -576,8 +563,8 @@ func (c *CassandraIndex) postingsTableSelectUUIDsQuery(name string) *gocql.Query
 	return query
 }
 
-// Returns postings table select uuids with name focus Query
-func (c *CassandraIndex) postingsTableSelectUUIDsFocusQuery(name, value string) *gocql.Query {
+// queryUUIDsForLabel query UUIDs for given label name + value
+func (c *CassandraIndex) queryUUIDsFromLabel(name, value string) *gocql.Query {
 	query := c.session.Query(`
 		SELECT uuids FROM postings
 		WHERE name = ? AND value = ?
@@ -586,8 +573,8 @@ func (c *CassandraIndex) postingsTableSelectUUIDsFocusQuery(name, value string) 
 	return query
 }
 
-// Returns postings table select value Query
-func (c *CassandraIndex) postingsTableSelectValueQuery(name string) *gocql.Query {
+// queryLabelValues query values for given label name
+func (c *CassandraIndex) queryLabelValues(name string) *gocql.Query {
 	query := c.session.Query(`
 		SELECT value FROM postings
 		WHERE name = ?
@@ -596,31 +583,8 @@ func (c *CassandraIndex) postingsTableSelectValueQuery(name string) *gocql.Query
 	return query
 }
 
-// Returns postings table update uuids Query as string
-func (c *CassandraIndex) postingsTableUpdateUUIDsQueryString() string {
-	queryString := (`
-		UPDATE postings
-		USING TTL ?
-		SET uuids = uuids + ?
-		WHERE name = ? AND value = ?
-	`)
-
-	return queryString
-}
-
-// Returns uuids table insert labels Query as string
-func (c *CassandraIndex) uuidsTableInsertLabelsQueryString() string {
-	queryString := (`
-		INSERT INTO uuids (uuid, labels)
-		VALUES (?, ?)
-		USING TTL ?
-	`)
-
-	return queryString
-}
-
-// Returns uuids table select labels Query
-func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid gocql.UUID) *gocql.Query {
+// queryLabelsFromUUID query labels of one uuid
+func (c *CassandraIndex) queryLabelsFromUUID(uuid gocql.UUID) *gocql.Query {
 	query := c.session.Query(`
 		SELECT labels FROM uuids
 		WHERE uuid = ?
@@ -629,8 +593,8 @@ func (c *CassandraIndex) uuidsTableSelectLabelsQuery(uuid gocql.UUID) *gocql.Que
 	return query
 }
 
-// Returns uuids table select labels all Query
-func (c *CassandraIndex) uuidsTableSelectUUIDsQuery() *gocql.Query {
+// queryAllUUIDs query all UUIDs of metrics
+func (c *CassandraIndex) queryAllUUIDs() *gocql.Query {
 	query := c.session.Query(`
 		SELECT uuid FROM uuids
 		ALLOW FILTERING
@@ -639,44 +603,34 @@ func (c *CassandraIndex) uuidsTableSelectUUIDsQuery() *gocql.Query {
 	return query
 }
 
-// Returns labels table create Query
-func labelsTableCreateQuery(session *gocql.Session) *gocql.Query {
-	query := session.Query(`
-		CREATE TABLE IF NOT EXISTS labels (
+// createTables create all Cassandra tables
+func (c *CassandraIndex) createTables() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS labels (
 			labels text,
 			uuid uuid,
 			PRIMARY KEY (labels)
-		)
-	`)
-
-	return query
-}
-
-// Returns postings table create Query
-func postingsTableCreateQuery(session *gocql.Session) *gocql.Query {
-	query := session.Query(`
-		CREATE TABLE IF NOT EXISTS postings (
+		)`,
+		`CREATE TABLE IF NOT EXISTS postings (
 			name text,
 			value text,
 			uuids set<uuid>,
 			PRIMARY KEY (name, value)
-		)
-	`)
-
-	return query
-}
-
-// Returns uuids table create Query
-func uuidsTableCreateQuery(session *gocql.Session) *gocql.Query {
-	query := session.Query(`
-		CREATE TABLE IF NOT EXISTS uuids (
+		)`,
+		`CREATE TABLE IF NOT EXISTS uuids (
 			uuid uuid,
 			labels frozen<list<tuple<text, text>>>,
 			PRIMARY KEY (uuid)
-		)
-	`)
+		)`,
+	}
 
-	return query
+	for _, query := range queries {
+		if err := c.session.Query(query).Exec(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Returns a boolean if the uuid list contains the target uuid or not
