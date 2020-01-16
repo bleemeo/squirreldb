@@ -15,6 +15,5 @@ var defaults = map[string]interface{}{
 	"remote_storage.listen_address":         "localhost:9201",
 	"batch.size":                            900,
 	"index.include_uuid":                    false,
-	"debug.level":                           0,
+	"log.level":                             0,
 }
-

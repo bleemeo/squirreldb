@@ -47,7 +47,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	debug.Level = squirrelConfig.Int("debug.level")
+	debug.Level = squirrelConfig.Int("log.level")
 
 	keyspace := squirrelConfig.String("cassandra.keyspace")
 	squirrelSession := createSquirrelSession(keyspace, squirrelConfig)
