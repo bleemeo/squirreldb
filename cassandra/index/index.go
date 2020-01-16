@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/gocql/gocql"
@@ -201,7 +202,7 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 
 // LookupUUID returns a UUID corresponding to the specified MetricLabel list
 // It also return the metric TTL
-func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, int64, error) {
+func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, int64, error) { //nolint: gocognit
 	start := time.Now()
 	now := time.Now()
 
@@ -217,8 +218,8 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 	defer c.ltuMutex.Unlock()
 
 	var (
-		uuidData uuidData
-		found    bool
+		sortedLabels       []types.MetricLabel
+		sortedLabelsString string
 	)
 
 	ttl := timeToLiveFromLabels(&labels)
@@ -226,41 +227,30 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 		ttl = c.options.DefaultTimeToLive
 	}
 
-	if c.options.IncludeUUID {
-		var uuidStr string
-		uuidStr, found = types.GetLabelsValue(labels, uuidLabelName)
-
-		if found {
-			var err error
-			uuidData.uuid, err = gouuid.FromString(uuidStr)
-
-			if err != nil {
-				return gouuid.UUID{}, 0, nil
-			}
-		}
-		// Broken for TTL :( Force not using it due to TTL
-		found = false
-	}
-
-	var labelsKey string
-
-	if !found {
-		labelsKey = keyFromLabels(labels)
-
-		uuidData, found = c.labelsToUUID[labelsKey]
-	}
-
-	var (
-		sortedLabelsString string
-		sortedLabels       []types.MetricLabel
-	)
+	labelsKey := keyFromLabels(labels)
+	uuidData, found := c.labelsToUUID[labelsKey]
 
 	if !found {
 		lookupUUIDMisses.Inc()
 
-		sortedLabels = types.SortLabels(labels)
+		uuidStr, _ := types.GetLabelsValue(labels, uuidLabelName)
+		if c.options.IncludeUUID && uuidStr != "" {
+			uuid, err := gouuid.FromString(uuidStr)
+			if err != nil {
+				return uuid, 0, err
+			}
 
-		sortedLabelsString = types.StringFromLabels(sortedLabels)
+			sortedLabels, err = c.LookupLabels(uuid)
+
+			if err != nil {
+				return uuid, 0, err
+			}
+
+			sortedLabelsString = types.StringFromLabels(sortedLabels)
+		} else {
+			sortedLabels = types.SortLabels(labels)
+			sortedLabelsString = types.StringFromLabels(sortedLabels)
+		}
 
 		selectUUIDQuery := c.labelsTableSelectUUIDQuery(sortedLabelsString)
 
@@ -275,6 +265,10 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 			found = true
 		} else if err != gocql.ErrNotFound {
 			return gouuid.UUID{}, 0, err
+		}
+
+		if !found && c.options.IncludeUUID && uuidStr != "" {
+			return gouuid.UUID{}, 0, fmt.Errorf("label __uuid__ (value is %s) is provided but the metric does not exists", uuidStr)
 		}
 	}
 
@@ -294,7 +288,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 	needTTLUpdate := uuidData.cassandraEntryExpiration.Before(wantedEntryExpiration)
 
 	if !found || needTTLUpdate {
-		if needTTLUpdate {
+		if needTTLUpdate && found {
 			lookupUUIDRefresh.Inc()
 		}
 
