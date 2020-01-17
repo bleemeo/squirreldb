@@ -42,6 +42,12 @@ func New(options Options) *Redis {
 
 // Append appends the specified metrics
 func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+	start := time.Now()
+
+	defer func() {
+		operationSecondsAdd.Observe(time.Since(start).Seconds())
+	}()
+
 	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
 		return nil
 	}
@@ -49,7 +55,10 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
+	var addedPoints int
+
 	for uuid, data := range newMetrics {
+		addedPoints += len(data.Points)
 		values, err := valuesFromData(data)
 
 		if err != nil {
@@ -63,6 +72,7 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 	}
 
 	for uuid, data := range existingMetrics {
+		addedPoints += len(data.Points)
 		values, err := valuesFromData(data)
 
 		if err != nil {
@@ -78,16 +88,26 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 		return err
 	}
 
+	operationPointssAdd.Add(float64(addedPoints))
+
 	return nil
 }
 
 // Get return the requested metrics
 func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
+	start := time.Now()
+
+	defer func() {
+		operationSecondsGet.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(uuids) == 0 {
 		return nil, nil
 	}
 
 	metrics := make(map[gouuid.UUID]types.MetricData)
+
+	var readPointsCount int
 
 	for _, uuid := range uuids {
 		key := keyPrefix + uuid.String()
@@ -104,13 +124,22 @@ func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 		}
 
 		metrics[uuid] = data
+		readPointsCount += len(data.Points)
 	}
+
+	operationPointssGet.Add(float64(readPointsCount))
 
 	return metrics, nil
 }
 
 // Set sets the specified metrics
 func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+	start := time.Now()
+
+	defer func() {
+		operationSecondsSet.Observe(time.Since(start).Seconds())
+	}()
+
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -118,7 +147,10 @@ func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) 
 	pipe := r.client.Pipeline()
 	timeToLiveDuration := time.Duration(timeToLive) * time.Second
 
+	var writtenPointsCount int
+
 	for uuid, data := range metrics {
+		writtenPointsCount += len(data.Points)
 		values, err := valuesFromData(data)
 
 		if err != nil {
@@ -133,6 +165,8 @@ func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) 
 	if _, err := pipe.Exec(); err != nil {
 		return err
 	}
+
+	operationPointssSet.Add(float64(writtenPointsCount))
 
 	return nil
 }
