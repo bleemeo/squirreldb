@@ -106,12 +106,22 @@ func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 	}
 
 	metrics := make(map[gouuid.UUID]types.MetricData)
+	commands := make([]*goredis.StringCmd, len(uuids))
+	pipe := r.client.Pipeline()
 
 	var readPointsCount int
 
-	for _, uuid := range uuids {
+	for i, uuid := range uuids {
 		key := keyPrefix + uuid.String()
-		values, err := r.client.Get(key).Bytes()
+		commands[i] = pipe.Get(key)
+	}
+
+	if _, err := pipe.Exec(); err != nil {
+		return nil, err
+	}
+
+	for i, uuid := range uuids {
+		values, err := commands[i].Bytes()
 
 		if (err != nil) && (err != goredis.Nil) {
 			return nil, err
