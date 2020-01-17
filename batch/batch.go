@@ -133,7 +133,7 @@ func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 	}
 
 	var (
-		readPointsCount, deletedPointsCount int
+		readPointsCount, setPointsCount int
 	)
 
 	uuids := make([]gouuid.UUID, 0, len(states))
@@ -175,11 +175,11 @@ func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 			metricsToSet[uuid] = dataToSet
 
 			readPointsCount += len(data.Points)
-			deletedPointsCount += len(data.Points) - len(dataToSet.Points)
+			setPointsCount += len(dataToSet.Points)
 		}
 
 		flushPointsTotalRead.Add(float64(readPointsCount))
-		flushPointsTotalDelete.Add(float64(deletedPointsCount))
+		flushPointsTotalSet.Add(float64(setPointsCount))
 
 		retry.Print(func() error {
 			return b.writer.Write(metricsToWrite)

@@ -47,18 +47,18 @@ var (
 		Name:      "background_seconds",
 		Help:      "Total background processing time in seconds",
 	})
-	flushPointsTotalDelete = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace:   "squirreldb",
-		Subsystem:   "batch",
-		Name:        "points_total",
-		Help:        "Total points processed by the flush() method from/to memory-store",
-		ConstLabels: prometheus.Labels{"operation": "delete"},
-	})
 	flushPointsTotalRead = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "batch",
-		Name:        "points_total",
+		Name:        "flush_points_total",
 		Help:        "Total points processed by the flush() method from/to memory-store",
 		ConstLabels: prometheus.Labels{"operation": "read"},
+	})
+	flushPointsTotalSet = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "flush_points_total",
+		Help:        "Total points processed by the flush() method from/to memory-store",
+		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
 )
