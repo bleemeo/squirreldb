@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -135,19 +136,34 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Inde
 		return nil, nil
 	}
 
+	uuidToIndex := make(map[gouuid.UUID]int, len(promTimeseries))
+
 	totalPoints := 0
-
 	metrics := make([]types.MetricData, len(promTimeseries))
+	i := 0
 
-	for i, promSeries := range promTimeseries {
+	for _, promSeries := range promTimeseries {
 		data, err := metricFromPromSeries(promSeries, index)
 		if err != nil {
 			return nil, err
 		}
 
-		metrics[i] = data
+		if idx, found := uuidToIndex[data.UUID]; found {
+			metrics[idx].Points = append(metrics[idx].Points, data.Points...)
+			if metrics[idx].TimeToLive < data.TimeToLive {
+				metrics[idx].TimeToLive = data.TimeToLive
+			}
+		} else {
+			metrics[i] = data
+			uuidToIndex[data.UUID] = i
+
+			i++
+		}
+
 		totalPoints += len(data.Points)
 	}
+
+	metrics = metrics[:i]
 
 	requestsPointsTotalWrite.Add(float64(totalPoints))
 
