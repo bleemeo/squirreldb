@@ -41,8 +41,9 @@ func New(options Options, index types.Index, reader types.MetricReader, writer t
 		reader: reader,
 	}
 	writeMetrics := WriteMetrics{
-		index:  index,
-		writer: writer,
+		index:    index,
+		writer:   writer,
+		reqCtxCh: make(chan *requestContext, 4),
 	}
 
 	router.Handle(metricsPattern, promhttp.Handler())

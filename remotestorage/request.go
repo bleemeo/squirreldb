@@ -1,8 +1,8 @@
 package remotestorage
 
 import (
+	"bytes"
 	"io"
-	"io/ioutil"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -21,21 +21,29 @@ func encodeResponse(pb proto.Marshaler) ([]byte, error) {
 	return encodedBody, nil
 }
 
+type requestContext struct {
+	buffer        bytes.Buffer
+	decodedBuffer []byte
+	pb            proto.Message
+}
+
 // Decodes the request
-func decodeRequest(reader io.Reader, pb proto.Message) error {
-	body, err := ioutil.ReadAll(reader)
+func decodeRequest(reader io.Reader, reqCtx *requestContext) error {
+	reqCtx.buffer.Reset()
+
+	_, err := reqCtx.buffer.ReadFrom(reader)
 
 	if err != nil {
 		return err
 	}
 
-	decodedBody, err := snappy.Decode(nil, body)
+	reqCtx.decodedBuffer, err = snappy.Decode(reqCtx.decodedBuffer, reqCtx.buffer.Bytes())
 
 	if err != nil {
 		return err
 	}
 
-	if err := proto.Unmarshal(decodedBody, pb); err != nil {
+	if err := proto.Unmarshal(reqCtx.decodedBuffer, reqCtx.pb); err != nil {
 		return err
 	}
 

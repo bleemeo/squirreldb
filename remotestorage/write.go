@@ -11,8 +11,27 @@ import (
 )
 
 type WriteMetrics struct {
-	index  types.Index
-	writer types.MetricWriter
+	index    types.Index
+	writer   types.MetricWriter
+	reqCtxCh chan *requestContext
+}
+
+func (w *WriteMetrics) getRequestContext() *requestContext {
+	select {
+	case reqCtx := <-w.reqCtxCh:
+		return reqCtx
+	default:
+		return &requestContext{
+			pb: &prompb.WriteRequest{},
+		}
+	}
+}
+
+func (w *WriteMetrics) putRequestContext(reqCtx *requestContext) {
+	select {
+	case w.reqCtxCh <- reqCtx:
+	default:
+	}
 }
 
 // ServeHTTP handles writing requests
@@ -23,9 +42,9 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		requestsSecondsWrite.Observe(time.Since(start).Seconds())
 	}()
 
-	var writeRequest prompb.WriteRequest
-
-	err := decodeRequest(request.Body, &writeRequest)
+	reqCtx := w.getRequestContext()
+	defer w.putRequestContext(reqCtx)
+	err := decodeRequest(request.Body, reqCtx)
 
 	if err != nil {
 		logger.Printf("Error: Can't decode the write request (%v)", err)
@@ -34,6 +53,8 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 		return
 	}
+
+	writeRequest := reqCtx.pb.(*prompb.WriteRequest)
 
 	metrics, err := metricsFromTimeseries(writeRequest.Timeseries, w.index)
 	if err != nil {

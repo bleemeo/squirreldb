@@ -263,13 +263,16 @@ func Test_decodeRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		wr := prompb.WriteRequest{}
+		reqCtx := requestContext{
+			pb: &wr,
+		}
 		t.Run(tt.file, func(t *testing.T) {
 			f, err := os.Open(tt.file)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			defer f.Close()
-			if err := decodeRequest(f, &wr); (err != nil) != tt.wantErr {
+			if err := decodeRequest(f, &reqCtx); (err != nil) != tt.wantErr {
 				t.Errorf("decodeRequest() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if len(wr.Timeseries) != tt.wantCount {
@@ -300,8 +303,11 @@ func Benchmark_decodeRequest(b *testing.B) {
 			}
 			reader := bytes.NewReader(data)
 			wr := prompb.WriteRequest{}
+			reqCtx := requestContext{
+				pb: &wr,
+			}
 			for n := 0; n < b.N; n++ {
-				decodeRequest(reader, &wr)
+				decodeRequest(reader, &reqCtx)
 				reader.Seek(0, os.SEEK_SET)
 			}
 		})
