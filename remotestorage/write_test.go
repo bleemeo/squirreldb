@@ -102,10 +102,9 @@ func Test_metricFromPromSeries(t *testing.T) {
 		index      types.Index
 	}
 	tests := []struct {
-		name  string
-		args  args
-		want  gouuid.UUID
-		want1 types.MetricData
+		name string
+		args args
+		want types.MetricData
 	}{
 		{
 			name: "promSeries",
@@ -150,8 +149,8 @@ func Test_metricFromPromSeries(t *testing.T) {
 				},
 				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
 			},
-			want: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-			want1: types.MetricData{
+			want: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 0,
@@ -184,15 +183,12 @@ func Test_metricFromPromSeries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got1, err := metricFromPromSeries(tt.args.promSeries, tt.args.index)
+			got, err := metricFromPromSeries(tt.args.promSeries, tt.args.index)
 			if err != nil {
 				t.Errorf("metricFromPromSeries() failed: %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("metricFromPromSeries() got = %v, want %v", got, tt.want)
-			}
-			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("metricFromPromSeries() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("metricFromPromSeries() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -235,7 +231,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want map[gouuid.UUID]types.MetricData
+		want []types.MetricData
 	}{
 		{
 			name: "promTimeseries_filled",
@@ -282,8 +278,9 @@ func Test_metricsFromTimeseries(t *testing.T) {
 				},
 				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
 			},
-			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+			want: []types.MetricData{
+				{
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,

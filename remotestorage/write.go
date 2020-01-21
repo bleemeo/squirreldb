@@ -1,11 +1,9 @@
 package remotestorage
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
-	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
 )
@@ -113,45 +111,41 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a UUID and a MetricData generated from a TimeSeries
-func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (gouuid.UUID, types.MetricData, error) {
+func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (types.MetricData, error) {
 	labels := labelsFromPromLabels(promSeries.Labels)
 
 	uuid, timeToLive, err := index.LookupUUID(labels)
 	if err != nil {
-		return uuid, types.MetricData{}, err
+		return types.MetricData{}, err
 	}
 
 	points := pointsFromPromSamples(promSeries.Samples)
 	data := types.MetricData{
+		UUID:       uuid,
 		Points:     points,
 		TimeToLive: timeToLive,
 	}
 
-	return uuid, data, nil
+	return data, nil
 }
 
 // Returns a metric list generated from a TimeSeries list
-func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) (map[gouuid.UUID]types.MetricData, error) {
+func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil
 	}
 
 	totalPoints := 0
 
-	metrics := make(map[gouuid.UUID]types.MetricData, len(promTimeseries))
+	metrics := make([]types.MetricData, len(promTimeseries))
 
-	for _, promSeries := range promTimeseries {
-		uuid, data, err := metricFromPromSeries(promSeries, index)
+	for i, promSeries := range promTimeseries {
+		data, err := metricFromPromSeries(promSeries, index)
 		if err != nil {
 			return nil, err
 		}
 
-		currentData := metrics[uuid]
-
-		currentData.Points = append(currentData.Points, data.Points...)
-		currentData.TimeToLive = compare.MaxInt64(currentData.TimeToLive, data.TimeToLive)
-
-		metrics[uuid] = currentData
+		metrics[i] = data
 		totalPoints += len(data.Points)
 	}
 

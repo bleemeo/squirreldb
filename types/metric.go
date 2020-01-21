@@ -15,6 +15,7 @@ type MetricPoint struct {
 }
 
 type MetricData struct {
+	UUID       gouuid.UUID
 	Points     []MetricPoint
 	TimeToLive int64
 }

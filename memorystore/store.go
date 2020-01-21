@@ -38,7 +38,7 @@ func New() *Store {
 }
 
 // Append is the public method of append
-func (s *Store) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+func (s *Store) Append(newMetrics, existingMetrics []types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -54,7 +54,7 @@ func (s *Store) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 }
 
 // Set is the public method of set
-func (s *Store) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+func (s *Store) Set(metrics []types.MetricData, timeToLive int64) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -92,31 +92,31 @@ func (s *Store) expire(now time.Time) {
 }
 
 // Appends the specified metrics
-func (s *Store) append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64, now time.Time) error {
+func (s *Store) append(newMetrics, existingMetrics []types.MetricData, timeToLive int64, now time.Time) error {
 	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
 		return nil
 	}
 
 	expirationTimestamp := now.Unix() + timeToLive
 
-	for uuid, data := range newMetrics {
-		storeData := s.metrics[uuid]
+	for _, data := range newMetrics {
+		storeData := s.metrics[data.UUID]
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
 		storeData.expirationTimestamp = expirationTimestamp
 
-		s.metrics[uuid] = storeData
+		s.metrics[data.UUID] = storeData
 	}
 
-	for uuid, data := range existingMetrics {
-		storeData := s.metrics[uuid]
+	for _, data := range existingMetrics {
+		storeData := s.metrics[data.UUID]
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
 		storeData.expirationTimestamp = expirationTimestamp
 
-		s.metrics[uuid] = storeData
+		s.metrics[data.UUID] = storeData
 	}
 
 	return nil
@@ -142,20 +142,20 @@ func (s *Store) get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 }
 
 // Sets the specified metrics
-func (s *Store) set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64, now time.Time) error {
+func (s *Store) set(metrics []types.MetricData, timeToLive int64, now time.Time) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 
 	expirationTimestamp := now.Unix() + timeToLive
 
-	for uuid, data := range metrics {
-		storeData := s.metrics[uuid]
+	for _, data := range metrics {
+		storeData := s.metrics[data.UUID]
 
 		storeData.MetricData = data
 		storeData.expirationTimestamp = expirationTimestamp
 
-		s.metrics[uuid] = storeData
+		s.metrics[data.UUID] = storeData
 	}
 
 	return nil

@@ -23,9 +23,9 @@ var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 // Store is an interface to store points associated to metrics. Batch use a memory store (i.e. temporary)
 type Store interface {
-	Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error
+	Append(newMetrics, existingMetrics []types.MetricData, timeToLive int64) error
 	Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error)
-	Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error
+	Set(metrics []types.MetricData, timeToLive int64) error
 }
 
 // stateData contains information about points stored in memory store for one metrics
@@ -76,7 +76,7 @@ func (b *Batch) Read(request types.MetricRequest) (map[gouuid.UUID]types.MetricD
 }
 
 // Write implements MetricWriter
-func (b *Batch) Write(metrics map[gouuid.UUID]types.MetricData) error {
+func (b *Batch) Write(metrics []types.MetricData) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -159,8 +159,10 @@ func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 			"get points from the memory store",
 		)
 
-		metricsToWrite := make(map[gouuid.UUID]types.MetricData)
-		metricsToSet := make(map[gouuid.UUID]types.MetricData)
+		metricsToWrite := make([]types.MetricData, endIndex-startIndex)
+		metricsToSet := make([]types.MetricData, endIndex-startIndex)
+
+		i := 0
 
 		for _, uuid := range uuids[startIndex:endIndex] {
 			statesData := states[uuid]
@@ -170,13 +172,19 @@ func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 				continue
 			}
 
-			dataToWrite, dataToSet := b.flushData(uuid, data, statesData, now)
-			metricsToWrite[uuid] = dataToWrite
-			metricsToSet[uuid] = dataToSet
+			data.UUID = uuid
+			dataToWrite, dataToSet := b.flushData(data, statesData, now)
+			metricsToWrite[i] = dataToWrite
+			metricsToSet[i] = dataToSet
+
+			i++
 
 			readPointsCount += len(data.Points)
 			setPointsCount += len(dataToSet.Points)
 		}
+
+		metricsToWrite = metricsToWrite[:i]
+		metricsToSet = metricsToSet[:i]
 
 		flushPointsTotalRead.Add(float64(readPointsCount))
 		flushPointsTotalSet.Add(float64(setPointsCount))
@@ -204,12 +212,12 @@ func (b *Batch) flush(states map[gouuid.UUID][]stateData, now time.Time) {
 //
 // Points may be in the two list (e.g. points less than 5 minutes of age)
 // dataToWrite is sorted & deduplicated
-func (b *Batch) flushData(uuid gouuid.UUID, data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
+func (b *Batch) flushData(data types.MetricData, statesData []stateData, now time.Time) (dataToKeep types.MetricData, dataToWrite types.MetricData) {
 	if len(data.Points) == 0 {
 		return types.MetricData{}, types.MetricData{}
 	}
 
-	currentStateData, exists := b.states[uuid]
+	currentStateData, exists := b.states[data.UUID]
 	cutoffTimestamp := now.Unix() - b.batchSize
 
 	if exists {
@@ -217,9 +225,11 @@ func (b *Batch) flushData(uuid gouuid.UUID, data types.MetricData, statesData []
 	}
 
 	dataToSet := types.MetricData{
+		UUID:       data.UUID,
 		TimeToLive: data.TimeToLive,
 	}
 	dataToWrite = types.MetricData{
+		UUID:       data.UUID,
 		TimeToLive: data.TimeToLive,
 	}
 
@@ -259,7 +269,7 @@ pointsLoop:
 
 	if gotPointsCount < expectedPointsCount {
 		logger.Printf("Warning: Metric %v expected at least %d point(s), got %d point(s)",
-			uuid, expectedPointsCount, gotPointsCount)
+			data.UUID, expectedPointsCount, gotPointsCount)
 	}
 
 	if needSort {
@@ -375,7 +385,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[gouuid.UUID]type
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
 // If this is the case, the state is added to the list of states to flush
-func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) error {
+func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 	start := time.Now()
 
 	defer func() {
@@ -392,26 +402,28 @@ func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) e
 	)
 
 	states := make(map[gouuid.UUID][]stateData)
-	newMetrics := make(map[gouuid.UUID]types.MetricData)
-	existingMetrics := make(map[gouuid.UUID]types.MetricData)
+	newMetrics := make([]types.MetricData, len(metrics))
+	existingMetrics := make([]types.MetricData, len(metrics))
 
-	for uuid, data := range metrics {
+	for i, data := range metrics {
 		newData := types.MetricData{
+			UUID:       data.UUID,
 			TimeToLive: data.TimeToLive,
 		}
 		existingData := types.MetricData{
+			UUID:       data.UUID,
 			TimeToLive: data.TimeToLive,
 		}
 
 		for _, point := range data.Points {
-			currentState, exists := b.states[uuid]
+			currentState, exists := b.states[data.UUID]
 
 			if !exists {
 				currentState = stateData{
 					pointCount:          1,
 					firstPointTimestamp: point.Timestamp,
 					lastPointTimestamp:  point.Timestamp,
-					flushTimestamp:      flushTimestamp(uuid, now, b.batchSize),
+					flushTimestamp:      flushTimestamp(data.UUID, now, b.batchSize),
 				}
 			} else {
 				if point.Timestamp == currentState.lastPointTimestamp {
@@ -424,8 +436,8 @@ func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) e
 				nextDelta := nextLastPointTimestamp - nextFirstPointTimestamp
 
 				if (currentState.flushTimestamp < now.Unix()) || (nextDelta >= b.batchSize) {
-					states[uuid] = append(states[uuid], currentState)
-					delete(b.states, uuid)
+					states[data.UUID] = append(states[data.UUID], currentState)
+					delete(b.states, data.UUID)
 
 					exists = false
 
@@ -433,7 +445,7 @@ func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) e
 						pointCount:          1,
 						firstPointTimestamp: point.Timestamp,
 						lastPointTimestamp:  point.Timestamp,
-						flushTimestamp:      flushTimestamp(uuid, now, b.batchSize),
+						flushTimestamp:      flushTimestamp(data.UUID, now, b.batchSize),
 					}
 				} else {
 					currentState.pointCount++
@@ -442,7 +454,7 @@ func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) e
 				}
 			}
 
-			b.states[uuid] = currentState
+			b.states[data.UUID] = currentState
 
 			if !exists {
 				newData.Points = append(newData.Points, point)
@@ -451,8 +463,8 @@ func (b *Batch) write(metrics map[gouuid.UUID]types.MetricData, now time.Time) e
 			}
 		}
 
-		newMetrics[uuid] = newData
-		existingMetrics[uuid] = existingData
+		newMetrics[i] = newData
+		existingMetrics[i] = existingData
 
 		writtenPointsCount += len(data.Points)
 	}

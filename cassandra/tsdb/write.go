@@ -30,61 +30,52 @@ type serializedPoint struct {
 
 // Write writes all specified metrics
 // metrics points should be sorted and deduplicated
-func (c *CassandraTSDB) Write(metrics map[gouuid.UUID]types.MetricData) error {
+func (c *CassandraTSDB) Write(metrics []types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 
 	start := time.Now()
 
-	slicesMetrics := make([]types.MetricData, len(metrics))
-	slicesUUIDs := make([]gouuid.UUID, len(metrics))
-
-	var aggregatePointsCount int
-
-	i := 0
-
-	for uuid, data := range metrics {
-		aggregatePointsCount += len(data.Points)
-		slicesUUIDs[i] = uuid
-		slicesMetrics[i] = data
-		i++
-	}
-
-	requestsPointsTotalWriteRaw.Add(float64(aggregatePointsCount))
+	var rawPointsCount int
 
 	var wg sync.WaitGroup
 
 	wg.Add(concurrentWriterCount)
 
-	step := len(slicesMetrics) / concurrentWriterCount
+	step := len(metrics) / concurrentWriterCount
+
+	for _, data := range metrics {
+		rawPointsCount += len(data.Points)
+	}
 
 	for i := 0; i < concurrentWriterCount; i++ {
 		startIndex := i * step
 		endIndex := (i + 1) * step
 
-		if endIndex > len(slicesMetrics) || i == concurrentWriterCount-1 {
-			endIndex = len(slicesMetrics)
+		if endIndex > len(metrics) || i == concurrentWriterCount-1 {
+			endIndex = len(metrics)
 		}
 
 		go func() {
 			defer wg.Done()
-			c.writeMetrics(slicesUUIDs[startIndex:endIndex], slicesMetrics[startIndex:endIndex])
+			c.writeMetrics(metrics[startIndex:endIndex])
 		}()
 	}
 
 	wg.Wait()
 
+	requestsPointsTotalWriteRaw.Add(float64(rawPointsCount))
 	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
 
 	return nil
 }
 
 // Write writes all specified metrics of the slice
-func (c *CassandraTSDB) writeMetrics(uuids []gouuid.UUID, metrics []types.MetricData) {
-	for i, data := range metrics {
+func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData) {
+	for _, data := range metrics {
 		retry.Print(func() error {
-			return c.writeRawData(uuids[i], data) // nolint: scopelint
+			return c.writeRawData(data) // nolint: scopelint
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"write points to Cassandra",
 		)
@@ -174,7 +165,7 @@ func (c *CassandraTSDB) writeAggregateRow(uuid gouuid.UUID, aggregatedData aggre
 }
 
 // Write raw data per partition
-func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) error {
+func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -185,7 +176,7 @@ func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) er
 	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % c.options.RawPartitionSize)
 
 	if startBaseTimestamp == endBaseTimestamp {
-		err := c.writeRawPartitionData(uuid, data, startBaseTimestamp)
+		err := c.writeRawPartitionData(data, startBaseTimestamp)
 		return err
 	}
 
@@ -196,11 +187,12 @@ func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) er
 		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize)
 		if currentBaseTimestamp != baseTimestamp {
 			partitionData := types.MetricData{
+				UUID:       data.UUID,
 				Points:     data.Points[currentStartIndex:i],
 				TimeToLive: data.TimeToLive,
 			}
 
-			if err := c.writeRawPartitionData(uuid, partitionData, currentBaseTimestamp); err != nil {
+			if err := c.writeRawPartitionData(partitionData, currentBaseTimestamp); err != nil {
 				return err
 			}
 
@@ -210,11 +202,12 @@ func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) er
 	}
 
 	partitionData := types.MetricData{
+		UUID:       data.UUID,
 		Points:     data.Points[currentStartIndex:],
 		TimeToLive: data.TimeToLive,
 	}
 
-	if err := c.writeRawPartitionData(uuid, partitionData, currentBaseTimestamp); err != nil {
+	if err := c.writeRawPartitionData(partitionData, currentBaseTimestamp); err != nil {
 		return err
 	}
 
@@ -222,7 +215,7 @@ func (c *CassandraTSDB) writeRawData(uuid gouuid.UUID, data types.MetricData) er
 }
 
 // Write raw partition data
-func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.MetricData, baseTimestamp int64) error {
+func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -232,7 +225,7 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.Metri
 
 	// The sub-offset timestamp is encoded as uint16. It first, no need to split in multiple write
 	if data.Points[n-1].Timestamp-startOffsetTimestamp < 1<<16 {
-		err := c.writeRawBatchData(uuid, data, baseTimestamp, startOffsetTimestamp)
+		err := c.writeRawBatchData(data, baseTimestamp, startOffsetTimestamp)
 		return err
 	}
 
@@ -243,11 +236,12 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.Metri
 		subOffset := point.Timestamp - baseTimestamp - currentOffsetTimestamp
 		if subOffset >= 1<<16 {
 			rowData := types.MetricData{
+				UUID:       data.UUID,
 				Points:     data.Points[currentStartIndex:i],
 				TimeToLive: data.TimeToLive,
 			}
 
-			if err := c.writeRawBatchData(uuid, rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+			if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
 				return err
 			}
 
@@ -257,18 +251,19 @@ func (c *CassandraTSDB) writeRawPartitionData(uuid gouuid.UUID, data types.Metri
 	}
 
 	rowData := types.MetricData{
+		UUID:       data.UUID,
 		Points:     data.Points[currentStartIndex:],
 		TimeToLive: data.TimeToLive,
 	}
 
-	if err := c.writeRawBatchData(uuid, rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+	if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *CassandraTSDB) writeRawBatchData(uuid gouuid.UUID, data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
+func (c *CassandraTSDB) writeRawBatchData(data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -279,7 +274,7 @@ func (c *CassandraTSDB) writeRawBatchData(uuid gouuid.UUID, data types.MetricDat
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertRawDataQuery(uuid.String(), baseTimestamp, offsetTimestamp, data.TimeToLive, rawValues)
+	tableInsertDataQuery := c.tableInsertRawDataQuery(data.UUID.String(), baseTimestamp, offsetTimestamp, data.TimeToLive, rawValues)
 
 	start := time.Now()
 

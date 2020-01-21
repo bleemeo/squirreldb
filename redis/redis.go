@@ -41,7 +41,7 @@ func New(options Options) *Redis {
 }
 
 // Append appends the specified metrics
-func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+func (r *Redis) Append(newMetrics, existingMetrics []types.MetricData, timeToLive int64) error {
 	start := time.Now()
 
 	defer func() {
@@ -57,7 +57,7 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 
 	var addedPoints int
 
-	for uuid, data := range newMetrics {
+	for _, data := range newMetrics {
 		addedPoints += len(data.Points)
 		values, err := valuesFromData(data)
 
@@ -65,13 +65,13 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + data.UUID.String()
 
 		pipe.Append(key, string(values))
 		pipe.Expire(key, timeToLiveDuration)
 	}
 
-	for uuid, data := range existingMetrics {
+	for _, data := range existingMetrics {
 		addedPoints += len(data.Points)
 		values, err := valuesFromData(data)
 
@@ -79,7 +79,7 @@ func (r *Redis) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricD
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + data.UUID.String()
 
 		pipe.Append(key, string(values))
 	}
@@ -143,7 +143,7 @@ func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 }
 
 // Set sets the specified metrics
-func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) error {
+func (r *Redis) Set(metrics []types.MetricData, timeToLive int64) error {
 	start := time.Now()
 
 	defer func() {
@@ -159,7 +159,7 @@ func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) 
 
 	var writtenPointsCount int
 
-	for uuid, data := range metrics {
+	for _, data := range metrics {
 		writtenPointsCount += len(data.Points)
 		values, err := valuesFromData(data)
 
@@ -167,7 +167,7 @@ func (r *Redis) Set(metrics map[gouuid.UUID]types.MetricData, timeToLive int64) 
 			return err
 		}
 
-		key := keyPrefix + uuid.String()
+		key := keyPrefix + data.UUID.String()
 
 		pipe.Set(key, string(values), timeToLiveDuration)
 	}

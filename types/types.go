@@ -18,7 +18,7 @@ type MetricReader interface {
 }
 
 type MetricWriter interface {
-	Write(metrics map[gouuid.UUID]MetricData) error
+	Write(metrics []MetricData) error
 }
 
 // TryLocker is a Locker with an additional TryLock() method

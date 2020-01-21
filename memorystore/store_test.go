@@ -40,8 +40,8 @@ func TestStore_append(t *testing.T) {
 		metrics map[gouuid.UUID]storeData
 	}
 	type args struct {
-		newMetrics      map[gouuid.UUID]types.MetricData
-		existingMetrics map[gouuid.UUID]types.MetricData
+		newMetrics      []types.MetricData
+		existingMetrics []types.MetricData
 		timeToLive      int64
 		now             time.Time
 	}
@@ -91,8 +91,9 @@ func TestStore_append(t *testing.T) {
 				},
 			},
 			args: args{
-				newMetrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				newMetrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 20,
@@ -118,8 +119,9 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 300,
 					},
 				},
-				existingMetrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				existingMetrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 40,
@@ -230,8 +232,9 @@ func TestStore_append(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				newMetrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				newMetrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -257,8 +260,9 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 300,
 					},
 				},
-				existingMetrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				existingMetrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -682,7 +686,7 @@ func TestStore_set(t *testing.T) {
 		metrics map[gouuid.UUID]storeData
 	}
 	type args struct {
-		metrics    map[gouuid.UUID]types.MetricData
+		metrics    []types.MetricData
 		timeToLive int64
 		now        time.Time
 	}
@@ -732,8 +736,9 @@ func TestStore_set(t *testing.T) {
 				},
 			},
 			args: args{
-				metrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				metrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 20,
@@ -758,7 +763,8 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 40,
@@ -853,8 +859,9 @@ func TestStore_set(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				metrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				metrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -879,7 +886,8 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,

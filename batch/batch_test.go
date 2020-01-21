@@ -22,23 +22,23 @@ type mockMetricWriter struct {
 	metrics map[gouuid.UUID]types.MetricData
 }
 
-func (m *mockStore) Append(newMetrics, existingMetrics map[gouuid.UUID]types.MetricData, _ int64) error {
-	for uuid, data := range newMetrics {
-		storeData := m.metrics[uuid]
+func (m *mockStore) Append(newMetrics, existingMetrics []types.MetricData, _ int64) error {
+	for _, data := range newMetrics {
+		storeData := m.metrics[data.UUID]
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
 
-		m.metrics[uuid] = storeData
+		m.metrics[data.UUID] = storeData
 	}
 
-	for uuid, data := range existingMetrics {
-		storeData := m.metrics[uuid]
+	for _, data := range existingMetrics {
+		storeData := m.metrics[data.UUID]
 
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
 
-		m.metrics[uuid] = storeData
+		m.metrics[data.UUID] = storeData
 	}
 
 	return nil
@@ -58,9 +58,9 @@ func (m *mockStore) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, 
 	return metrics, nil
 }
 
-func (m *mockStore) Set(metrics map[gouuid.UUID]types.MetricData, _ int64) error {
-	for uuid, data := range metrics {
-		m.metrics[uuid] = data
+func (m *mockStore) Set(metrics []types.MetricData, _ int64) error {
+	for _, data := range metrics {
+		m.metrics[data.UUID] = data
 	}
 
 	return nil
@@ -80,12 +80,15 @@ func (m *mockMetricReader) Read(request types.MetricRequest) (map[gouuid.UUID]ty
 	return metrics, nil
 }
 
-func (m *mockMetricWriter) Write(metrics map[gouuid.UUID]types.MetricData) error {
+func (m *mockMetricWriter) Write(metrics []types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 
-	m.metrics = metrics
+	m.metrics = make(map[gouuid.UUID]types.MetricData)
+	for _, data := range metrics {
+		m.metrics[data.UUID] = data
+	}
 
 	return nil
 }
@@ -130,6 +133,7 @@ func TestBatch_check(t *testing.T) {
 				memoryStore: &mockStore{
 					metrics: map[gouuid.UUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -173,6 +177,7 @@ func TestBatch_check(t *testing.T) {
 			},
 			wantStorer: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 10,
@@ -204,6 +209,7 @@ func TestBatch_check(t *testing.T) {
 			},
 			wantWriter: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -245,6 +251,7 @@ func TestBatch_check(t *testing.T) {
 				memoryStore: &mockStore{
 					metrics: map[gouuid.UUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -288,6 +295,7 @@ func TestBatch_check(t *testing.T) {
 			},
 			wantStorer: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 10,
@@ -319,6 +327,7 @@ func TestBatch_check(t *testing.T) {
 			},
 			wantWriter: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50,
@@ -439,6 +448,7 @@ func TestBatch_flush(t *testing.T) {
 				memoryStore: &mockStore{
 					metrics: map[gouuid.UUID]types.MetricData{
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -472,6 +482,7 @@ func TestBatch_flush(t *testing.T) {
 							TimeToLive: 300,
 						},
 						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -538,6 +549,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			storerWant: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 10,
@@ -567,6 +579,7 @@ func TestBatch_flush(t *testing.T) {
 					TimeToLive: 300,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 20,
@@ -598,6 +611,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			writerWant: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -623,6 +637,7 @@ func TestBatch_flush(t *testing.T) {
 					TimeToLive: 300,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -791,7 +806,6 @@ func TestBatch_flushData(t *testing.T) {
 		states    map[gouuid.UUID]stateData
 	}
 	type args struct {
-		uuid       gouuid.UUID
 		data       types.MetricData
 		statesData []stateData
 		now        time.Time
@@ -823,8 +837,8 @@ func TestBatch_flushData(t *testing.T) {
 				},
 			},
 			args: args{
-				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				data: types.MetricData{
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -868,6 +882,7 @@ func TestBatch_flushData(t *testing.T) {
 				now: time.Unix(60, 0),
 			},
 			wantWrite: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 0,
@@ -893,6 +908,7 @@ func TestBatch_flushData(t *testing.T) {
 				TimeToLive: 300,
 			},
 			wantKeep: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 10,
@@ -942,8 +958,8 @@ func TestBatch_flushData(t *testing.T) {
 				},
 			},
 			args: args{
-				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				data: types.MetricData{
+					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points:     nil,
 					TimeToLive: 300,
 				},
@@ -980,8 +996,8 @@ func TestBatch_flushData(t *testing.T) {
 				},
 			},
 			args: args{
-				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				data: types.MetricData{
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 40,
@@ -1013,6 +1029,7 @@ func TestBatch_flushData(t *testing.T) {
 				now: time.Unix(6000, 0),
 			},
 			wantWrite: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 40,
@@ -1022,6 +1039,7 @@ func TestBatch_flushData(t *testing.T) {
 				TimeToLive: 300,
 			},
 			wantKeep: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 50,
@@ -1047,6 +1065,7 @@ func TestBatch_flushData(t *testing.T) {
 			},
 			args: args{
 				data: types.MetricData{
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
 						{Timestamp: 20},
@@ -1084,6 +1103,7 @@ func TestBatch_flushData(t *testing.T) {
 				now: time.Unix(130+50, 0),
 			},
 			wantWrite: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{Timestamp: 10},
 					{Timestamp: 20},
@@ -1100,6 +1120,7 @@ func TestBatch_flushData(t *testing.T) {
 				TimeToLive: 300,
 			},
 			wantKeep: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{Timestamp: 130},
 				},
@@ -1114,6 +1135,7 @@ func TestBatch_flushData(t *testing.T) {
 			},
 			args: args{
 				data: types.MetricData{
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
 						{Timestamp: 20},
@@ -1154,6 +1176,7 @@ func TestBatch_flushData(t *testing.T) {
 				now: time.Unix(130+50, 0),
 			},
 			wantWrite: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{Timestamp: 10},
 					{Timestamp: 20},
@@ -1170,6 +1193,7 @@ func TestBatch_flushData(t *testing.T) {
 				TimeToLive: 300,
 			},
 			wantKeep: types.MetricData{
+				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{Timestamp: 130},
 				},
@@ -1183,7 +1207,7 @@ func TestBatch_flushData(t *testing.T) {
 				batchSize: tt.fields.batchSize,
 				states:    tt.fields.states,
 			}
-			gotWrite, gotKeep := b.flushData(tt.args.uuid, tt.args.data, tt.args.statesData, tt.args.now)
+			gotWrite, gotKeep := b.flushData(tt.args.data, tt.args.statesData, tt.args.now)
 			if !reflect.DeepEqual(gotWrite, tt.wantWrite) {
 				t.Errorf("flushData() gotWrite = %v, want %v", gotWrite, tt.wantWrite)
 			}
@@ -1886,7 +1910,7 @@ func TestBatch_write(t *testing.T) {
 		writer      types.MetricWriter
 	}
 	type args struct {
-		metrics map[gouuid.UUID]types.MetricData
+		metrics []types.MetricData
 		now     time.Time
 	}
 	tests := []struct {
@@ -1909,8 +1933,9 @@ func TestBatch_write(t *testing.T) {
 				writer: &mockMetricWriter{},
 			},
 			args: args{
-				metrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				metrics: []types.MetricData{
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -1943,7 +1968,8 @@ func TestBatch_write(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -1995,6 +2021,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			wantStorer: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50,
@@ -2024,6 +2051,7 @@ func TestBatch_write(t *testing.T) {
 					TimeToLive: 300,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 60,
@@ -2055,6 +2083,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			wantWriter: map[gouuid.UUID]types.MetricData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -2080,6 +2109,7 @@ func TestBatch_write(t *testing.T) {
 					TimeToLive: 300,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -2207,6 +2237,7 @@ func Benchmark_flushData(b *testing.B) {
 		{
 			name: "one_state_first_5_30",
 			data: types.MetricData{
+				UUID:   uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: types.MakePointsForTest(30),
 			},
 			states: []stateData{
@@ -2222,6 +2253,7 @@ func Benchmark_flushData(b *testing.B) {
 		{
 			name: "one_state_first_30_60",
 			data: types.MetricData{
+				UUID:   uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: types.MakePointsForTest(60),
 			},
 			states: []stateData{
@@ -2237,6 +2269,7 @@ func Benchmark_flushData(b *testing.B) {
 		{
 			name: "three_state_90",
 			data: types.MetricData{
+				UUID:   uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: types.MakePointsForTest(90),
 			},
 			states: []stateData{
@@ -2265,7 +2298,7 @@ func Benchmark_flushData(b *testing.B) {
 		batch := Batch{}
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_, _ = batch.flushData(gouuid.UUID{}, tt.data, nil, now)
+				_, _ = batch.flushData(tt.data, nil, now)
 			}
 		})
 	}
