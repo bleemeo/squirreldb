@@ -96,33 +96,9 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 }
 
-// Returns a MetricLabelMatcher list- generated from LabelMatcher
-func matchersFromPromMatchers(promMatchers []*prompb.LabelMatcher) []types.MetricLabelMatcher {
-	if len(promMatchers) == 0 {
-		return nil
-	}
-
-	matchers := make([]types.MetricLabelMatcher, 0, len(promMatchers))
-
-	for _, promMatcher := range promMatchers {
-		matcher := types.MetricLabelMatcher{
-			MetricLabel: types.MetricLabel{
-				Name:  promMatcher.Name,
-				Value: promMatcher.Value,
-			},
-			Type: uint8(promMatcher.Type),
-		}
-
-		matchers = append(matchers, matcher)
-	}
-
-	return matchers
-}
-
 // Returns a MetricRequest generated from a Query
 func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.MetricRequest, error) {
-	matchers := matchersFromPromMatchers(promQuery.Matchers)
-	uuids, err := index.Search(matchers)
+	uuids, err := index.Search(promQuery.Matchers)
 
 	if err != nil {
 		return types.MetricRequest{}, err
@@ -162,26 +138,6 @@ func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index type
 	return requests, nil
 }
 
-// Returns a Label list generated from a MetricLabel list
-func promLabelsFromLabels(labels []types.MetricLabel) []*prompb.Label {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	promLabels := make([]*prompb.Label, 0, len(labels))
-
-	for _, label := range labels {
-		promLabel := &prompb.Label{
-			Name:  label.Name,
-			Value: label.Value,
-		}
-
-		promLabels = append(promLabels, promLabel)
-	}
-
-	return promLabels
-}
-
 // Returns a Sample list generated from a MetricPoint list
 func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	if len(points) == 0 {
@@ -209,11 +165,10 @@ func promSeriesFromMetric(uuid gouuid.UUID, data types.MetricData, index types.I
 		return nil, err
 	}
 
-	promLabels := promLabelsFromLabels(labels)
 	promSample := promSamplesFromPoints(data.Points)
 
 	promQueryResult := &prompb.TimeSeries{
-		Labels:  promLabels,
+		Labels:  labels,
 		Samples: promSample,
 	}
 

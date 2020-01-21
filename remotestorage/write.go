@@ -71,41 +71,17 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	}
 }
 
-// Returns a MetricLabel list generated from a Label list
-func labelsFromPromLabels(promLabels []*prompb.Label) []types.MetricLabel {
-	if len(promLabels) == 0 {
-		return nil
-	}
-
-	labels := make([]types.MetricLabel, 0, len(promLabels))
-
-	for _, promLabel := range promLabels {
-		label := types.MetricLabel{
-			Name:  promLabel.Name,
-			Value: promLabel.Value,
-		}
-
-		labels = append(labels, label)
-	}
-
-	return labels
-}
-
 // Returns a MetricPoint list generated from a Sample list
 func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	if len(promSamples) == 0 {
 		return nil
 	}
 
-	points := make([]types.MetricPoint, 0, len(promSamples))
+	points := make([]types.MetricPoint, len(promSamples))
 
-	for _, promSample := range promSamples {
-		point := types.MetricPoint{
-			Timestamp: promSample.Timestamp / 1000,
-			Value:     promSample.Value,
-		}
-
-		points = append(points, point)
+	for i, promSample := range promSamples {
+		points[i].Timestamp = promSample.Timestamp / 1000
+		points[i].Value = promSample.Value
 	}
 
 	return points
@@ -113,9 +89,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 
 // Returns a UUID and a MetricData generated from a TimeSeries
 func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (types.MetricData, error) {
-	labels := labelsFromPromLabels(promSeries.Labels)
-
-	uuid, timeToLive, err := index.LookupUUID(labels)
+	uuid, timeToLive, err := index.LookupUUID(promSeries.Labels)
 	if err != nil {
 		return types.MetricData{}, err
 	}

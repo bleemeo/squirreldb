@@ -17,83 +17,25 @@ const defaultTTL = 3600
 type mockIndex struct {
 	fixedLookupUUID string
 	fixedSearchUUID string
-	fixedLabels     []types.MetricLabel
+	fixedLabels     []*prompb.Label
 }
 
 func (i mockIndex) AllUUIDs() ([]gouuid.UUID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, error) {
+func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, int64, error) {
+func (i mockIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error) {
 	return uuidFromStringOrNil(i.fixedLookupUUID), defaultTTL, nil
 }
 
-func (i mockIndex) Search(matchers []types.MetricLabelMatcher) ([]gouuid.UUID, error) {
+func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error) {
 	if i.fixedSearchUUID == "" {
 		return nil, nil
 	}
 	return []gouuid.UUID{uuidFromStringOrNil(i.fixedSearchUUID)}, nil
-}
-
-func Test_labelsFromPromLabels(t *testing.T) {
-	type args struct {
-		promLabels []*prompb.Label
-	}
-	tests := []struct {
-		name string
-		args args
-		want []types.MetricLabel
-	}{
-		{
-			name: "promLabels_filled",
-			args: args{
-				promLabels: []*prompb.Label{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: []types.MetricLabel{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "promLabels_empty",
-			args: args{
-				promLabels: []*prompb.Label{},
-			},
-			want: nil,
-		},
-		{
-			name: "promLabels_nil",
-			args: args{
-				promLabels: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := labelsFromPromLabels(tt.args.promLabels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("labelsFromPromLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func Test_metricFromPromSeries(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"math/rand"
 	"sort"
-	"strings"
 )
 
 type MetricPoint struct {
@@ -18,16 +17,6 @@ type MetricData struct {
 	UUID       gouuid.UUID
 	Points     []MetricPoint
 	TimeToLive int64
-}
-
-type MetricLabel struct {
-	Name  string
-	Value string
-}
-
-type MetricLabelMatcher struct {
-	MetricLabel
-	Type uint8
 }
 
 type MetricRequest struct {
@@ -43,19 +32,6 @@ func UintFromUUID(uuid gouuid.UUID) uint64 {
 	bigInt := big.NewInt(0).SetBytes(uuid.Bytes())
 
 	return bigInt.Uint64()
-}
-
-// CopyLabels returns a copy of labels
-func CopyLabels(labels []MetricLabel) []MetricLabel {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	copiedLabels := make([]MetricLabel, len(labels))
-
-	copy(copiedLabels, labels)
-
-	return copiedLabels
 }
 
 // CopyPoints returns a copy of points
@@ -95,55 +71,6 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	return result
 }
 
-// PopLabelsValue get and delete value via its name from a MetricLabel list
-func PopLabelsValue(labels *[]MetricLabel, key string) (string, bool) {
-	for i, label := range *labels {
-		if label.Name == key {
-			*labels = append((*labels)[:i], (*labels)[i+1:]...)
-			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// GetLabelsValue gets value via its name from a MetricLabel list
-func GetLabelsValue(labels []MetricLabel, name string) (string, bool) {
-	for _, label := range labels {
-		if label.Name == name {
-			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// GetMatchersValue gets value via its name from a MetricLabel list
-func GetMatchersValue(matchers []MetricLabelMatcher, name string) (string, bool) {
-	for _, matcher := range matchers {
-		if matcher.Name == name {
-			return matcher.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// SortLabels returns the MetricLabel list sorted by name
-func SortLabels(labels []MetricLabel) []MetricLabel {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	sortedLabels := CopyLabels(labels)
-
-	sort.Slice(sortedLabels, func(i, j int) bool {
-		return sortedLabels[i].Name < sortedLabels[j].Name
-	})
-
-	return sortedLabels
-}
-
 // sortPoints returns the MetricPoint list sorted by timestamp
 func sortPoints(points []MetricPoint) {
 	if len(points) <= 1 {
@@ -153,26 +80,6 @@ func sortPoints(points []MetricPoint) {
 	sort.Slice(points, func(i, j int) bool {
 		return points[i].Timestamp < points[j].Timestamp
 	})
-}
-
-// StringFromLabels returns a string generated from a MetricLabel list
-func StringFromLabels(labels []MetricLabel) string {
-	if len(labels) == 0 {
-		return ""
-	}
-
-	strLabels := make([]string, 0, len(labels))
-	quoter := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
-
-	for _, label := range labels {
-		str := label.Name + "=\"" + quoter.Replace(label.Value) + "\""
-
-		strLabels = append(strLabels, str)
-	}
-
-	str := strings.Join(strLabels, ",")
-
-	return str
 }
 
 // MakePointsForTest generate a list a MetricPoint for testing

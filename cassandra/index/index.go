@@ -2,17 +2,18 @@ package index
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
+	"github.com/prometheus/prometheus/prompb"
 
 	"context"
 	"log"
 	"os"
 	"regexp"
 	"squirreldb/debug"
-	"squirreldb/types"
 	"strings"
 	"sync"
 	"time"
@@ -35,13 +36,6 @@ const (
 )
 
 const (
-	matcherTypeEq  = 0
-	matcherTypeNeq = 1
-	matcherTypeRe  = 2
-	matcherTypeNre = 3
-)
-
-const (
 	targetTypeKeyUndefined = 0
 	targetTypeKeyDefined   = 1
 	targetTypeValueEqual   = 2
@@ -51,7 +45,7 @@ const (
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 type labelsData struct {
-	labels              []types.MetricLabel
+	labels              []*prompb.Label
 	expirationTimestamp int64
 }
 
@@ -130,8 +124,8 @@ func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
 	return uuids, nil
 }
 
-// LookupLabels returns a MetricLabel list corresponding to the specified UUID
-func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, error) {
+// LookupLabels returns a prompb.Label list corresponding to the specified UUID
+func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
 	start := time.Now()
 
 	c.utlMutex.Lock()
@@ -154,10 +148,16 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 	labelsData.expirationTimestamp = now.Unix() + cacheExpirationDelay
 	c.uuidsToLabels[uuid] = labelsData
 
-	labels := types.CopyLabels(labelsData.labels)
+	labels := make([]*prompb.Label, len(labelsData.labels))
+	for i, v := range labelsData.labels {
+		labels[i] = &prompb.Label{
+			Name:  v.Name,
+			Value: v.Value,
+		}
+	}
 
 	if c.options.IncludeUUID {
-		label := types.MetricLabel{
+		label := &prompb.Label{
 			Name:  uuidLabelName,
 			Value: uuid.String(),
 		}
@@ -170,9 +170,9 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]types.MetricLabel, er
 	return labels, nil
 }
 
-// LookupUUID returns a UUID corresponding to the specified MetricLabel list
+// LookupUUID returns a UUID corresponding to the specified prompb.Label list
 // It also return the metric TTL
-func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, int64, error) { //nolint: gocognit
+func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error) { //nolint: gocognit
 	start := time.Now()
 	now := time.Now()
 
@@ -188,7 +188,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 	defer c.ltuMutex.Unlock()
 
 	var (
-		sortedLabels       []types.MetricLabel
+		sortedLabels       []*prompb.Label
 		sortedLabelsString string
 	)
 
@@ -203,7 +203,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 	if !found {
 		lookupUUIDMisses.Inc()
 
-		uuidStr, _ := types.GetLabelsValue(labels, uuidLabelName)
+		uuidStr, _ := getLabelsValue(labels, uuidLabelName)
 		if c.options.IncludeUUID && uuidStr != "" {
 			uuid, err := gouuid.FromString(uuidStr)
 			if err != nil {
@@ -216,10 +216,10 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 				return uuid, 0, err
 			}
 
-			sortedLabelsString = types.StringFromLabels(sortedLabels)
+			sortedLabelsString = stringFromLabels(labels)
 		} else {
-			sortedLabels = types.SortLabels(labels)
-			sortedLabelsString = types.StringFromLabels(sortedLabels)
+			sortedLabels = sortLabels(labels)
+			sortedLabelsString = stringFromLabels(labels)
 		}
 
 		selectUUIDQuery := c.queryUUIDFromLabels(sortedLabelsString)
@@ -263,8 +263,8 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 		}
 
 		if sortedLabelsString == "" {
-			sortedLabels = types.SortLabels(labels)
-			sortedLabelsString = types.StringFromLabels(sortedLabels)
+			sortedLabels = sortLabels(labels)
+			sortedLabelsString = stringFromLabels(sortedLabels)
 		}
 		// The Cassandra TTL is a little longer because we only update the TTL
 		// every cassandraTTLUpdateDelay. By adding cassandraTTLUpdateDelay to the TTL
@@ -291,7 +291,7 @@ func (c *CassandraIndex) LookupUUID(labels []types.MetricLabel) (gouuid.UUID, in
 }
 
 // Search returns a list of UUID corresponding to the specified MetricLabelMatcher list
-func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]gouuid.UUID, error) {
+func (c *CassandraIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error) {
 	start := time.Now()
 
 	defer func() {
@@ -309,7 +309,7 @@ func (c *CassandraIndex) Search(matchers []types.MetricLabelMatcher) ([]gouuid.U
 
 	if c.options.IncludeUUID {
 		var uuidStr string
-		uuidStr, found = types.GetMatchersValue(matchers, uuidLabelName)
+		uuidStr, found = getMatchersValue(matchers, uuidLabelName)
 
 		if found {
 			uuid, err := gouuid.FromString(uuidStr)
@@ -368,15 +368,15 @@ func (c *CassandraIndex) expire(now time.Time) {
 }
 
 // Returns labels by target type
-func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[int][]types.MetricLabel, error) { // nolint:gocognit
+func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int][]*prompb.Label, error) { // nolint:gocognit
 	if len(matchers) == 0 {
 		return nil, nil
 	}
 
-	targetLabels := make(map[int][]types.MetricLabel)
+	targetLabels := make(map[int][]*prompb.Label)
 
 	for _, matcher := range matchers {
-		targetLabel := types.MetricLabel{
+		targetLabel := prompb.Label{
 			Name: matcher.Name,
 		}
 
@@ -384,10 +384,10 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 			targetLabel.Value = ""
 
 			switch matcher.Type {
-			case matcherTypeEq, matcherTypeRe:
-				targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], targetLabel)
-			case matcherTypeNeq, matcherTypeNre:
-				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], targetLabel)
+			case prompb.LabelMatcher_EQ, prompb.LabelMatcher_RE:
+				targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
+			case prompb.LabelMatcher_NEQ, prompb.LabelMatcher_NRE:
+				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], &targetLabel)
 			}
 		} else {
 			selectValueQuery := c.queryLabelValues(matcher.Name)
@@ -408,7 +408,7 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 
 			var regex *regexp.Regexp
 
-			if (matcher.Type == matcherTypeRe) || (matcher.Type == matcherTypeNre) {
+			if (matcher.Type == prompb.LabelMatcher_RE) || (matcher.Type == prompb.LabelMatcher_NRE) {
 				var err error
 				regex, err = regexp.Compile("^(?:" + matcher.Value + ")$")
 
@@ -420,11 +420,11 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 			for _, value := range values {
 				targetLabel.Value = value
 
-				if ((matcher.Type == matcherTypeEq) && (matcher.Value == value)) ||
-					((matcher.Type == matcherTypeNeq) && (matcher.Value != value)) ||
-					((matcher.Type == matcherTypeRe) && regex.MatchString(value)) ||
-					((matcher.Type == matcherTypeNre) && !regex.MatchString(value)) {
-					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], targetLabel)
+				if ((matcher.Type == prompb.LabelMatcher_EQ) && (matcher.Value == value)) ||
+					((matcher.Type == prompb.LabelMatcher_NEQ) && (matcher.Value != value)) ||
+					((matcher.Type == prompb.LabelMatcher_RE) && regex.MatchString(value)) ||
+					((matcher.Type == prompb.LabelMatcher_NRE) && !regex.MatchString(value)) {
+					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &targetLabel)
 				}
 			}
 		}
@@ -434,7 +434,7 @@ func (c *CassandraIndex) targetLabels(matchers []types.MetricLabelMatcher) (map[
 }
 
 // Returns a list of uuid associated with the number of times it has corresponded to a targeted label
-func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (map[gouuid.UUID]int, error) { // nolint:gocognit
+func (c *CassandraIndex) uuidMatches(targetLabels map[int][]*prompb.Label) (map[gouuid.UUID]int, error) { // nolint:gocognit
 	if len(targetLabels) == 0 {
 		return nil, nil
 	}
@@ -521,7 +521,7 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]types.MetricLabel) (
 }
 
 // Returns uuids table insert labels Query as string
-func (c *CassandraIndex) batchAddEntry(batch *gocql.Batch, uuid gocql.UUID, labelsString string, labels []types.MetricLabel, ttl int64) {
+func (c *CassandraIndex) batchAddEntry(batch *gocql.Batch, uuid gocql.UUID, labelsString string, labels []*prompb.Label, ttl int64) {
 	batch.Query(`
 		INSERT INTO index_labels2uuid (labels, uuid)
 		VALUES (?, ?)
@@ -648,8 +648,8 @@ func containsUUIDs(list []gouuid.UUID, target gouuid.UUID) bool {
 	return false
 }
 
-// keyFromLabels returns a string key generated from a MetricLabel list
-func keyFromLabels(labels []types.MetricLabel) string {
+// keyFromLabels returns a string key generated from a prompb.Label list
+func keyFromLabels(labels []*prompb.Label) string {
 	if len(labels) == 0 {
 		return ""
 	}
@@ -666,9 +666,84 @@ func keyFromLabels(labels []types.MetricLabel) string {
 	return str
 }
 
-// Returns and delete time to live from a MetricLabel list
-func timeToLiveFromLabels(labels *[]types.MetricLabel) int64 {
-	value, exists := types.PopLabelsValue(labels, timeToLiveLabelName)
+// popLabelsValue get and delete value via its name from a prompb.Label list
+func popLabelsValue(labels *[]*prompb.Label, key string) (string, bool) {
+	for i, label := range *labels {
+		if label.Name == key {
+			*labels = append((*labels)[:i], (*labels)[i+1:]...)
+			return label.Value, true
+		}
+	}
+
+	return "", false
+}
+
+// getLabelsValue gets value via its name from a prompb.Label list
+func getLabelsValue(labels []*prompb.Label, name string) (string, bool) {
+	for _, label := range labels {
+		if label.Name == name {
+			return label.Value, true
+		}
+	}
+
+	return "", false
+}
+
+// getMatchersValue gets value via its name from a prompb.LabelMatcher list
+func getMatchersValue(matchers []*prompb.LabelMatcher, name string) (string, bool) {
+	for _, matcher := range matchers {
+		if matcher.Name == name {
+			return matcher.Value, true
+		}
+	}
+
+	return "", false
+}
+
+// sortLabels returns the prompb.Label list sorted by name
+func sortLabels(labels []*prompb.Label) []*prompb.Label {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	sortedLabels := make([]*prompb.Label, len(labels))
+	for i, v := range labels {
+		sortedLabels[i] = &prompb.Label{
+			Name:  v.Name,
+			Value: v.Value,
+		}
+	}
+
+	sort.Slice(sortedLabels, func(i, j int) bool {
+		return sortedLabels[i].Name < sortedLabels[j].Name
+	})
+
+	return sortedLabels
+}
+
+// stringFromLabels returns a string generated from a prompb.Label list
+func stringFromLabels(labels []*prompb.Label) string {
+	if len(labels) == 0 {
+		return ""
+	}
+
+	strLabels := make([]string, 0, len(labels))
+	quoter := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+	for _, label := range labels {
+		str := label.Name + "=\"" + quoter.Replace(label.Value) + "\""
+
+		strLabels = append(strLabels, str)
+	}
+
+	str := strings.Join(strLabels, ",")
+
+	return str
+}
+
+// Returns and delete time to live from a prompb.Label list
+func timeToLiveFromLabels(labels *[]*prompb.Label) int64 {
+	value, exists := popLabelsValue(labels, timeToLiveLabelName)
 
 	var timeToLive int64
 

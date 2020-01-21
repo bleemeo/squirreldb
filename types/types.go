@@ -4,13 +4,14 @@ import (
 	"sync"
 
 	gouuid "github.com/gofrs/uuid"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 type Index interface {
 	AllUUIDs() ([]gouuid.UUID, error)
-	LookupLabels(uuid gouuid.UUID) ([]MetricLabel, error)
-	LookupUUID(labels []MetricLabel) (gouuid.UUID, int64, error)
-	Search(matchers []MetricLabelMatcher) ([]gouuid.UUID, error)
+	LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error)
+	LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error)
+	Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error)
 }
 
 type MetricReader interface {

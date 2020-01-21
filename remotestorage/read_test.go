@@ -5,80 +5,14 @@ import (
 	"squirreldb/types"
 	"testing"
 
-	"github.com/prometheus/prometheus/prompb"
 	gouuid "github.com/gofrs/uuid"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 func uuidFromStringOrNil(s string) gouuid.UUID {
 	uuid, _ := gouuid.FromString(s)
 
 	return uuid
-}
-
-func Test_matchersFromPromMatchers(t *testing.T) {
-	type args struct {
-		promMatchers []*prompb.LabelMatcher
-	}
-	tests := []struct {
-		name string
-		args args
-		want []types.MetricLabelMatcher
-	}{
-		{
-			name: "promMatchers_filled",
-			args: args{
-				promMatchers: []*prompb.LabelMatcher{
-					{
-						Type:  1,
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Type:  2,
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: []types.MetricLabelMatcher{
-				{
-					MetricLabel: types.MetricLabel{
-						Name:  "__name__",
-						Value: "up",
-					},
-					Type: 1,
-				},
-				{
-					MetricLabel: types.MetricLabel{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-					Type: 2,
-				},
-			},
-		},
-		{
-			name: "promMatchers_empty",
-			args: args{
-				promMatchers: []*prompb.LabelMatcher{},
-			},
-			want: nil,
-		},
-		{
-			name: "promMatchers_nil",
-			args: args{
-				promMatchers: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := matchersFromPromMatchers(tt.args.promMatchers); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("matchersFromPromMatchers() = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func Test_requestFromPromQuery(t *testing.T) {
@@ -247,65 +181,6 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 		})
 	}
 }
-
-func Test_promLabelsFromLabels(t *testing.T) {
-	type args struct {
-		labels []types.MetricLabel
-	}
-	tests := []struct {
-		name string
-		args args
-		want []*prompb.Label
-	}{
-		{
-			name: "labels_filled",
-			args: args{
-				labels: []types.MetricLabel{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: []*prompb.Label{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []types.MetricLabel{},
-			},
-			want: nil,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := promLabelsFromLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("promLabelsFromLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_promSamplesFromPoints(t *testing.T) {
 	type args struct {
 		points []types.MetricPoint
@@ -440,7 +315,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []types.MetricLabel{
+					fixedLabels: []*prompb.Label{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -549,7 +424,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []types.MetricLabel{
+					fixedLabels: []*prompb.Label{
 						{
 							Name:  "__name__",
 							Value: "up",
