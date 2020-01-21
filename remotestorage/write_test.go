@@ -1,7 +1,9 @@
 package remotestorage
 
 import (
+	"bytes"
 	"errors"
+	"io/ioutil"
 	"reflect"
 	"squirreldb/types"
 	"testing"
@@ -191,6 +193,35 @@ func Test_metricFromPromSeries(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
 				t.Errorf("metricFromPromSeries() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}
+
+func Benchmark_metricsFromPromSeries(b *testing.B) {
+	dummyIndex := mockIndex{
+		fixedLookupUUID: "00000000-0000-0000-0000-000000000001",
+	}
+	tests := []string{
+		"testdata/write_req_empty",
+		"testdata/write_req_one",
+		"testdata/write_req_backlog",
+		"testdata/write_req_large",
+	}
+	for _, file := range tests {
+		b.Run(file, func(b *testing.B) {
+			wr := prompb.WriteRequest{}
+			reqCtx := requestContext{
+				pb: &wr,
+			}
+			data, err := ioutil.ReadFile(file)
+			if err != nil {
+				b.Fatalf("unexpected error: %v", err)
+			}
+			reader := bytes.NewReader(data)
+			decodeRequest(reader, &reqCtx)
+			for n := 0; n < b.N; n++ {
+				metricsFromTimeseries(wr.Timeseries, dummyIndex)
 			}
 		})
 	}
