@@ -1,11 +1,11 @@
 package remotestorage
 
 import (
+	"io"
+	"io/ioutil"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-
-	"io/ioutil"
-	"net/http"
 )
 
 // Returns the encoded response
@@ -22,8 +22,8 @@ func encodeResponse(pb proto.Marshaler) ([]byte, error) {
 }
 
 // Decodes the request
-func decodeRequest(request *http.Request, pb proto.Message) error {
-	body, err := ioutil.ReadAll(request.Body)
+func decodeRequest(reader io.Reader, pb proto.Message) error {
+	body, err := ioutil.ReadAll(reader)
 
 	if err != nil {
 		return err

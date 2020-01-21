@@ -25,7 +25,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 	var writeRequest prompb.WriteRequest
 
-	err := decodeRequest(request, &writeRequest)
+	err := decodeRequest(request.Body, &writeRequest)
 
 	if err != nil {
 		logger.Printf("Error: Can't decode the write request (%v)", err)

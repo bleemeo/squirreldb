@@ -24,7 +24,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	var readRequest prompb.ReadRequest
 
-	err := decodeRequest(request, &readRequest)
+	err := decodeRequest(request.Body, &readRequest)
 
 	if err != nil {
 		logger.Printf("Error: Can't decode the read request (%v)", err)
