@@ -1,6 +1,8 @@
 package remotestorage
 
 import (
+	"bytes"
+	"io/ioutil"
 	"os"
 	"reflect"
 	"testing"
@@ -292,15 +294,15 @@ func Benchmark_decodeRequest(b *testing.B) {
 
 	for _, file := range tests {
 		b.Run(file, func(b *testing.B) {
-			f, err := os.Open(file)
+			data, err := ioutil.ReadFile(file)
 			if err != nil {
 				b.Fatalf("unexpected error: %v", err)
 			}
-			defer f.Close()
+			reader := bytes.NewReader(data)
 			wr := prompb.WriteRequest{}
 			for n := 0; n < b.N; n++ {
-				decodeRequest(f, &wr)
-				f.Seek(0, os.SEEK_SET)
+				decodeRequest(reader, &wr)
+				reader.Seek(0, os.SEEK_SET)
 			}
 		})
 	}
