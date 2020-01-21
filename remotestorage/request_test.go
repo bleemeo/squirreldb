@@ -262,8 +262,8 @@ func Test_decodeRequest(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		wr := prompb.WriteRequest{}
 		t.Run(tt.file, func(t *testing.T) {
-			wr := prompb.WriteRequest{}
 			f, err := os.Open(tt.file)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
