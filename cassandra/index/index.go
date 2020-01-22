@@ -418,13 +418,14 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 			}
 
 			for _, value := range values {
-				targetLabel.Value = value
+				copyLabel := targetLabel
+				copyLabel.Value = value
 
 				if ((matcher.Type == prompb.LabelMatcher_EQ) && (matcher.Value == value)) ||
 					((matcher.Type == prompb.LabelMatcher_NEQ) && (matcher.Value != value)) ||
 					((matcher.Type == prompb.LabelMatcher_RE) && regex.MatchString(value)) ||
 					((matcher.Type == prompb.LabelMatcher_NRE) && !regex.MatchString(value)) {
-					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &targetLabel)
+					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &copyLabel)
 				}
 			}
 		}
