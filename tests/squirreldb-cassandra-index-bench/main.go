@@ -111,6 +111,32 @@ func test(cassandraIndex *index.CassandraIndex) {
 			"cpu":      "1",
 			"mode":     "user",
 		},
+		{ // index 7
+			"__name__":   "node_filesystem_avail_bytes",
+			"job":        "node_exporter",
+			"instance":   "localhost:9100",
+			"device":     "/dev/mapper/vg0-root",
+			"fstype":     "ext4",
+			"mountpoint": "/",
+		},
+		{ // index 8
+			"__name__":    "node_filesystem_avail_bytes",
+			"job":         "node_exporter",
+			"instance":    "localhost:9100",
+			"device":      "/dev/mapper/vg0-data",
+			"fstype":      "ext4",
+			"mountpoint":  "/srv/data",
+			"environment": "devel",
+		},
+		{ // index 9
+			"__name__":    "node_filesystem_avail_bytes",
+			"job":         "node_exporter",
+			"instance":    "remote:9100",
+			"device":      "/dev/mapper/vg0-data",
+			"fstype":      "ext4",
+			"mountpoint":  "/srv/data",
+			"environment": "production",
+		},
 	}
 
 	tests := []struct {
@@ -119,7 +145,7 @@ func test(cassandraIndex *index.CassandraIndex) {
 		MatchingMetrics []int
 	}{
 		{
-			Name: "equal-one-label",
+			Name: "eq",
 			Matchers: []*prompb.LabelMatcher{
 				{
 					Type:  prompb.LabelMatcher_EQ,
@@ -130,7 +156,7 @@ func test(cassandraIndex *index.CassandraIndex) {
 			MatchingMetrics: []int{1, 2, 3},
 		},
 		{
-			Name: "equal-two-label",
+			Name: "eq-eq",
 			Matchers: []*prompb.LabelMatcher{
 				{
 					Type:  prompb.LabelMatcher_EQ,
@@ -160,6 +186,182 @@ func test(cassandraIndex *index.CassandraIndex) {
 				},
 			},
 			MatchingMetrics: []int{4},
+		},
+		{
+			Name: "eq-nolabel",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			MatchingMetrics: []int{7},
+		},
+		{
+			Name: "eq-label",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			MatchingMetrics: []int{8, 9},
+		},
+		{
+			Name: "re",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "u.",
+				},
+			},
+			MatchingMetrics: []int{1, 2, 3},
+		},
+		{
+			Name: "re-re",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_cpu_.*",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "mode",
+					Value: "^u.*",
+				},
+			},
+			MatchingMetrics: []int{5, 6},
+		},
+		{
+			Name: "re-nre",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_(cpu|disk)_seconds_total",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "mode",
+					Value: "u\\wer",
+				},
+			},
+			MatchingMetrics: []int{4},
+		},
+		{
+			Name: "re-re_nolabel",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "environment",
+					Value: "^$",
+				},
+			},
+			MatchingMetrics: []int{7},
+		},
+		{
+			Name: "re-re_label",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "^$",
+				},
+			},
+			MatchingMetrics: []int{8, 9},
+		},
+		{
+			Name: "re-re*",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "environment",
+					Value: ".*",
+				},
+			},
+			MatchingMetrics: []int{7, 8, 9},
+		},
+		{
+			Name: "re-nre*",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: ".*",
+				},
+			},
+			MatchingMetrics: []int{},
+		},
+		{
+			Name: "eq-nre_empty_and_devel",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "(|devel)",
+				},
+			},
+			MatchingMetrics: []int{9},
+		},
+		{
+			Name: "eq-nre-eq same label",
+			Matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "^$",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "environment",
+					Value: "devel",
+				},
+			},
+			MatchingMetrics: []int{8},
 		},
 	}
 

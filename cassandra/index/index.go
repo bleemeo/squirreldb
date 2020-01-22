@@ -408,13 +408,24 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 			Name: matcher.Name,
 		}
 
-		if matcher.Value == "" {
+		var regex *regexp.Regexp
+
+		if (matcher.Type == prompb.LabelMatcher_RE) || (matcher.Type == prompb.LabelMatcher_NRE) {
+			var err error
+			regex, err = regexp.Compile("^(?:" + matcher.Value + ")$")
+
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if matcher.Value == "" && regex == nil {
 			targetLabel.Value = ""
 
 			switch matcher.Type {
-			case prompb.LabelMatcher_EQ, prompb.LabelMatcher_RE:
+			case prompb.LabelMatcher_EQ:
 				targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
-			case prompb.LabelMatcher_NEQ, prompb.LabelMatcher_NRE:
+			case prompb.LabelMatcher_NEQ:
 				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], &targetLabel)
 			}
 		} else {
@@ -434,17 +445,6 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 				return nil, err
 			}
 
-			var regex *regexp.Regexp
-
-			if (matcher.Type == prompb.LabelMatcher_RE) || (matcher.Type == prompb.LabelMatcher_NRE) {
-				var err error
-				regex, err = regexp.Compile("^(?:" + matcher.Value + ")$")
-
-				if err != nil {
-					return nil, err
-				}
-			}
-
 			for _, value := range values {
 				copyLabel := targetLabel
 				copyLabel.Value = value
@@ -454,6 +454,11 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 					((matcher.Type == prompb.LabelMatcher_RE) && regex.MatchString(value)) ||
 					((matcher.Type == prompb.LabelMatcher_NRE) && !regex.MatchString(value)) {
 					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &copyLabel)
+				}
+			}
+			if regex != nil && regex.MatchString("") {
+				if matcher.Type == prompb.LabelMatcher_RE {
+					targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
 				}
 			}
 		}
