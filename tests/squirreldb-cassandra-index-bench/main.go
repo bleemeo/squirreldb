@@ -55,6 +55,8 @@ func main() {
 	log.Printf("Start validating test")
 	test(cassandraIndex)
 	log.Printf("Re-run validating test")
+	test(cassandraIndex)
+	log.Printf("Re-run validating test on fresh index")
 	test(cassandraIndex2)
 }
 
@@ -203,6 +205,49 @@ func test(cassandraIndex *index.CassandraIndex) {
 
 		if !reflect.DeepEqual(wantUUIDToIndex, gotUUIDToIndex) {
 			log.Fatalf("Search(%s) = %v, want %v", tt.Name, gotUUIDToIndex, wantUUIDToIndex)
+		}
+	}
+
+	if *includeUUID {
+		uuid, _, err := cassandraIndex.LookupUUID([]*prompb.Label{
+			{Name: "__uuid__", Value: metricsUUID[1].String()},
+			{Name: "ignored", Value: "__uuid__ win"},
+		})
+		if err != nil {
+			log.Fatalf("LookupUUID(__uuid__ valid) failed: %v", err)
+		}
+		if uuid != metricsUUID[1] {
+			log.Fatalf("LookupUUID(__uuid__ valid) = %v, want %v", uuid, metricsUUID[1])
+		}
+
+		_, _, err = cassandraIndex.LookupUUID([]*prompb.Label{
+			{Name: "__uuid__", Value: "00000000-0000-0000-0000-000000000001"},
+			{Name: "ignored", Value: "__uuid__ win"},
+		})
+		if err == nil {
+			log.Fatalf("LookupUUID(__uuid__ invalid) succeded. It must fail")
+		}
+
+		uuids, err := cassandraIndex.Search([]*prompb.LabelMatcher{
+			{Type: prompb.LabelMatcher_EQ, Name: "__uuid__", Value: metricsUUID[1].String()},
+			{Type: prompb.LabelMatcher_EQ, Name: "ignored", Value: "only_uuid_is_used"},
+		})
+		if err != nil {
+			log.Fatalf("Search(__uuid__ valid) failed: %v", err)
+		}
+		if len(uuids) != 1 || uuids[0] != metricsUUID[1] {
+			log.Fatalf("Search(__uuid__ valid) = %v, want [%v]", uuids, metricsUUID[1])
+		}
+
+		uuids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
+			{Type: prompb.LabelMatcher_EQ, Name: "__uuid__", Value: metricsUUID[2].String()},
+			{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "up"},
+		})
+		if err != nil {
+			log.Fatalf("Search(__uuid__ valid 2) failed: %v", err)
+		}
+		if len(uuids) != 1 || uuids[0] != metricsUUID[2] {
+			log.Fatalf("Search(__uuid__ valid 2) = %v, want [%v]", uuids, metricsUUID[2])
 		}
 	}
 }

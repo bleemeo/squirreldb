@@ -126,6 +126,10 @@ func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
 
 // LookupLabels returns a prompb.Label list corresponding to the specified UUID
 func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
+	return c.lookupLabels(uuid, c.options.IncludeUUID)
+}
+
+func (c *CassandraIndex) lookupLabels(uuid gouuid.UUID, addUUID bool) ([]*prompb.Label, error) {
 	start := time.Now()
 
 	c.utlMutex.Lock()
@@ -156,7 +160,7 @@ func (c *CassandraIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error)
 		}
 	}
 
-	if c.options.IncludeUUID {
+	if addUUID {
 		label := &prompb.Label{
 			Name:  uuidLabelName,
 			Value: uuid.String(),
@@ -210,18 +214,17 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 				return uuid, 0, err
 			}
 
-			sortedLabels, err = c.LookupLabels(uuid)
+			sortedLabels, err = c.lookupLabels(uuid, false)
 
 			if err != nil {
 				return uuid, 0, err
 			}
 
-			sortedLabelsString = stringFromLabels(labels)
+			sortedLabelsString = stringFromLabels(sortedLabels)
 		} else {
 			sortedLabels = sortLabels(labels)
 			sortedLabelsString = stringFromLabels(sortedLabels)
 		}
-
 		selectUUIDQuery := c.queryUUIDFromLabels(sortedLabelsString)
 
 		var (
