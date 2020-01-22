@@ -11,19 +11,32 @@ Tests:
 * squirreldb-cassandra-index-bench: Tests & benchmark Cassandra Index.
 
 
-To run those test, you will need a Cassandra:
+To run test, you will need a Cassandra:
 
 ```
-docker run -p 9042:9042 --name squirreldb-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
+docker run --name squirreldb-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
 ```
 
-Before each test, you should probably drop the keyspace:
+# squirreldb-cassandra-index-bench
 
+This test does few validation test and the will create a "shard" with a fixed number of metrics.
+Think "shard" a one tenant, queries will only ask metric from one shard.
+
+Run it with:
 ```
-docker exec squirreldb-cassandra cqlsh -e 'drop keyspace squirreldb_test'
+export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
+go run ./tests/squirreldb-cassandra-index-bench/ -drop
 ```
 
-Then run it with:
+To see impact of other shard/number of total metrics, you may be interested in running in two step:
+
+* First insert data without querying (because querying is rather long):
 ```
-go run ./tests/squirreldb-cassandra-index-bench/
+go run ./tests/squirreldb-cassandra-index-bench/ -bench.query 0 -bench.shard-end 10
 ```
+* Then only query one shard (the last for example):
+```
+go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 0 -bench.shard-start 10 -bench.shard-end 10
+```
+
+Run-re the two commands, increasing the last shard number to see evolution of times with larger index

@@ -17,6 +17,7 @@ require (
 	github.com/onsi/gomega v1.8.1 // indirect
 	github.com/pelletier/go-toml v1.6.0 // indirect
 	github.com/prometheus/client_golang v1.3.0
+	github.com/prometheus/procfs v0.0.8
 	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
