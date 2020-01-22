@@ -72,6 +72,14 @@ func map2Labels(input map[string]string) []*prompb.Label {
 	return result
 }
 
+func labels2Map(input []*prompb.Label) map[string]string {
+	result := make(map[string]string, len(input))
+	for _, l := range input {
+		result[l.Name] = l.Value
+	}
+	return result
+}
+
 func test(cassandraIndex *index.CassandraIndex) {
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
@@ -451,5 +459,31 @@ func test(cassandraIndex *index.CassandraIndex) {
 		if len(uuids) != 1 || uuids[0] != metricsUUID[2] {
 			log.Fatalf("Search(__uuid__ valid 2) = %v, want [%v]", uuids, metricsUUID[2])
 		}
+	}
+
+	for i, uuid := range metricsUUID {
+		if i == 0 {
+			continue
+		}
+		labels, err := cassandraIndex.LookupLabels(uuid)
+		if err != nil {
+			log.Fatalf("LookupLabels(%d) failed: %v", i, err)
+		}
+		got := labels2Map(labels)
+		if !reflect.DeepEqual(got, metrics[i]) {
+			log.Fatalf("LookupLabels(%d) = %v, want %v", i, got, metrics[i])
+		}
+	}
+
+	got, err := cassandraIndex.AllUUIDs()
+	if err != nil {
+		log.Fatalf("AllUUIDs() failed: %v", err)
+	}
+	gotMap := make(map[gouuid.UUID]int, len(got))
+	for _, v := range got {
+		gotMap[v] = UUIDmetrics[v]
+	}
+	if !reflect.DeepEqual(gotMap, UUIDmetrics) {
+		log.Fatalf("AllUUIDs() = %v, want %v", gotMap, UUIDmetrics)
 	}
 }
