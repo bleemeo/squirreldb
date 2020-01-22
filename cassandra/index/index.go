@@ -219,7 +219,7 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 			sortedLabelsString = stringFromLabels(labels)
 		} else {
 			sortedLabels = sortLabels(labels)
-			sortedLabelsString = stringFromLabels(labels)
+			sortedLabelsString = stringFromLabels(sortedLabels)
 		}
 
 		selectUUIDQuery := c.queryUUIDFromLabels(sortedLabelsString)
@@ -291,6 +291,31 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 }
 
 // Search returns a list of UUID corresponding to the specified MetricLabelMatcher list
+//
+// It implement a revered index (as used in full-text search). The idea is that word
+// are a couple LabelName=LabelValue. As in a revered index, it use this "word" to
+// query a posting table which return the list of document ID (metric UUID here) that
+// has this "word".
+//
+// In normal full-text search, the document(s) with the most match will be return, here
+// it return the "document" (metric UUID) that exactly match all matchers
+//
+// Finally since Matcher could be other thing than LabelName=LabelValue (like not equal or using regular expression)
+// there is a fist pass that convert them to something that works with the revered index: it query all values for the
+// given label name then for each value, it the value match the filter convert to an simple equal matcher. Then this
+// simple equal matcher could be used with the posting of the reversed index (e.g. name!="cpu" will be converted in
+// something like name="memory" || name="disk" || name="...")
+//
+// There is still two additional special case: when label should be defined (regardless of the value, e.g. name!="") or
+// when the label should NOT be defined (e.g. name="").
+// In those case, it use the ability of our posting table to query for metric UUID that has a LabelName regardless of the values.
+// * For label must be defined, it increament the number of Matcher satified if the metric has the label. In the principe it's the
+//   same as if it expanded it to all possible values (e.g. with name!="" it avoid expanding to name="memory" || name="disk" and directly
+//   ask for name=*)
+// * For label must NOT be defined, it query for all metric UUIDs that has this label, then increament the number of Matcher satified if
+//   currently found metrics are not in the list of metrics having this label.
+//   Note: this means that it must already have found some metrics (and that this filter is applied at the end) but PromQL forbid to only
+//   have label-not-defined matcher, so some other matcher must exists.
 func (c *CassandraIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error) {
 	start := time.Now()
 
