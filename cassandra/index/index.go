@@ -225,6 +225,7 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 			sortedLabels = sortLabels(labels)
 			sortedLabelsString = stringFromLabels(sortedLabels)
 		}
+
 		selectUUIDQuery := c.queryUUIDFromLabels(sortedLabelsString)
 
 		var (
@@ -405,7 +406,8 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 
 	for _, matcher := range matchers {
 		targetLabel := prompb.Label{
-			Name: matcher.Name,
+			Name:  matcher.Name,
+			Value: matcher.Value,
 		}
 
 		var regex *regexp.Regexp
@@ -419,7 +421,8 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 			}
 		}
 
-		if matcher.Value == "" && regex == nil {
+		switch {
+		case matcher.Value == "" && regex == nil:
 			targetLabel.Value = ""
 
 			switch matcher.Type {
@@ -428,7 +431,9 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 			case prompb.LabelMatcher_NEQ:
 				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], &targetLabel)
 			}
-		} else {
+		case matcher.Type == prompb.LabelMatcher_EQ:
+			targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &targetLabel)
+		default:
 			selectValueQuery := c.queryLabelValues(matcher.Name)
 			selectValueIter := selectValueQuery.Iter()
 
@@ -456,6 +461,7 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &copyLabel)
 				}
 			}
+
 			if regex != nil && regex.MatchString("") {
 				if matcher.Type == prompb.LabelMatcher_RE {
 					targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
