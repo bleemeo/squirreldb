@@ -5,6 +5,7 @@ import (
 
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Options struct {
@@ -16,6 +17,7 @@ type Options struct {
 // New creates a new Cassandra object
 func New(options Options) (*gocql.Session, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
+	cluster.Timeout = 3 * time.Second
 	session, err := cluster.CreateSession()
 
 	if err != nil {
