@@ -21,78 +21,6 @@ type queryResult struct {
 	QueryCount  int
 }
 
-type benchResult struct {
-	metricsBefore int
-	metricsAfter  int
-	insertCount   int
-	insertTime    time.Duration
-	queries       []queryResult
-	allUUIDsTime  time.Duration
-	maxRSS        int
-	benchCount    int
-}
-
-func (b benchResult) Log(name string) {
-	log.Printf("== Run %s added %d metrics (%d metrics in DB)", name, b.metricsAfter-b.metricsBefore, b.metricsAfter)
-
-	if b.insertCount > 0 {
-		log.Printf(
-			"insert took %v: %v/metrics",
-			b.insertTime.Round(time.Millisecond),
-			(b.insertTime / time.Duration(b.insertCount)).Round(time.Microsecond),
-		)
-	}
-
-	log.Printf("AllUUIDs() took %v", (b.allUUIDsTime / time.Duration(b.benchCount)).Round(time.Millisecond))
-	log.Printf("Peak memory seen = %d kB (rss)", b.maxRSS/1024)
-
-	for _, q := range b.queries {
-		if q.QueryCount == 0 {
-			continue
-		}
-
-		log.Printf(
-			"Query %s took %v and returned %d metrics (%v/query and %.1f metrics/query)",
-			q.Name,
-			(q.Time / time.Duration(b.benchCount)).Round(time.Millisecond),
-			q.ResultCount/b.benchCount,
-			(q.Time / time.Duration(q.QueryCount)).Round(time.Microsecond),
-			float64(q.ResultCount)/float64(q.QueryCount),
-		)
-	}
-}
-
-func (b *benchResult) Add(other benchResult) {
-	if other.metricsBefore < b.metricsBefore {
-		b.metricsBefore = other.metricsBefore
-	}
-
-	if other.metricsAfter > b.metricsAfter {
-		b.metricsAfter = other.metricsAfter
-	}
-
-	b.insertCount += other.insertCount
-
-	if other.maxRSS > b.maxRSS {
-		b.maxRSS = other.maxRSS
-	}
-
-	if b.queries == nil {
-		b.queries = make([]queryResult, len(other.queries))
-	}
-
-	for i, qo := range other.queries {
-		b.queries[i].Name = qo.Name
-		b.queries[i].Time += qo.Time
-		b.queries[i].ResultCount += qo.ResultCount
-		b.queries[i].QueryCount += qo.QueryCount
-	}
-
-	b.insertTime += other.insertTime
-	b.allUUIDsTime += other.allUUIDsTime
-	b.benchCount++
-}
-
 //nolint: gochecknoglobals
 var (
 	// Choose name that didn't conflict with test (that is name that won't
@@ -144,57 +72,44 @@ var (
 	}
 )
 
-func bench(cassandraIndex *index.CassandraIndex, shardID string, insertRnd *rand.Rand, queryRnd *rand.Rand) benchResult {
+func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 	proc, err := procfs.NewProc(os.Getpid())
 
 	if err != nil {
 		log.Fatalf("NewProc() failed: %v", err)
 	}
 
-	b := benchResult{
-		benchCount:  1,
-		insertCount: *shardSize,
-	}
+	var maxRSS int
 
 	uuids, err := cassandraIndex.AllUUIDs()
 	if err != nil {
 		log.Fatalf("AllUUIDs() failed: %v", err)
 	}
 
-	b.metricsBefore = len(uuids)
+	metricsBefore := len(uuids)
 
-	b.insertTime = benchInsert(cassandraIndex, shardID, insertRnd)
+	var sumInsertTime time.Duration
 
-	b.queries = make([]queryResult, 0)
+	shardCount := *shardEnd - *shardStart + 1
 
-	queries := []struct {
-		Name string
-		Fun  func(i int) []*prompb.LabelMatcher
-	}{
-		{
-			Name: "whole-shard-eq",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: shardID},
-				}
-			},
-		},
-		{
-			Name: "name-eq",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: shardID},
-					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[queryRnd.Intn(len(names))]},
-				}
-			},
-		},
-	}
-	for _, q := range queries {
-		if stat, err := proc.Stat(); err == nil && b.maxRSS < stat.ResidentMemory() {
-			b.maxRSS = stat.ResidentMemory()
+	for n := 0; n < shardCount; n++ {
+		shardID := *shardStart + n
+		shardStr := fmt.Sprintf("shard%06d", shardID)
+		insertTime := benchInsert(cassandraIndex, shardStr)
+
+		if n%10 == 0 || shardID == *shardEnd {
+			log.Printf("Insert for shard %d took %v/query", shardID, (insertTime / time.Duration(*shardSize)).Round(time.Microsecond))
 		}
 
-		b.queries = append(b.queries, runQuery(q.Name, cassandraIndex, q.Fun))
+		sumInsertTime += insertTime
+
+		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
+			maxRSS = stat.ResidentMemory()
+		}
+	}
+
+	if *shardSize > 0 && shardCount > 0 {
+		log.Printf("Average insert for %d shards took %v/query", shardCount, (sumInsertTime / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
 	}
 
 	start := time.Now()
@@ -204,14 +119,89 @@ func bench(cassandraIndex *index.CassandraIndex, shardID string, insertRnd *rand
 		log.Fatalf("AllUUIDs() failed: %v", err)
 	}
 
-	b.allUUIDsTime = time.Since(start)
-	b.metricsAfter = len(uuids)
+	log.Printf("There is %d entry in the index (%d added). AllUUIDS took %v", len(uuids), len(uuids)-metricsBefore, time.Since(start))
 
-	if stat, err := proc.Stat(); err == nil && b.maxRSS < stat.ResidentMemory() {
-		b.maxRSS = stat.ResidentMemory()
+	queries := []struct {
+		Name string
+		Fun  func(i int) []*prompb.LabelMatcher
+	}{
+		{
+			Name: "shard=N",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+				}
+			},
+		},
+		{
+			Name: "shard=N name=X",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
+				}
+			},
+		},
+		{
+			Name: "name=X shard=N",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+				}
+			},
+		},
+		{
+			Name: "shard=N name!=X",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
+				}
+			},
+		},
+		{
+			Name: "shard=N name=~X",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: names[rand.Intn(len(names))][:6] + ".*"},
+				}
+			},
+		},
+		{
+			Name: "shard=N name=node_.* name!=node_netstat_Udp_InErrors",
+			Fun: func(_ int) []*prompb.LabelMatcher {
+				return []*prompb.LabelMatcher{
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: "node_.*"},
+					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "node_netstat_Udp_InErrors"},
+				}
+			},
+		},
+	}
+	for _, q := range queries {
+		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
+			maxRSS = stat.ResidentMemory()
+		}
+
+		result := runQuery(q.Name, cassandraIndex, q.Fun)
+
+		if result.QueryCount == 0 {
+			continue
+		}
+
+		timePerQuery := (result.Time / time.Duration(result.QueryCount))
+		log.Printf(
+			"%30s  %.3f ms/query (returned %.1f metrics/query and done %d queries)",
+			result.Name,
+			float64(timePerQuery.Microseconds())/1000,
+			float64(result.ResultCount)/float64(result.QueryCount),
+			result.QueryCount,
+		)
 	}
 
-	return b
+	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
 }
 
 // benchInsert insert *metricCount metrics with random labels.
@@ -225,29 +215,29 @@ func bench(cassandraIndex *index.CassandraIndex, shardID string, insertRnd *rand
 //
 // Metrics may also have additional labels (labelNN), ranging from 0 to 20 additional labels
 // (most of the time, 3 additional labels). Few values for those labels.
-func benchInsert(cassandraIndex *index.CassandraIndex, shardID string, insertRnd *rand.Rand) time.Duration {
+func benchInsert(cassandraIndex *index.CassandraIndex, shardID string) time.Duration {
 	metrics := make([][]*prompb.Label, *shardSize)
 
 	for n := 0; n < *shardSize; n++ {
-		userID := strconv.FormatInt(insertRnd.Int63n(100000), 10)
+		userID := strconv.FormatInt(rand.Int63n(100000), 10)
 		labels := map[string]string{
-			"__name__": names[insertRnd.Intn(len(names))],
+			"__name__": names[rand.Intn(len(names))],
 			"shardID":  shardID,
 			"randomID": userID,
-			fmt.Sprintf("random%03d", insertRnd.Intn(100)): userID,
-			fmt.Sprintf("help%03d", insertRnd.Intn(100)):   helps[insertRnd.Intn(len(helps))],
+			fmt.Sprintf("random%03d", rand.Intn(100)): userID,
+			fmt.Sprintf("help%03d", rand.Intn(100)):   helps[rand.Intn(len(helps))],
 		}
 
 		var addN int
 		// 50% of metrics have 3 additional labels
-		if insertRnd.Intn(1) == 0 {
+		if rand.Intn(1) == 0 {
 			addN = 3
 		} else {
-			addN = insertRnd.Intn(20)
+			addN = rand.Intn(20)
 		}
 
 		for i := 0; i < addN; i++ {
-			labels[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(insertRnd.Int63n(20), 10)
+			labels[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rand.Int63n(20), 10)
 		}
 
 		promLabel := map2Labels(labels)
@@ -277,7 +267,8 @@ func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int)
 	start := time.Now()
 	count := 0
 
-	for n := 0; n < *queryCount; n++ {
+	var n int
+	for n = 0; n < *queryCount; n++ {
 		matchers := fun(n)
 		uuids, err := cassandraIndex.Search(matchers)
 
@@ -286,12 +277,16 @@ func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int)
 		}
 
 		count += len(uuids)
+
+		if time.Since(start) > *queryMaxTime {
+			break
+		}
 	}
 
 	return queryResult{
 		Name:        name,
 		Time:        time.Since(start),
 		ResultCount: count,
-		QueryCount:  *queryCount,
+		QueryCount:  n,
 	}
 }

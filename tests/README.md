@@ -25,18 +25,14 @@ Think "shard" a one tenant, queries will only ask metric from one shard.
 Run it with:
 ```
 export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
-go run ./tests/squirreldb-cassandra-index-bench/ -drop
+go run ./tests/squirreldb-cassandra-index-bench/
 ```
 
-To see impact of other shard/number of total metrics, you may be interested in running in two step:
+To see impact of other shard (total number of total metrics) you may wan't to re-run the command increasing the shard-start/shard-end
 
-* First insert data without querying (because querying is rather long):
 ```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.query 0 -bench.shard-end 10
+go run ./tests/squirreldb-cassandra-index-bench/ -no-drop -bench.shard-start 1 -bench.shard-end 5
+go run ./tests/squirreldb-cassandra-index-bench/ -no-drop -bench.shard-start 6 -bench.shard-end 10
+go run ./tests/squirreldb-cassandra-index-bench/ -no-drop -bench.shard-start 11 -bench.shard-end 50
+[...]
 ```
-* Then only query one shard (the last for example):
-```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 0 -bench.shard-start 10 -bench.shard-end 10
-```
-
-Run-re the two commands, increasing the last shard number to see evolution of times with larger index

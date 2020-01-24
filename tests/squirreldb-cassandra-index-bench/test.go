@@ -443,7 +443,7 @@ func test(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 		}
 	}
 
-	if *dropTables {
+	if !*noDropTables {
 		got, err := cassandraIndex.AllUUIDs()
 		if err != nil {
 			log.Fatalf("AllUUIDs() failed: %v", err)
