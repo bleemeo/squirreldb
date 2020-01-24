@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -11,23 +12,20 @@ import (
 
 type mockIndex struct {
 	postings map[string]map[string][]gouuid.UUID
+	metrics  map[gouuid.UUID]map[string]string
 }
 
-type metric struct {
-	UUID   gouuid.UUID
-	Labels map[string]string
-}
-
-func mockIndexFromMetrics(metrics []metric) mockIndex {
+func mockIndexFromMetrics(metrics map[gouuid.UUID]map[string]string) mockIndex {
 	result := mockIndex{
 		postings: make(map[string]map[string][]gouuid.UUID),
+		metrics:  metrics,
 	}
-	for _, m := range metrics {
-		for k, v := range m.Labels {
+	for uuid, labels := range metrics {
+		for k, v := range labels {
 			if _, ok := result.postings[k]; !ok {
 				result.postings[k] = make(map[string][]gouuid.UUID)
 			}
-			result.postings[k][v] = append(result.postings[k][v], m.UUID)
+			result.postings[k][v] = append(result.postings[k][v], uuid)
 		}
 	}
 	return result
@@ -42,6 +40,18 @@ func (i mockIndex) LabelValues(name string) ([]string, error) {
 		n++
 	}
 	return results, nil
+}
+
+func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
+	labelsMap := i.metrics[uuid]
+	labels := make([]*prompb.Label, 0, len(labelsMap))
+	for k, v := range labelsMap {
+		labels = append(labels, &prompb.Label{
+			Name:  k,
+			Value: v,
+		})
+	}
+	return labels, nil
 }
 
 func (i mockIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
@@ -722,111 +732,100 @@ func Benchmark_stringFromLabels(b *testing.B) {
 }
 
 func Test_postingsForMatchers(t *testing.T) {
-	metrics1 := []metric{
-		{ // index 0
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "up",
-				"job":      "prometheus",
-				"instance": "localhost:9090",
-			},
+	metrics1 := map[gouuid.UUID]map[string]string{
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+			"__name__": "up",
+			"job":      "prometheus",
+			"instance": "localhost:9090",
 		},
-		{ // index 1
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "up",
-				"job":      "node_exporter",
-				"instance": "localhost:9100",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+			"__name__": "up",
+			"job":      "node_exporter",
+			"instance": "localhost:9100",
 		},
-		{ // index 2
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "up",
-				"job":      "node_exporter",
-				"instance": "remotehost:9100",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"): {
+			"__name__": "up",
+			"job":      "node_exporter",
+			"instance": "remotehost:9100",
 		},
-		{ // index 3
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "node_cpu_seconds_total",
-				"job":      "node_exporter",
-				"instance": "remotehost:9100",
-				"cpu":      "0",
-				"mode":     "idle",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"): {
+			"__name__": "node_cpu_seconds_total",
+			"job":      "node_exporter",
+			"instance": "remotehost:9100",
+			"cpu":      "0",
+			"mode":     "idle",
 		},
-		{ // index 4
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "node_cpu_seconds_total",
-				"job":      "node_exporter",
-				"instance": "remotehost:9100",
-				"cpu":      "0",
-				"mode":     "user",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"): {
+			"__name__": "node_cpu_seconds_total",
+			"job":      "node_exporter",
+			"instance": "remotehost:9100",
+			"cpu":      "0",
+			"mode":     "user",
 		},
-		{ // index 5
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__": "node_cpu_seconds_total",
-				"job":      "node_exporter",
-				"instance": "remotehost:9100",
-				"cpu":      "1",
-				"mode":     "user",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"): {
+			"__name__": "node_cpu_seconds_total",
+			"job":      "node_exporter",
+			"instance": "remotehost:9100",
+			"cpu":      "1",
+			"mode":     "user",
 		},
-		{ // index 6
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__":   "node_filesystem_avail_bytes",
-				"job":        "node_exporter",
-				"instance":   "localhost:9100",
-				"device":     "/dev/mapper/vg0-root",
-				"fstype":     "ext4",
-				"mountpoint": "/",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000007"): {
+			"__name__":   "node_filesystem_avail_bytes",
+			"job":        "node_exporter",
+			"instance":   "localhost:9100",
+			"device":     "/dev/mapper/vg0-root",
+			"fstype":     "ext4",
+			"mountpoint": "/",
 		},
-		{ // index 7
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__":    "node_filesystem_avail_bytes",
-				"job":         "node_exporter",
-				"instance":    "localhost:9100",
-				"device":      "/dev/mapper/vg0-data",
-				"fstype":      "ext4",
-				"mountpoint":  "/srv/data",
-				"environment": "devel",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"): {
+			"__name__":    "node_filesystem_avail_bytes",
+			"job":         "node_exporter",
+			"instance":    "localhost:9100",
+			"device":      "/dev/mapper/vg0-data",
+			"fstype":      "ext4",
+			"mountpoint":  "/srv/data",
+			"environment": "devel",
 		},
-		{ // index 8
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__":    "node_filesystem_avail_bytes",
-				"job":         "node_exporter",
-				"instance":    "remote:9100",
-				"device":      "/dev/mapper/vg0-data",
-				"fstype":      "ext4",
-				"mountpoint":  "/srv/data",
-				"environment": "production",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"): {
+			"__name__":    "node_filesystem_avail_bytes",
+			"job":         "node_exporter",
+			"instance":    "remote:9100",
+			"device":      "/dev/mapper/vg0-data",
+			"fstype":      "ext4",
+			"mountpoint":  "/srv/data",
+			"environment": "production",
 		},
-		{ // index 9
-			UUID: gouuid.Must(gouuid.NewV4()),
-			Labels: map[string]string{
-				"__name__":    "node_filesystem_avail_bytes",
-				"job":         "node_exporter",
-				"instance":    "remote:9100",
-				"device":      "/dev/mapper/vg0-data",
-				"fstype":      "ext4",
-				"mountpoint":  "/srv/data",
-				"environment": "production",
-				"userID":      "42",
-			},
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000010"): {
+			"__name__":    "node_filesystem_avail_bytes",
+			"job":         "node_exporter",
+			"instance":    "remote:9100",
+			"device":      "/dev/mapper/vg0-data",
+			"fstype":      "ext4",
+			"mountpoint":  "/srv/data",
+			"environment": "production",
+			"userID":      "42",
 		},
 	}
 	index1 := mockIndexFromMetrics(metrics1)
+
+	metrics2 := make(map[gouuid.UUID]map[string]string)
+
+	for x := 0; x < 100; x++ {
+		for y := 0; y < 100; y++ {
+			uuid := fmt.Sprintf("00000000-0000-%04d-%04d-000000000000", x, y)
+			metrics2[gouuid.FromStringOrNil(uuid)] = map[string]string{
+				"__name__":   fmt.Sprintf("generated_%03d", x),
+				"label_x":    fmt.Sprintf("%03d", x),
+				"label_y":    fmt.Sprintf("%03d", y),
+				"multiple_2": fmt.Sprintf("%v", y%2 == 0),
+				"multiple_3": fmt.Sprintf("%v", y%3 == 0),
+				"multiple_5": fmt.Sprintf("%v", y%5 == 0),
+			}
+		}
+	}
+
+	index2 := mockIndexFromMetrics(metrics2)
+
 	type args struct {
 		index    Index
 		matchers []*prompb.LabelMatcher
@@ -836,6 +835,7 @@ func Test_postingsForMatchers(t *testing.T) {
 		index    Index
 		matchers []*prompb.LabelMatcher
 		want     []gouuid.UUID
+		wantLen  int
 	}{
 		{
 			name:  "eq",
@@ -847,7 +847,11 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "up",
 				},
 			},
-			want: []gouuid.UUID{metrics1[0].UUID, metrics1[1].UUID, metrics1[2].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+			},
 		},
 		{
 			name:  "eq-eq",
@@ -864,7 +868,10 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "user",
 				},
 			},
-			want: []gouuid.UUID{metrics1[4].UUID, metrics1[5].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+			},
 		},
 		{
 			name:  "eq-neq",
@@ -881,7 +888,9 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "user",
 				},
 			},
-			want: []gouuid.UUID{metrics1[3].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
 		},
 		{
 			name:  "eq-nolabel",
@@ -898,7 +907,9 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "",
 				},
 			},
-			want: []gouuid.UUID{metrics1[6].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000007"),
+			},
 		},
 		{
 			name:  "eq-label",
@@ -915,7 +926,11 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "",
 				},
 			},
-			want: []gouuid.UUID{metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000010"),
+			},
 		},
 		{
 			name:  "re",
@@ -927,7 +942,11 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "u.",
 				},
 			},
-			want: []gouuid.UUID{metrics1[0].UUID, metrics1[1].UUID, metrics1[2].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+			},
 		},
 		{
 			name:  "re-re",
@@ -944,7 +963,10 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "^u.*",
 				},
 			},
-			want: []gouuid.UUID{metrics1[4].UUID, metrics1[5].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+			},
 		},
 		{
 			name:  "re-nre",
@@ -961,7 +983,9 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "u\\wer",
 				},
 			},
-			want: []gouuid.UUID{metrics1[3].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
 		},
 		{
 			name:  "re-re_nolabel",
@@ -978,7 +1002,9 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "^$",
 				},
 			},
-			want: []gouuid.UUID{metrics1[6].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000007"),
+			},
 		},
 		{
 			name:  "re-re_label",
@@ -995,7 +1021,11 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "^$",
 				},
 			},
-			want: []gouuid.UUID{metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000010"),
+			},
 		},
 		{
 			name:  "re-re*",
@@ -1012,7 +1042,12 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: ".*",
 				},
 			},
-			want: []gouuid.UUID{metrics1[6].UUID, metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000007"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000010"),
+			},
 		},
 		{
 			name:  "re-nre*",
@@ -1046,7 +1081,10 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "(|devel)",
 				},
 			},
-			want: []gouuid.UUID{metrics1[8].UUID, metrics1[9].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000010"),
+			},
 		},
 		{
 			name:  "eq-nre-eq same label",
@@ -1068,7 +1106,9 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "devel",
 				},
 			},
-			want: []gouuid.UUID{metrics1[7].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+			},
 		},
 		{
 			name:  "eq-eq-no_label",
@@ -1090,7 +1130,157 @@ func Test_postingsForMatchers(t *testing.T) {
 					Value: "",
 				},
 			},
-			want: []gouuid.UUID{metrics1[8].UUID},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+			},
+		},
+		{
+			name:  "index2-eq",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "generated_042",
+				},
+			},
+			wantLen: 100,
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0042-0000-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0042-0001-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0042-0002-000000000000"),
+				// [...]
+			},
+		},
+		{
+			name:  "index2-eq-eq",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "generated_042",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+			},
+			wantLen: 50,
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0042-0000-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0042-0002-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0042-0004-000000000000"),
+				// [...]
+			},
+		},
+		{
+			name:  "index2-eq-neq",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "multiple_2",
+					Value: "false",
+				},
+			},
+			wantLen: 5000,
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0002-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0004-000000000000"),
+				// [...]
+			},
+		},
+		{
+			name:  "index2-eq-neq-2",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+			},
+			wantLen: 0,
+			want:    []gouuid.UUID{},
+		},
+		{
+			name:  "index2-re-neq-eq-neq",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "generated_04.",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "__name__",
+					Value: "generated_042",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "multiple_5",
+					Value: "false",
+				},
+			},
+			wantLen: 90,
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0040-0000-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0040-0010-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0040-0020-000000000000"),
+				// [...]
+			},
+		},
+		{
+			name:  "index2-re-nre-eq-neq",
+			index: index2,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "generated_04.",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "__name__",
+					Value: "(generated_04(0|2)|)",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "multiple_2",
+					Value: "true",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "multiple_5",
+					Value: "false",
+				},
+			},
+			wantLen: 80,
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0041-0000-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0041-0010-000000000000"),
+				gouuid.FromStringOrNil("00000000-0000-0041-0020-000000000000"),
+				// [...]
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -1100,16 +1290,17 @@ func Test_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
 			}
-			wantMap := make(map[gouuid.UUID]bool)
-			for _, u := range tt.want {
-				wantMap[u] = true
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
 			}
-			gotMap := make(map[gouuid.UUID]bool)
-			for _, u := range got {
-				gotMap[u] = true
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
 			}
-			if !reflect.DeepEqual(gotMap, wantMap) {
-				t.Errorf("postingsForMatchers() = %v, want %v", gotMap, wantMap)
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
 	}

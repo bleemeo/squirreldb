@@ -93,6 +93,10 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 	shardCount := *shardEnd - *shardStart + 1
 
 	for n := 0; n < shardCount; n++ {
+		if *shardSize == 0 {
+			break
+		}
+
 		shardID := *shardStart + n
 		shardStr := fmt.Sprintf("shard%06d", shardID)
 		insertTime := benchInsert(cassandraIndex, shardStr)
