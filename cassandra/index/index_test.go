@@ -2,6 +2,7 @@ package index
 
 import (
 	"reflect"
+	"sort"
 	"testing"
 
 	gouuid "github.com/gofrs/uuid"
@@ -59,6 +60,11 @@ func (i mockIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
 			results[n] = u
 			n++
 		}
+
+		sort.Slice(results, func(i, j int) bool {
+			return uuidIsLess(results[i], results[j])
+		})
+
 		return results, nil
 	}
 
@@ -76,9 +82,23 @@ func (i mockIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
 			results[n] = u
 			n++
 		}
+
+		sort.Slice(results, func(i, j int) bool {
+			return uuidIsLess(results[i], results[j])
+		})
+
 		return results, nil
 	}
-	return values[value], nil
+
+	results := make([]gouuid.UUID, len(values[value]))
+
+	copy(results, values[value])
+
+	sort.Slice(results, func(i, j int) bool {
+		return uuidIsLess(results[i], results[j])
+	})
+
+	return results, nil
 }
 
 func Benchmark_keyFromLabels(b *testing.B) {
@@ -1090,6 +1110,483 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if !reflect.DeepEqual(gotMap, wantMap) {
 				t.Errorf("postingsForMatchers() = %v, want %v", gotMap, wantMap)
+			}
+		})
+	}
+}
+
+func Test_intersectResult(t *testing.T) {
+	tests := []struct {
+		name  string
+		lists [][]gouuid.UUID
+		want  []gouuid.UUID
+	}{
+		{
+			name: "two-same-list",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+		},
+		{
+			name: "two-list",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+		},
+		{
+			name: "two-list-2",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+			},
+		},
+		{
+			name: "three-list",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+			},
+		},
+		{
+			name: "three-list-2",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := intersectResult(tt.lists...); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("intersectResult() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_unionResult(t *testing.T) {
+	tests := []struct {
+		name  string
+		lists [][]gouuid.UUID
+		want  []gouuid.UUID
+	}{
+		{
+			name: "two-same-list",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+		},
+		{
+			name: "two-list-1",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+		},
+		{
+			name: "two-list-2",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+			},
+		},
+		{
+			name: "two-list-2",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+			},
+		},
+		{
+			name: "three-list",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+			},
+		},
+		{
+			name: "three-list-2",
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000009"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unionResult(tt.lists...); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("unionResult() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_substractResult(t *testing.T) {
+	tests := []struct {
+		name  string
+		main  []gouuid.UUID
+		lists [][]gouuid.UUID
+		want  []gouuid.UUID
+	}{
+		{
+			name: "same-list",
+			main: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{},
+		},
+		{
+			name: "two-list",
+			main: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+			},
+		},
+		{
+			name: "two-list-2",
+			main: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+			},
+		},
+		{
+			name: "two-list-3",
+			main: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+			},
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+			},
+		},
+		{
+			name: "three-list",
+			main: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+			},
+			lists: [][]gouuid.UUID{
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000003"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000006"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000c"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+				{
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000005"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000f"),
+				},
+			},
+			want: []gouuid.UUID{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000004"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000008"),
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000e"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := substractResult(tt.main, tt.lists...); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("substractResult() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strconv"
@@ -33,12 +34,6 @@ const (
 const (
 	timeToLiveLabelName = "__ttl__"
 	uuidLabelName       = "__uuid__"
-)
-
-const (
-	targetTypeKeyUndefined = 0
-	targetTypeKeyDefined   = 1
-	targetTypeValueEqual   = 2
 )
 
 //nolint: gochecknoglobals
@@ -126,6 +121,10 @@ func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
 		return nil, err
 	}
 
+	sort.Slice(uuids, func(i, j int) bool {
+		return uuidIsLess(uuids[i], uuids[j])
+	})
+
 	return uuids, nil
 }
 
@@ -151,6 +150,7 @@ func (c *CassandraIndex) LabelValues(name string) ([]string, error) {
 // Postings result uuids matching give Label name & value
 // If value is the empty string, it match any values (but the label must be set)
 // If name is the empty string, it match *ALL* UUID of the index
+// The list of UUIDs is sorted
 func (c *CassandraIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
 	if name == "" {
 		return c.AllUUIDs()
@@ -174,6 +174,10 @@ func (c *CassandraIndex) Postings(name string, value string) ([]gouuid.UUID, err
 
 		err := selectUUIDsIter.Close()
 
+		sort.Slice(labelUUIDs, func(i, j int) bool {
+			return uuidIsLess(labelUUIDs[i], labelUUIDs[j])
+		})
+
 		return labelUUIDs, err
 	}
 
@@ -194,6 +198,10 @@ func (c *CassandraIndex) Postings(name string, value string) ([]gouuid.UUID, err
 	if err := selectUUIDsIter.Close(); err != nil {
 		return nil, err
 	}
+
+	sort.Slice(labelUUIDs, func(i, j int) bool {
+		return uuidIsLess(labelUUIDs[i], labelUUIDs[j])
+	})
 
 	return labelUUIDs, nil
 }
@@ -459,142 +467,327 @@ func (c *CassandraIndex) expire(now time.Time) {
 	}
 }
 
+func matchValues(matcher *prompb.LabelMatcher, re *regexp.Regexp, value string) bool {
+	var match bool
+
+	if re != nil {
+		match = re.MatchString(value)
+	} else {
+		match = (value == matcher.Value)
+	}
+
+	if matcher.Type == prompb.LabelMatcher_NEQ || matcher.Type == prompb.LabelMatcher_NRE {
+		return !match
+	}
+
+	return match
+}
+
+func inverseMatcher(m *prompb.LabelMatcher) *prompb.LabelMatcher {
+	mInv := prompb.LabelMatcher{
+		Name:  m.Name,
+		Value: m.Value,
+	}
+
+	switch m.Type {
+	case prompb.LabelMatcher_EQ:
+		mInv.Type = prompb.LabelMatcher_NEQ
+	case prompb.LabelMatcher_NEQ:
+		mInv.Type = prompb.LabelMatcher_EQ
+	case prompb.LabelMatcher_RE:
+		mInv.Type = prompb.LabelMatcher_NRE
+	case prompb.LabelMatcher_NRE:
+		mInv.Type = prompb.LabelMatcher_RE
+	}
+
+	return &mInv
+}
+
 // postingsForMatchers return metric UUID matching given matcher.
-func postingsForMatchers(index Index, matchers []*prompb.LabelMatcher) (uuids []gouuid.UUID, err error) {
-	targetLabels, err := targetLabels(index, matchers)
+// The logic is taken from Prometheus PostingsForMatchers (in querier.go)
+func postingsForMatchers(index Index, matchers []*prompb.LabelMatcher) (uuids []gouuid.UUID, err error) { //nolint: gocognit
+	re := make([]*regexp.Regexp, len(matchers))
+	labelMustBeSet := make(map[string]bool, len(matchers))
 
-	if err != nil {
-		return uuids, err
-	}
+	for i, m := range matchers {
+		if m.Type == prompb.LabelMatcher_RE || m.Type == prompb.LabelMatcher_NRE {
+			re[i], err = regexp.Compile("^(?:" + m.Value + ")$")
+		}
 
-	uuidMatches, err := uuidMatches(index, targetLabels)
-
-	if err != nil {
-		return uuids, err
-	}
-
-	for uuid, matches := range uuidMatches {
-		if matches == len(matchers) {
-			uuids = append(uuids, uuid)
+		if !matchValues(m, re[i], "") {
+			labelMustBeSet[m.Name] = true
 		}
 	}
 
-	return uuids, nil
-}
+	var its, notIts [][]gouuid.UUID
 
-// Returns labels by target type
-func targetLabels(index Index, matchers []*prompb.LabelMatcher) (map[int][]*prompb.Label, error) { // nolint:gocognit
-	if len(matchers) == 0 {
-		return nil, nil
-	}
+	for i, m := range matchers {
+		if labelMustBeSet[m.Name] {
+			matchesEmpty := matchValues(m, re[i], "")
+			isNot := m.Type == prompb.LabelMatcher_NEQ || m.Type == prompb.LabelMatcher_NRE
 
-	targetLabels := make(map[int][]*prompb.Label)
+			// nolint: gocritic
+			if isNot && matchesEmpty { // l!="foo"
+				// If the label can't be empty and is a Not and the inner matcher
+				// doesn't match empty, then subtract it out at the end.
+				inverse := inverseMatcher(m)
+				it, err := postingsForMatcher(index, inverse, re[i])
 
-	for _, matcher := range matchers {
-		targetLabel := prompb.Label{
-			Name:  matcher.Name,
-			Value: matcher.Value,
-		}
+				if err != nil {
+					return nil, err
+				}
 
-		var regex *regexp.Regexp
+				notIts = append(notIts, it)
+			} else if isNot && !matchesEmpty { // l!=""
+				// If the label can't be empty and is a Not, but the inner matcher can
+				// be empty we need to use inversePostingsForMatcher.
+				inverse := inverseMatcher(m)
 
-		if (matcher.Type == prompb.LabelMatcher_RE) || (matcher.Type == prompb.LabelMatcher_NRE) {
-			var err error
-			regex, err = regexp.Compile("^(?:" + matcher.Value + ")$")
+				it, err := inversePostingsForMatcher(index, inverse, re[i])
+				if err != nil {
+					return nil, err
+				}
+				its = append(its, it)
+			} else { // l="a"
+				// Non-Not matcher, use normal postingsForMatcher.
+				it, err := postingsForMatcher(index, m, re[i])
+
+				if err != nil {
+					return nil, err
+				}
+
+				its = append(its, it)
+			}
+		} else { // l=""
+			// If the matchers for a labelname selects an empty value, it selects all
+			// the series which don't have the label name set too. See:
+			// https://github.com/prometheus/prometheus/issues/3575 and
+			// https://github.com/prometheus/prometheus/pull/3578#issuecomment-351653555
+			it, err := inversePostingsForMatcher(index, m, re[i])
 
 			if err != nil {
 				return nil, err
 			}
-		}
 
-		switch {
-		case matcher.Value == "" && regex == nil:
-			targetLabel.Value = ""
-
-			switch matcher.Type {
-			case prompb.LabelMatcher_EQ:
-				targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
-			case prompb.LabelMatcher_NEQ:
-				targetLabels[targetTypeKeyDefined] = append(targetLabels[targetTypeKeyDefined], &targetLabel)
-			}
-		case matcher.Type == prompb.LabelMatcher_EQ:
-			targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &targetLabel)
-		default:
-			values, err := index.LabelValues(matcher.Name)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, value := range values {
-				copyLabel := targetLabel
-				copyLabel.Value = value
-
-				if ((matcher.Type == prompb.LabelMatcher_EQ) && (matcher.Value == value)) ||
-					((matcher.Type == prompb.LabelMatcher_NEQ) && (matcher.Value != value)) ||
-					((matcher.Type == prompb.LabelMatcher_RE) && regex.MatchString(value)) ||
-					((matcher.Type == prompb.LabelMatcher_NRE) && !regex.MatchString(value)) {
-					targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &copyLabel)
-				}
-			}
-
-			if regex != nil && regex.MatchString("") {
-				if matcher.Type == prompb.LabelMatcher_RE {
-					targetLabels[targetTypeKeyUndefined] = append(targetLabels[targetTypeKeyUndefined], &targetLabel)
-				}
-			}
+			notIts = append(notIts, it)
 		}
 	}
 
-	return targetLabels, nil
+	// If there's nothing to subtract from, add in everything and remove the notIts later.
+	if len(its) == 0 && len(notIts) != 0 && false {
+		allPostings, err := index.Postings("", "")
+
+		if err != nil {
+			return nil, err
+		}
+
+		its = append(its, allPostings)
+	}
+
+	it := intersectResult(its...)
+
+	it = substractResult(it, notIts...)
+
+	return it, err
 }
 
-// Returns a list of uuid associated with the number of times it has corresponded to a targeted label
-func uuidMatches(index Index, targetLabels map[int][]*prompb.Label) (map[gouuid.UUID]int, error) { // nolint:gocognit
-	if len(targetLabels) == 0 {
-		return nil, nil
+// postingsForMatcher return uuid that match one matcher.
+// This method will not return postings for missing labels.
+func postingsForMatcher(index Index, m *prompb.LabelMatcher, re *regexp.Regexp) ([]gouuid.UUID, error) {
+	if m.Type == prompb.LabelMatcher_EQ {
+		return index.Postings(m.Name, m.Value)
 	}
 
-	uuidMatches := make(map[gouuid.UUID]int)
+	values, err := index.LabelValues(m.Name)
 
-	for _, label := range targetLabels[targetTypeValueEqual] {
-		labelUUIDs, err := index.Postings(label.Name, label.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []string
+
+	for _, val := range values {
+		if matchValues(m, re, val) {
+			res = append(res, val)
+		}
+	}
+
+	workSets := make([][]gouuid.UUID, len(res))
+	for i, v := range res {
+		workSets[i], err = index.Postings(m.Name, v)
 
 		if err != nil {
 			return nil, err
 		}
+	}
 
-		for _, uuid := range labelUUIDs {
-			uuidMatches[uuid]++
+	return unionResult(workSets...), nil
+}
+
+func inversePostingsForMatcher(index Index, m *prompb.LabelMatcher, re *regexp.Regexp) ([]gouuid.UUID, error) {
+	values, err := index.LabelValues(m.Name)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var res []string
+
+	for _, val := range values {
+		if !matchValues(m, re, val) {
+			res = append(res, val)
 		}
 	}
 
-	for _, label := range targetLabels[targetTypeKeyDefined] {
-		labelUUIDs, err := index.Postings(label.Name, "")
+	workSets := make([][]gouuid.UUID, len(res))
+
+	for i, v := range res {
+		workSets[i], err = index.Postings(m.Name, v)
 
 		if err != nil {
 			return nil, err
 		}
-
-		for _, uuid := range labelUUIDs {
-			uuidMatches[uuid]++
-		}
 	}
 
-	for _, label := range targetLabels[targetTypeKeyUndefined] {
-		labelUUIDs, err := index.Postings(label.Name, "")
+	return unionResult(workSets...), nil
+}
 
-		if err != nil {
-			return nil, err
-		}
+func uuidIsLess(x, y gouuid.UUID) bool {
+	return bytes.Compare(x[:], y[:]) == -1
+}
 
-		for uuid := range uuidMatches {
-			if !containsUUIDs(labelUUIDs, uuid) {
-				uuidMatches[uuid]++
+// intersectResults do the intersection multiple UUID list.
+func intersectResult(lists ...[]gouuid.UUID) []gouuid.UUID {
+	if len(lists) == 0 {
+		return nil
+	}
+
+	if len(lists) == 1 {
+		return lists[0]
+	}
+
+	currentIndex := make([]int, len(lists))
+	results := make([]gouuid.UUID, 0, len(lists[0]))
+
+mainLoop:
+	for idx0 := 0; idx0 < len(lists[0]); idx0++ {
+		candidate := lists[0][idx0]
+		for idxList, l := range lists[1:] {
+			idx := currentIndex[idxList]
+			for idx < len(l) && uuidIsLess(l[idx], candidate) {
+				idx++
+			}
+			currentIndex[idxList] = idx
+			if idx == len(l) {
+				break mainLoop
+			}
+			if l[idx] != candidate { // i.e. l[idx] > candidate
+				if currentIndex[idxList] > 0 {
+					currentIndex[idxList]--
+				}
+				continue mainLoop
 			}
 		}
+		results = append(results, candidate)
 	}
 
-	return uuidMatches, nil
+	return results
+}
+
+// intersectResults do the intersection multiple UUID list.
+func unionResult(lists ...[]gouuid.UUID) []gouuid.UUID { // nolint: gocognit
+	if len(lists) == 0 {
+		return nil
+	}
+
+	if len(lists) == 1 {
+		return lists[0]
+	}
+
+	currentIndex := make([]int, len(lists))
+	results := make([]gouuid.UUID, 0, len(lists[0]))
+
+mainLoop:
+	for {
+		for idxList, l := range lists {
+			var countFinished int
+			smallest := gouuid.UUID([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+
+			for idxList2, l2 := range lists {
+				if idxList2 == idxList {
+					continue
+				}
+
+				idx := currentIndex[idxList2]
+
+				if idx >= len(l2) {
+					countFinished++
+					continue
+				}
+
+				if uuidIsLess(l2[idx], smallest) {
+					smallest = l2[idx]
+				}
+			}
+
+			idx := currentIndex[idxList]
+
+			for idx < len(l) && uuidIsLess(l[idx], smallest) {
+				results = append(results, l[idx])
+				idx++
+			}
+
+			if idx < len(l) && l[idx] == smallest {
+				idx++
+			}
+
+			if idx >= len(l) {
+				countFinished++
+			}
+
+			if countFinished == len(lists) {
+				break mainLoop
+			}
+
+			currentIndex[idxList] = idx
+		}
+	}
+
+	return results
+}
+
+// substractResult remove from main all UUID found in on lists
+func substractResult(main []gouuid.UUID, lists ...[]gouuid.UUID) []gouuid.UUID {
+	if len(lists) == 0 {
+		return main
+	}
+
+	currentIndex := make([]int, len(lists))
+	results := make([]gouuid.UUID, 0, len(main))
+
+mainLoop:
+	for idx0 := 0; idx0 < len(main); idx0++ {
+		candidate := main[idx0]
+		for idxList, l := range lists {
+			idx := currentIndex[idxList]
+			for idx < len(l) && uuidIsLess(l[idx], candidate) {
+				idx++
+			}
+			currentIndex[idxList] = idx
+			if idx == len(l) {
+				continue
+			}
+			if l[idx] == candidate {
+				continue mainLoop
+			}
+			if currentIndex[idxList] > 0 {
+				currentIndex[idxList]--
+			}
+		}
+		results = append(results, candidate)
+	}
+
+	return results
 }
 
 // Returns uuids table insert labels Query as string
@@ -708,21 +901,6 @@ func (c *CassandraIndex) createTables() error {
 	}
 
 	return nil
-}
-
-// Returns a boolean if the uuid list contains the target uuid or not
-func containsUUIDs(list []gouuid.UUID, target gouuid.UUID) bool {
-	if len(list) == 0 {
-		return false
-	}
-
-	for _, uuid := range list {
-		if uuid == target {
-			return true
-		}
-	}
-
-	return false
 }
 
 // keyFromLabels returns a string key generated from a prompb.Label list
