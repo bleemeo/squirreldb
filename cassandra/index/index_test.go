@@ -4,8 +4,82 @@ import (
 	"reflect"
 	"testing"
 
+	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 )
+
+type mockIndex struct {
+	postings map[string]map[string][]gouuid.UUID
+}
+
+type metric struct {
+	UUID   gouuid.UUID
+	Labels map[string]string
+}
+
+func mockIndexFromMetrics(metrics []metric) mockIndex {
+	result := mockIndex{
+		postings: make(map[string]map[string][]gouuid.UUID),
+	}
+	for _, m := range metrics {
+		for k, v := range m.Labels {
+			if _, ok := result.postings[k]; !ok {
+				result.postings[k] = make(map[string][]gouuid.UUID)
+			}
+			result.postings[k][v] = append(result.postings[k][v], m.UUID)
+		}
+	}
+	return result
+}
+
+func (i mockIndex) LabelValues(name string) ([]string, error) {
+	results := make([]string, len(i.postings[name]))
+	n := 0
+
+	for v := range i.postings[name] {
+		results[n] = v
+		n++
+	}
+	return results, nil
+}
+
+func (i mockIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
+	if name == "" {
+		resultsMap := make(map[gouuid.UUID]interface{}, len(i.postings))
+		for _, values := range i.postings {
+			for _, uuids := range values {
+				for _, u := range uuids {
+					resultsMap[u] = nil
+				}
+			}
+		}
+		results := make([]gouuid.UUID, len(resultsMap))
+		n := 0
+		for u := range resultsMap {
+			results[n] = u
+			n++
+		}
+		return results, nil
+	}
+
+	values := i.postings[name]
+	if value == "" {
+		resultsMap := make(map[gouuid.UUID]interface{}, len(values))
+		for _, uuids := range values {
+			for _, u := range uuids {
+				resultsMap[u] = nil
+			}
+		}
+		results := make([]gouuid.UUID, len(resultsMap))
+		n := 0
+		for u := range resultsMap {
+			results[n] = u
+			n++
+		}
+		return results, nil
+	}
+	return values[value], nil
+}
 
 func Benchmark_keyFromLabels(b *testing.B) {
 	tests := []struct {
@@ -622,6 +696,400 @@ func Benchmark_stringFromLabels(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				_ = stringFromLabels(tt.labels)
+			}
+		})
+	}
+}
+
+func Test_postingsForMatchers(t *testing.T) {
+	metrics1 := []metric{
+		{ // index 0
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "up",
+				"job":      "prometheus",
+				"instance": "localhost:9090",
+			},
+		},
+		{ // index 1
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "up",
+				"job":      "node_exporter",
+				"instance": "localhost:9100",
+			},
+		},
+		{ // index 2
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "up",
+				"job":      "node_exporter",
+				"instance": "remotehost:9100",
+			},
+		},
+		{ // index 3
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "node_cpu_seconds_total",
+				"job":      "node_exporter",
+				"instance": "remotehost:9100",
+				"cpu":      "0",
+				"mode":     "idle",
+			},
+		},
+		{ // index 4
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "node_cpu_seconds_total",
+				"job":      "node_exporter",
+				"instance": "remotehost:9100",
+				"cpu":      "0",
+				"mode":     "user",
+			},
+		},
+		{ // index 5
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__": "node_cpu_seconds_total",
+				"job":      "node_exporter",
+				"instance": "remotehost:9100",
+				"cpu":      "1",
+				"mode":     "user",
+			},
+		},
+		{ // index 6
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__":   "node_filesystem_avail_bytes",
+				"job":        "node_exporter",
+				"instance":   "localhost:9100",
+				"device":     "/dev/mapper/vg0-root",
+				"fstype":     "ext4",
+				"mountpoint": "/",
+			},
+		},
+		{ // index 7
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__":    "node_filesystem_avail_bytes",
+				"job":         "node_exporter",
+				"instance":    "localhost:9100",
+				"device":      "/dev/mapper/vg0-data",
+				"fstype":      "ext4",
+				"mountpoint":  "/srv/data",
+				"environment": "devel",
+			},
+		},
+		{ // index 8
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__":    "node_filesystem_avail_bytes",
+				"job":         "node_exporter",
+				"instance":    "remote:9100",
+				"device":      "/dev/mapper/vg0-data",
+				"fstype":      "ext4",
+				"mountpoint":  "/srv/data",
+				"environment": "production",
+			},
+		},
+		{ // index 9
+			UUID: gouuid.Must(gouuid.NewV4()),
+			Labels: map[string]string{
+				"__name__":    "node_filesystem_avail_bytes",
+				"job":         "node_exporter",
+				"instance":    "remote:9100",
+				"device":      "/dev/mapper/vg0-data",
+				"fstype":      "ext4",
+				"mountpoint":  "/srv/data",
+				"environment": "production",
+				"userID":      "42",
+			},
+		},
+	}
+	index1 := mockIndexFromMetrics(metrics1)
+	type args struct {
+		index    Index
+		matchers []*prompb.LabelMatcher
+	}
+	tests := []struct {
+		name     string
+		index    Index
+		matchers []*prompb.LabelMatcher
+		want     []gouuid.UUID
+	}{
+		{
+			name:  "eq",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "up",
+				},
+			},
+			want: []gouuid.UUID{metrics1[0].UUID, metrics1[1].UUID, metrics1[2].UUID},
+		},
+		{
+			name:  "eq-eq",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_cpu_seconds_total",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "mode",
+					Value: "user",
+				},
+			},
+			want: []gouuid.UUID{metrics1[4].UUID, metrics1[5].UUID},
+		},
+		{
+			name:  "eq-neq",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_cpu_seconds_total",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "mode",
+					Value: "user",
+				},
+			},
+			want: []gouuid.UUID{metrics1[3].UUID},
+		},
+		{
+			name:  "eq-nolabel",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			want: []gouuid.UUID{metrics1[6].UUID},
+		},
+		{
+			name:  "eq-label",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NEQ,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			want: []gouuid.UUID{metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+		},
+		{
+			name:  "re",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "u.",
+				},
+			},
+			want: []gouuid.UUID{metrics1[0].UUID, metrics1[1].UUID, metrics1[2].UUID},
+		},
+		{
+			name:  "re-re",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_cpu_.*",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "mode",
+					Value: "^u.*",
+				},
+			},
+			want: []gouuid.UUID{metrics1[4].UUID, metrics1[5].UUID},
+		},
+		{
+			name:  "re-nre",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_(cpu|disk)_seconds_total",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "mode",
+					Value: "u\\wer",
+				},
+			},
+			want: []gouuid.UUID{metrics1[3].UUID},
+		},
+		{
+			name:  "re-re_nolabel",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "environment",
+					Value: "^$",
+				},
+			},
+			want: []gouuid.UUID{metrics1[6].UUID},
+		},
+		{
+			name:  "re-re_label",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "^$",
+				},
+			},
+			want: []gouuid.UUID{metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+		},
+		{
+			name:  "re-re*",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "environment",
+					Value: ".*",
+				},
+			},
+			want: []gouuid.UUID{metrics1[6].UUID, metrics1[7].UUID, metrics1[8].UUID, metrics1[9].UUID},
+		},
+		{
+			name:  "re-nre*",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_RE,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes$",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: ".*",
+				},
+			},
+			want: []gouuid.UUID{},
+		},
+		{
+			name:  "eq-nre_empty_and_devel",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "(|devel)",
+				},
+			},
+			want: []gouuid.UUID{metrics1[8].UUID, metrics1[9].UUID},
+		},
+		{
+			name:  "eq-nre-eq same label",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_NRE,
+					Name:  "environment",
+					Value: "^$",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "environment",
+					Value: "devel",
+				},
+			},
+			want: []gouuid.UUID{metrics1[7].UUID},
+		},
+		{
+			name:  "eq-eq-no_label",
+			index: index1,
+			matchers: []*prompb.LabelMatcher{
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "environment",
+					Value: "production",
+				},
+				{
+					Type:  prompb.LabelMatcher_EQ,
+					Name:  "userID",
+					Value: "",
+				},
+			},
+			want: []gouuid.UUID{metrics1[8].UUID},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := postingsForMatchers(tt.index, tt.matchers)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			wantMap := make(map[gouuid.UUID]bool)
+			for _, u := range tt.want {
+				wantMap[u] = true
+			}
+			gotMap := make(map[gouuid.UUID]bool)
+			for _, u := range got {
+				gotMap[u] = true
+			}
+			if !reflect.DeepEqual(gotMap, wantMap) {
+				t.Errorf("postingsForMatchers() = %v, want %v", gotMap, wantMap)
 			}
 		})
 	}

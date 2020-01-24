@@ -70,6 +70,11 @@ type CassandraIndex struct {
 	utlMutex      sync.Mutex
 }
 
+type Index interface {
+	LabelValues(name string) ([]string, error)
+	Postings(name string, value string) ([]gouuid.UUID, error)
+}
+
 // New creates a new CassandraIndex object
 func New(session *gocql.Session, options Options) (*CassandraIndex, error) {
 	index := &CassandraIndex{
@@ -122,6 +127,75 @@ func (c *CassandraIndex) AllUUIDs() ([]gouuid.UUID, error) {
 	}
 
 	return uuids, nil
+}
+
+// LabelValues return values for given label name
+func (c *CassandraIndex) LabelValues(name string) ([]string, error) {
+	selectValueQuery := c.queryLabelValues(name)
+	selectValueIter := selectValueQuery.Iter()
+
+	var (
+		values []string
+		value  string
+	)
+
+	for selectValueIter.Scan(&value) {
+		values = append(values, value)
+	}
+
+	err := selectValueIter.Close()
+
+	return values, err
+}
+
+// Postings result uuids matching give Label name & value
+// If value is the empty string, it match any values (but the label must be set)
+// If name is the empty string, it match *ALL* UUID of the index
+func (c *CassandraIndex) Postings(name string, value string) ([]gouuid.UUID, error) {
+	if name == "" {
+		return c.AllUUIDs()
+	}
+
+	if value == "" {
+		selectUUIDsQuery := c.queryUUIDsFromLabelName(name)
+		selectUUIDsIter := selectUUIDsQuery.Iter()
+
+		var (
+			labelUUIDs []gouuid.UUID
+			cqlUUIDs   []gocql.UUID
+		)
+
+		for selectUUIDsIter.Scan(&cqlUUIDs) {
+			for _, cqlUUID := range cqlUUIDs {
+				labelUUID := gouuid.UUID(cqlUUID)
+				labelUUIDs = append(labelUUIDs, labelUUID)
+			}
+		}
+
+		err := selectUUIDsIter.Close()
+
+		return labelUUIDs, err
+	}
+
+	selectUUIDsQuery := c.queryUUIDsFromLabel(name, value)
+	selectUUIDsIter := selectUUIDsQuery.Iter()
+
+	var (
+		labelUUIDs []gouuid.UUID
+		cqlUUIDs   []gocql.UUID
+	)
+
+	for selectUUIDsIter.Scan(&cqlUUIDs) {
+		for _, cqlUUID := range cqlUUIDs {
+			labelUUIDs = append(labelUUIDs, gouuid.UUID(cqlUUID))
+		}
+	}
+
+	if err := selectUUIDsIter.Close(); err != nil {
+		return nil, err
+	}
+
+	return labelUUIDs, nil
 }
 
 // LookupLabels returns a prompb.Label list corresponding to the specified UUID
@@ -352,22 +426,11 @@ func (c *CassandraIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID,
 	}
 
 	if !found {
-		targetLabels, err := c.targetLabels(matchers)
+		var err error
+		uuids, err = postingsForMatchers(c, matchers)
 
 		if err != nil {
 			return nil, err
-		}
-
-		uuidMatches, err := c.uuidMatches(targetLabels)
-
-		if err != nil {
-			return nil, err
-		}
-
-		for uuid, matches := range uuidMatches {
-			if matches == len(matchers) {
-				uuids = append(uuids, uuid)
-			}
 		}
 	}
 
@@ -396,8 +459,31 @@ func (c *CassandraIndex) expire(now time.Time) {
 	}
 }
 
+// postingsForMatchers return metric UUID matching given matcher.
+func postingsForMatchers(index Index, matchers []*prompb.LabelMatcher) (uuids []gouuid.UUID, err error) {
+	targetLabels, err := targetLabels(index, matchers)
+
+	if err != nil {
+		return uuids, err
+	}
+
+	uuidMatches, err := uuidMatches(index, targetLabels)
+
+	if err != nil {
+		return uuids, err
+	}
+
+	for uuid, matches := range uuidMatches {
+		if matches == len(matchers) {
+			uuids = append(uuids, uuid)
+		}
+	}
+
+	return uuids, nil
+}
+
 // Returns labels by target type
-func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int][]*prompb.Label, error) { // nolint:gocognit
+func targetLabels(index Index, matchers []*prompb.LabelMatcher) (map[int][]*prompb.Label, error) { // nolint:gocognit
 	if len(matchers) == 0 {
 		return nil, nil
 	}
@@ -434,19 +520,8 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 		case matcher.Type == prompb.LabelMatcher_EQ:
 			targetLabels[targetTypeValueEqual] = append(targetLabels[targetTypeValueEqual], &targetLabel)
 		default:
-			selectValueQuery := c.queryLabelValues(matcher.Name)
-			selectValueIter := selectValueQuery.Iter()
-
-			var (
-				values []string
-				value  string
-			)
-
-			for selectValueIter.Scan(&value) {
-				values = append(values, value)
-			}
-
-			if err := selectValueIter.Close(); err != nil {
+			values, err := index.LabelValues(matcher.Name)
+			if err != nil {
 				return nil, err
 			}
 
@@ -474,7 +549,7 @@ func (c *CassandraIndex) targetLabels(matchers []*prompb.LabelMatcher) (map[int]
 }
 
 // Returns a list of uuid associated with the number of times it has corresponded to a targeted label
-func (c *CassandraIndex) uuidMatches(targetLabels map[int][]*prompb.Label) (map[gouuid.UUID]int, error) { // nolint:gocognit
+func uuidMatches(index Index, targetLabels map[int][]*prompb.Label) (map[gouuid.UUID]int, error) { // nolint:gocognit
 	if len(targetLabels) == 0 {
 		return nil, nil
 	}
@@ -482,21 +557,9 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]*prompb.Label) (map[
 	uuidMatches := make(map[gouuid.UUID]int)
 
 	for _, label := range targetLabels[targetTypeValueEqual] {
-		selectUUIDsQuery := c.queryUUIDsFromLabel(label.Name, label.Value)
-		selectUUIDsIter := selectUUIDsQuery.Iter()
+		labelUUIDs, err := index.Postings(label.Name, label.Value)
 
-		var (
-			labelUUIDs []gouuid.UUID
-			cqlUUIDs   []gocql.UUID
-		)
-
-		for selectUUIDsIter.Scan(&cqlUUIDs) {
-			for _, cqlUUID := range cqlUUIDs {
-				labelUUIDs = append(labelUUIDs, gouuid.UUID(cqlUUID))
-			}
-		}
-
-		if err := selectUUIDsIter.Close(); err != nil {
+		if err != nil {
 			return nil, err
 		}
 
@@ -506,23 +569,9 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]*prompb.Label) (map[
 	}
 
 	for _, label := range targetLabels[targetTypeKeyDefined] {
-		selectUUIDsQuery := c.queryUUIDsFromLabelName(label.Name)
-		selectUUIDsIter := selectUUIDsQuery.Iter()
+		labelUUIDs, err := index.Postings(label.Name, "")
 
-		var (
-			labelUUIDs []gouuid.UUID
-			cqlUUIDs   []gocql.UUID
-		)
-
-		for selectUUIDsIter.Scan(&cqlUUIDs) {
-			for _, cqlUUID := range cqlUUIDs {
-				labelUUID := gouuid.UUID(cqlUUID)
-
-				labelUUIDs = append(labelUUIDs, labelUUID)
-			}
-		}
-
-		if err := selectUUIDsIter.Close(); err != nil {
+		if err != nil {
 			return nil, err
 		}
 
@@ -532,21 +581,9 @@ func (c *CassandraIndex) uuidMatches(targetLabels map[int][]*prompb.Label) (map[
 	}
 
 	for _, label := range targetLabels[targetTypeKeyUndefined] {
-		selectUUIDsQuery := c.queryUUIDsFromLabelName(label.Name)
-		selectUUIDsIter := selectUUIDsQuery.Iter()
+		labelUUIDs, err := index.Postings(label.Name, "")
 
-		var (
-			labelUUIDs []gouuid.UUID
-			cqlUUIDs   []gocql.UUID
-		)
-
-		for selectUUIDsIter.Scan(&cqlUUIDs) {
-			for _, cqlUUID := range cqlUUIDs {
-				labelUUIDs = append(labelUUIDs, gouuid.UUID(cqlUUID))
-			}
-		}
-
-		if err := selectUUIDsIter.Close(); err != nil {
+		if err != nil {
 			return nil, err
 		}
 
