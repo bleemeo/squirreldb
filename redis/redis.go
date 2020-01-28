@@ -116,7 +116,7 @@ func (r *Redis) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, erro
 		commands[i] = pipe.Get(key)
 	}
 
-	if _, err := pipe.Exec(); err != nil {
+	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
 		return nil, err
 	}
 
