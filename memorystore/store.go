@@ -2,6 +2,7 @@ package memorystore
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"squirreldb/compare"
@@ -15,50 +16,211 @@ import (
 
 const expiratorInterval = 60
 
+const defaultTTL = 24 * time.Hour
+
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
 	types.MetricData
+	WriteOffset         int
+	flushDeadline       time.Time
 	expirationTimestamp int64
 }
 
 type Store struct {
-	metrics map[gouuid.UUID]storeData
-	mutex   sync.Mutex
+	knownMetrics     map[gouuid.UUID]interface{}
+	metrics          map[gouuid.UUID]storeData
+	transfertMetrics []gouuid.UUID
+	mutex            sync.Mutex
 }
 
 // New creates a new Store object
 func New() *Store {
 	store := &Store{
-		metrics: make(map[gouuid.UUID]storeData),
+		metrics:      make(map[gouuid.UUID]storeData),
+		knownMetrics: make(map[gouuid.UUID]interface{}),
 	}
 
 	return store
 }
 
-// Append is the public method of append
-func (s *Store) Append(newMetrics, existingMetrics []types.MetricData, timeToLive int64) error {
+// Append implement batch.TemporaryStore interface
+func (s *Store) Append(points []types.MetricData) ([]int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.append(newMetrics, existingMetrics, timeToLive, time.Now())
+	if len(points) == 0 {
+		return nil, nil
+	}
+
+	pointCount := make([]int, len(points))
+
+	for i, data := range points {
+		storeData := s.metrics[data.UUID]
+
+		storeData.UUID = data.UUID
+		storeData.Points = append(storeData.Points, data.Points...)
+		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
+		s.metrics[data.UUID] = storeData
+
+		pointsTotal.Add(float64(len(data.Points)))
+
+		pointCount[i] = len(storeData.Points)
+	}
+
+	metricsTotal.Set(float64(len(s.metrics)))
+
+	return pointCount, nil
 }
 
-// Get is the public method of get
-func (s *Store) Get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
+// GetSetPointsAndOffset implement batch.TemporaryStore interface
+func (s *Store) GetSetPointsAndOffset(points []types.MetricData, offsets []int) ([]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.get(uuids)
+	return s.getSetPointsAndOffset(points, offsets, time.Now())
 }
 
-// Set is the public method of set
-func (s *Store) Set(metrics []types.MetricData, timeToLive int64) error {
+func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, now time.Time) ([]types.MetricData, error) {
+	if len(points) == 0 {
+		return nil, nil
+	}
+
+	if len(points) != len(offsets) {
+		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
+	}
+
+	expirationTimestamp := now.Add(defaultTTL).Unix()
+	oldData := make([]types.MetricData, len(points))
+
+	for i, data := range points {
+		storeData := s.metrics[data.UUID]
+
+		oldData[i] = storeData.MetricData
+
+		pointsTotal.Add(float64(len(data.Points) - len(storeData.MetricData.Points)))
+
+		storeData.MetricData = data
+		storeData.expirationTimestamp = expirationTimestamp
+		storeData.WriteOffset = offsets[i]
+
+		s.metrics[data.UUID] = storeData
+		s.knownMetrics[data.UUID] = nil
+	}
+
+	metricsTotal.Set(float64(len(s.metrics)))
+
+	return oldData, nil
+}
+
+// ReadPointsAndOffset implement batch.TemporaryStore interface
+func (s *Store) ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.set(metrics, timeToLive, time.Now())
+	if len(uuids) == 0 {
+		return nil, nil, nil
+	}
+
+	metrics := make([]types.MetricData, len(uuids))
+	writeOffsets := make([]int, len(uuids))
+
+	for i, uuid := range uuids {
+		storeData, exists := s.metrics[uuid]
+
+		if exists {
+			metrics[i] = storeData.MetricData
+			writeOffsets[i] = storeData.WriteOffset
+		}
+	}
+
+	return metrics, writeOffsets, nil
+}
+
+// MarkToExpire implement batch.TemporaryStore interface
+func (s *Store) MarkToExpire(uuids []gouuid.UUID, ttl time.Duration) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.markToExpire(uuids, ttl, time.Now())
+}
+
+func (s *Store) markToExpire(uuids []gouuid.UUID, ttl time.Duration, now time.Time) error {
+	for _, uuid := range uuids {
+		if entry, found := s.metrics[uuid]; found {
+			entry.expirationTimestamp = now.Add(ttl).Unix()
+			s.metrics[uuid] = entry
+		}
+
+		delete(s.knownMetrics, uuid)
+	}
+
+	return nil
+}
+
+// GetSetFlushDeadline implement batch.TemporaryStore interface
+func (s *Store) GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[gouuid.UUID]time.Time, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	results := make(map[gouuid.UUID]time.Time, len(deadlines))
+
+	for uuid, deadline := range deadlines {
+		state := s.metrics[uuid]
+		results[uuid] = state.flushDeadline
+		state.flushDeadline = deadline
+		s.metrics[uuid] = state
+	}
+
+	return results, nil
+}
+
+// AddToTransfert implement batch.TemporaryStore interface
+func (s *Store) AddToTransfert(uuids []gouuid.UUID) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.transfertMetrics = append(s.transfertMetrics, uuids...)
+
+	return nil
+}
+
+// GetTransfert implement batch.TemporaryStore interface
+func (s *Store) GetTransfert(count int) (map[gouuid.UUID]time.Time, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	results := make(map[gouuid.UUID]time.Time, count)
+	endIndex := count
+
+	if endIndex >= len(s.transfertMetrics) {
+		endIndex = len(s.transfertMetrics)
+	}
+
+	for i := 0; i < endIndex; i++ {
+		uuid := s.transfertMetrics[i]
+		results[uuid] = s.metrics[uuid].flushDeadline
+	}
+
+	copy(s.transfertMetrics, s.transfertMetrics[endIndex:])
+	s.transfertMetrics = s.transfertMetrics[:len(s.transfertMetrics)-endIndex]
+
+	return results, nil
+}
+
+// GetAllKnownMetrics implement batch.TemporaryStore interface
+func (s *Store) GetAllKnownMetrics() (map[gouuid.UUID]time.Time, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	results := make(map[gouuid.UUID]time.Time, len(s.metrics))
+
+	for uuid := range s.knownMetrics {
+		results[uuid] = s.metrics[uuid].flushDeadline
+	}
+
+	return results, nil
 }
 
 // Run starts all Store services
@@ -84,79 +246,16 @@ func (s *Store) expire(now time.Time) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	var pointsCount int
+
 	for uuid, storeData := range s.metrics {
 		if storeData.expirationTimestamp < now.Unix() {
 			delete(s.metrics, uuid)
-		}
-	}
-}
-
-// Appends the specified metrics
-func (s *Store) append(newMetrics, existingMetrics []types.MetricData, timeToLive int64, now time.Time) error {
-	if (len(newMetrics) == 0) && (len(existingMetrics) == 0) {
-		return nil
-	}
-
-	expirationTimestamp := now.Unix() + timeToLive
-
-	for _, data := range newMetrics {
-		storeData := s.metrics[data.UUID]
-
-		storeData.Points = append(storeData.Points, data.Points...)
-		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-		storeData.expirationTimestamp = expirationTimestamp
-
-		s.metrics[data.UUID] = storeData
-	}
-
-	for _, data := range existingMetrics {
-		storeData := s.metrics[data.UUID]
-
-		storeData.Points = append(storeData.Points, data.Points...)
-		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-		storeData.expirationTimestamp = expirationTimestamp
-
-		s.metrics[data.UUID] = storeData
-	}
-
-	return nil
-}
-
-// Return the requested metrics
-func (s *Store) get(uuids []gouuid.UUID) (map[gouuid.UUID]types.MetricData, error) {
-	if len(uuids) == 0 {
-		return nil, nil
-	}
-
-	metrics := make(map[gouuid.UUID]types.MetricData, len(uuids))
-
-	for _, uuid := range uuids {
-		storeData, exists := s.metrics[uuid]
-
-		if exists {
-			metrics[uuid] = storeData.MetricData
+		} else {
+			pointsCount += len(storeData.Points)
 		}
 	}
 
-	return metrics, nil
-}
-
-// Sets the specified metrics
-func (s *Store) set(metrics []types.MetricData, timeToLive int64, now time.Time) error {
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	expirationTimestamp := now.Unix() + timeToLive
-
-	for _, data := range metrics {
-		storeData := s.metrics[data.UUID]
-
-		storeData.MetricData = data
-		storeData.expirationTimestamp = expirationTimestamp
-
-		s.metrics[data.UUID] = storeData
-	}
-
-	return nil
+	pointsTotal.Set(float64(pointsCount))
+	metricsTotal.Set(float64(len(s.metrics)))
 }

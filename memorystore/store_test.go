@@ -1,11 +1,12 @@
 package memorystore
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 	"time"
+
+	gouuid "github.com/gofrs/uuid"
 )
 
 func uuidFromStringOrNil(s string) gouuid.UUID {
@@ -14,43 +15,19 @@ func uuidFromStringOrNil(s string) gouuid.UUID {
 	return uuid
 }
 
-func TestNew(t *testing.T) {
-	tests := []struct {
-		name string
-		want *Store
-	}{
-		{
-			name: "new",
-			want: &Store{
-				metrics: make(map[gouuid.UUID]storeData),
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := New(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("New() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestStore_append(t *testing.T) {
+func TestAppend(t *testing.T) {
 	type fields struct {
 		metrics map[gouuid.UUID]storeData
 	}
 	type args struct {
-		newMetrics      []types.MetricData
-		existingMetrics []types.MetricData
-		timeToLive      int64
-		now             time.Time
+		points []types.MetricData
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    map[gouuid.UUID]storeData
-		wantErr bool
+		name      string
+		fields    fields
+		args      args
+		want      []int
+		wantState map[gouuid.UUID]storeData
 	}{
 		{
 			name: "store_filled",
@@ -58,6 +35,7 @@ func TestStore_append(t *testing.T) {
 				metrics: map[gouuid.UUID]storeData{
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -70,10 +48,11 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 150,
 						},
-						expirationTimestamp: 400,
+						expirationTimestamp: 0,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -86,12 +65,12 @@ func TestStore_append(t *testing.T) {
 							},
 							TimeToLive: 2400,
 						},
-						expirationTimestamp: 400,
+						expirationTimestamp: 0,
 					},
 				},
 			},
 			args: args{
-				newMetrics: []types.MetricData{
+				points: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
@@ -118,8 +97,6 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-				},
-				existingMetrics: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
@@ -147,12 +124,11 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 1200,
 					},
 				},
-				timeToLive: 1200,
-				now:        time.Unix(400, 0),
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -185,10 +161,11 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					expirationTimestamp: 1600,
+					expirationTimestamp: 0,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -221,10 +198,10 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 2400,
 					},
-					expirationTimestamp: 1600,
+					expirationTimestamp: 0,
 				},
 			},
-			wantErr: false,
+			want: []int{7, 7},
 		},
 		{
 			name: "store_empty",
@@ -232,7 +209,7 @@ func TestStore_append(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				newMetrics: []types.MetricData{
+				points: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
@@ -259,8 +236,6 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-				},
-				existingMetrics: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
@@ -288,12 +263,11 @@ func TestStore_append(t *testing.T) {
 						TimeToLive: 1200,
 					},
 				},
-				timeToLive: 600,
-				now:        time.Unix(200, 0),
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -318,10 +292,11 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					expirationTimestamp: 800,
+					expirationTimestamp: 0,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -346,10 +321,10 @@ func TestStore_append(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					expirationTimestamp: 800,
+					expirationTimestamp: 0,
 				},
 			},
-			wantErr: false,
+			want: []int{5, 5},
 		},
 		{
 			name: "store_filled_metrics_empty",
@@ -357,6 +332,7 @@ func TestStore_append(t *testing.T) {
 				metrics: map[gouuid.UUID]storeData{
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						MetricData: types.MetricData{
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -373,6 +349,7 @@ func TestStore_append(t *testing.T) {
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						MetricData: types.MetricData{
+							UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -390,14 +367,12 @@ func TestStore_append(t *testing.T) {
 				},
 			},
 			args: args{
-				newMetrics:      nil,
-				existingMetrics: nil,
-				timeToLive:      600,
-				now:             time.Unix(200, 0),
+				points: nil,
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -414,6 +389,7 @@ func TestStore_append(t *testing.T) {
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -429,7 +405,7 @@ func TestStore_append(t *testing.T) {
 					expirationTimestamp: 400,
 				},
 			},
-			wantErr: false,
+			want: nil,
 		},
 		{
 			name: "store_empty_metrics_empty",
@@ -437,13 +413,10 @@ func TestStore_append(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				newMetrics:      nil,
-				existingMetrics: nil,
-				timeToLive:      600,
-				now:             time.Unix(200, 0),
+				points: nil,
 			},
-			want:    make(map[gouuid.UUID]storeData),
-			wantErr: false,
+			wantState: make(map[gouuid.UUID]storeData),
+			want:      nil,
 		},
 	}
 	for _, tt := range tests {
@@ -451,11 +424,15 @@ func TestStore_append(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			if err := s.append(tt.args.newMetrics, tt.args.existingMetrics, tt.args.timeToLive, tt.args.now); (err != nil) != tt.wantErr {
-				t.Errorf("append() error = %v, wantErr %v", err, tt.wantErr)
+			got, err := s.Append(tt.args.points)
+			if err != nil {
+				t.Errorf("Append() error = %v", err)
 			}
-			if !reflect.DeepEqual(s.metrics, tt.want) {
-				t.Errorf("append() metrics = %v, want %v", s.metrics, tt.want)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Append() = %v, want %v", got, tt.want)
+			}
+			if !reflect.DeepEqual(s.metrics, tt.wantState) {
+				t.Errorf("Append() metrics = %v, want %v", s.metrics, tt.wantState)
 			}
 		})
 	}
@@ -540,7 +517,7 @@ func TestStore_expire(t *testing.T) {
 	}
 }
 
-func TestStore_get(t *testing.T) {
+func TestStoreReadPointsAndOffset(t *testing.T) {
 	type fields struct {
 		metrics map[gouuid.UUID]storeData
 	}
@@ -548,11 +525,12 @@ func TestStore_get(t *testing.T) {
 		uuids []gouuid.UUID
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    map[gouuid.UUID]types.MetricData
-		wantErr bool
+		name       string
+		fields     fields
+		args       args
+		want       []types.MetricData
+		wantOffset []int
+		wantErr    bool
 	}{
 		{
 			name: "store_empty",
@@ -564,8 +542,9 @@ func TestStore_get(t *testing.T) {
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 			},
-			want:    make(map[gouuid.UUID]types.MetricData),
-			wantErr: false,
+			want:       make([]types.MetricData, 1),
+			wantOffset: []int{0},
+			wantErr:    false,
 		},
 		{
 			name: "store_filled",
@@ -597,6 +576,7 @@ func TestStore_get(t *testing.T) {
 							},
 							TimeToLive: 300,
 						},
+						WriteOffset:         1,
 						expirationTimestamp: 800,
 					},
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
@@ -625,6 +605,7 @@ func TestStore_get(t *testing.T) {
 							},
 							TimeToLive: 1200,
 						},
+						WriteOffset:         0,
 						expirationTimestamp: 800,
 					},
 				},
@@ -634,8 +615,8 @@ func TestStore_get(t *testing.T) {
 					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 			},
-			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+			want: []types.MetricData{
+				{
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -661,7 +642,8 @@ func TestStore_get(t *testing.T) {
 					TimeToLive: 300,
 				},
 			},
-			wantErr: false,
+			wantOffset: []int{1},
+			wantErr:    false,
 		},
 	}
 	for _, tt := range tests {
@@ -669,33 +651,36 @@ func TestStore_get(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			got, err := s.get(tt.args.uuids)
+			got, gotOffset, err := s.ReadPointsAndOffset(tt.args.uuids)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("get() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ReadPointsAndOffset() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("get() got = %v, want %v", got, tt.want)
+				t.Errorf("ReadPointsAndOffset() got = %v, want %v", got, tt.want)
+			}
+			if !reflect.DeepEqual(gotOffset, tt.wantOffset) {
+				t.Errorf("ReadPointsAndOffset() gotOffset = %v, want %v", gotOffset, tt.wantOffset)
 			}
 		})
 	}
 }
 
-func TestStore_set(t *testing.T) {
+func TestStoreGetSetPointsAndOffset(t *testing.T) {
 	type fields struct {
 		metrics map[gouuid.UUID]storeData
 	}
 	type args struct {
-		metrics    []types.MetricData
-		timeToLive int64
-		now        time.Time
+		points  []types.MetricData
+		offsets []int
+		now     time.Time
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    map[gouuid.UUID]storeData
-		wantErr bool
+		name      string
+		fields    fields
+		args      args
+		want      []types.MetricData
+		wantState map[gouuid.UUID]storeData
 	}{
 		{
 			name: "store_filled",
@@ -736,7 +721,7 @@ func TestStore_set(t *testing.T) {
 				},
 			},
 			args: args{
-				metrics: []types.MetricData{
+				points: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
@@ -790,12 +775,13 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 1200,
 					},
 				},
-				timeToLive: 1200,
-				now:        time.Unix(400, 0),
+				offsets: []int{1, 3},
+				now:     time.Unix(400, 0),
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 20,
@@ -820,10 +806,12 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					expirationTimestamp: 1600,
+					expirationTimestamp: 400 + int64(defaultTTL.Seconds()),
+					WriteOffset:         1,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 40,
@@ -848,10 +836,38 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					expirationTimestamp: 1600,
+					expirationTimestamp: 400 + int64(defaultTTL.Seconds()),
+					WriteOffset:         3,
 				},
 			},
-			wantErr: false,
+			want: []types.MetricData{
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 0,
+							Value:     10,
+						},
+						{
+							Timestamp: 10,
+							Value:     20,
+						},
+					},
+					TimeToLive: 150,
+				},
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 0,
+							Value:     50,
+						},
+						{
+							Timestamp: 20,
+							Value:     100,
+						},
+					},
+					TimeToLive: 2400,
+				},
+			},
 		},
 		{
 			name: "store_empty",
@@ -859,7 +875,7 @@ func TestStore_set(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				metrics: []types.MetricData{
+				points: []types.MetricData{
 					{
 						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
@@ -913,12 +929,13 @@ func TestStore_set(t *testing.T) {
 						TimeToLive: 1200,
 					},
 				},
-				timeToLive: 600,
-				now:        time.Unix(200, 0),
+				offsets: []int{1, 0},
+				now:     time.Unix(200, 0),
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -943,10 +960,12 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					expirationTimestamp: 800,
+					expirationTimestamp: 200 + int64(defaultTTL.Seconds()),
+					WriteOffset:         1,
 				},
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -971,10 +990,11 @@ func TestStore_set(t *testing.T) {
 						},
 						TimeToLive: 1200,
 					},
-					expirationTimestamp: 800,
+					expirationTimestamp: 200 + int64(defaultTTL.Seconds()),
+					WriteOffset:         0,
 				},
 			},
-			wantErr: false,
+			want: make([]types.MetricData, 2),
 		},
 		{
 			name: "store_filled_metrics_empty",
@@ -1015,11 +1035,11 @@ func TestStore_set(t *testing.T) {
 				},
 			},
 			args: args{
-				metrics:    nil,
-				timeToLive: 600,
-				now:        time.Unix(200, 0),
+				points:  nil,
+				offsets: nil,
+				now:     time.Unix(200, 0),
 			},
-			want: map[gouuid.UUID]storeData{
+			wantState: map[gouuid.UUID]storeData{
 				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					MetricData: types.MetricData{
 						Points: []types.MetricPoint{
@@ -1053,7 +1073,7 @@ func TestStore_set(t *testing.T) {
 					expirationTimestamp: 400,
 				},
 			},
-			wantErr: false,
+			want: nil,
 		},
 		{
 			name: "store_empty_metrics_empty",
@@ -1061,22 +1081,327 @@ func TestStore_set(t *testing.T) {
 				metrics: make(map[gouuid.UUID]storeData),
 			},
 			args: args{
-				metrics:    nil,
-				timeToLive: 600,
-				now:        time.Unix(200, 0),
+				points:  nil,
+				offsets: nil,
+				now:     time.Unix(200, 0),
 			},
-			want:    make(map[gouuid.UUID]storeData),
-			wantErr: false,
+			wantState: make(map[gouuid.UUID]storeData),
+			want:      nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				metrics:      tt.fields.metrics,
+				knownMetrics: make(map[gouuid.UUID]interface{}),
 			}
-			if err := s.set(tt.args.metrics, tt.args.timeToLive, tt.args.now); (err != nil) != tt.wantErr {
-				t.Errorf("set() error = %v, wantErr %v", err, tt.wantErr)
+			got, err := s.getSetPointsAndOffset(tt.args.points, tt.args.offsets, tt.args.now)
+			if err != nil {
+				t.Errorf("getSetPointsAndOffset() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getSetPointsAndOffset() = %v, want %v", got, tt.want)
+			}
+			if !reflect.DeepEqual(s.metrics, tt.wantState) {
+				t.Errorf("getSetPointsAndOffset() metrics = %v, want %v", s.metrics, tt.wantState)
 			}
 		})
+	}
+}
+
+func TestStore_markToExpire(t *testing.T) {
+	type args struct {
+		uuids []gouuid.UUID
+		ttl   time.Duration
+		now   time.Time
+	}
+	tests := []struct {
+		name      string
+		state     map[gouuid.UUID]storeData
+		args      args
+		wantState map[gouuid.UUID]storeData
+	}{
+		{
+			name: "simple",
+			state: map[gouuid.UUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					},
+					WriteOffset:         1,
+					expirationTimestamp: 900000,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					},
+					WriteOffset:         2,
+					expirationTimestamp: 900000,
+				},
+			},
+			args: args{
+				uuids: []gouuid.UUID{uuidFromStringOrNil("00000000-0000-0000-0000-000000000002")},
+				ttl:   30 * time.Second,
+				now:   time.Unix(600, 0),
+			},
+			wantState: map[gouuid.UUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					},
+					WriteOffset:         1,
+					expirationTimestamp: 900000,
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricData: types.MetricData{
+						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					},
+					WriteOffset:         2,
+					expirationTimestamp: 600 + 30,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Store{
+				metrics: tt.state,
+			}
+			if err := s.markToExpire(tt.args.uuids, tt.args.ttl, tt.args.now); err != nil {
+				t.Errorf("Store.markToExpire() error = %v", err)
+			}
+			if !reflect.DeepEqual(s.metrics, tt.wantState) {
+				t.Errorf("Store.markToExpire() metrics = %v, want %v", s.metrics, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestStore_GetSetFlushDeadline(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     map[gouuid.UUID]storeData
+		args      map[gouuid.UUID]time.Time
+		want      map[gouuid.UUID]time.Time
+		wantState map[gouuid.UUID]storeData
+	}{
+		{
+			name: "simple",
+			state: map[gouuid.UUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					flushDeadline: time.Unix(42, 0),
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					flushDeadline: time.Unix(1337, 0),
+				},
+			},
+			args: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Unix(200, 0),
+			},
+			want: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Unix(1337, 0),
+			},
+			wantState: map[gouuid.UUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					flushDeadline: time.Unix(42, 0),
+				},
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					flushDeadline: time.Unix(200, 0),
+				},
+			},
+		},
+		{
+			name:  "no-state",
+			state: map[gouuid.UUID]storeData{},
+			args: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Unix(200, 0),
+			},
+			want: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Time{},
+			},
+			wantState: map[gouuid.UUID]storeData{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					flushDeadline: time.Unix(200, 0),
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Store{
+				metrics: tt.state,
+			}
+			got, err := s.GetSetFlushDeadline(tt.args)
+			if err != nil {
+				t.Errorf("Store.GetSetFlushDeadline() error = %v", err)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Store.GetSetFlushDeadline() = %v, want %v", got, tt.want)
+			}
+			if !reflect.DeepEqual(s.metrics, tt.wantState) {
+				t.Errorf("Store.GetSetFlushDeadline() flushDeadlines = %v, want %v", s.metrics, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestStore_GetTransfert(t *testing.T) {
+	type fields struct {
+		metrics          map[gouuid.UUID]storeData
+		transfertMetrics []gouuid.UUID
+	}
+	tests := []struct {
+		name      string
+		fields    fields
+		args      int
+		want      map[gouuid.UUID]time.Time
+		wantState []gouuid.UUID
+	}{
+		{
+			name: "empty-nil",
+			fields: fields{
+				metrics:          nil,
+				transfertMetrics: nil,
+			},
+			args:      50,
+			want:      map[gouuid.UUID]time.Time{},
+			wantState: nil,
+		},
+		{
+			name: "empty",
+			fields: fields{
+				metrics:          nil,
+				transfertMetrics: []gouuid.UUID{},
+			},
+			args:      50,
+			want:      map[gouuid.UUID]time.Time{},
+			wantState: []gouuid.UUID{},
+		},
+		{
+			name: "less-than-requested",
+			fields: fields{
+				metrics: map[gouuid.UUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						flushDeadline: time.Unix(0, 0),
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						flushDeadline: time.Unix(42, 0),
+					},
+				},
+				transfertMetrics: []gouuid.UUID{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				},
+			},
+			args: 50,
+			want: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): time.Unix(0, 0),
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Unix(42, 0),
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000003"): time.Time{},
+			},
+			wantState: []gouuid.UUID{},
+		},
+		{
+			name: "more-than-requested",
+			fields: fields{
+				metrics: map[gouuid.UUID]storeData{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						flushDeadline: time.Unix(0, 0),
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						flushDeadline: time.Unix(42, 0),
+					},
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000003"): {
+						flushDeadline: time.Unix(1337, 0),
+					},
+				},
+				transfertMetrics: []gouuid.UUID{
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					uuidFromStringOrNil("00000000-0000-0000-0000-000000000003"),
+				},
+			},
+			args: 2,
+			want: map[gouuid.UUID]time.Time{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): time.Unix(0, 0),
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): time.Unix(42, 0),
+			},
+			wantState: []gouuid.UUID{
+				uuidFromStringOrNil("00000000-0000-0000-0000-000000000003"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Store{
+				metrics:          tt.fields.metrics,
+				transfertMetrics: tt.fields.transfertMetrics,
+			}
+			got, err := s.GetTransfert(tt.args)
+			if err != nil {
+				t.Errorf("Store.GetTransfert() error = %v", err)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Store.GetTransfert() = %v, want %v", got, tt.want)
+			}
+			if !reflect.DeepEqual(s.transfertMetrics, tt.wantState) {
+				t.Errorf("Store.GetTransfert() = %v, want %v", s.transfertMetrics, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestStore_GetAllKnownMetrics(t *testing.T) {
+	store := New()
+	store.getSetPointsAndOffset(
+		[]types.MetricData{
+			{
+				UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				TimeToLive: 42,
+				Points: []types.MetricPoint{
+					{Timestamp: 10},
+				},
+			},
+		},
+		[]int{0},
+		time.Unix(10, 0),
+	)
+
+	want := map[gouuid.UUID]time.Time{
+		uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): time.Time{},
+	}
+
+	got, _ := store.GetAllKnownMetrics()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
+	}
+
+	store.GetSetFlushDeadline(map[gouuid.UUID]time.Time{
+		uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): time.Unix(42, 42),
+	})
+
+	want = map[gouuid.UUID]time.Time{
+		uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): time.Unix(42, 42),
+	}
+
+	got, _ = store.GetAllKnownMetrics()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
+	}
+
+	store.markToExpire(
+		[]gouuid.UUID{uuidFromStringOrNil("00000000-0000-0000-0000-000000000001")},
+		time.Minute,
+		time.Unix(10, 0),
+	)
+
+	want = map[gouuid.UUID]time.Time{}
+
+	got, _ = store.GetAllKnownMetrics()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
 }

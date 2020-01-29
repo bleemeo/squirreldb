@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"squirreldb/types"
 	"testing"
+
+	gouuid "github.com/gofrs/uuid"
 )
 
 func Benchmark_valuesFromData(b *testing.B) {
@@ -56,6 +58,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 		{
 			name: "small_5",
 			data: types.MetricData{
+				UUID: gouuid.UUID{},
 				Points: []types.MetricPoint{
 					{Timestamp: 20, Value: 20},
 					{Timestamp: 30, Value: 30},
@@ -69,6 +72,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 		{
 			name: "medium_30",
 			data: types.MetricData{
+				UUID:       gouuid.UUID{},
 				Points:     types.MakePointsForTest(30),
 				TimeToLive: 360,
 			},
@@ -76,6 +80,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 		{
 			name: "large_300",
 			data: types.MetricData{
+				UUID:       gouuid.UUID{},
 				Points:     types.MakePointsForTest(300),
 				TimeToLive: 360,
 			},
@@ -86,7 +91,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 			dataBytes, _ := valuesFromData(tt.data)
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				_, _ = dataFromValues(dataBytes)
+				_, _ = dataFromValues(gouuid.UUID{}, dataBytes)
 			}
 		})
 	}
@@ -100,6 +105,7 @@ func Test_valuesSerialization(t *testing.T) {
 		{
 			name: "small_5",
 			data: types.MetricData{
+				UUID: gouuid.UUID{},
 				Points: []types.MetricPoint{
 					{Timestamp: 20, Value: 20},
 					{Timestamp: 30, Value: 30},
@@ -113,6 +119,7 @@ func Test_valuesSerialization(t *testing.T) {
 		{
 			name: "medium_30",
 			data: types.MetricData{
+				UUID:       gouuid.UUID{},
 				Points:     types.MakePointsForTest(30),
 				TimeToLive: 360,
 			},
@@ -120,6 +127,7 @@ func Test_valuesSerialization(t *testing.T) {
 		{
 			name: "large_300",
 			data: types.MetricData{
+				UUID:       gouuid.UUID{},
 				Points:     types.MakePointsForTest(300),
 				TimeToLive: 360,
 			},
@@ -132,7 +140,7 @@ func Test_valuesSerialization(t *testing.T) {
 				t.Errorf("valuesFromData() error = %v", err)
 				return
 			}
-			got, err := dataFromValues(gotBytes)
+			got, err := dataFromValues(gouuid.UUID{}, gotBytes)
 			if err != nil {
 				t.Errorf("dataFromValues() error = %v", err)
 				return

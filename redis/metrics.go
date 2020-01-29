@@ -35,6 +35,13 @@ var (
 		Help:        "Total processing time of Redis operations in seconds",
 		ConstLabels: prometheus.Labels{"operation": "add"},
 	})
+	operationSecondsExpire = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "redis",
+		Name:        "operations_seconds",
+		Help:        "Total processing time of Redis operations in seconds",
+		ConstLabels: prometheus.Labels{"operation": "expire"},
+	})
 	operationSecondsGet = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "redis",
@@ -42,11 +49,25 @@ var (
 		Help:        "Total processing time of Redis operations in seconds",
 		ConstLabels: prometheus.Labels{"operation": "get"},
 	})
+	operationSecondsKnownMetrics = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "redis",
+		Name:        "operations_seconds",
+		Help:        "Total processing time of Redis operations in seconds",
+		ConstLabels: prometheus.Labels{"operation": "known-metrics"},
+	})
 	operationSecondsSet = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "redis",
 		Name:        "operations_seconds",
 		Help:        "Total processing time of Redis operations in seconds",
 		ConstLabels: prometheus.Labels{"operation": "set"},
+	})
+	operationSecondsSetDeadline = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "redis",
+		Name:        "operations_seconds",
+		Help:        "Total processing time of Redis operations in seconds",
+		ConstLabels: prometheus.Labels{"operation": "set-deadline"},
 	})
 )

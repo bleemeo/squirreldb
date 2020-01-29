@@ -57,7 +57,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var squirrelStore batch.Store
+	var squirrelStore batch.TemporaryStore
 
 	redisAddress := squirrelConfig.String("redis.address")
 
@@ -238,7 +238,7 @@ func createSquirrelRedis(address string) *redis.Redis {
 	return squirrelRedis
 }
 
-func createSquirrelBatch(config *config.Config, store batch.Store, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
+func createSquirrelBatch(config *config.Config, store batch.TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
 	squirrelBatchSize := config.Int64("batch.size")
 
 	squirrelBatch := batch.New(squirrelBatchSize, store, reader, writer)
