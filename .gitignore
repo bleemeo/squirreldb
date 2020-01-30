@@ -1,5 +1,5 @@
-# Files
 squirreldb
 
-# Folders
 /.idea
+.vscode
+*.*.swp
