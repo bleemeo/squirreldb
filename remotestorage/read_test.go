@@ -9,12 +9,6 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-func uuidFromStringOrNil(s string) gouuid.UUID {
-	uuid, _ := gouuid.FromString(s)
-
-	return uuid
-}
-
 func Test_requestFromPromQuery(t *testing.T) {
 	type args struct {
 		promQuery *prompb.Query
@@ -43,7 +37,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 			},
 			want: types.MetricRequest{
 				UUIDs: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 0,
 				ToTimestamp:   50,
@@ -64,7 +58,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 			},
 			want: types.MetricRequest{
 				UUIDs: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				FromTimestamp: 0,
 				ToTimestamp:   50,
@@ -130,7 +124,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 			want: []types.MetricRequest{
 				{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   50,
@@ -139,7 +133,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 				},
 				{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					},
 					FromTimestamp: 50,
 					ToTimestamp:   100,
@@ -285,7 +279,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 		{
 			name: "metric",
 			args: args{
-				uuid: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				uuid: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				data: types.MetricData{
 					Points: []types.MetricPoint{
 						{
@@ -394,7 +388,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 			name: "metrics_filled",
 			args: args{
 				metrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,

@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-func uuidFromStringOrNil(s string) gouuid.UUID {
-	uuid, _ := gouuid.FromString(s)
-
-	return uuid
-}
-
 func TestAggregate(t *testing.T) {
 	type args struct {
 		metrics    map[gouuid.UUID]types.MetricData
@@ -28,7 +22,7 @@ func TestAggregate(t *testing.T) {
 			name: "test",
 			args: args{
 				metrics: map[gouuid.UUID]types.MetricData{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -53,7 +47,7 @@ func TestAggregate(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -82,7 +76,7 @@ func TestAggregate(t *testing.T) {
 				resolution: 50,
 			},
 			want: map[gouuid.UUID]AggregatedData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []AggregatedPoint{
 						{
 							Timestamp: 0,
@@ -94,7 +88,7 @@ func TestAggregate(t *testing.T) {
 					},
 					TimeToLive: 300,
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					Points: []AggregatedPoint{
 						{
 							Timestamp: 0,

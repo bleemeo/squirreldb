@@ -142,12 +142,6 @@ func (m *mockMetricWriter) Write(metrics []types.MetricData) error {
 	return nil
 }
 
-func uuidFromStringOrNil(s string) gouuid.UUID {
-	uuid, _ := gouuid.FromString(s)
-
-	return uuid
-}
-
 func TestBatch_read(t *testing.T) {
 	type fields struct {
 		batchSize   int64
@@ -173,7 +167,7 @@ func TestBatch_read(t *testing.T) {
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 50,
@@ -187,7 +181,7 @@ func TestBatch_read(t *testing.T) {
 					},
 
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 100,
@@ -202,7 +196,7 @@ func TestBatch_read(t *testing.T) {
 				}),
 				reader: &mockMetricReader{
 					metrics: map[gouuid.UUID]types.MetricData{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -226,7 +220,7 @@ func TestBatch_read(t *testing.T) {
 								},
 							},
 						},
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -257,8 +251,8 @@ func TestBatch_read(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -267,7 +261,7 @@ func TestBatch_read(t *testing.T) {
 				},
 			},
 			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -299,7 +293,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -341,7 +335,7 @@ func TestBatch_read(t *testing.T) {
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 50,
@@ -354,7 +348,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 100,
@@ -375,8 +369,8 @@ func TestBatch_read(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -385,7 +379,7 @@ func TestBatch_read(t *testing.T) {
 				},
 			},
 			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50,
@@ -397,7 +391,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 100,
@@ -420,7 +414,7 @@ func TestBatch_read(t *testing.T) {
 				memoryStore: newMemoryStore(nil),
 				reader: &mockMetricReader{
 					metrics: map[gouuid.UUID]types.MetricData{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -444,7 +438,7 @@ func TestBatch_read(t *testing.T) {
 								},
 							},
 						},
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -475,8 +469,8 @@ func TestBatch_read(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -485,7 +479,7 @@ func TestBatch_read(t *testing.T) {
 				},
 			},
 			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -509,7 +503,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -550,8 +544,8 @@ func TestBatch_read(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -569,7 +563,7 @@ func TestBatch_read(t *testing.T) {
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -596,7 +590,7 @@ func TestBatch_read(t *testing.T) {
 				}),
 				reader: &mockMetricReader{
 					metrics: map[gouuid.UUID]types.MetricData{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -627,7 +621,7 @@ func TestBatch_read(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   100,
@@ -636,7 +630,7 @@ func TestBatch_read(t *testing.T) {
 				},
 			},
 			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -710,7 +704,7 @@ func TestBatch_readTemporary(t *testing.T) {
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 50,
@@ -723,7 +717,7 @@ func TestBatch_readTemporary(t *testing.T) {
 						},
 					},
 					{
-						UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 100,
@@ -742,8 +736,8 @@ func TestBatch_readTemporary(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -752,7 +746,7 @@ func TestBatch_readTemporary(t *testing.T) {
 				},
 			},
 			want: map[gouuid.UUID]types.MetricData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50,
@@ -764,7 +758,7 @@ func TestBatch_readTemporary(t *testing.T) {
 						},
 					},
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 100,
@@ -791,8 +785,8 @@ func TestBatch_readTemporary(t *testing.T) {
 			args: args{
 				request: types.MetricRequest{
 					UUIDs: []gouuid.UUID{
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   200,
@@ -839,7 +833,7 @@ func Test_flushTimestamp(t *testing.T) {
 		{
 			name: "uuid_0",
 			args: args{
-				uuid:      uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				uuid:      gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				now:       time.Unix(0, 0),
 				batchSize: 50,
 			},
@@ -848,7 +842,7 @@ func Test_flushTimestamp(t *testing.T) {
 		{
 			name: "uuid_1707",
 			args: args{
-				uuid:      uuidFromStringOrNil("00000000-0000-0000-0000-0000000006ab"),
+				uuid:      gouuid.FromStringOrNil("00000000-0000-0000-0000-0000000006ab"),
 				now:       time.Unix(0, 0),
 				batchSize: 50,
 			},
@@ -890,7 +884,7 @@ func TestBatch_flush(t *testing.T) {
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						TimeToLive: 42,
 						Points: []types.MetricPoint{
 							{Timestamp: 100, Value: 42.0},
@@ -905,14 +899,14 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				uuids: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				now:      time.Unix(150, 0),
 				shutdown: false,
 			},
 			wantWriter: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -925,7 +919,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -944,7 +938,7 @@ func TestBatch_flush(t *testing.T) {
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						TimeToLive: 42,
 						Points: []types.MetricPoint{
 							{Timestamp: 140, Value: 46.0},
@@ -961,14 +955,14 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				uuids: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				now:      time.Unix(150, 0),
 				shutdown: false,
 			},
 			wantWriter: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -981,7 +975,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 140, Value: 46.0},
@@ -1002,7 +996,7 @@ func TestBatch_flush(t *testing.T) {
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						TimeToLive: 42,
 						Points: []types.MetricPoint{
 							{Timestamp: 100, Value: 42.0},
@@ -1019,14 +1013,14 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				uuids: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				now:      time.Unix(150, 0),
 				shutdown: false,
 			},
 			wantWriter: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -1039,7 +1033,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -1060,7 +1054,7 @@ func TestBatch_flush(t *testing.T) {
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
-						UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						TimeToLive: 42,
 						Points: []types.MetricPoint{
 							{Timestamp: 100, Value: 42.0},
@@ -1075,14 +1069,14 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				uuids: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				now:      time.Unix(300+130, 0),
 				shutdown: false,
 			},
 			wantWriter: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -1095,7 +1089,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 130, Value: 45.0},
@@ -1112,7 +1106,7 @@ func TestBatch_flush(t *testing.T) {
 				memoryStore: newMemoryStoreOffset(
 					[]types.MetricData{
 						{
-							UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+							UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 							TimeToLive: 42,
 							Points: []types.MetricPoint{
 								{Timestamp: 100, Value: 42.0},
@@ -1129,14 +1123,14 @@ func TestBatch_flush(t *testing.T) {
 			},
 			args: args{
 				uuids: []gouuid.UUID{
-					uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				},
 				now:      time.Unix(125, 0),
 				shutdown: false,
 			},
 			wantWriter: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 120, Value: 44.0},
@@ -1147,7 +1141,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 100, Value: 42.0},
@@ -1232,7 +1226,7 @@ func TestBatch_write(t *testing.T) {
 			nowWrite1: time.Unix(200, 0),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
@@ -1244,7 +1238,7 @@ func TestBatch_write(t *testing.T) {
 			wantWriter1: []types.MetricData{},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
@@ -1253,7 +1247,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: time.Unix(299, 0), // 200 + 100 - 1. flushTimestamp
 				},
 			},
@@ -1264,14 +1258,14 @@ func TestBatch_write(t *testing.T) {
 			nowCheck1: time.Unix(297, 0),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 220},
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1281,7 +1275,7 @@ func TestBatch_write(t *testing.T) {
 			wantWriter1: []types.MetricData{},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
@@ -1290,7 +1284,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1298,12 +1292,12 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: time.Unix(299, 0),
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(220, 0),
 						100,
 					),
@@ -1315,7 +1309,7 @@ func TestBatch_write(t *testing.T) {
 			nowWrite1: time.Unix(302, 0),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 210},
@@ -1325,7 +1319,7 @@ func TestBatch_write(t *testing.T) {
 			wantWriter1: []types.MetricData{}, // not yet write, it's check that do the flush
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
@@ -1335,7 +1329,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1348,7 +1342,7 @@ func TestBatch_write(t *testing.T) {
 			nowCheck1: time.Unix(301, 12),
 			wantWriter1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 10},
@@ -1358,7 +1352,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1367,7 +1361,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 220},
@@ -1375,7 +1369,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1383,16 +1377,16 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(300, 0),
 						100,
 					),
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(300, 0),
 						100,
 					),
@@ -1404,7 +1398,7 @@ func TestBatch_write(t *testing.T) {
 			nowWrite1: time.Unix(303, 0),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 230},
@@ -1416,7 +1410,7 @@ func TestBatch_write(t *testing.T) {
 			shutdown1: true,
 			wantWriter1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 199},
@@ -1426,7 +1420,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 220},
@@ -1434,7 +1428,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1448,7 +1442,7 @@ func TestBatch_write(t *testing.T) {
 			wantWriter1: []types.MetricData{},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points: []types.MetricPoint{
 						{Timestamp: 220},
@@ -1456,7 +1450,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1464,16 +1458,16 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(300, 0),
 						100,
 					),
 				},
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(300, 0),
 						100,
 					),
@@ -1485,26 +1479,26 @@ func TestBatch_write(t *testing.T) {
 			nowWrite1: time.Unix(400, 0),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points:     generatePoint(229, 400, 1),
 				},
 			},
 			wantWriter1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points:     generatePoint(229, 400, 1),
 				},
 			},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 4200,
 					Points:     generatePoint(300, 400, 1),
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 1337,
 					Points: []types.MetricPoint{
 						{Timestamp: 221},
@@ -1524,7 +1518,7 @@ func TestBatch_write(t *testing.T) {
 			nowWrite2: time.Unix(1000, 42),
 			write1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1533,7 +1527,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			write2: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1541,7 +1535,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1552,7 +1546,7 @@ func TestBatch_write(t *testing.T) {
 			wantWriter2: []types.MetricData{},
 			wantMemoryStore: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1561,7 +1555,7 @@ func TestBatch_write(t *testing.T) {
 					},
 				},
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1569,18 +1563,18 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(1000, 0),
 						100,
 					),
 				},
 			},
 			wantState2: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(1000, 0),
 						100,
 					),
@@ -1593,7 +1587,7 @@ func TestBatch_write(t *testing.T) {
 			nowCheck2: time.Unix(1100, 0),
 			wantWriter1: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1603,7 +1597,7 @@ func TestBatch_write(t *testing.T) {
 			},
 			wantWriter2: []types.MetricData{
 				{
-					UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+					UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 					TimeToLive: 42,
 					Points: []types.MetricPoint{
 						{Timestamp: 1000},
@@ -1611,18 +1605,18 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(1100, 0),
 						100,
 					),
 				},
 			},
 			wantState2: map[gouuid.UUID]stateData{
-				uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
+				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
-						uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(1100, 0),
 						100,
 					),
@@ -1735,7 +1729,7 @@ func Test_takeover(t *testing.T) {
 	batch1.write(
 		[]types.MetricData{
 			{
-				UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				TimeToLive: 42,
 				Points: []types.MetricPoint{
 					{Timestamp: 10},
@@ -1747,7 +1741,7 @@ func Test_takeover(t *testing.T) {
 	batch2.write(
 		[]types.MetricData{
 			{
-				UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 				TimeToLive: 42,
 				Points: []types.MetricPoint{
 					{Timestamp: 10},
@@ -1759,14 +1753,14 @@ func Test_takeover(t *testing.T) {
 	batch1.write(
 		[]types.MetricData{
 			{
-				UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				TimeToLive: 42,
 				Points: []types.MetricPoint{
 					{Timestamp: 20},
 				},
 			},
 			{
-				UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+				UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 				TimeToLive: 42,
 				Points: []types.MetricPoint{
 					{Timestamp: 21},
@@ -1779,18 +1773,18 @@ func Test_takeover(t *testing.T) {
 	wantWriter1 := metricsToMap([]types.MetricData{})
 	wantWriter2 := metricsToMap([]types.MetricData{})
 	wantState1 := map[gouuid.UUID]stateData{
-		uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"): {
-			flushDeadline: flushTimestamp(uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"), time.Unix(10, 0), 100),
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"), time.Unix(10, 0), 100),
 		},
 	}
 	wantState2 := map[gouuid.UUID]stateData{
-		uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"): {
-			flushDeadline: flushTimestamp(uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"), time.Unix(10, 0), 100),
+		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"), time.Unix(10, 0), 100),
 		},
 	}
 	wantMemoryStore := metricsToMap([]types.MetricData{
 		{
-			UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+			UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 			TimeToLive: 42,
 			Points: []types.MetricPoint{
 				{Timestamp: 10},
@@ -1798,7 +1792,7 @@ func Test_takeover(t *testing.T) {
 			},
 		},
 		{
-			UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+			UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 			TimeToLive: 42,
 			Points: []types.MetricPoint{
 				{Timestamp: 10},
@@ -1831,7 +1825,7 @@ func Test_takeover(t *testing.T) {
 
 	wantWriter2 = metricsToMap([]types.MetricData{
 		{
-			UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000002"),
+			UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 			TimeToLive: 42,
 			Points: []types.MetricPoint{
 				{Timestamp: 10},
@@ -1842,7 +1836,7 @@ func Test_takeover(t *testing.T) {
 	wantState2 = map[gouuid.UUID]stateData{}
 	wantMemoryStore = metricsToMap([]types.MetricData{
 		{
-			UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+			UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 			TimeToLive: 42,
 			Points: []types.MetricPoint{
 				{Timestamp: 10},
@@ -1875,7 +1869,7 @@ func Test_takeover(t *testing.T) {
 
 	wantWriter2 = metricsToMap([]types.MetricData{
 		{
-			UUID:       uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+			UUID:       gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 			TimeToLive: 42,
 			Points: []types.MetricPoint{
 				{Timestamp: 10},

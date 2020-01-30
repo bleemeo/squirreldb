@@ -28,14 +28,14 @@ func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
 }
 
 func (i mockIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error) {
-	return uuidFromStringOrNil(i.fixedLookupUUID), defaultTTL, nil
+	return gouuid.FromStringOrNil(i.fixedLookupUUID), defaultTTL, nil
 }
 
 func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error) {
 	if i.fixedSearchUUID == "" {
 		return nil, nil
 	}
-	return []gouuid.UUID{uuidFromStringOrNil(i.fixedSearchUUID)}, nil
+	return []gouuid.UUID{gouuid.FromStringOrNil(i.fixedSearchUUID)}, nil
 }
 
 func Test_metricFromPromSeries(t *testing.T) {
@@ -92,7 +92,7 @@ func Test_metricFromPromSeries(t *testing.T) {
 				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
 			},
 			want: types.MetricData{
-				UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				Points: []types.MetricPoint{
 					{
 						Timestamp: 0,
@@ -222,7 +222,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 			},
 			want: []types.MetricData{
 				{
-					UUID: uuidFromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
