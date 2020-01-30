@@ -103,6 +103,13 @@ func (b *Batch) Run(ctx context.Context) {
 	}
 }
 
+// Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB
+func (b *Batch) Flush() error {
+	b.check(time.Now(), true)
+
+	return nil
+}
+
 // Checks the current states and flush those whose flush date has expired
 // If force is true, each state is flushed
 func (b *Batch) check(now time.Time, force bool) {

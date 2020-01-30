@@ -1,6 +1,8 @@
 package remotestorage
 
 import (
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"context"
@@ -16,6 +18,7 @@ const (
 	metricsPattern            = "/metrics"
 	readPattern               = "/read"
 	writePattern              = "/write"
+	flushPattern              = "/flush"
 	httpServerShutdownTimeout = 10 * time.Second
 )
 
@@ -24,6 +27,7 @@ var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type Options struct {
 	ListenAddress string
+	FlushCallback func() error
 }
 
 type RemoteStorage struct {
@@ -49,6 +53,17 @@ func New(options Options, index types.Index, reader types.MetricReader, writer t
 	router.Handle(metricsPattern, promhttp.Handler())
 	router.HandleFunc(readPattern, readMetrics.ServeHTTP)
 	router.HandleFunc(writePattern, writeMetrics.ServeHTTP)
+	router.HandleFunc(flushPattern, func(w http.ResponseWriter, req *http.Request) {
+		if options.FlushCallback != nil {
+			err := options.FlushCallback()
+			if err != nil {
+				logger.Printf("flush failed: %v", err)
+				http.Error(w, "Flush failed", http.StatusInternalServerError)
+				return
+			}
+		}
+		fmt.Fprintln(w, "Flush points (of this SquirrelDB instance) from temporary store to TSDB done")
+	})
 
 	server := &http.Server{
 		Addr:    options.ListenAddress,

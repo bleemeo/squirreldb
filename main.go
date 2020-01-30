@@ -71,7 +71,7 @@ func main() {
 	squirrelLocks := createSquirrelLocks(squirrelSession)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
-	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelBatch)
+	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch)
 
 	signalChan := make(chan os.Signal, 1)
 
@@ -246,12 +246,13 @@ func createSquirrelBatch(config *config.Config, store batch.Store, reader types.
 	return squirrelBatch
 }
 
-func createSquirrelRemoteStorage(config *config.Config, index types.Index, reader types.MetricReader, writer types.MetricWriter) *remotestorage.RemoteStorage {
+func createSquirrelRemoteStorage(config *config.Config, index types.Index, batch *batch.Batch) *remotestorage.RemoteStorage {
 	options := remotestorage.Options{
 		ListenAddress: config.String("remote_storage.listen_address"),
+		FlushCallback: batch.Flush,
 	}
 
-	squirrelRemoteStorage := remotestorage.New(options, index, reader, writer)
+	squirrelRemoteStorage := remotestorage.New(options, index, batch, batch)
 
 	return squirrelRemoteStorage
 }
