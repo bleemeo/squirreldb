@@ -22,7 +22,7 @@ import (
 
 const expiratorInterval = 60
 
-const cacheExpirationDelay = 300
+const cacheExpirationDelay = 300 * time.Second
 
 // Update TTL of index entries in Cassandra every update delay.
 // The actual TTL used in Cassanra is the metric data TTL + update delay.
@@ -40,14 +40,14 @@ const (
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 type labelsData struct {
-	labels              []*prompb.Label
-	expirationTimestamp int64
+	labels         []*prompb.Label
+	expirationTime time.Time
 }
 
 type uuidData struct {
 	uuid                     gouuid.UUID
 	cassandraEntryExpiration time.Time
-	expirationTimestamp      int64
+	expirationTime           time.Time
 }
 
 type Options struct {
@@ -231,7 +231,7 @@ func (c *CassandraIndex) lookupLabels(uuid gouuid.UUID, addUUID bool) ([]*prompb
 
 	now := time.Now()
 
-	labelsData.expirationTimestamp = now.Unix() + cacheExpirationDelay
+	labelsData.expirationTime = now.Add(cacheExpirationDelay)
 	c.uuidsToLabels[uuid] = labelsData
 
 	labels := make([]*prompb.Label, len(labelsData.labels))
@@ -370,7 +370,7 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 		uuidData.cassandraEntryExpiration = now.Add(time.Duration(cassandraTTL) * time.Second)
 	}
 
-	uuidData.expirationTimestamp = now.Unix() + cacheExpirationDelay
+	uuidData.expirationTime = now.Add(cacheExpirationDelay)
 	c.labelsToUUID[labelsKey] = uuidData
 
 	return uuidData.uuid, ttl, nil
@@ -455,13 +455,13 @@ func (c *CassandraIndex) expire(now time.Time) {
 	defer c.utlMutex.Unlock()
 
 	for labelsString, uuidData := range c.labelsToUUID {
-		if uuidData.expirationTimestamp < now.Unix() {
+		if uuidData.expirationTime.Before(now) {
 			delete(c.labelsToUUID, labelsString)
 		}
 	}
 
 	for uuid, labelsData := range c.uuidsToLabels {
-		if labelsData.expirationTimestamp < now.Unix() {
+		if labelsData.expirationTime.Before(now) {
 			delete(c.uuidsToLabels, uuid)
 		}
 	}

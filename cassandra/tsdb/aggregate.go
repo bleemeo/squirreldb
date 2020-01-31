@@ -24,7 +24,7 @@ const (
 
 // Processed with aggregation for data older than backlogMargin seconds. If data older than this delay are received,
 // they won't be aggregated.
-const backlogMargin = 3600
+const backlogMargin = time.Hour
 
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
@@ -79,9 +79,11 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		"get state for shard "+name,
 	)
 
+	fromTimestamp *= 1000
+
 	if fromTimestamp == 0 {
 		now := time.Now()
-		fromTimestamp = now.Unix() - (now.Unix() % c.options.AggregateSize)
+		fromTimestamp = (now.Unix() - (now.Unix() % c.options.AggregateSize)) * 1000
 
 		retry.Print(func() error {
 			return c.state.Write(name, fromTimestamp)
@@ -91,9 +93,9 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	}
 
 	now := time.Now()
-	maxTimestamp := now.Unix() - (now.Unix() % c.options.AggregateSize)
-	toTimestamp := fromTimestamp + c.options.AggregateSize
-	isSafeMargin := (now.Unix() % 86400) >= backlogMargin
+	maxTimestamp := (now.Unix() - (now.Unix() % c.options.AggregateSize)) * 1000
+	toTimestamp := fromTimestamp + c.options.AggregateSize*1000
+	isSafeMargin := toTimestamp < (now.Add(-backlogMargin)).Unix()*1000
 
 	if (toTimestamp > maxTimestamp) || !isSafeMargin {
 		return false
@@ -122,16 +124,16 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 
 	if err := c.doAggregation(shardUUIDs, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
 		logger.Printf("Aggregate shard %d from [%v] to [%v]",
-			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0))
+			shard, time.Unix(fromTimestamp/1000, 0), time.Unix(toTimestamp/1000, 0))
 
 		retry.Print(func() error {
-			return c.state.Write(name, toTimestamp)
+			return c.state.Write(name, toTimestamp/1000)
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	} else {
 		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
-			shard, time.Unix(fromTimestamp, 0), time.Unix(toTimestamp, 0), err)
+			shard, time.Unix(fromTimestamp/1000, 0), time.Unix(toTimestamp/1000, 0), err)
 	}
 
 	return true

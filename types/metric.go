@@ -23,7 +23,7 @@ type MetricRequest struct {
 	UUIDs         []gouuid.UUID
 	FromTimestamp int64
 	ToTimestamp   int64
-	Step          int64
+	StepMs        int64
 	Function      string
 }
 
@@ -88,7 +88,7 @@ func sortPoints(points []MetricPoint) {
 func MakePointsForTest(size int) []MetricPoint {
 	result := make([]MetricPoint, size)
 	for i := 0; i < size; i++ {
-		result[i].Timestamp = int64(1568706164 + i*10)
+		result[i].Timestamp = int64(1568706164+i*10) * 1000
 		result[i].Value = float64(i)
 	}
 

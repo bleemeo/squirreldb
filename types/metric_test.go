@@ -59,11 +59,11 @@ func TestDeduplicatePoints(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 				},
@@ -74,11 +74,11 @@ func TestDeduplicatePoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 			},
@@ -88,7 +88,7 @@ func TestDeduplicatePoints(t *testing.T) {
 			args: args{
 				points: []MetricPoint{
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
@@ -96,7 +96,7 @@ func TestDeduplicatePoints(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 				},
@@ -107,11 +107,11 @@ func TestDeduplicatePoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 			},
@@ -125,19 +125,19 @@ func TestDeduplicatePoints(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 				},
@@ -148,11 +148,11 @@ func TestDeduplicatePoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 			},
@@ -162,15 +162,15 @@ func TestDeduplicatePoints(t *testing.T) {
 			args: args{
 				points: []MetricPoint{
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
@@ -178,7 +178,7 @@ func TestDeduplicatePoints(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 				},
@@ -189,11 +189,11 @@ func TestDeduplicatePoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 			},
@@ -240,19 +240,19 @@ func TestSortPoints(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
-						Timestamp: 30,
+						Timestamp: 30000,
 						Value:     40,
 					},
 					{
-						Timestamp: 40,
+						Timestamp: 40000,
 						Value:     50,
 					},
 				},
@@ -263,19 +263,19 @@ func TestSortPoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 				{
-					Timestamp: 30,
+					Timestamp: 30000,
 					Value:     40,
 				},
 				{
-					Timestamp: 40,
+					Timestamp: 40000,
 					Value:     50,
 				},
 			},
@@ -285,19 +285,19 @@ func TestSortPoints(t *testing.T) {
 			args: args{
 				points: []MetricPoint{
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
-						Timestamp: 40,
+						Timestamp: 40000,
 						Value:     50,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 30,
+						Timestamp: 30000,
 						Value:     40,
 					},
 					{
@@ -312,19 +312,19 @@ func TestSortPoints(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 				{
-					Timestamp: 30,
+					Timestamp: 30000,
 					Value:     40,
 				},
 				{
-					Timestamp: 40,
+					Timestamp: 40000,
 					Value:     50,
 				},
 			},

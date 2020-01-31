@@ -106,12 +106,12 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.Met
 
 	request := types.MetricRequest{
 		UUIDs:         uuids,
-		FromTimestamp: promQuery.StartTimestampMs / 1000,
-		ToTimestamp:   promQuery.EndTimestampMs / 1000,
+		FromTimestamp: promQuery.StartTimestampMs,
+		ToTimestamp:   promQuery.EndTimestampMs,
 	}
 
 	if promQuery.Hints != nil {
-		request.Step = promQuery.Hints.StepMs / 1000
+		request.StepMs = promQuery.Hints.StepMs
 		request.Function = promQuery.Hints.Func
 	}
 
@@ -149,7 +149,7 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	for _, point := range points {
 		promSample := prompb.Sample{
 			Value:     point.Value,
-			Timestamp: point.Timestamp * 1000,
+			Timestamp: point.Timestamp,
 		}
 
 		promSamples = append(promSamples, promSample)

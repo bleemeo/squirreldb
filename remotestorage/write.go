@@ -80,7 +80,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	points := make([]types.MetricPoint, len(promSamples))
 
 	for i, promSample := range promSamples {
-		points[i].Timestamp = promSample.Timestamp / 1000
+		points[i].Timestamp = promSample.Timestamp
 		points[i].Value = promSample.Value
 	}
 

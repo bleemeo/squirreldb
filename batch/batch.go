@@ -490,7 +490,7 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 			Points:     make([]types.MetricPoint, 0, len(m.Points)/2),
 		}
 
-		cutoffTimestamp := now.Unix() - b.batchSize
+		cutoffTimestamp := (now.Unix() - b.batchSize) * 1000
 
 		for _, p := range m.Points {
 			if p.Timestamp >= cutoffTimestamp {
@@ -637,7 +637,7 @@ func (b *Batch) read(request types.MetricRequest) (map[gouuid.UUID]types.MetricD
 			UUIDs:         []gouuid.UUID{uuid},
 			FromTimestamp: request.FromTimestamp,
 			ToTimestamp:   request.ToTimestamp,
-			Step:          request.Step,
+			StepMs:        request.StepMs,
 			Function:      request.Function,
 		}
 

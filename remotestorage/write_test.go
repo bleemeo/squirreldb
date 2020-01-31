@@ -99,23 +99,23 @@ func Test_metricFromPromSeries(t *testing.T) {
 						Value:     10,
 					},
 					{
-						Timestamp: 10,
+						Timestamp: 10000,
 						Value:     20,
 					},
 					{
-						Timestamp: 20,
+						Timestamp: 20000,
 						Value:     30,
 					},
 					{
-						Timestamp: 30,
+						Timestamp: 30000,
 						Value:     40,
 					},
 					{
-						Timestamp: 40,
+						Timestamp: 40000,
 						Value:     50,
 					},
 					{
-						Timestamp: 50,
+						Timestamp: 50000,
 						Value:     60,
 					},
 				},
@@ -229,23 +229,23 @@ func Test_metricsFromTimeseries(t *testing.T) {
 							Value:     10,
 						},
 						{
-							Timestamp: 10,
+							Timestamp: 10000,
 							Value:     20,
 						},
 						{
-							Timestamp: 20,
+							Timestamp: 20000,
 							Value:     30,
 						},
 						{
-							Timestamp: 30,
+							Timestamp: 30000,
 							Value:     40,
 						},
 						{
-							Timestamp: 40,
+							Timestamp: 40000,
 							Value:     50,
 						},
 						{
-							Timestamp: 50,
+							Timestamp: 50000,
 							Value:     60,
 						},
 					},
@@ -328,23 +328,23 @@ func Test_pointsFromPromSamples(t *testing.T) {
 					Value:     10,
 				},
 				{
-					Timestamp: 10,
+					Timestamp: 10000,
 					Value:     20,
 				},
 				{
-					Timestamp: 20,
+					Timestamp: 20000,
 					Value:     30,
 				},
 				{
-					Timestamp: 30,
+					Timestamp: 30000,
 					Value:     40,
 				},
 				{
-					Timestamp: 40,
+					Timestamp: 40000,
 					Value:     50,
 				},
 				{
-					Timestamp: 50,
+					Timestamp: 50000,
 					Value:     60,
 				},
 			},

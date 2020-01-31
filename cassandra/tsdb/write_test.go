@@ -25,13 +25,13 @@ func Test_rawValuesFromPoints(t *testing.T) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164,
+				baseTimestamp:   1568706164000,
 				offsetTimestamp: 0,
 				points: []types.MetricPoint{
-					{Timestamp: 1568706164, Value: 42},
-					{Timestamp: 1568706164 + 5, Value: 1337},
-					{Timestamp: 1568706164 + 15, Value: 64},
-					{Timestamp: 1568706164 + 21, Value: 42},
+					{Timestamp: 1568706164000, Value: 42},
+					{Timestamp: 1568706164000 + 5000, Value: 1337},
+					{Timestamp: 1568706164000 + 15000, Value: 64},
+					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
 			},
 			want: []byte{
@@ -48,13 +48,13 @@ func Test_rawValuesFromPoints(t *testing.T) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
 				points: []types.MetricPoint{
-					{Timestamp: 1568706164, Value: 42},
-					{Timestamp: 1568706164 + 5, Value: 1337},
-					{Timestamp: 1568706164 + 15, Value: 64},
-					{Timestamp: 1568706164 + 21, Value: 42},
+					{Timestamp: 1568706164000, Value: 42},
+					{Timestamp: 1568706164000 + 5000, Value: 1337},
+					{Timestamp: 1568706164000 + 15000, Value: 64},
+					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
 			},
 			want: []byte{
@@ -99,13 +99,13 @@ func Benchmark_rawValuesFromPoints(b *testing.B) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164,
+				baseTimestamp:   1568706164000,
 				offsetTimestamp: 0,
 				points: []types.MetricPoint{
-					{Timestamp: 1568706164, Value: 42},
-					{Timestamp: 1568706164 + 5, Value: 1337},
-					{Timestamp: 1568706164 + 15, Value: 64},
-					{Timestamp: 1568706164 + 21, Value: 42},
+					{Timestamp: 1568706164000, Value: 42},
+					{Timestamp: 1568706164000 + 5000, Value: 1337},
+					{Timestamp: 1568706164000 + 15000, Value: 64},
+					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
 			},
 			want: []byte{
@@ -122,13 +122,13 @@ func Benchmark_rawValuesFromPoints(b *testing.B) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
 				points: []types.MetricPoint{
-					{Timestamp: 1568706164, Value: 42},
-					{Timestamp: 1568706164 + 5, Value: 1337},
-					{Timestamp: 1568706164 + 15, Value: 64},
-					{Timestamp: 1568706164 + 21, Value: 42},
+					{Timestamp: 1568706164000, Value: 42},
+					{Timestamp: 1568706164000 + 5000, Value: 1337},
+					{Timestamp: 1568706164000 + 15000, Value: 64},
+					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
 			},
 			want: []byte{
@@ -145,16 +145,16 @@ func Benchmark_rawValuesFromPoints(b *testing.B) {
 		{
 			name: "5_min",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
 				points:          types.MakePointsForTest(300 / 10),
 			},
 		},
 		{
 			name: "50_min",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764
 				points:          types.MakePointsForTest(10 * 300 / 10),
 			},
 		},
@@ -185,26 +185,26 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164,
+				baseTimestamp:   1568706164000,
 				offsetTimestamp: 0,
 				resolution:      300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: 1568706164,
+						Timestamp: 1568706164000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: 1568706164 + 300,
+						Timestamp: 1568706164000 + 300000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: 1568706164 + 900,
+						Timestamp: 1568706164000 + 900000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -233,26 +233,26 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
 				resolution:      300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: 1568706164,
+						Timestamp: 1568706164000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: 1568706164 + 300,
+						Timestamp: 1568706164000 + 300000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: 1568706164 + 900,
+						Timestamp: 1568706164000 + 900000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -313,7 +313,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			Points:     types.MakePointsForTest(100 * 3600 / 10),
 		},
 	}
-	aggregatedMetrics := aggregate.Aggregate(metrics, 300)
+	aggregatedMetrics := aggregate.Aggregate(metrics, 300000)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -328,26 +328,26 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164,
+				baseTimestamp:   1568706164000,
 				offsetTimestamp: 0,
 				resolution:      300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: 1568706164,
+						Timestamp: 1568706164000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: 1568706164 + 300,
+						Timestamp: 1568706164000 + 300000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: 1568706164 + 900,
+						Timestamp: 1568706164000 + 900000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -359,26 +359,26 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400,
-				offsetTimestamp: 27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:   1568678400000,
+				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
 				resolution:      300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: 1568706164,
+						Timestamp: 1568706164000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: 1568706164 + 300,
+						Timestamp: 1568706164000 + 300000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: 1568706164 + 900,
+						Timestamp: 1568706164000 + 900000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -390,8 +390,8 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "one_hour",
 			args: args{
-				baseTimestamp:    1568678400,
-				offsetTimestamp:  27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:    1568678400000,
+				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidOneHour].Points,
 			},
@@ -399,8 +399,8 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "one_day",
 			args: args{
-				baseTimestamp:    1568678400,
-				offsetTimestamp:  27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:    1568678400000,
+				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidOneDay].Points,
 			},
@@ -408,8 +408,8 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "100_hours",
 			args: args{
-				baseTimestamp:    1568678400,
-				offsetTimestamp:  27764, // 1568706164 = 1568678400 + 27764
+				baseTimestamp:    1568678400000,
+				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidHunderdHours].Points,
 			},

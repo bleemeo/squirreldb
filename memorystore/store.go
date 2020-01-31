@@ -23,9 +23,9 @@ var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
 	types.MetricData
-	WriteOffset         int
-	flushDeadline       time.Time
-	expirationTimestamp int64
+	WriteOffset    int
+	flushDeadline  time.Time
+	expirationTime time.Time
 }
 
 type Store struct {
@@ -91,7 +91,7 @@ func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, 
 		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
 	}
 
-	expirationTimestamp := now.Add(defaultTTL).Unix()
+	expirationTime := now.Add(defaultTTL)
 	oldData := make([]types.MetricData, len(points))
 
 	for i, data := range points {
@@ -102,7 +102,7 @@ func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, 
 		pointsTotal.Add(float64(len(data.Points) - len(storeData.MetricData.Points)))
 
 		storeData.MetricData = data
-		storeData.expirationTimestamp = expirationTimestamp
+		storeData.expirationTime = expirationTime
 		storeData.WriteOffset = offsets[i]
 
 		s.metrics[data.UUID] = storeData
@@ -149,7 +149,7 @@ func (s *Store) MarkToExpire(uuids []gouuid.UUID, ttl time.Duration) error {
 func (s *Store) markToExpire(uuids []gouuid.UUID, ttl time.Duration, now time.Time) error {
 	for _, uuid := range uuids {
 		if entry, found := s.metrics[uuid]; found {
-			entry.expirationTimestamp = now.Add(ttl).Unix()
+			entry.expirationTime = now.Add(ttl)
 			s.metrics[uuid] = entry
 		}
 
@@ -249,7 +249,7 @@ func (s *Store) expire(now time.Time) {
 	var pointsCount int
 
 	for uuid, storeData := range s.metrics {
-		if storeData.expirationTimestamp < now.Unix() {
+		if storeData.expirationTime.Before(now) {
 			delete(s.metrics, uuid)
 		} else {
 			pointsCount += len(storeData.Points)

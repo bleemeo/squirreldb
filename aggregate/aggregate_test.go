@@ -29,19 +29,19 @@ func TestAggregate(t *testing.T) {
 								Value:     10,
 							},
 							{
-								Timestamp: 10,
+								Timestamp: 10000,
 								Value:     20,
 							},
 							{
-								Timestamp: 20,
+								Timestamp: 20000,
 								Value:     30,
 							},
 							{
-								Timestamp: 30,
+								Timestamp: 30000,
 								Value:     40,
 							},
 							{
-								Timestamp: 40,
+								Timestamp: 40000,
 								Value:     50,
 							},
 						},
@@ -54,26 +54,26 @@ func TestAggregate(t *testing.T) {
 								Value:     50,
 							},
 							{
-								Timestamp: 20,
+								Timestamp: 20000,
 								Value:     100,
 							},
 							{
-								Timestamp: 40,
+								Timestamp: 40000,
 								Value:     150,
 							},
 							{
-								Timestamp: 60,
+								Timestamp: 60000,
 								Value:     200,
 							},
 							{
-								Timestamp: 80,
+								Timestamp: 80000,
 								Value:     250,
 							},
 						},
 						TimeToLive: 1200,
 					},
 				},
-				resolution: 50,
+				resolution: 50000,
 			},
 			want: map[gouuid.UUID]AggregatedData{
 				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
@@ -98,7 +98,7 @@ func TestAggregate(t *testing.T) {
 							Count:     3,
 						},
 						{
-							Timestamp: 50,
+							Timestamp: 50000,
 							Min:       200,
 							Max:       250,
 							Average:   225,
@@ -139,25 +139,25 @@ func Test_aggregateData(t *testing.T) {
 							Value:     100,
 						},
 						{
-							Timestamp: 100,
+							Timestamp: 100000,
 							Value:     200,
 						},
 						{
-							Timestamp: 200,
+							Timestamp: 200000,
 							Value:     300,
 						},
 						{
-							Timestamp: 300,
+							Timestamp: 300000,
 							Value:     400,
 						},
 						{
-							Timestamp: 400,
+							Timestamp: 400000,
 							Value:     500,
 						},
 					},
 					TimeToLive: 3600,
 				},
-				resolution: 200,
+				resolution: 200000,
 			},
 			want: AggregatedData{
 				Points: []AggregatedPoint{
@@ -169,14 +169,14 @@ func Test_aggregateData(t *testing.T) {
 						Count:     2,
 					},
 					{
-						Timestamp: 200,
+						Timestamp: 200000,
 						Min:       300,
 						Max:       400,
 						Average:   350,
 						Count:     2,
 					},
 					{
-						Timestamp: 400,
+						Timestamp: 400000,
 						Min:       500,
 						Max:       500,
 						Average:   500,
@@ -215,19 +215,19 @@ func Test_aggregatePoints(t *testing.T) {
 						Value:     500,
 					},
 					{
-						Timestamp: 200,
+						Timestamp: 200000,
 						Value:     1000,
 					},
 					{
-						Timestamp: 400,
+						Timestamp: 400000,
 						Value:     1500,
 					},
 					{
-						Timestamp: 600,
+						Timestamp: 600000,
 						Value:     2000,
 					},
 					{
-						Timestamp: 800,
+						Timestamp: 800000,
 						Value:     2500,
 					},
 				},
@@ -291,7 +291,7 @@ func Benchmark_aggregateData(b *testing.B) {
 				Points: make([]types.MetricPoint, tt.Size),
 			}
 			for i := range data.Points {
-				data.Points[i].Timestamp = startTS + int64(tt.PointStep*i)
+				data.Points[i].Timestamp = (startTS + int64(tt.PointStep*i)) * 1000
 				data.Points[i].Value = float64(i)
 			}
 			b.ResetTimer()
