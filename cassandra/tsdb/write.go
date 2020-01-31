@@ -16,16 +16,21 @@ import (
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 type serializedAggregatedPoint struct {
-	Timestamp uint16
+	SubOffset uint16
 	Min       float64
 	Max       float64
 	Average   float64
 	Count     float64
 }
 
+const (
+	serializedAggregatedPointSize = 2 + 8*4
+	serializedPointSize           = 4 + 8
+)
+
 type serializedPoint struct {
-	Timestamp uint16
-	Value     float64
+	SubOffsetMs uint32
+	Value       float64
 }
 
 // Write writes all specified metrics
@@ -144,15 +149,14 @@ func (c *CassandraTSDB) writeAggregateRow(uuid gouuid.UUID, aggregatedData aggre
 	}
 
 	firstPoint := aggregatedData.Points[0]
-	// aggregated date are stored at second precision. Round the offset to seconds
-	offsetTimestamp := (firstPoint.Timestamp - baseTimestamp) / 1000 * 1000
-	aggregateValues, err := aggregateValuesFromAggregatedPoints(aggregatedData.Points, baseTimestamp, offsetTimestamp, c.options.AggregateResolution)
+	offsetSecond := (firstPoint.Timestamp - baseTimestamp) / 1000
+	aggregateValues, err := aggregateValuesFromAggregatedPoints(aggregatedData.Points, baseTimestamp, offsetSecond, c.options.AggregateResolution)
 
 	if err != nil {
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetTimestamp, aggregatedData.TimeToLive, aggregateValues)
+	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetSecond, aggregatedData.TimeToLive, aggregateValues)
 
 	start := time.Now()
 
@@ -222,38 +226,35 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 	}
 
 	n := len(data.Points)
-	startOffsetTimestamp := data.Points[0].Timestamp - baseTimestamp
+	startOffsetMs := data.Points[0].Timestamp - baseTimestamp
 
-	// For now raw data also store at second precision
-	startOffsetTimestamp = startOffsetTimestamp / 1000 * 1000
-
-	// The sub-offset timestamp is encoded as uint16 number of SECOND.
+	// The sub-offset is encoded as uint32 number of Millisecond.
 	// If all points fit within this range, no need to split in multiple write
-	if (data.Points[n-1].Timestamp-startOffsetTimestamp)/1000 < 1<<16 {
-		err := c.writeRawBatchData(data, baseTimestamp, startOffsetTimestamp)
+	if (data.Points[n-1].Timestamp - startOffsetMs) < 1<<32 {
+		err := c.writeRawBatchData(data, baseTimestamp, startOffsetMs)
 		return err
 	}
 
-	currentOffsetTimestamp := startOffsetTimestamp
+	// The following is dead-code. The sub-offset will always fit
+
+	currentOffsetMs := startOffsetMs
 	currentStartIndex := 0
 
 	for i, point := range data.Points {
-		subOffsetMs := point.Timestamp - baseTimestamp - currentOffsetTimestamp
-		if (subOffsetMs / 1000) >= 1<<16 {
+		subOffsetMs := point.Timestamp - baseTimestamp - currentOffsetMs
+		if subOffsetMs >= 1<<32 {
 			rowData := types.MetricData{
 				UUID:       data.UUID,
 				Points:     data.Points[currentStartIndex:i],
 				TimeToLive: data.TimeToLive,
 			}
 
-			if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+			if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetMs); err != nil {
 				return err
 			}
 
 			currentStartIndex = i
-			currentOffsetTimestamp = point.Timestamp - baseTimestamp
-
-			currentOffsetTimestamp = currentOffsetTimestamp / 1000 * 1000
+			currentOffsetMs = point.Timestamp - baseTimestamp
 		}
 	}
 
@@ -263,25 +264,25 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 		TimeToLive: data.TimeToLive,
 	}
 
-	if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetTimestamp); err != nil {
+	if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetMs); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *CassandraTSDB) writeRawBatchData(data types.MetricData, baseTimestamp int64, offsetTimestamp int64) error {
+func (c *CassandraTSDB) writeRawBatchData(data types.MetricData, baseTimestamp int64, offsetMs int64) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
 
-	rawValues, err := rawValuesFromPoints(data.Points, baseTimestamp, offsetTimestamp)
+	rawValues, err := rawValuesFromPoints(data.Points, baseTimestamp, offsetMs)
 
 	if err != nil {
 		return err
 	}
 
-	tableInsertDataQuery := c.tableInsertRawDataQuery(data.UUID.String(), baseTimestamp, offsetTimestamp, data.TimeToLive, rawValues)
+	tableInsertDataQuery := c.tableInsertRawDataQuery(data.UUID.String(), baseTimestamp, offsetMs, data.TimeToLive, rawValues)
 
 	start := time.Now()
 
@@ -295,38 +296,38 @@ func (c *CassandraTSDB) writeRawBatchData(data types.MetricData, baseTimestamp i
 }
 
 // Returns table insert raw data Query
-func (c *CassandraTSDB) tableInsertRawDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
+func (c *CassandraTSDB) tableInsertRawDataQuery(uuid string, baseTimestamp, offsetMs, timeToLive int64, values []byte) *gocql.Query {
 	query := c.session.Query(`
-		INSERT INTO data (metric_uuid, base_ts, offset_ts, insert_time, values)
+		INSERT INTO data (metric_uuid, base_ts, offset_ms, insert_time, values)
 		VALUES (?, ?, ?, now(), ?)
 		USING TTL ?
-	`, uuid, baseTimestamp/1000, offsetTimestamp/1000, values, timeToLive)
+	`, uuid, baseTimestamp, offsetMs, values, timeToLive)
 
 	return query
 }
 
 // Returns table insert aggregated data Query
-func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestamp, offsetTimestamp, timeToLive int64, values []byte) *gocql.Query {
+func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestamp, offsetSecond, timeToLive int64, values []byte) *gocql.Query {
 	query := c.session.Query(`
-		INSERT INTO data_aggregated (metric_uuid, base_ts, offset_ts, values)
+		INSERT INTO data_aggregated (metric_uuid, base_ts, offset_second, values)
 		VALUES (?, ?, ?, ?)
 		USING TTL ?
-	`, uuid, baseTimestamp/1000, offsetTimestamp/1000, values, timeToLive)
+	`, uuid, baseTimestamp, offsetSecond, values, timeToLive)
 
 	return query
 }
 
 // Return bytes aggregated values from aggregated points
-func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetTimestamp, resolutionSec int64) ([]byte, error) {
+func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetSecond, resolutionSec int64) ([]byte, error) {
 	buffer := new(bytes.Buffer)
-	buffer.Grow(len(aggregatedPoints) * 34)
+	buffer.Grow(len(aggregatedPoints) * serializedAggregatedPointSize)
 
 	serializedPoints := make([]serializedAggregatedPoint, len(aggregatedPoints))
 
 	for i, aggregatedPoint := range aggregatedPoints {
-		pointTimestamp := (aggregatedPoint.Timestamp - baseTimestamp - offsetTimestamp) / (resolutionSec * 1000)
+		subOffset := (aggregatedPoint.Timestamp - baseTimestamp - offsetSecond*1000) / (resolutionSec * 1000)
 		serializedPoints[i] = serializedAggregatedPoint{
-			Timestamp: uint16(pointTimestamp),
+			SubOffset: uint16(subOffset),
 			Min:       aggregatedPoint.Min,
 			Max:       aggregatedPoint.Max,
 			Average:   aggregatedPoint.Average,
@@ -344,17 +345,17 @@ func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.Aggregated
 }
 
 // Return bytes raw values from points
-func rawValuesFromPoints(points []types.MetricPoint, baseTimestamp, offsetTimestamp int64) ([]byte, error) {
+func rawValuesFromPoints(points []types.MetricPoint, baseTimestamp, offsetMs int64) ([]byte, error) {
 	buffer := new(bytes.Buffer)
-	buffer.Grow(len(points) * 10)
+	buffer.Grow(len(points) * serializedPointSize)
 
 	serializedPoints := make([]serializedPoint, len(points))
 
 	for i, point := range points {
-		pointTimestamp := point.Timestamp - baseTimestamp - offsetTimestamp
+		subOffsetMs := point.Timestamp - baseTimestamp - offsetMs
 		serializedPoints[i] = serializedPoint{
-			Timestamp: uint16(pointTimestamp / 1000),
-			Value:     point.Value,
+			SubOffsetMs: uint32(subOffsetMs),
+			Value:       point.Value,
 		}
 	}
 

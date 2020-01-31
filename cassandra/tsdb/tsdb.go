@@ -75,12 +75,12 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive string) *goc
 		CREATE TABLE IF NOT EXISTS data (
 			metric_uuid uuid,
 			base_ts bigint,
-			offset_ts int,
+			offset_ms int,
 			insert_time timeuuid,
 			values blob,
-			PRIMARY KEY ((metric_uuid, base_ts), offset_ts, insert_time)
+			PRIMARY KEY ((metric_uuid, base_ts), offset_ms, insert_time)
 		)
-		WITH CLUSTERING ORDER BY (offset_ts DESC)
+		WITH CLUSTERING ORDER BY (offset_ms DESC)
 		AND COMPRESSION = {
 			'chunk_length_in_kb': '256',
 			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'
@@ -103,11 +103,11 @@ func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive str
 		CREATE TABLE IF NOT EXISTS data_aggregated (
 			metric_uuid uuid,
 			base_ts bigint,
-			offset_ts int,
+			offset_second int,
 			values blob,
-			PRIMARY KEY ((metric_uuid, base_ts), offset_ts)
+			PRIMARY KEY ((metric_uuid, base_ts), offset_second)
 		)
-		WITH CLUSTERING ORDER BY (offset_ts DESC)
+		WITH CLUSTERING ORDER BY (offset_second DESC)
 		AND COMPRESSION = {
 			'chunk_length_in_kb': '256',
 			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'

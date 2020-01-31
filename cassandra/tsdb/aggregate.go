@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	shardStatePrefix = "shard_"
+	shardStatePrefix = "aggregate_until_shard_"
 	shardNumber      = 60
 )
 
@@ -70,34 +70,39 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	}
 	defer lock.Unlock()
 
-	var fromTimestamp int64
+	var fromTime time.Time
 
-	retry.Print(func() error {
-		_, err := c.state.Read(name, &fromTimestamp)
-		return err
-	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-		"get state for shard "+name,
-	)
+	{
+		var fromTimeStr string
+		retry.Print(func() error {
+			_, err := c.state.Read(name, &fromTimeStr)
+			return err
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+			"get state for shard "+name,
+		)
 
-	fromTimestamp *= 1000
+		if fromTimeStr != "" {
+			fromTime, _ = time.Parse(time.RFC3339, fromTimeStr)
+		}
+	}
 
-	if fromTimestamp == 0 {
-		now := time.Now()
-		fromTimestamp = (now.Unix() - (now.Unix() % c.options.AggregateSize)) * 1000
+	now := time.Now()
+	maxTime := now.Truncate(time.Duration(c.options.AggregateSize) * time.Second)
+
+	if fromTime.IsZero() {
+		fromTime = maxTime
 
 		retry.Print(func() error {
-			return c.state.Write(name, fromTimestamp)
+			return c.state.Write(name, fromTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	}
 
-	now := time.Now()
-	maxTimestamp := (now.Unix() - (now.Unix() % c.options.AggregateSize)) * 1000
-	toTimestamp := fromTimestamp + c.options.AggregateSize*1000
-	isSafeMargin := toTimestamp < (now.Add(-backlogMargin)).Unix()*1000
+	toTime := fromTime.Add(time.Duration(c.options.AggregateSize) * time.Second)
+	isSafeMargin := toTime.Before(now.Add(-backlogMargin))
 
-	if (toTimestamp > maxTimestamp) || !isSafeMargin {
+	if toTime.After(maxTime) || !isSafeMargin {
 		return false
 	}
 
@@ -122,18 +127,17 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		}
 	}
 
-	if err := c.doAggregation(shardUUIDs, fromTimestamp, toTimestamp, c.options.AggregateResolution); err == nil {
-		logger.Printf("Aggregate shard %d from [%v] to [%v]",
-			shard, time.Unix(fromTimestamp/1000, 0), time.Unix(toTimestamp/1000, 0))
+	if err := c.doAggregation(shardUUIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution); err == nil {
+		logger.Printf("Aggregate shard %d from [%v] to [%v]", shard, fromTime, toTime)
 
 		retry.Print(func() error {
-			return c.state.Write(name, toTimestamp/1000)
+			return c.state.Write(name, toTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	} else {
 		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
-			shard, time.Unix(fromTimestamp/1000, 0), time.Unix(toTimestamp/1000, 0), err)
+			shard, fromTime, toTime, err)
 	}
 
 	return true

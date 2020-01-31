@@ -12,9 +12,9 @@ import (
 func Test_rawValuesFromPoints(t *testing.T) {
 
 	type args struct {
-		points          []types.MetricPoint
-		baseTimestamp   int64
-		offsetTimestamp int64
+		points        []types.MetricPoint
+		baseTimestamp int64
+		offsetMs      int64
 	}
 	tests := []struct {
 		name    string
@@ -25,8 +25,8 @@ func Test_rawValuesFromPoints(t *testing.T) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164000,
-				offsetTimestamp: 0,
+				baseTimestamp: 1568706164000,
+				offsetMs:      0,
 				points: []types.MetricPoint{
 					{Timestamp: 1568706164000, Value: 42},
 					{Timestamp: 1568706164000 + 5000, Value: 1337},
@@ -35,21 +35,21 @@ func Test_rawValuesFromPoints(t *testing.T) {
 				},
 			},
 			want: []byte{
-				0, 0,
+				0, 0, 0, 0,
 				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
-				0, 5,
+				0, 0, 0x13, 0x88,
 				64, 148, 228, 0, 0, 0, 0, 0, // encoding of value 1337.0
-				0, 15,
+				0, 0, 0x3a, 0x98,
 				64, 80, 0, 0, 0, 0, 0, 0, // encoding of value 64.0
-				0, 21,
+				0, 0, 0x52, 0x08,
 				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
 			},
 		},
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
+				baseTimestamp: 1568678400000,
+				offsetMs:      27764000, // 1568706164 = 1568678400 + 27764, in millisecond
 				points: []types.MetricPoint{
 					{Timestamp: 1568706164000, Value: 42},
 					{Timestamp: 1568706164000 + 5000, Value: 1337},
@@ -58,20 +58,20 @@ func Test_rawValuesFromPoints(t *testing.T) {
 				},
 			},
 			want: []byte{
-				0, 0,
+				0, 0, 0, 0,
 				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
-				0, 5,
+				0, 0, 0x13, 0x88,
 				64, 148, 228, 0, 0, 0, 0, 0, // encoding of value 1337.0
-				0, 15,
+				0, 0, 0x3a, 0x98,
 				64, 80, 0, 0, 0, 0, 0, 0, // encoding of value 64.0
-				0, 21,
+				0, 0, 0x52, 0x08,
 				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := rawValuesFromPoints(tt.args.points, tt.args.baseTimestamp, tt.args.offsetTimestamp)
+			got, err := rawValuesFromPoints(tt.args.points, tt.args.baseTimestamp, tt.args.offsetMs)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("rawValuesFromPoints() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -86,44 +86,32 @@ func Test_rawValuesFromPoints(t *testing.T) {
 func Benchmark_rawValuesFromPoints(b *testing.B) {
 
 	type args struct {
-		points          []types.MetricPoint
-		baseTimestamp   int64
-		offsetTimestamp int64
+		points        []types.MetricPoint
+		baseTimestamp int64
+		offsetMs      int64
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    []byte
-		wantErr bool
+		name string
+		args args
 	}{
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164000,
-				offsetTimestamp: 0,
+				baseTimestamp: 1568706164000,
+				offsetMs:      0,
 				points: []types.MetricPoint{
 					{Timestamp: 1568706164000, Value: 42},
 					{Timestamp: 1568706164000 + 5000, Value: 1337},
 					{Timestamp: 1568706164000 + 15000, Value: 64},
 					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
-			},
-			want: []byte{
-				0, 0,
-				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
-				0, 5,
-				64, 148, 228, 0, 0, 0, 0, 0, // encoding of value 1337.0
-				0, 15,
-				64, 80, 0, 0, 0, 0, 0, 0, // encoding of value 64.0
-				0, 21,
-				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
 			},
 		},
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
+				baseTimestamp: 1568678400000,
+				offsetMs:      27764000, // 1568706164 = 1568678400 + 27764, in millisecond
 				points: []types.MetricPoint{
 					{Timestamp: 1568706164000, Value: 42},
 					{Timestamp: 1568706164000 + 5000, Value: 1337},
@@ -131,38 +119,28 @@ func Benchmark_rawValuesFromPoints(b *testing.B) {
 					{Timestamp: 1568706164000 + 21000, Value: 42},
 				},
 			},
-			want: []byte{
-				0, 0,
-				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
-				0, 5,
-				64, 148, 228, 0, 0, 0, 0, 0, // encoding of value 1337.0
-				0, 15,
-				64, 80, 0, 0, 0, 0, 0, 0, // encoding of value 64.0
-				0, 21,
-				64, 69, 0, 0, 0, 0, 0, 0, // encoding of value 42.0
-			},
 		},
 		{
 			name: "5_min",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in millisecond
-				points:          types.MakePointsForTest(300 / 10),
+				baseTimestamp: 1568678400000,
+				offsetMs:      27764000, // 1568706164 = 1568678400 + 27764, in millisecond
+				points:        types.MakePointsForTest(300 / 10),
 			},
 		},
 		{
 			name: "50_min",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764
-				points:          types.MakePointsForTest(10 * 300 / 10),
+				baseTimestamp: 1568678400000,
+				offsetMs:      27764000, // 1568706164 = 1568678400 + 27764
+				points:        types.MakePointsForTest(10 * 300 / 10),
 			},
 		},
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_, _ = rawValuesFromPoints(tt.args.points, tt.args.baseTimestamp, tt.args.offsetTimestamp)
+				_, _ = rawValuesFromPoints(tt.args.points, tt.args.baseTimestamp, tt.args.offsetMs)
 			}
 		})
 	}
@@ -173,7 +151,7 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
 		baseTimestamp    int64
-		offsetTimestamp  int64
+		offsetSecond     int64
 		resolution       int64
 	}
 	tests := []struct {
@@ -185,9 +163,9 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164000,
-				offsetTimestamp: 0,
-				resolution:      300,
+				baseTimestamp: 1568706164000,
+				offsetSecond:  0,
+				resolution:    300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -233,9 +211,9 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
-				resolution:      300,
+				baseTimestamp: 1568678400000,
+				offsetSecond:  27764, // 1568706164 = 1568678400 + 27764
+				resolution:    300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -281,7 +259,7 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := aggregateValuesFromAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.offsetTimestamp, tt.args.resolution)
+			got, err := aggregateValuesFromAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.offsetSecond, tt.args.resolution)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("aggregateValuesFromAggregatedPoints() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -318,7 +296,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
 		baseTimestamp    int64
-		offsetTimestamp  int64
+		offsetSecond     int64
 		resolution       int64
 	}
 	tests := []struct {
@@ -328,9 +306,9 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp:   1568706164000,
-				offsetTimestamp: 0,
-				resolution:      300,
+				baseTimestamp: 1568706164000,
+				offsetSecond:  0,
+				resolution:    300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -359,9 +337,9 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		{
 			name: "offset_27764",
 			args: args{
-				baseTimestamp:   1568678400000,
-				offsetTimestamp: 27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
-				resolution:      300,
+				baseTimestamp: 1568678400000,
+				offsetSecond:  27764, // 1568706164 = 1568678400 + 27764
+				resolution:    300,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -391,7 +369,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			name: "one_hour",
 			args: args{
 				baseTimestamp:    1568678400000,
-				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
+				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidOneHour].Points,
 			},
@@ -400,7 +378,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			name: "one_day",
 			args: args{
 				baseTimestamp:    1568678400000,
-				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
+				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidOneDay].Points,
 			},
@@ -409,7 +387,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				offsetTimestamp:  27764000, // 1568706164 = 1568678400 + 27764, in milliseconds
+				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
 				resolution:       300,
 				aggregatedPoints: aggregatedMetrics[uuidHunderdHours].Points,
 			},
@@ -418,7 +396,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_, _ = aggregateValuesFromAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.offsetTimestamp, tt.args.resolution)
+				_, _ = aggregateValuesFromAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.offsetSecond, tt.args.resolution)
 			}
 		})
 	}
