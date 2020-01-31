@@ -51,7 +51,7 @@ type uuidData struct {
 }
 
 type Options struct {
-	DefaultTimeToLive int64
+	DefaultTimeToLive time.Duration
 	IncludeUUID       bool
 }
 
@@ -280,7 +280,7 @@ func (c *CassandraIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64,
 
 	ttl := timeToLiveFromLabels(&labels)
 	if ttl == 0 {
-		ttl = c.options.DefaultTimeToLive
+		ttl = int64(c.options.DefaultTimeToLive.Seconds())
 	}
 
 	labelsKey := keyFromLabels(labels)

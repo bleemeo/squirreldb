@@ -123,7 +123,7 @@ func (c *CassandraTSDB) writeAggregateData(uuid gouuid.UUID, aggregatedData aggr
 	baseTimestampAggregatedPoints := make(map[int64][]aggregate.AggregatedPoint)
 
 	for _, aggregatedPoint := range aggregatedData.Points {
-		baseTimestamp := aggregatedPoint.Timestamp - (aggregatedPoint.Timestamp % (c.options.AggregatePartitionSize * 1000))
+		baseTimestamp := aggregatedPoint.Timestamp - (aggregatedPoint.Timestamp % c.options.AggregatePartitionSize.Milliseconds())
 
 		baseTimestampAggregatedPoints[baseTimestamp] = append(baseTimestampAggregatedPoints[baseTimestamp], aggregatedPoint)
 	}
@@ -177,8 +177,8 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 
 	// data.Points is sorted
 	n := len(data.Points)
-	startBaseTimestamp := data.Points[0].Timestamp - (data.Points[0].Timestamp % (c.options.RawPartitionSize * 1000))
-	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % (c.options.RawPartitionSize * 1000))
+	startBaseTimestamp := data.Points[0].Timestamp - (data.Points[0].Timestamp % c.options.RawPartitionSize.Milliseconds())
+	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % c.options.RawPartitionSize.Milliseconds())
 
 	if startBaseTimestamp == endBaseTimestamp {
 		err := c.writeRawPartitionData(data, startBaseTimestamp)
@@ -189,7 +189,7 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 	currentStartIndex := 0
 
 	for i, point := range data.Points {
-		baseTimestamp := point.Timestamp - (point.Timestamp % (c.options.RawPartitionSize * 1000))
+		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize.Milliseconds())
 		if currentBaseTimestamp != baseTimestamp {
 			partitionData := types.MetricData{
 				UUID:       data.UUID,
@@ -318,14 +318,14 @@ func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestam
 }
 
 // Return bytes aggregated values from aggregated points
-func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetSecond, resolutionSec int64) ([]byte, error) {
+func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetSecond int64, resolution time.Duration) ([]byte, error) {
 	buffer := new(bytes.Buffer)
 	buffer.Grow(len(aggregatedPoints) * serializedAggregatedPointSize)
 
 	serializedPoints := make([]serializedAggregatedPoint, len(aggregatedPoints))
 
 	for i, aggregatedPoint := range aggregatedPoints {
-		subOffset := (aggregatedPoint.Timestamp - baseTimestamp - offsetSecond*1000) / (resolutionSec * 1000)
+		subOffset := (aggregatedPoint.Timestamp - baseTimestamp - offsetSecond*1000) / resolution.Milliseconds()
 		serializedPoints[i] = serializedAggregatedPoint{
 			SubOffset: uint16(subOffset),
 			Min:       aggregatedPoint.Min,

@@ -20,7 +20,7 @@ var (
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
 	includeUUID               = flag.Bool("index.include-uuid", false, "IncludeUUID")
-	defaultTimeToLive         = flag.Int64("index.ttl", 86400*365, "Default time to live in seconds")
+	defaultTimeToLive         = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
 	seed                      = flag.Int64("bench.seed", 42, "Seed used in random generator")
 	sortInsert                = flag.Bool("bench.insert-sorted", false, "Keep label sorted at insertion time (Prometheus do it)")
 	queryCount                = flag.Int("bench.query", 1000, "Number of query to run")

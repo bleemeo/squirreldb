@@ -157,7 +157,7 @@ func createSquirrelIndex(session *gocql.Session, config *config.Config) *index.C
 	var squirrelIndex *index.CassandraIndex
 
 	options := index.Options{
-		DefaultTimeToLive: config.Int64("cassandra.default_time_to_live"),
+		DefaultTimeToLive: config.Duration("cassandra.default_time_to_live"),
 		IncludeUUID:       config.Bool("index.include_uuid"),
 	}
 
@@ -205,13 +205,13 @@ func createSquirrelStates(session *gocql.Session) *states.CassandraStates {
 
 func createSquirrelTSDB(session *gocql.Session, config *config.Config, index types.Index, lockFactory *locks.CassandraLocks, state types.State) *tsdb.CassandraTSDB {
 	options := tsdb.Options{
-		DefaultTimeToLive:         config.Int64("cassandra.default_time_to_live"),
-		BatchSize:                 config.Int64("batch.size"),
-		RawPartitionSize:          config.Int64("cassandra.partition_size.raw"),
-		AggregatePartitionSize:    config.Int64("cassandra.partition_size.aggregate"),
-		AggregateResolution:       config.Int64("cassandra.aggregate.resolution"),
-		AggregateSize:             config.Int64("cassandra.aggregate.size"),
-		AggregateIntendedDuration: config.Int64("cassandra.aggregate.intended_duration"),
+		DefaultTimeToLive:         config.Duration("cassandra.default_time_to_live"),
+		BatchSize:                 config.Duration("batch.size"),
+		RawPartitionSize:          config.Duration("cassandra.partition_size.raw"),
+		AggregatePartitionSize:    config.Duration("cassandra.partition_size.aggregate"),
+		AggregateResolution:       config.Duration("cassandra.aggregate.resolution"),
+		AggregateSize:             config.Duration("cassandra.aggregate.size"),
+		AggregateIntendedDuration: config.Duration("cassandra.aggregate.intended_duration"),
 	}
 
 	var squirrelTSDB *tsdb.CassandraTSDB
@@ -239,7 +239,7 @@ func createSquirrelRedis(address string) *redis.Redis {
 }
 
 func createSquirrelBatch(config *config.Config, store batch.TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
-	squirrelBatchSize := config.Int64("batch.size")
+	squirrelBatchSize := config.Duration("batch.size")
 
 	squirrelBatch := batch.New(squirrelBatchSize, store, reader, writer)
 

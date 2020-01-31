@@ -346,7 +346,7 @@ func test(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			log.Fatalf("LookupUUID(%v) failed: %v", labels, err)
 		}
 
-		if ttl != *defaultTimeToLive {
+		if ttl != int64(defaultTimeToLive.Seconds()) {
 			log.Fatalf("TTL = %d, want default TTL (%d)", ttl, *defaultTimeToLive)
 		}
 

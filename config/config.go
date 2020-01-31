@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"squirreldb/retry"
 	"squirreldb/types"
+	"strconv"
 	"time"
 )
 
@@ -83,16 +84,42 @@ func New() (*Config, error) {
 	return config, nil
 }
 
+// Duration returns the time.Duration value of a given key path. It take
+// care of converting string to a Duration and if it's a numetric value convert
+// it from a number of seconds.
+func (c *Config) Duration(key string) time.Duration {
+	value := c.Koanf.String(key)
+	return string2Duration(value)
+}
+
+// string2Duration convert a string to a time.Duration
+// In addition to time.ParseDuration, it also allow simple number and assume
+// it value to be second
+func string2Duration(value string) time.Duration {
+	result, err := time.ParseDuration(value)
+	if err == nil {
+		return result
+	}
+
+	resultInt, err := strconv.ParseInt(value, 10, 0)
+
+	if err == nil {
+		return time.Duration(resultInt) * time.Second
+	}
+
+	return 0
+}
+
 // Validate checks if the configuration is valid and consistent
 func (c *Config) Validate() bool {
 	keyspace := c.String("cassandra.keyspace")
 	replicationFactor := c.Int("cassandra.replication_factor")
-	batchSize := c.Int64("batch.size")
-	rawPartitionSize := c.Int64("cassandra.partition_size.raw")
-	aggregateResolution := c.Int64("cassandra.aggregate.resolution")
-	aggregateSize := c.Int64("cassandra.aggregate.size")
-	aggregatePartitionSize := c.Int64("cassandra.partition_size.aggregate")
-	aggregateIntendedDuration := c.Int64("cassandra.aggregate.intended_duration")
+	batchSize := c.Duration("batch.size")
+	rawPartitionSize := c.Duration("cassandra.partition_size.raw")
+	aggregateResolution := c.Duration("cassandra.aggregate.resolution")
+	aggregateSize := c.Duration("cassandra.aggregate.size")
+	aggregatePartitionSize := c.Duration("cassandra.partition_size.aggregate")
+	aggregateIntendedDuration := c.Duration("cassandra.aggregate.intended_duration")
 	valid := true
 
 	if keyspace == "" {
@@ -128,19 +155,33 @@ func (c *Config) Validate() bool {
 	if rawPartitionSize < batchSize {
 		valid = false
 
-		logger.Printf("Error: 'cassandra.rawPartitionSize' (current value %d) must be greater than 'batch.size' (current value %d)", rawPartitionSize, batchSize)
+		logger.Printf("Error: 'cassandra.rawPartitionSize' (current value %v) must be greater than 'batch.size' (current value %v)", rawPartitionSize, batchSize)
+	}
+
+	// This is due to Cassandra storing the offset as millisecond in a int32
+	if rawPartitionSize > 24*24*time.Hour {
+		valid = false
+
+		logger.Printf("Error: cassandra.rawPartitionSize' (current value %v) must be less than 24 days", rawPartitionSize)
+	}
+
+	// This is due to Cassandra storing the offset as millisecond in a int32
+	if rawPartitionSize > 24*24*time.Hour {
+		valid = false
+
+		logger.Printf("Error: cassandra.rawPartitionSize' (current value %d) must be less than 24 days", rawPartitionSize)
 	}
 
 	if aggregateSize < aggregateResolution {
 		valid = false
 
-		logger.Printf("Error: 'cassandra.aggregate.size' (current value %d) must be greater than 'cassandra.aggregate.resolution' (current value %d)", aggregateSize, aggregateResolution)
+		logger.Printf("Error: 'cassandra.aggregate.size' (current value %v) must be greater than 'cassandra.aggregate.resolution' (current value %v)", aggregateSize, aggregateResolution)
 	}
 
 	if aggregatePartitionSize < aggregateSize {
 		valid = false
 
-		logger.Printf("Error: 'cassandra.partition_size.aggregate' (current value %d) must be greater than 'cassandra.aggregate.size' (current value %d)", aggregatePartitionSize, aggregateSize)
+		logger.Printf("Error: 'cassandra.partition_size.aggregate' (current value %v) must be greater than 'cassandra.aggregate.size' (current value %v)", aggregatePartitionSize, aggregateSize)
 	}
 
 	return valid
@@ -155,19 +196,21 @@ func (c *Config) ValidateRemote(state types.State) bool {
 	force := c.Bool("overwite-previous-config")
 
 	for _, name := range names {
-		local := c.String(name)
+		local := c.Duration(name)
 
 		var (
-			remote string
-			err    error
+			remoteStr string
+			err       error
 		)
 
 		retry.Print(func() error {
-			exists, err = state.Read(name, &remote) // nolint: scopelint
+			exists, err = state.Read(name, &remoteStr) // nolint: scopelint
 			return err
 		}, retry.NewExponentialBackOff(30*time.Second), logger,
 			"read config state "+name,
 		)
+
+		remote := string2Duration(remoteStr)
 
 		if exists && (local != remote) {
 			valid = false
@@ -176,12 +219,12 @@ func (c *Config) ValidateRemote(state types.State) bool {
 			if force {
 				level = "Warning"
 
-				c.writeRemote(state, name, local)
+				c.writeRemote(state, name, local.String())
 			}
 
 			logger.Printf("%s: option '%s' changed from \"%s\" to \"%s\" since last SquirrelDB start", level, name, remote, local)
 		} else if !exists {
-			c.writeRemote(state, name, local)
+			c.writeRemote(state, name, local.String())
 		}
 	}
 

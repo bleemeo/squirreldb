@@ -5,6 +5,7 @@ import (
 	"squirreldb/aggregate"
 	"squirreldb/types"
 	"testing"
+	"time"
 
 	gouuid "github.com/gofrs/uuid"
 )
@@ -152,7 +153,7 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 		aggregatedPoints []aggregate.AggregatedPoint
 		baseTimestamp    int64
 		offsetSecond     int64
-		resolution       int64
+		resolution       time.Duration
 	}
 	tests := []struct {
 		name    string
@@ -165,7 +166,7 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 			args: args{
 				baseTimestamp: 1568706164000,
 				offsetSecond:  0,
-				resolution:    300,
+				resolution:    5 * time.Minute,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -213,7 +214,7 @@ func Test_aggregateValuesFromAggregatedPoints(t *testing.T) {
 			args: args{
 				baseTimestamp: 1568678400000,
 				offsetSecond:  27764, // 1568706164 = 1568678400 + 27764
-				resolution:    300,
+				resolution:    5 * time.Minute,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -297,7 +298,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 		aggregatedPoints []aggregate.AggregatedPoint
 		baseTimestamp    int64
 		offsetSecond     int64
-		resolution       int64
+		resolution       time.Duration
 	}
 	tests := []struct {
 		name string
@@ -308,7 +309,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			args: args{
 				baseTimestamp: 1568706164000,
 				offsetSecond:  0,
-				resolution:    300,
+				resolution:    5 * time.Minute,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -339,7 +340,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			args: args{
 				baseTimestamp: 1568678400000,
 				offsetSecond:  27764, // 1568706164 = 1568678400 + 27764
-				resolution:    300,
+				resolution:    5 * time.Minute,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
 						Timestamp: 1568706164000,
@@ -370,7 +371,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			args: args{
 				baseTimestamp:    1568678400000,
 				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
-				resolution:       300,
+				resolution:       5 * time.Minute,
 				aggregatedPoints: aggregatedMetrics[uuidOneHour].Points,
 			},
 		},
@@ -379,7 +380,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			args: args{
 				baseTimestamp:    1568678400000,
 				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
-				resolution:       300,
+				resolution:       5 * time.Minute,
 				aggregatedPoints: aggregatedMetrics[uuidOneDay].Points,
 			},
 		},
@@ -388,7 +389,7 @@ func Benchmark_aggregateValuesFromAggregatedPoints(b *testing.B) {
 			args: args{
 				baseTimestamp:    1568678400000,
 				offsetSecond:     27764, // 1568706164 = 1568678400 + 27764
-				resolution:       300,
+				resolution:       5 * time.Minute,
 				aggregatedPoints: aggregatedMetrics[uuidHunderdHours].Points,
 			},
 		},

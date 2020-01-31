@@ -100,7 +100,7 @@ type stateData struct {
 // flushing them to the writer.
 // It also allow to read points merging value from the persistent store (reader) and the memory store.
 type Batch struct {
-	batchSize int64
+	batchSize time.Duration
 
 	states map[gouuid.UUID]stateData
 	mutex  sync.Mutex
@@ -111,7 +111,7 @@ type Batch struct {
 }
 
 // New creates a new Batch object
-func New(batchSize int64, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
+func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
 		states:      make(map[gouuid.UUID]stateData),
@@ -490,7 +490,8 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 			Points:     make([]types.MetricPoint, 0, len(m.Points)/2),
 		}
 
-		cutoffTimestamp := (now.Unix() - b.batchSize) * 1000
+		cutoffTime := now.Add(-b.batchSize)
+		cutoffTimestamp := cutoffTime.UnixNano() / 1000000
 
 		for _, p := range m.Points {
 			if p.Timestamp >= cutoffTimestamp {
@@ -543,7 +544,7 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 		// that this metrics has no ownership.
 		// maximum deadline is now + b.batchSize
 		// Give two takeoverInterval as safely margin
-		ttl := 2*takeoverInterval + overdueThreshold + time.Duration(b.batchSize)*time.Second
+		ttl := 2*takeoverInterval + overdueThreshold + b.batchSize
 		return b.memoryStore.MarkToExpire(uuidToExpire, ttl)
 	},
 		retry.NewExponentialBackOff(30*time.Second),
@@ -772,13 +773,13 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 		// Yes we compare number of point with time. This test only here
 		// to avoid unbounded grow of temporary store when processing backlog
 		// of data.
-		if count > int(b.batchSize) {
+		if count > int(b.batchSize.Seconds()) {
 			_, isOwner := b.states[metrics[i].UUID]
-			n := count / int(b.batchSize)
+			n := count / int(b.batchSize.Seconds())
 
 			if isOwner {
 				metricToFlush[metrics[i].UUID] = nil
-			} else if n > 1 && count < n*int(b.batchSize) {
+			} else if n > 1 && count < n*int(b.batchSize.Seconds()) {
 				// If the number of points crossed a multiple of our b.batchSize
 				// (that is count < N*b.batchSize and count >= N*b.batchSize)
 				// and it's not the first threshold, then always flush.
@@ -841,11 +842,11 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 // Returns a flush date
 // It follows the formula:
 // timestamp = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
-func flushTimestamp(uuid gouuid.UUID, now time.Time, batchSize int64) time.Time {
-	timestamp := now.Unix() + batchSize
+func flushTimestamp(uuid gouuid.UUID, now time.Time, batchSize time.Duration) time.Time {
+	timestamp := now.Unix() + int64(batchSize.Seconds())
 	offset := int64(types.UintFromUUID(uuid) % uint64(batchSize))
 
-	timestamp -= (timestamp + offset) % batchSize
+	timestamp -= (timestamp + offset) % int64(batchSize.Seconds())
 
 	return time.Unix(timestamp, 0)
 }

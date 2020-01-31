@@ -144,7 +144,7 @@ func (m *mockMetricWriter) Write(metrics []types.MetricData) error {
 
 func TestBatch_read(t *testing.T) {
 	type fields struct {
-		batchSize   int64
+		batchSize   time.Duration
 		states      map[gouuid.UUID]stateData
 		memoryStore TemporaryStore
 		reader      types.MetricReader
@@ -163,7 +163,7 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_filled_persistent_filled",
 			fields: fields{
-				batchSize: 50,
+				batchSize: 50 * time.Second,
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -331,7 +331,7 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_filled_persistent_empty",
 			fields: fields{
-				batchSize: 50,
+				batchSize: 50 * time.Second,
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -409,7 +409,7 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_empty_persistent_filled",
 			fields: fields{
-				batchSize:   50,
+				batchSize:   50 * time.Second,
 				states:      nil,
 				memoryStore: newMemoryStore(nil),
 				reader: &mockMetricReader{
@@ -533,7 +533,7 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_empty_persistent_empty",
 			fields: fields{
-				batchSize:   50,
+				batchSize:   50 * time.Second,
 				states:      nil,
 				memoryStore: newMemoryStore(nil),
 				reader: &mockMetricReader{
@@ -559,7 +559,7 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_has_all_points",
 			fields: fields{
-				batchSize: 50,
+				batchSize: 50 * time.Second,
 				states:    nil,
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -681,7 +681,7 @@ func TestBatch_read(t *testing.T) {
 
 func TestBatch_readTemporary(t *testing.T) {
 	type fields struct {
-		batchSize   int64
+		batchSize   time.Duration
 		states      map[gouuid.UUID]stateData
 		memoryStore TemporaryStore
 		reader      types.MetricReader
@@ -823,7 +823,7 @@ func Test_flushTimestamp(t *testing.T) {
 	type args struct {
 		uuid      gouuid.UUID
 		now       time.Time
-		batchSize int64
+		batchSize time.Duration
 	}
 	tests := []struct {
 		name string
@@ -835,7 +835,7 @@ func Test_flushTimestamp(t *testing.T) {
 			args: args{
 				uuid:      gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 				now:       time.Unix(0, 0),
-				batchSize: 50,
+				batchSize: 50 * time.Second,
 			},
 			want: time.Unix(49, 0),
 		},
@@ -844,7 +844,7 @@ func Test_flushTimestamp(t *testing.T) {
 			args: args{
 				uuid:      gouuid.FromStringOrNil("00000000-0000-0000-0000-0000000006ab"),
 				now:       time.Unix(0, 0),
-				batchSize: 50,
+				batchSize: 50 * time.Second,
 			},
 			want: time.Unix(43, 0),
 		},
@@ -860,7 +860,7 @@ func Test_flushTimestamp(t *testing.T) {
 
 func TestBatch_flush(t *testing.T) {
 	type fields struct {
-		batchSize   int64
+		batchSize   time.Duration
 		states      map[gouuid.UUID]stateData
 		memoryStore TemporaryStore
 		writer      *mockMetricWriter
@@ -880,7 +880,7 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "tsdb-write-sorted",
 			fields: fields{
-				batchSize: 300,
+				batchSize: 300 * time.Second,
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -934,7 +934,7 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "tsdb-write-sorted-dedup",
 			fields: fields{
-				batchSize: 300,
+				batchSize: 300 * time.Second,
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -992,7 +992,7 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "tsdb-write-dedup",
 			fields: fields{
-				batchSize: 300,
+				batchSize: 300 * time.Second,
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -1050,7 +1050,7 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "keep-last-batchsize",
 			fields: fields{
-				batchSize: 300,
+				batchSize: 300 * time.Second,
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStore([]types.MetricData{
 					{
@@ -1101,7 +1101,7 @@ func TestBatch_flush(t *testing.T) {
 		{
 			name: "tsdb-write-after-offset",
 			fields: fields{
-				batchSize: 300,
+				batchSize: 300 * time.Second,
 				states:    map[gouuid.UUID]stateData{},
 				memoryStore: newMemoryStoreOffset(
 					[]types.MetricData{
@@ -1182,6 +1182,7 @@ func TestBatch_flush(t *testing.T) {
 // memoryStore (e.g. Redis)
 func TestBatch_write(t *testing.T) {
 
+	batchSize := 100 * time.Second
 	memoryStore := memorystore.New()
 	writer1 := &mockMetricWriter{
 		metrics: map[gouuid.UUID]types.MetricData{},
@@ -1189,8 +1190,8 @@ func TestBatch_write(t *testing.T) {
 	writer2 := &mockMetricWriter{
 		metrics: map[gouuid.UUID]types.MetricData{},
 	}
-	batch1 := New(100, memoryStore, nil, writer1)
-	batch2 := New(100, memoryStore, nil, writer2)
+	batch1 := New(batchSize, memoryStore, nil, writer1)
+	batch2 := New(batchSize, memoryStore, nil, writer2)
 
 	type args struct {
 		uuids    []gouuid.UUID
@@ -1299,7 +1300,7 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(220, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1381,14 +1382,14 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(300, 0),
-						100,
+						batchSize,
 					),
 				},
 				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(300, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1462,14 +1463,14 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(300, 0),
-						100,
+						batchSize,
 					),
 				},
 				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): stateData{
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(300, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1567,7 +1568,7 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(1000, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1576,7 +1577,7 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(1000, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1609,7 +1610,7 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
 						time.Unix(1100, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1618,7 +1619,7 @@ func TestBatch_write(t *testing.T) {
 					flushDeadline: flushTimestamp(
 						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"),
 						time.Unix(1100, 0),
-						100,
+						batchSize,
 					),
 				},
 			},
@@ -1684,10 +1685,10 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.shutdown1 {
-				batch1 = New(100, memoryStore, nil, writer1)
+				batch1 = New(batchSize, memoryStore, nil, writer1)
 			}
 			if tt.shutdown2 {
-				batch2 = New(100, memoryStore, nil, writer2)
+				batch2 = New(batchSize, memoryStore, nil, writer2)
 			}
 
 			writer1.metrics = map[gouuid.UUID]types.MetricData{}
@@ -1715,6 +1716,7 @@ func Test_randomDuration(t *testing.T) {
 }
 
 func Test_takeover(t *testing.T) {
+	batchSize := 100 * time.Second
 	memoryStore := memorystore.New()
 	writer1 := &mockMetricWriter{
 		metrics: map[gouuid.UUID]types.MetricData{},
@@ -1722,8 +1724,8 @@ func Test_takeover(t *testing.T) {
 	writer2 := &mockMetricWriter{
 		metrics: map[gouuid.UUID]types.MetricData{},
 	}
-	batch1 := New(100, memoryStore, nil, writer1)
-	batch2 := New(100, memoryStore, nil, writer2)
+	batch1 := New(batchSize, memoryStore, nil, writer1)
+	batch2 := New(batchSize, memoryStore, nil, writer2)
 	ctx := context.Background()
 
 	batch1.write(
@@ -1774,12 +1776,12 @@ func Test_takeover(t *testing.T) {
 	wantWriter2 := metricsToMap([]types.MetricData{})
 	wantState1 := map[gouuid.UUID]stateData{
 		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
-			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"), time.Unix(10, 0), 100),
+			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"), time.Unix(10, 0), batchSize),
 		},
 	}
 	wantState2 := map[gouuid.UUID]stateData{
 		gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
-			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"), time.Unix(10, 0), 100),
+			flushDeadline: flushTimestamp(gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"), time.Unix(10, 0), batchSize),
 		},
 	}
 	wantMemoryStore := metricsToMap([]types.MetricData{

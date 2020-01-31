@@ -87,7 +87,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	}
 
 	now := time.Now()
-	maxTime := now.Truncate(time.Duration(c.options.AggregateSize) * time.Second)
+	maxTime := now.Truncate(c.options.AggregateSize)
 
 	if fromTime.IsZero() {
 		fromTime = maxTime
@@ -99,7 +99,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		)
 	}
 
-	toTime := fromTime.Add(time.Duration(c.options.AggregateSize) * time.Second)
+	toTime := fromTime.Add(c.options.AggregateSize)
 	isSafeMargin := toTime.Before(now.Add(-backlogMargin))
 
 	if toTime.After(maxTime) || !isSafeMargin {
@@ -127,8 +127,9 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		}
 	}
 
-	if err := c.doAggregation(shardUUIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution); err == nil {
-		logger.Printf("Aggregate shard %d from [%v] to [%v]", shard, fromTime, toTime)
+	if err := c.doAggregation(shardUUIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
+		logger.Printf("Aggregate shard %d from [%v] to [%v]",
+			shard, fromTime, toTime)
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
