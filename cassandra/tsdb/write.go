@@ -225,57 +225,7 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 		return nil
 	}
 
-	n := len(data.Points)
-	startOffsetMs := data.Points[0].Timestamp - baseTimestamp
-
-	// The sub-offset is encoded as uint32 number of Millisecond.
-	// If all points fit within this range, no need to split in multiple write
-	if (data.Points[n-1].Timestamp - startOffsetMs) < 1<<32 {
-		err := c.writeRawBatchData(data, baseTimestamp, startOffsetMs)
-		return err
-	}
-
-	// The following is dead-code. The sub-offset will always fit
-
-	currentOffsetMs := startOffsetMs
-	currentStartIndex := 0
-
-	for i, point := range data.Points {
-		subOffsetMs := point.Timestamp - baseTimestamp - currentOffsetMs
-		if subOffsetMs >= 1<<32 {
-			rowData := types.MetricData{
-				UUID:       data.UUID,
-				Points:     data.Points[currentStartIndex:i],
-				TimeToLive: data.TimeToLive,
-			}
-
-			if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetMs); err != nil {
-				return err
-			}
-
-			currentStartIndex = i
-			currentOffsetMs = point.Timestamp - baseTimestamp
-		}
-	}
-
-	rowData := types.MetricData{
-		UUID:       data.UUID,
-		Points:     data.Points[currentStartIndex:],
-		TimeToLive: data.TimeToLive,
-	}
-
-	if err := c.writeRawBatchData(rowData, baseTimestamp, currentOffsetMs); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *CassandraTSDB) writeRawBatchData(data types.MetricData, baseTimestamp int64, offsetMs int64) error {
-	if len(data.Points) == 0 {
-		return nil
-	}
-
+	offsetMs := data.Points[0].Timestamp - baseTimestamp
 	rawValues, err := rawValuesFromPoints(data.Points, baseTimestamp, offsetMs)
 
 	if err != nil {
