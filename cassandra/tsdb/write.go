@@ -1,11 +1,10 @@
 package tsdb
 
 import (
+	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
 
-	"bytes"
-	"encoding/binary"
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -14,24 +13,6 @@ import (
 )
 
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
-
-type serializedAggregatedPoint struct {
-	SubOffset uint16
-	Min       float64
-	Max       float64
-	Average   float64
-	Count     float64
-}
-
-const (
-	serializedAggregatedPointSize = 2 + 8*4
-	serializedPointSize           = 4 + 8
-)
-
-type serializedPoint struct {
-	SubOffsetMs uint32
-	Value       float64
-}
 
 // Write writes all specified metrics
 // metrics points should be sorted and deduplicated
@@ -150,11 +131,7 @@ func (c *CassandraTSDB) writeAggregateRow(uuid gouuid.UUID, aggregatedData aggre
 
 	firstPoint := aggregatedData.Points[0]
 	offsetSecond := (firstPoint.Timestamp - baseTimestamp) / 1000
-	aggregateValues, err := aggregateValuesFromAggregatedPoints(aggregatedData.Points, baseTimestamp, offsetSecond, c.options.AggregateResolution)
-
-	if err != nil {
-		return err
-	}
+	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp-1)
 
 	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetSecond, aggregatedData.TimeToLive, aggregateValues)
 
@@ -226,11 +203,10 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 	}
 
 	offsetMs := data.Points[0].Timestamp - baseTimestamp
-	rawValues, err := rawValuesFromPoints(data.Points, baseTimestamp, offsetMs)
 
-	if err != nil {
-		return err
-	}
+	// The minus one for baseTimestamp is to ensure baseTimestamp is strickyly less then
+	// data.Points[0].Timestamp
+	rawValues := gorillaEncode(data.Points, data.Points[0].Timestamp, baseTimestamp-1)
 
 	tableInsertDataQuery := c.tableInsertRawDataQuery(data.UUID.String(), baseTimestamp, offsetMs, data.TimeToLive, rawValues)
 
@@ -267,53 +243,80 @@ func (c *CassandraTSDB) tableInsertAggregatedDataQuery(uuid string, baseTimestam
 	return query
 }
 
-// Return bytes aggregated values from aggregated points
-func aggregateValuesFromAggregatedPoints(aggregatedPoints []aggregate.AggregatedPoint, baseTimestamp, offsetSecond int64, resolution time.Duration) ([]byte, error) {
-	buffer := new(bytes.Buffer)
-	buffer.Grow(len(aggregatedPoints) * serializedAggregatedPointSize)
+// gorillaEncode encode points using Gorilla tsz
+//
+// It's the encoding described in https://www.vldb.org/pvldb/vol8/p1816-teller.pdf with two change:
+// * This function use millisecond precision timestamp (while Gorilla use second). This function
+//   will pass the millisecond timestamp as second timestamp.
+// * All timestamp of offseted by baseTimestamp (that is, the actual value stored is the timestamp
+//   with baseTimestamp subtracted).
+//   This second points allow timestamp to remain smaller than 32-bits integer, which is required
+//   because Gorilla can't store larger timestamp (strictly speaking, can't store delta larger than
+//   a 32-bits integer)
+//
+// There are the following constraint:
+// * points must be sorted
+// * baseTimestamp must be *strickly* less than all point timestamps and t0
+// * t0 must be less or equal to all points timestamps
+// * Delta with biggest timestamp and baseTimestamp must be less than 49 days (fit in 32 bits integer)
+// * delta with first point timestamp and t0 must fit in 14-bits integer (that is ~16 seconds)
+func gorillaEncode(points []types.MetricPoint, t0 int64, baseTimestamp int64) []byte {
+	s := tsz.New(uint32(t0 - baseTimestamp))
 
-	serializedPoints := make([]serializedAggregatedPoint, len(aggregatedPoints))
-
-	for i, aggregatedPoint := range aggregatedPoints {
-		subOffset := (aggregatedPoint.Timestamp - baseTimestamp - offsetSecond*1000) / resolution.Milliseconds()
-		serializedPoints[i] = serializedAggregatedPoint{
-			SubOffset: uint16(subOffset),
-			Min:       aggregatedPoint.Min,
-			Max:       aggregatedPoint.Max,
-			Average:   aggregatedPoint.Average,
-			Count:     aggregatedPoint.Count,
-		}
+	for _, point := range points {
+		s.Push(uint32(point.Timestamp-baseTimestamp), point.Value)
 	}
 
-	if err := binary.Write(buffer, binary.BigEndian, serializedPoints); err != nil {
-		return nil, err
-	}
+	s.Finish()
 
-	aggregateValues := buffer.Bytes()
+	buffer := s.Bytes()
 
-	return aggregateValues, nil
+	return buffer
 }
 
-// Return bytes raw values from points
-func rawValuesFromPoints(points []types.MetricPoint, baseTimestamp, offsetMs int64) ([]byte, error) {
-	buffer := new(bytes.Buffer)
-	buffer.Grow(len(points) * serializedPointSize)
+// gorillaEncodeAggregate encode aggregated points
+// It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened
+// It also means that same constraint as gorillaEncode apply
+func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTimestamp int64) []byte {
+	// Gorilla encoding worst case is ~14 bytes per points. So on 64k we could store ~4000 points,
+	// since it's aggregated points, with 5 minutes resolution it's ~13 days.
+	// It will always fit in 64k, so we will use uint16 to mark the length of gorillaEncode() result
+	var buffer []byte
 
-	serializedPoints := make([]serializedPoint, len(points))
+	workPoint := make([]types.MetricPoint, len(points))
 
-	for i, point := range points {
-		subOffsetMs := point.Timestamp - baseTimestamp - offsetMs
-		serializedPoints[i] = serializedPoint{
-			SubOffsetMs: uint32(subOffsetMs),
-			Value:       point.Value,
-		}
+	for i, p := range points {
+		workPoint[i].Timestamp = p.Timestamp
+		workPoint[i].Value = p.Min
 	}
 
-	if err := binary.Write(buffer, binary.BigEndian, serializedPoints); err != nil {
-		return nil, err
+	tmp := gorillaEncode(workPoint, t0, baseTimestamp)
+	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	buffer = append(buffer, tmp...)
+
+	for i, p := range points {
+		workPoint[i].Value = p.Max
 	}
 
-	rawValues := buffer.Bytes()
+	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	buffer = append(buffer, tmp...)
 
-	return rawValues, nil
+	for i, p := range points {
+		workPoint[i].Value = p.Average
+	}
+
+	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	buffer = append(buffer, tmp...)
+
+	for i, p := range points {
+		workPoint[i].Value = p.Count
+	}
+
+	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	buffer = append(buffer, tmp...)
+
+	return buffer
 }

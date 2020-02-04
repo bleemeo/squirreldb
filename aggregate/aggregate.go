@@ -54,6 +54,7 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 
 	for i, point := range data.Points {
 		aggregatedTimestamp := point.Timestamp - (point.Timestamp % resolution)
+
 		if i == 0 {
 			currentAggregatedTimestamp = aggregatedTimestamp
 		} else if currentAggregatedTimestamp != aggregatedTimestamp {

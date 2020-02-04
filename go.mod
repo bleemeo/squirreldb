@@ -5,6 +5,7 @@ go 1.12
 require (
 	github.com/bitly/go-hostpool v0.1.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible
+	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
 	github.com/go-redis/redis v6.15.6+incompatible
 	github.com/gocql/gocql v0.0.0-20200103014340-68f928edb90a
 	github.com/gofrs/uuid v3.2.0+incompatible

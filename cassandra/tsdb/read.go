@@ -1,12 +1,15 @@
 package tsdb
 
 import (
+	"errors"
+	"os"
+
+	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
 	gouuid "github.com/gofrs/uuid"
 
 	"bytes"
 	"encoding/binary"
-	"io"
 	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
@@ -115,7 +118,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid gouuid.UUID, fromTimesta
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		points, err := pointsFromAggregateValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetSecond, c.options.AggregateResolution, function)
+		points, err := gorillaDecodeAggregate(values, baseTimestamp-1, function)
 
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
@@ -195,7 +198,7 @@ func (c *CassandraTSDB) readRawPartitionData(uuid gouuid.UUID, fromTimestamp, to
 	for tableSelectDataIter.Scan(&offsetMs, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		points, err := pointsFromRawValues(values, fromTimestamp, toTimestamp, baseTimestamp, offsetMs)
+		points, err := gorillaDecode(values, baseTimestamp-1)
 
 		if err != nil {
 			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
@@ -203,8 +206,12 @@ func (c *CassandraTSDB) readRawPartitionData(uuid gouuid.UUID, fromTimestamp, to
 			return types.MetricData{}, err
 		}
 
-		rawPartitionData.Points = append(rawPartitionData.Points, points...)
-		rawPartitionData.TimeToLive = compare.MaxInt64(rawPartitionData.TimeToLive, timeToLive)
+		points = filterPoints(points, fromTimestamp, toTimestamp)
+
+		if len(points) > 0 {
+			rawPartitionData.Points = append(rawPartitionData.Points, points...)
+			rawPartitionData.TimeToLive = compare.MaxInt64(rawPartitionData.TimeToLive, timeToLive)
+		}
 
 		start = time.Now()
 	}
@@ -239,82 +246,92 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(uuid string, baseTimestamp
 	return iter
 }
 
-// Return points from bytes aggregated values
-func pointsFromAggregateValues(values []byte, fromTimestamp, toTimestamp, baseTimestamp, offsetSecond int64, resolution time.Duration, function string) ([]types.MetricPoint, error) {
-	buffer := bytes.NewReader(values)
-
-	var points []types.MetricPoint
-
-forLoop:
-	for {
-		var pointData serializedAggregatedPoint
-
-		err := binary.Read(buffer, binary.BigEndian, &pointData)
-
-		switch err {
-		case nil:
-			timestamp := baseTimestamp + offsetSecond*1000 + (int64(pointData.SubOffset) * resolution.Milliseconds())
-
-			if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
-				point := types.MetricPoint{
-					Timestamp: timestamp,
-				}
-
-				switch function {
-				case "min":
-					point.Value = pointData.Min
-				case "max":
-					point.Value = pointData.Max
-				case "avg":
-					point.Value = pointData.Average
-				case "count":
-					point.Value = pointData.Count
-				default:
-					point.Value = pointData.Average
-				}
-
-				points = append(points, point)
-			}
-		case io.EOF:
-			break forLoop
-		default:
-			return nil, err
-		}
+func gorillaDecode(values []byte, baseTimestamp int64) ([]types.MetricPoint, error) {
+	i, err := tsz.NewIterator(values)
+	if err != nil {
+		return nil, err
 	}
 
-	return points, nil
+	result := make([]types.MetricPoint, 0)
+
+	for i.Next() {
+		t, v := i.Values()
+
+		result = append(result, types.MetricPoint{
+			Timestamp: int64(t) + baseTimestamp,
+			Value:     v,
+		})
+	}
+
+	return result, i.Err()
 }
 
-// Return points from bytes raw values
-func pointsFromRawValues(values []byte, fromTimestamp, toTimestamp, baseTimestamp, offsetTimestamp int64) ([]types.MetricPoint, error) {
-	buffer := bytes.NewReader(values)
+func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string) ([]types.MetricPoint, error) {
+	var (
+		length       uint16
+		streamNumber int
+	)
 
-	var points []types.MetricPoint
+	reader := bytes.NewReader(values)
 
-forLoop:
-	for {
-		var pointData serializedPoint
+	switch function {
+	case "min":
+		streamNumber = 0
+	case "max":
+		streamNumber = 1
+	case "avg":
+		streamNumber = 2
+	case "count":
+		streamNumber = 3
+	default:
+		streamNumber = 2
+	}
 
-		err := binary.Read(buffer, binary.BigEndian, &pointData)
+	for i := 0; i < streamNumber; i++ {
+		err := binary.Read(reader, binary.BigEndian, &length)
+		if err != nil {
+			return nil, err
+		}
 
-		switch err {
-		case nil:
-			timestamp := baseTimestamp + offsetTimestamp + int64(pointData.SubOffsetMs)
-
-			if (timestamp >= fromTimestamp) && (timestamp <= toTimestamp) {
-				point := types.MetricPoint{
-					Timestamp: timestamp,
-					Value:     pointData.Value,
-				}
-
-				points = append(points, point)
-			}
-		case io.EOF:
-			break forLoop
-		default:
+		_, err = reader.Seek(int64(length), os.SEEK_CUR)
+		if err != nil {
 			return nil, err
 		}
 	}
 
-	return points, nil
+	err := binary.Read(reader, binary.BigEndian, &length)
+	if err != nil {
+		return nil, err
+	}
+
+	startIndex, _ := reader.Seek(0, os.SEEK_CUR)
+	endIndex := int(startIndex) + int(length)
+
+	if endIndex > len(values) {
+		return nil, errors.New("corrupted values, stored length larged than actual length")
+	}
+
+	return gorillaDecode(values[int(startIndex):endIndex], baseTimestamp)
+}
+
+func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp int64) []types.MetricPoint {
+	minIndex := -1
+	maxIndex := len(points)
+
+	for i, p := range points {
+		if p.Timestamp >= fromTimestamp && minIndex == -1 {
+			minIndex = i
+		}
+
+		if p.Timestamp > toTimestamp {
+			maxIndex = i
+			break
+		}
+	}
+
+	if minIndex == -1 || maxIndex == -1 || minIndex >= maxIndex {
+		return nil
+	}
+
+	return points[minIndex:maxIndex]
 }
