@@ -186,6 +186,34 @@ func Test_aggregateData(t *testing.T) {
 				TimeToLive: 3600,
 			},
 		},
+		{
+			name: "test-real-timestamp",
+			args: args{
+				data: types.MetricData{
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: 1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       500,
+						Max:       2500,
+						Average:   1500,
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -52,9 +52,11 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 		TimeToLive: data.TimeToLive,
 	}
 
-	for _, point := range data.Points {
+	for i, point := range data.Points {
 		aggregatedTimestamp := point.Timestamp - (point.Timestamp % resolution)
-		if currentAggregatedTimestamp != aggregatedTimestamp {
+		if i == 0 {
+			currentAggregatedTimestamp = aggregatedTimestamp
+		} else if currentAggregatedTimestamp != aggregatedTimestamp {
 			aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
 			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
 			workingPoints = workingPoints[:0]
