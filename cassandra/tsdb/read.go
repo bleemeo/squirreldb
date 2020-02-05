@@ -117,8 +117,9 @@ func (c *CassandraTSDB) readAggregatePartitionData(uuid gouuid.UUID, fromTimesta
 
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
+		offsetMs := offsetSecond * 1000
 
-		points, err := gorillaDecodeAggregate(values, baseTimestamp-1, function)
+		points, err := gorillaDecodeAggregate(values, offsetMs+baseTimestamp-1, function)
 
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())

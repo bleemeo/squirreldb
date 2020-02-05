@@ -159,17 +159,18 @@ func (c *Config) Validate() bool {
 	}
 
 	// This is due to Cassandra storing the offset as millisecond in a int32
+	// It's also due to Gorilla TSZ storing time delta as uint32
 	if rawPartitionSize > 24*24*time.Hour {
 		valid = false
 
 		logger.Printf("Error: cassandra.rawPartitionSize' (current value %v) must be less than 24 days", rawPartitionSize)
 	}
 
-	// This is due to Cassandra storing the offset as millisecond in a int32
-	if rawPartitionSize > 24*24*time.Hour {
+	// This is due to Gorilla TSZ storing the timestamp as millisecond in a uint32 (and we use millisecond)
+	if aggregateSize > 49*24*time.Hour {
 		valid = false
 
-		logger.Printf("Error: cassandra.rawPartitionSize' (current value %d) must be less than 24 days", rawPartitionSize)
+		logger.Printf("Error: cassandra.aggregate.size' (current value %v) must be less than 49 days", rawPartitionSize)
 	}
 
 	if aggregateSize < aggregateResolution {

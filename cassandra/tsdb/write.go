@@ -130,10 +130,10 @@ func (c *CassandraTSDB) writeAggregateRow(uuid gouuid.UUID, aggregatedData aggre
 	}
 
 	firstPoint := aggregatedData.Points[0]
-	offsetSecond := (firstPoint.Timestamp - baseTimestamp) / 1000
-	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp-1)
+	offsetMs := firstPoint.Timestamp - baseTimestamp
+	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, offsetMs+baseTimestamp-1)
 
-	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetSecond, aggregatedData.TimeToLive, aggregateValues)
+	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(uuid.String(), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive, aggregateValues)
 
 	start := time.Now()
 

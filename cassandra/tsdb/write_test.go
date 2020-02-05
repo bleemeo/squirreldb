@@ -179,6 +179,17 @@ func Test_gorillaEncode2(t *testing.T) {
 			},
 		},
 		{
+			name: "49_days_delta",
+			args: args{
+				baseTimestamp: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC).UnixNano() / 1000000,
+				points: []types.MetricPoint{
+					{Timestamp: time.Date(2020, 1, 1, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 0},  // delta with t0 and first point must fit in 14-bits
+					{Timestamp: time.Date(2020, 2, 19, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 1}, // first point +49 days
+				},
+			},
+		},
+		{
 			name: "50_min",
 			args: args{
 				baseTimestamp: 1568678400000,
