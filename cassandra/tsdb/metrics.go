@@ -16,7 +16,7 @@ var (
 	aggregatdUntilSeconds = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "squirreldb",
 		Subsystem: "tsdb",
-		Name:      "aggregated_untile_seconds",
+		Name:      "aggregated_until_seconds",
 		Help:      "Most recent timestamp for which all shard are aggregated",
 	})
 	cassandraQueriesSecondsReadAggregated = promauto.NewSummary(prometheus.SummaryOpts{
