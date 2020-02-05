@@ -29,9 +29,8 @@ const backlogMargin = time.Hour
 // Run starts all CassandraTSDB services
 func (c *CassandraTSDB) Run(ctx context.Context) {
 	shard := rand.Intn(shardNumber)
-	aggregateShardIntended := float64(c.options.AggregateIntendedDuration) / float64(shardNumber)
-	interval := (time.Duration(aggregateShardIntended)) * time.Second
-	ticker := time.NewTicker(interval)
+	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
+	ticker := time.NewTicker(aggregateShardIntended)
 	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
 
 	defer ticker.Stop()
