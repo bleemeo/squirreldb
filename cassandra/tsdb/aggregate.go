@@ -33,10 +33,26 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 	ticker := time.NewTicker(aggregateShardIntended)
 	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
 
+	var (
+		lastNotifiedAggretedFrom  time.Time
+		lastNotifiedAggretedUntil time.Time
+	)
+
+	aggregatedUntil := make(map[int]time.Time, shardNumber)
+
 	defer ticker.Stop()
 
 	for ctx.Err() == nil {
-		workDone := c.aggregateShard(shard)
+		start := time.Now()
+		workDone, tmp := c.aggregateShard(shard, &lastNotifiedAggretedFrom)
+
+		if workDone {
+			aggregationSeconds.Observe(time.Since(start).Seconds())
+		}
+
+		if !tmp.IsZero() {
+			aggregatedUntil[shard] = tmp
+		}
 
 		shard = (shard + 1) % shardNumber
 
@@ -50,6 +66,23 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 			continue
 		}
 
+		if len(aggregatedUntil) == shardNumber {
+			var minTime time.Time
+
+			for _, t := range aggregatedUntil {
+				if minTime.IsZero() || t.Before(minTime) {
+					minTime = t
+				}
+			}
+
+			aggregatdUntilSeconds.Set(float64(minTime.Unix()))
+
+			if minTime.After(lastNotifiedAggretedUntil) {
+				logger.Printf("All shard are aggregated until %s", minTime)
+				lastNotifiedAggretedUntil = minTime
+			}
+		}
+
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
@@ -60,12 +93,12 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 }
 
 // aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.
-func (c *CassandraTSDB) aggregateShard(shard int) bool {
+func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time.Time) (bool, time.Time) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
 	if acquired := lock.TryLock(); !acquired {
-		return false
+		return false, time.Time{}
 	}
 	defer lock.Unlock()
 
@@ -102,7 +135,12 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 	isSafeMargin := toTime.Before(now.Add(-backlogMargin))
 
 	if toTime.After(maxTime) || !isSafeMargin {
-		return false
+		return false, fromTime
+	}
+
+	if fromTime.After(*lastNotifiedAggretedFrom) {
+		logger.Printf("Start aggregating from %s to %s", fromTime, toTime)
+		*lastNotifiedAggretedFrom = fromTime
 	}
 
 	var uuids []gouuid.UUID
@@ -126,9 +164,11 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 		}
 	}
 
+	start := time.Now()
+
 	if err := c.doAggregation(shardUUIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
-		logger.Printf("Aggregate shard %d from [%v] to [%v]",
-			shard, fromTime, toTime)
+		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] in %v",
+			shard, fromTime, toTime, time.Since(start))
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
@@ -140,7 +180,7 @@ func (c *CassandraTSDB) aggregateShard(shard int) bool {
 			shard, fromTime, toTime, err)
 	}
 
-	return true
+	return true, toTime
 }
 
 // doAggregation perform the aggregation for given parameter

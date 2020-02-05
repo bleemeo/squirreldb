@@ -7,6 +7,18 @@ import (
 
 //nolint: gochecknoglobals
 var (
+	aggregationSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "tsdb",
+		Name:      "aggregation_seconds",
+		Help:      "Total processing time spent for aggregating each shard",
+	})
+	aggregatdUntilSeconds = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "squirreldb",
+		Subsystem: "tsdb",
+		Name:      "aggregated_untile_seconds",
+		Help:      "Most recent timestamp for which all shard are aggregated",
+	})
 	cassandraQueriesSecondsReadAggregated = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "tsdb",
