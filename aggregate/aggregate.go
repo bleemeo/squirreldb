@@ -3,8 +3,6 @@ package aggregate
 import (
 	"math"
 	"squirreldb/types"
-
-	gouuid "github.com/gofrs/uuid"
 )
 
 type AggregatedPoint struct {
@@ -22,17 +20,17 @@ type AggregatedData struct {
 
 // Aggregate returns an aggregated metric list from a metric list
 // points must be sorted in ascending order
-func Aggregate(metrics map[gouuid.UUID]types.MetricData, resolution int64) map[gouuid.UUID]AggregatedData {
+func Aggregate(metrics map[types.MetricID]types.MetricData, resolution int64) map[types.MetricID]AggregatedData {
 	if len(metrics) == 0 {
 		return nil
 	}
 
-	aggregatedMetrics := make(map[gouuid.UUID]AggregatedData)
+	aggregatedMetrics := make(map[types.MetricID]AggregatedData)
 
-	for uuid, data := range metrics {
+	for id, data := range metrics {
 		aggregatedData := aggregateData(data, resolution)
 
-		aggregatedMetrics[uuid] = aggregatedData
+		aggregatedMetrics[id] = aggregatedData
 	}
 
 	return aggregatedMetrics

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
 	"sort"
 	"squirreldb/cassandra/index"
+	"squirreldb/cassandra/states"
 	"strconv"
 	"time"
 
@@ -72,7 +74,7 @@ var (
 	}
 )
 
-func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
+func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates *states.CassandraStates) { //nolint: gocognit
 	proc, err := procfs.NewProc(os.Getpid())
 
 	if err != nil {
@@ -81,12 +83,12 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 
 	var maxRSS int
 
-	uuids, err := cassandraIndex.AllUUIDs()
+	ids, err := cassandraIndex.AllIDs()
 	if err != nil {
-		log.Fatalf("AllUUIDs() failed: %v", err)
+		log.Fatalf("AllIDs() failed: %v", err)
 	}
 
-	metricsBefore := len(uuids)
+	metricsBefore := len(ids)
 
 	var sumInsertTime time.Duration
 
@@ -99,7 +101,7 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 
 		shardID := *shardStart + n
 		shardStr := fmt.Sprintf("shard%06d", shardID)
-		insertTime := benchInsert(cassandraIndex, shardStr)
+		insertTime := benchInsert(cassandraIndex, shardStr, rnd)
 
 		if n%10 == 0 || shardID == *shardEnd {
 			log.Printf("Insert for shard %d took %v/query", shardID, (insertTime / time.Duration(*shardSize)).Round(time.Microsecond))
@@ -117,13 +119,13 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 	}
 
 	start := time.Now()
-	uuids, err = cassandraIndex.AllUUIDs()
+	ids, err = cassandraIndex.AllIDs()
 
 	if err != nil {
-		log.Fatalf("AllUUIDs() failed: %v", err)
+		log.Fatalf("AllIDs() failed: %v", err)
 	}
 
-	log.Printf("There is %d entry in the index (%d added). AllUUIDS took %v", len(uuids), len(uuids)-metricsBefore, time.Since(start))
+	log.Printf("There is %d entry in the index (%d added). AllIDs took %v", len(ids), len(ids)-metricsBefore, time.Since(start))
 
 	queries := []struct {
 		Name string
@@ -133,7 +135,7 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "shard=N",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
 				}
 			},
 		},
@@ -141,8 +143,8 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "shard=N name=X",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
 				}
 			},
 		},
@@ -150,8 +152,8 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "name=X shard=N",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
 				}
 			},
 		},
@@ -159,8 +161,8 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "shard=N name!=X",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: names[rand.Intn(len(names))]},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
 				}
 			},
 		},
@@ -168,8 +170,8 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "shard=N name=~X",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: names[rand.Intn(len(names))][:6] + ".*"},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: names[rnd.Intn(len(names))][:6] + ".*"},
 				}
 			},
 		},
@@ -177,7 +179,7 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 			Name: "shard=N name=node_.* name!=node_netstat_Udp_InErrors",
 			Fun: func(_ int) []*prompb.LabelMatcher {
 				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rand.Intn(shardCount)+*shardStart)},
+					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
 					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: "node_.*"},
 					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "node_netstat_Udp_InErrors"},
 				}
@@ -205,6 +207,33 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 		)
 	}
 
+	if *runExpiration {
+		beforePurge := len(ids)
+		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
+		err = squirrelStates.Write("index-expired-until", beforeYesterday.Format(time.RFC3339))
+
+		if err != nil {
+			log.Fatalf("state.Write() failed: %v", err)
+		}
+
+		start = time.Now()
+
+		cassandraIndex.RunOnce(context.Background())
+
+		stop := time.Now()
+
+		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
+			maxRSS = stat.ResidentMemory()
+		}
+
+		ids, err = cassandraIndex.AllIDs()
+		if err != nil {
+			log.Fatalf("AllIDs() failed: %v", err)
+		}
+
+		log.Printf("RunOnce took %v and deleted %d metrics", stop.Sub(start), beforePurge-len(ids))
+	}
+
 	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
 }
 
@@ -219,29 +248,37 @@ func bench(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 //
 // Metrics may also have additional labels (labelNN), ranging from 0 to 20 additional labels
 // (most of the time, 3 additional labels). Few values for those labels.
-func benchInsert(cassandraIndex *index.CassandraIndex, shardID string) time.Duration {
+func benchInsert(cassandraIndex *index.CassandraIndex, shardID string, rnd *rand.Rand) time.Duration {
 	metrics := make([][]*prompb.Label, *shardSize)
 
+	// We remove 1 days (and 1 hour) so the expiration of the metrics is yesterday
+	// (the 1 hour is because of index cassandraTTLUpdateDelay)
+	negativeTTL := strconv.FormatInt(-86400-3600, 10)
+
 	for n := 0; n < *shardSize; n++ {
-		userID := strconv.FormatInt(rand.Int63n(100000), 10)
+		userID := strconv.FormatInt(rnd.Int63n(100000), 10)
 		labels := map[string]string{
-			"__name__": names[rand.Intn(len(names))],
-			"shardID":  shardID,
-			"randomID": userID,
-			fmt.Sprintf("random%03d", rand.Intn(100)): userID,
-			fmt.Sprintf("help%03d", rand.Intn(100)):   helps[rand.Intn(len(helps))],
+			"__name__":                               names[rnd.Intn(len(names))],
+			"shardID":                                shardID,
+			"randomID":                               userID,
+			fmt.Sprintf("random%03d", rnd.Intn(100)): userID,
+			fmt.Sprintf("help%03d", rnd.Intn(100)):   helps[rnd.Intn(len(helps))],
 		}
 
 		var addN int
 		// 50% of metrics have 3 additional labels
-		if rand.Intn(1) == 0 {
+		if rnd.Intn(1) == 0 {
 			addN = 3
 		} else {
-			addN = rand.Intn(20)
+			addN = rnd.Intn(20)
 		}
 
 		for i := 0; i < addN; i++ {
-			labels[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rand.Int63n(20), 10)
+			labels[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rnd.Int63n(20), 10)
+		}
+
+		if *expiredFaction > 0 && n%*expiredFaction == 0 {
+			labels["__ttl__"] = negativeTTL
 		}
 
 		promLabel := map2Labels(labels)
@@ -257,8 +294,13 @@ func benchInsert(cassandraIndex *index.CassandraIndex, shardID string) time.Dura
 
 	start := time.Now()
 
-	for _, labels := range metrics {
-		_, _, err := cassandraIndex.LookupUUID(labels)
+	for startIndex := 0; startIndex < len(metrics); startIndex += *insertBatchSize {
+		endIndex := startIndex + *insertBatchSize
+		if endIndex > len(metrics) {
+			endIndex = len(metrics)
+		}
+
+		_, _, err := cassandraIndex.LookupIDs(metrics[startIndex:endIndex])
 		if err != nil {
 			log.Fatalf("benchInsert() failed: %v", err)
 		}
@@ -274,13 +316,13 @@ func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int)
 	var n int
 	for n = 0; n < *queryCount; n++ {
 		matchers := fun(n)
-		uuids, err := cassandraIndex.Search(matchers)
+		ids, err := cassandraIndex.Search(matchers)
 
 		if err != nil {
 			log.Fatalf("Search() failed: %v", err)
 		}
 
-		count += len(uuids)
+		count += len(ids)
 
 		if time.Since(start) > *queryMaxTime {
 			break

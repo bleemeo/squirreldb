@@ -1,28 +1,32 @@
 package aggregate
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 	"time"
 )
 
+const (
+	MetricIDTest1 = 1
+	MetricIDTest2 = 2
+)
+
 func TestAggregate(t *testing.T) {
 	type args struct {
-		metrics    map[gouuid.UUID]types.MetricData
+		metrics    map[types.MetricID]types.MetricData
 		resolution int64
 	}
 	tests := []struct {
 		name string
 		args args
-		want map[gouuid.UUID]AggregatedData
+		want map[types.MetricID]AggregatedData
 	}{
 		{
 			name: "test",
 			args: args{
-				metrics: map[gouuid.UUID]types.MetricData{
-					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				metrics: map[types.MetricID]types.MetricData{
+					MetricIDTest1: {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -47,7 +51,7 @@ func TestAggregate(t *testing.T) {
 						},
 						TimeToLive: 300,
 					},
-					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+					MetricIDTest2: {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -75,8 +79,8 @@ func TestAggregate(t *testing.T) {
 				},
 				resolution: 50000,
 			},
-			want: map[gouuid.UUID]AggregatedData{
-				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+			want: map[types.MetricID]AggregatedData{
+				MetricIDTest1: {
 					Points: []AggregatedPoint{
 						{
 							Timestamp: 0,
@@ -88,7 +92,7 @@ func TestAggregate(t *testing.T) {
 					},
 					TimeToLive: 300,
 				},
-				gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000002"): {
+				MetricIDTest2: {
 					Points: []AggregatedPoint{
 						{
 							Timestamp: 0,

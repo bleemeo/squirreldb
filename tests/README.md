@@ -45,3 +45,15 @@ With larger index, query may excess the deadline (5s by default), you may want t
 ```
 go run ./tests/squirreldb-cassandra-index-bench/ -no-drop -bench.shard-start 201 -bench.shard-end 400 -bench.max-time 30s
 ```
+
+Finally if you want to test a bit the expiration of metric you may want to run the following two command:
+```
+go run ./tests/squirreldb-cassandra-index-bench/ -bench.query 0 -expired-fraction 1 -bench.expiration=false -bench.shard-end 30
+go run ./tests/squirreldb-cassandra-index-bench/ -bench.query 0 -expired-fraction 2 -bench.expiration=true -bench.shard-end 30 -no-drop
+```
+
+The first command will:
+
+* Create 30k metrics that all are set to expire, but don't run the expiration
+* The second will update metric, and keep only 1/2 to expire. The other will get the expiration date updated.
+  Then run the expiration which should only delete 15k metrics

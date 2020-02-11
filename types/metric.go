@@ -1,12 +1,11 @@
 package types
 
 import (
-	gouuid "github.com/gofrs/uuid"
-
-	"math/big"
 	"math/rand"
 	"sort"
 )
+
+type MetricID int64
 
 type MetricPoint struct {
 	Timestamp int64
@@ -14,24 +13,17 @@ type MetricPoint struct {
 }
 
 type MetricData struct {
-	UUID       gouuid.UUID
+	ID         MetricID
 	Points     []MetricPoint
 	TimeToLive int64
 }
 
 type MetricRequest struct {
-	UUIDs         []gouuid.UUID
+	IDs           []MetricID
 	FromTimestamp int64
 	ToTimestamp   int64
 	StepMs        int64
 	Function      string
-}
-
-// UintFromUUID returns an uint64 from the UUID
-func UintFromUUID(uuid gouuid.UUID) uint64 {
-	bigInt := big.NewInt(0).SetBytes(uuid.Bytes())
-
-	return bigInt.Uint64()
 }
 
 // CopyPoints returns a copy of points

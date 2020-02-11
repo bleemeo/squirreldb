@@ -9,8 +9,6 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"time"
-
-	gouuid "github.com/gofrs/uuid"
 )
 
 const (
@@ -143,30 +141,30 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 		*lastNotifiedAggretedFrom = fromTime
 	}
 
-	var uuids []gouuid.UUID
+	var ids []types.MetricID
 
 	retry.Print(func() error {
 		var err error
-		uuids, err = c.index.AllUUIDs()
+		ids, err = c.index.AllIDs()
 
 		return err
 	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
-		"get UUIDs from the index",
+		"get IDs from the index",
 	)
 
-	var shardUUIDs []gouuid.UUID
+	var shardIDs []types.MetricID
 
-	for _, uuid := range uuids {
-		uuidShard := (int(types.UintFromUUID(uuid) % uint64(shardNumber)))
+	for _, id := range ids {
+		idShard := id % shardNumber
 
-		if uuidShard == shard {
-			shardUUIDs = append(shardUUIDs, uuid)
+		if idShard == types.MetricID(shard) {
+			shardIDs = append(shardIDs, id)
 		}
 	}
 
 	start := time.Now()
 
-	if err := c.doAggregation(shardUUIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
+	if err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
 		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] in %v",
 			shard, fromTime, toTime, time.Since(start))
 
@@ -184,13 +182,13 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 }
 
 // doAggregation perform the aggregation for given parameter
-func (c *CassandraTSDB) doAggregation(uuids []gouuid.UUID, fromTimestamp, toTimestamp, resolution int64) error {
-	if len(uuids) == 0 {
+func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTimestamp, resolution int64) error {
+	if len(ids) == 0 {
 		return nil
 	}
 
 	request := types.MetricRequest{
-		UUIDs:         uuids,
+		IDs:           ids,
 		FromTimestamp: fromTimestamp,
 		ToTimestamp:   toTimestamp,
 	}

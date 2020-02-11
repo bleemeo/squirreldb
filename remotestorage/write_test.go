@@ -8,137 +8,40 @@ import (
 	"squirreldb/types"
 	"testing"
 
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 )
 
 const defaultTTL = 3600
 
 type mockIndex struct {
-	fixedLookupUUID string
-	fixedSearchUUID string
-	fixedLabels     []*prompb.Label
+	fixedLookupID types.MetricID
+	fixedSearchID types.MetricID
+	fixedLabels   []*prompb.Label
 }
 
-func (i mockIndex) AllUUIDs() ([]gouuid.UUID, error) {
+func (i mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error) {
+func (i mockIndex) LookupLabels(id types.MetricID) ([]*prompb.Label, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error) {
-	return gouuid.FromStringOrNil(i.fixedLookupUUID), defaultTTL, nil
+func (i mockIndex) LookupIDs(labelsList [][]*prompb.Label) ([]types.MetricID, []int64, error) {
+	if len(labelsList) != 1 {
+		return nil, nil, errors.New("not implemented for more than one metrics")
+
+	}
+
+	return []types.MetricID{i.fixedLookupID}, []int64{defaultTTL}, nil
 }
 
-func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error) {
-	if i.fixedSearchUUID == "" {
-		return nil, nil
-	}
-	return []gouuid.UUID{gouuid.FromStringOrNil(i.fixedSearchUUID)}, nil
-}
-
-func Test_metricFromPromSeries(t *testing.T) {
-	type args struct {
-		promSeries *prompb.TimeSeries
-		index      types.Index
-	}
-	tests := []struct {
-		name string
-		args args
-		want types.MetricData
-	}{
-		{
-			name: "promSeries",
-			args: args{
-				promSeries: &prompb.TimeSeries{
-					Labels: []*prompb.Label{
-						{
-							Name:  "__name__",
-							Value: "up",
-						},
-						{
-							Name:  "monitor",
-							Value: "codelab",
-						},
-					},
-					Samples: []prompb.Sample{
-						{
-							Value:     10,
-							Timestamp: 0,
-						},
-						{
-							Value:     20,
-							Timestamp: 10000,
-						},
-						{
-							Value:     30,
-							Timestamp: 20000,
-						},
-						{
-							Value:     40,
-							Timestamp: 30000,
-						},
-						{
-							Value:     50,
-							Timestamp: 40000,
-						},
-						{
-							Value:     60,
-							Timestamp: 50000,
-						},
-					},
-				},
-				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
-			},
-			want: types.MetricData{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
-				Points: []types.MetricPoint{
-					{
-						Timestamp: 0,
-						Value:     10,
-					},
-					{
-						Timestamp: 10000,
-						Value:     20,
-					},
-					{
-						Timestamp: 20000,
-						Value:     30,
-					},
-					{
-						Timestamp: 30000,
-						Value:     40,
-					},
-					{
-						Timestamp: 40000,
-						Value:     50,
-					},
-					{
-						Timestamp: 50000,
-						Value:     60,
-					},
-				},
-				TimeToLive: defaultTTL,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := metricFromPromSeries(tt.args.promSeries, tt.args.index)
-			if err != nil {
-				t.Errorf("metricFromPromSeries() failed: %v", err)
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("metricFromPromSeries() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]types.MetricID, error) {
+	return []types.MetricID{i.fixedSearchID}, nil
 }
 
 func Benchmark_metricsFromPromSeries(b *testing.B) {
 	dummyIndex := mockIndex{
-		fixedLookupUUID: "00000000-0000-0000-0000-000000000001",
+		fixedLookupID: MetricIDTest1,
 	}
 	tests := []string{
 		"testdata/write_req_empty",
@@ -218,11 +121,11 @@ func Test_metricsFromTimeseries(t *testing.T) {
 						},
 					},
 				},
-				index: mockIndex{fixedLookupUUID: "00000000-0000-0000-0000-000000000001"},
+				index: mockIndex{fixedLookupID: MetricIDTest1},
 			},
 			want: []types.MetricData{
 				{
-					UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,

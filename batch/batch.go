@@ -32,8 +32,6 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
-
-	gouuid "github.com/gofrs/uuid"
 )
 
 const (
@@ -64,11 +62,11 @@ type TemporaryStore interface {
 	Append(points []types.MetricData) ([]int, error)
 
 	// GetSetPointsAndOffset do an atomic read-and-set on the metric points (atomic per-metric).
-	// It also set the offset for each metrics and add metric uuids to known metric.
+	// It also set the offset for each metrics and add metric ids to known metric.
 	GetSetPointsAndOffset(points []types.MetricData, offsets []int) ([]types.MetricData, error)
 
 	// ReadPointsAndOffset simply return points of write offset for metrics
-	ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []int, error)
+	ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error)
 
 	// MarkToExpire will mark points, write offset and flushdeadline to expire
 	// This is used to delete those entry. Since it should only be deleted if empty but
@@ -76,19 +74,19 @@ type TemporaryStore interface {
 	// only empty & no longer user metrics are deleted
 	// It also forget the metric from known metrics.
 	// Expiration is removed by GetSetPointsAndOffset and GetSetFlushDeadline
-	MarkToExpire(uuids []gouuid.UUID, ttl time.Duration) error
+	MarkToExpire(ids []types.MetricID, ttl time.Duration) error
 
 	// GetSetFlushDeadline do an atomic read-and-set on the metric flush deadline (atomic per-metric).
-	GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[gouuid.UUID]time.Time, error)
+	GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error)
 
 	// AddToTransfert add the metrics to a list of metrics to transfert ownership from one SquirrelDB to another
-	AddToTransfert(uuids []gouuid.UUID) error
+	AddToTransfert(ids []types.MetricID) error
 
 	// GetTransfert return & remove count metric from the list of metrics to transfert
-	GetTransfert(count int) (map[gouuid.UUID]time.Time, error)
+	GetTransfert(count int) (map[types.MetricID]time.Time, error)
 
 	// GetAllKnownMetrics return all known metrics with their deadline
-	GetAllKnownMetrics() (map[gouuid.UUID]time.Time, error)
+	GetAllKnownMetrics() (map[types.MetricID]time.Time, error)
 }
 
 // stateData contains information about points stored in memory store for one metrics
@@ -102,7 +100,7 @@ type stateData struct {
 type Batch struct {
 	batchSize time.Duration
 
-	states map[gouuid.UUID]stateData
+	states map[types.MetricID]stateData
 	mutex  sync.Mutex
 
 	memoryStore TemporaryStore
@@ -114,7 +112,7 @@ type Batch struct {
 func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
-		states:      make(map[gouuid.UUID]stateData),
+		states:      make(map[types.MetricID]stateData),
 		memoryStore: memoryStore,
 		reader:      reader,
 		writer:      writer,
@@ -124,7 +122,7 @@ func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.Metri
 }
 
 // Read implements MetricReader
-func (b *Batch) Read(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
+func (b *Batch) Read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
 	return b.read(request)
 }
 
@@ -181,8 +179,8 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		}
 
 		b.mutex.Lock()
-		for uuid, deadline := range metrics {
-			b.states[uuid] = stateData{
+		for id, deadline := range metrics {
+			b.states[id] = stateData{
 				flushDeadline: deadline,
 			}
 		}
@@ -200,23 +198,23 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		}
 	}
 
-	uuids := make([]gouuid.UUID, 0)
+	ids := make([]types.MetricID, 0)
 
 	b.mutex.Lock()
-	for uuid, data := range b.states {
+	for id, data := range b.states {
 		if now.After(data.flushDeadline) || force || shutdown {
-			uuids = append(uuids, uuid)
+			ids = append(ids, id)
 		}
 	}
 	b.mutex.Unlock()
 
-	for startIndex := 0; startIndex < len(uuids); startIndex += flushMetricLimit {
+	for startIndex := 0; startIndex < len(ids); startIndex += flushMetricLimit {
 		endIndex := startIndex + flushMetricLimit
-		if endIndex > len(uuids) {
-			endIndex = len(uuids)
+		if endIndex > len(ids) {
+			endIndex = len(ids)
 		}
 
-		b.flush(uuids[startIndex:endIndex], now, shutdown)
+		b.flush(ids[startIndex:endIndex], now, shutdown)
 	}
 
 	backgroundSeconds.Observe(time.Since(start).Seconds())
@@ -238,14 +236,14 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 			return
 		}
 
-		overdue := make(map[gouuid.UUID]time.Time)
+		overdue := make(map[types.MetricID]time.Time)
 
-		for uuid, deadline := range metrics {
+		for id, deadline := range metrics {
 			if deadline.Add(overdueThreshold).Before(now) {
-				overdue[uuid] = deadline
+				overdue[id] = deadline
 			}
 
-			if len(uuid) > takeoverLimit {
+			if len(overdue) > takeoverLimit {
 				break
 			}
 		}
@@ -270,21 +268,21 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 	}
 }
 
-func (b *Batch) takeoverMetrics(metrics map[gouuid.UUID]time.Time, now time.Time) {
-	uuids := make([]gouuid.UUID, len(metrics))
+func (b *Batch) takeoverMetrics(metrics map[types.MetricID]time.Time, now time.Time) {
+	ids := make([]types.MetricID, len(metrics))
 	i := 0
 
 	b.mutex.Lock()
 
-	for uuid, deadline := range metrics {
-		b.states[uuid] = stateData{
+	for id, deadline := range metrics {
+		b.states[id] = stateData{
 			flushDeadline: deadline,
 		}
-		uuids[i] = uuid
+		ids[i] = id
 	}
 	b.mutex.Unlock()
 
-	b.flush(uuids, now, false)
+	b.flush(ids, now, false)
 	takeoverInTotal.Add(float64(len(metrics)))
 }
 
@@ -355,13 +353,13 @@ func (b *Batch) setPointsAndOffset(previousMetrics []types.MetricData, setMetric
 
 			if needOffsetFix && deep < 3 {
 				rePreviousMetrics = append(rePreviousMetrics, types.MetricData{
-					UUID:       setMetric.UUID,
+					ID:         setMetric.ID,
 					TimeToLive: setMetric.TimeToLive,
 					Points:     setMetric.Points,
 				})
 
 				reSetMetrics = append(reSetMetrics, types.MetricData{
-					UUID:       setMetric.UUID,
+					ID:         setMetric.ID,
 					TimeToLive: setMetric.TimeToLive,
 					Points:     append(setMetric.Points, newPoints...),
 				})
@@ -377,7 +375,7 @@ func (b *Batch) setPointsAndOffset(previousMetrics []types.MetricData, setMetric
 				}
 			} else {
 				appendPoints = append(appendPoints, types.MetricData{
-					UUID:       setMetric.UUID,
+					ID:         setMetric.ID,
 					TimeToLive: setMetric.TimeToLive,
 					Points:     newPoints,
 				})
@@ -423,13 +421,13 @@ func (b *Batch) setPointsAndOffset(previousMetrics []types.MetricData, setMetric
 // * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore)
-func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
-	states := make([]stateData, len(uuids))
+func (b *Batch) flush(ids []types.MetricID, now time.Time, shutdown bool) {
+	states := make([]stateData, len(ids))
 
 	b.mutex.Lock()
 
-	for i, uuid := range uuids {
-		states[i] = b.states[uuid]
+	for i, id := range ids {
+		states[i] = b.states[id]
 	}
 
 	b.mutex.Unlock()
@@ -445,7 +443,7 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 
 	retry.Print(func() error {
 		var err error
-		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(uuids) // nolint: scopelint
+		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ids) // nolint: scopelint
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -460,7 +458,7 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 		offset := offsets[i]
 
 		if offset > len(storeData.Points) {
-			logger.Printf("Batch.flush(): unexpected offset == %d is too big for metric %s (only %d points)", offset, data.UUID.String(), len(data.Points))
+			logger.Printf("Batch.flush(): unexpected offset == %d is too big for metric ID %d (only %d points)", offset, data.ID, len(data.Points))
 			offset = len(storeData.Points)
 		}
 
@@ -485,7 +483,7 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 
 	for i, m := range metrics {
 		keptMetrics[i] = types.MetricData{
-			UUID:       m.UUID,
+			ID:         m.ID,
 			TimeToLive: m.TimeToLive,
 			Points:     make([]types.MetricPoint, 0, len(m.Points)/2),
 		}
@@ -509,23 +507,23 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 	results := b.setPointsAndOffset(metrics, keptMetrics, offsets, 0)
 
 	var (
-		uuidToExpire       []gouuid.UUID
-		transfertOwnership []gouuid.UUID
+		idToExpire         []types.MetricID
+		transfertOwnership []types.MetricID
 	)
 
-	newDeadlines := make(map[gouuid.UUID]time.Time)
+	newDeadlines := make(map[types.MetricID]time.Time)
 
 	b.mutex.Lock()
 	for i, hasPoint := range results {
-		uuid := uuids[i]
+		id := ids[i]
 
 		if !hasPoint {
-			uuidToExpire = append(uuidToExpire, uuid)
-			delete(b.states, uuid)
-		} else if _, isOwner := b.states[uuids[i]]; isOwner {
-			newDeadlines[uuid] = flushTimestamp(uuid, now, b.batchSize)
+			idToExpire = append(idToExpire, id)
+			delete(b.states, id)
+		} else if _, isOwner := b.states[ids[i]]; isOwner {
+			newDeadlines[id] = flushTimestamp(id, now, b.batchSize)
 			if shutdown {
-				transfertOwnership = append(transfertOwnership, uuid)
+				transfertOwnership = append(transfertOwnership, id)
 			}
 		}
 	}
@@ -545,14 +543,14 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 		// maximum deadline is now + b.batchSize
 		// Give two takeoverInterval as safely margin
 		ttl := 2*takeoverInterval + overdueThreshold + b.batchSize
-		return b.memoryStore.MarkToExpire(uuidToExpire, ttl)
+		return b.memoryStore.MarkToExpire(idToExpire, ttl)
 	},
 		retry.NewExponentialBackOff(30*time.Second),
 		logger,
 		"mark metrics to expire in memory store",
 	)
 
-	var storeDeadlines map[gouuid.UUID]time.Time
+	var storeDeadlines map[types.MetricID]time.Time
 
 	retry.Print(func() error {
 		var err error
@@ -568,15 +566,15 @@ func (b *Batch) flush(uuids []gouuid.UUID, now time.Time, shutdown bool) {
 
 	b.mutex.Lock()
 
-	for uuid, newDeadline := range newDeadlines {
-		previousDeadline := b.states[uuid].flushDeadline
-		b.states[uuid] = stateData{
+	for id, newDeadline := range newDeadlines {
+		previousDeadline := b.states[id].flushDeadline
+		b.states[id] = stateData{
 			flushDeadline: newDeadline,
 		}
 
-		if !storeDeadlines[uuid].Equal(previousDeadline) {
+		if !storeDeadlines[id].Equal(previousDeadline) {
 			takeoverOutTotal.Inc()
-			delete(b.states, uuid)
+			delete(b.states, id)
 		}
 	}
 	b.mutex.Unlock()
@@ -618,57 +616,57 @@ func sortMetrics(input []types.MetricData) int {
 }
 
 // Returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
-func (b *Batch) read(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
+func (b *Batch) read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
 	start := time.Now()
 
 	defer func() {
 		requestsSecondsRead.Observe(time.Since(start).Seconds())
 	}()
 
-	if len(request.UUIDs) == 0 {
+	if len(request.IDs) == 0 {
 		return nil, nil
 	}
 
-	metrics := make(map[gouuid.UUID]types.MetricData, len(request.UUIDs))
+	metrics := make(map[types.MetricID]types.MetricData, len(request.IDs))
 
 	var readPointsCount int
 
-	for _, uuid := range request.UUIDs {
-		uuidRequest := types.MetricRequest{
-			UUIDs:         []gouuid.UUID{uuid},
+	for _, id := range request.IDs {
+		idRequest := types.MetricRequest{
+			IDs:           []types.MetricID{id},
 			FromTimestamp: request.FromTimestamp,
 			ToTimestamp:   request.ToTimestamp,
 			StepMs:        request.StepMs,
 			Function:      request.Function,
 		}
 
-		temporaryMetrics, err := b.readTemporary(uuidRequest)
+		temporaryMetrics, err := b.readTemporary(idRequest)
 		if err != nil {
 			return nil, err
 		}
 
-		temporaryData := temporaryMetrics[uuid]
+		temporaryData := temporaryMetrics[id]
 
 		if len(temporaryData.Points) > 0 {
-			uuidRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
+			idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
 		}
 
 		data := types.MetricData{
 			Points: temporaryData.Points,
 		}
 
-		if uuidRequest.ToTimestamp >= uuidRequest.FromTimestamp {
-			persistentMetrics, err := b.reader.Read(uuidRequest)
+		if idRequest.ToTimestamp >= idRequest.FromTimestamp {
+			persistentMetrics, err := b.reader.Read(idRequest)
 			if err != nil {
 				return nil, err
 			}
 
-			persistentData := persistentMetrics[uuid]
+			persistentData := persistentMetrics[id]
 			data.Points = append(persistentData.Points, data.Points...)
 		}
 
 		if len(data.Points) > 0 {
-			metrics[uuid] = data
+			metrics[id] = data
 			readPointsCount += len(data.Points)
 		}
 	}
@@ -679,14 +677,14 @@ func (b *Batch) read(request types.MetricRequest) (map[gouuid.UUID]types.MetricD
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
-func (b *Batch) readTemporary(request types.MetricRequest) (map[gouuid.UUID]types.MetricData, error) {
-	metrics, _, err := b.memoryStore.ReadPointsAndOffset(request.UUIDs)
+func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
+	metrics, _, err := b.memoryStore.ReadPointsAndOffset(request.IDs)
 
 	if err != nil {
 		return nil, err
 	}
 
-	temporaryMetrics := make(map[gouuid.UUID]types.MetricData, len(request.UUIDs))
+	temporaryMetrics := make(map[types.MetricID]types.MetricData, len(request.IDs))
 
 	for i, data := range metrics {
 		var (
@@ -694,7 +692,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[gouuid.UUID]type
 			needSort bool
 		)
 
-		uuid := request.UUIDs[i]
+		id := request.IDs[i]
 
 		temporaryData := types.MetricData{
 			TimeToLive: data.TimeToLive,
@@ -717,7 +715,7 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[gouuid.UUID]type
 		}
 
 		if len(data.Points) > 0 {
-			temporaryMetrics[uuid] = temporaryData
+			temporaryMetrics[id] = temporaryData
 		}
 	}
 
@@ -743,7 +741,7 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 		ownerShipInitialPoints []types.MetricData
 	)
 
-	metricToFlush := make(map[gouuid.UUID]interface{})
+	metricToFlush := make(map[types.MetricID]interface{})
 
 	pointsCount, err := b.memoryStore.Append(metrics)
 	if err != nil {
@@ -763,8 +761,8 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 		}
 
 		if previousCount == 0 {
-			b.states[metrics[i].UUID] = stateData{
-				flushDeadline: flushTimestamp(metrics[i].UUID, now, b.batchSize),
+			b.states[metrics[i].ID] = stateData{
+				flushDeadline: flushTimestamp(metrics[i].ID, now, b.batchSize),
 			}
 
 			ownerShipInitialPoints = append(ownerShipInitialPoints, metrics[i])
@@ -774,11 +772,11 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 		// to avoid unbounded grow of temporary store when processing backlog
 		// of data.
 		if count > int(b.batchSize.Seconds()) {
-			_, isOwner := b.states[metrics[i].UUID]
+			_, isOwner := b.states[metrics[i].ID]
 			n := count / int(b.batchSize.Seconds())
 
 			if isOwner {
-				metricToFlush[metrics[i].UUID] = nil
+				metricToFlush[metrics[i].ID] = nil
 			} else if n > 1 && count < n*int(b.batchSize.Seconds()) {
 				// If the number of points crossed a multiple of our b.batchSize
 				// (that is count < N*b.batchSize and count >= N*b.batchSize)
@@ -786,7 +784,7 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 				//
 				// This will catch case where the current owner is dead, but give him
 				// the first threshold to act.
-				metricToFlush[metrics[i].UUID] = nil
+				metricToFlush[metrics[i].ID] = nil
 				nonOwnerWriteTotal.Inc()
 			}
 		}
@@ -799,12 +797,12 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 
 		b.setPointsAndOffset(ownerShipInitialPoints, ownerShipInitialPoints, offsets, 0)
 
-		deadlines := make(map[gouuid.UUID]time.Time, len(ownerShipInitialPoints))
+		deadlines := make(map[types.MetricID]time.Time, len(ownerShipInitialPoints))
 
 		b.mutex.Lock()
 
 		for _, m := range ownerShipInitialPoints {
-			deadlines[m.UUID] = b.states[m.UUID].flushDeadline
+			deadlines[m.ID] = b.states[m.ID].flushDeadline
 		}
 
 		b.mutex.Unlock()
@@ -818,11 +816,11 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 	requestsPointsTotalWrite.Add(float64(writtenPointsCount))
 
 	if len(metricToFlush) != 0 {
-		tmp := make([]gouuid.UUID, len(metricToFlush))
+		tmp := make([]types.MetricID, len(metricToFlush))
 		i := 0
 
-		for uuid := range metricToFlush {
-			tmp[i] = uuid
+		for id := range metricToFlush {
+			tmp[i] = id
 			i++
 		}
 
@@ -841,10 +839,10 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 
 // Returns a flush date
 // It follows the formula:
-// timestamp = (now + batchSize) - (now + batchSize + (uuid.int % batchSize)) % batchSize
-func flushTimestamp(uuid gouuid.UUID, now time.Time, batchSize time.Duration) time.Time {
+// timestamp = (now + batchSize) - (now + batchSize + (id.int % batchSize)) % batchSize
+func flushTimestamp(id types.MetricID, now time.Time, batchSize time.Duration) time.Time {
 	timestamp := now.Unix() + int64(batchSize.Seconds())
-	offset := int64(types.UintFromUUID(uuid) % uint64(batchSize))
+	offset := int64(id) % int64(batchSize.Seconds())
 
 	timestamp -= (timestamp + offset) % int64(batchSize.Seconds())
 

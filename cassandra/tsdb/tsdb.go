@@ -72,12 +72,12 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duratio
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data (
-			metric_uuid uuid,
+			metric_id bigint,
 			base_ts bigint,
 			offset_ms int,
 			insert_time timeuuid,
 			values blob,
-			PRIMARY KEY ((metric_uuid, base_ts), offset_ms, insert_time)
+			PRIMARY KEY ((metric_id, base_ts), offset_ms, insert_time)
 		)
 		WITH CLUSTERING ORDER BY (offset_ms DESC)
 		AND COMPRESSION = {
@@ -100,11 +100,11 @@ func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive tim
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data_aggregated (
-			metric_uuid uuid,
+			metric_id bigint,
 			base_ts bigint,
 			offset_second int,
 			values blob,
-			PRIMARY KEY ((metric_uuid, base_ts), offset_second)
+			PRIMARY KEY ((metric_id, base_ts), offset_second)
 		)
 		WITH CLUSTERING ORDER BY (offset_second DESC)
 		AND COMPRESSION = {

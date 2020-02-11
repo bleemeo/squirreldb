@@ -1,7 +1,6 @@
 package remotestorage
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -87,57 +86,49 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	return points
 }
 
-// Returns a UUID and a MetricData generated from a TimeSeries
-func metricFromPromSeries(promSeries *prompb.TimeSeries, index types.Index) (types.MetricData, error) {
-	uuid, timeToLive, err := index.LookupUUID(promSeries.Labels)
-	if err != nil {
-		return types.MetricData{}, err
-	}
-
-	points := pointsFromPromSamples(promSeries.Samples)
-	data := types.MetricData{
-		UUID:       uuid,
-		Points:     points,
-		TimeToLive: timeToLive,
-	}
-
-	return data, nil
-}
-
 // Returns a metric list generated from a TimeSeries list
 func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil
 	}
 
-	uuidToIndex := make(map[gouuid.UUID]int, len(promTimeseries))
+	idToIndex := make(map[types.MetricID]int, len(promTimeseries))
 
 	totalPoints := 0
-	metrics := make([]types.MetricData, len(promTimeseries))
-	i := 0
+	metrics := make([]types.MetricData, 0, len(promTimeseries))
 
-	for _, promSeries := range promTimeseries {
-		data, err := metricFromPromSeries(promSeries, index)
-		if err != nil {
-			return nil, err
+	labelsList := make([][]*prompb.Label, len(promTimeseries))
+
+	for i, promSeries := range promTimeseries {
+		labelsList[i] = promSeries.Labels
+	}
+
+	ids, ttls, err := index.LookupIDs(labelsList)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for i, promSeries := range promTimeseries {
+		points := pointsFromPromSamples(promSeries.Samples)
+		data := types.MetricData{
+			ID:         ids[i],
+			Points:     points,
+			TimeToLive: ttls[i],
 		}
 
-		if idx, found := uuidToIndex[data.UUID]; found {
+		if idx, found := idToIndex[data.ID]; found {
 			metrics[idx].Points = append(metrics[idx].Points, data.Points...)
 			if metrics[idx].TimeToLive < data.TimeToLive {
 				metrics[idx].TimeToLive = data.TimeToLive
 			}
 		} else {
-			metrics[i] = data
-			uuidToIndex[data.UUID] = i
-
-			i++
+			metrics = append(metrics, data)
+			idToIndex[data.ID] = len(metrics) - 1
 		}
 
 		totalPoints += len(data.Points)
 	}
-
-	metrics = metrics[:i]
 
 	requestsPointsTotalWrite.Add(float64(totalPoints))
 

@@ -3,13 +3,13 @@ package main
 import (
 	"log"
 	"reflect"
-	"squirreldb/cassandra/index"
+	"squirreldb/types"
+	"strconv"
 
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 )
 
-func test(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
+func test(cassandraIndex types.Index) { //nolint: gocognit
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
 		{ // index 1
@@ -333,104 +333,108 @@ func test(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 		},
 	}
 
-	metricsUUID := make([]gouuid.UUID, len(metrics))
-	UUIDmetrics := make(map[gouuid.UUID]int, len(metrics))
+	metricsIDs := make([]types.MetricID, len(metrics))
+	ID2metrics := make(map[types.MetricID]int, len(metrics))
 
 	for i, labels := range metrics {
 		if i == 0 {
 			continue
 		}
 
-		uuid, ttl, err := cassandraIndex.LookupUUID(map2Labels(labels))
+		ids, ttls, err := cassandraIndex.LookupIDs([][]*prompb.Label{map2Labels(labels)})
 		if err != nil {
-			log.Fatalf("LookupUUID(%v) failed: %v", labels, err)
+			log.Fatalf("LookupIDs(%v) failed: %v", labels, err)
 		}
 
-		if ttl != int64(defaultTimeToLive.Seconds()) {
-			log.Fatalf("TTL = %d, want default TTL (%d)", ttl, *defaultTimeToLive)
+		if ttls[0] != int64(defaultTimeToLive.Seconds()) {
+			log.Fatalf("TTL = %d, want default TTL (%d)", ttls[0], *defaultTimeToLive)
 		}
 
-		metricsUUID[i] = uuid
-		UUIDmetrics[uuid] = i
+		metricsIDs[i] = ids[0]
+		ID2metrics[ids[0]] = i
 	}
 
 	for _, tt := range tests {
-		wantUUIDToIndex := make(map[gouuid.UUID]int, len(tt.MatchingMetrics))
+		wantIDToIndex := make(map[types.MetricID]int, len(tt.MatchingMetrics))
 
 		for _, m := range tt.MatchingMetrics {
-			wantUUIDToIndex[metricsUUID[m]] = m
+			wantIDToIndex[metricsIDs[m]] = m
 		}
 
-		uuids, err := cassandraIndex.Search(tt.Matchers)
+		ids, err := cassandraIndex.Search(tt.Matchers)
 
 		if err != nil {
 			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
 
-		gotUUIDToIndex := make(map[gouuid.UUID]int, len(uuids))
+		gotIDToIndex := make(map[types.MetricID]int, len(ids))
 
-		for _, uuid := range uuids {
-			gotUUIDToIndex[uuid] = UUIDmetrics[uuid]
+		for _, id := range ids {
+			gotIDToIndex[id] = ID2metrics[id]
 		}
 
-		if !reflect.DeepEqual(wantUUIDToIndex, gotUUIDToIndex) {
-			log.Fatalf("Search(%s) = %v, want %v", tt.Name, gotUUIDToIndex, wantUUIDToIndex)
+		if !reflect.DeepEqual(wantIDToIndex, gotIDToIndex) {
+			log.Fatalf("Search(%s) = %v, want %v", tt.Name, gotIDToIndex, wantIDToIndex)
 		}
 	}
 
-	if *includeUUID {
-		uuid, _, err := cassandraIndex.LookupUUID([]*prompb.Label{
-			{Name: "__uuid__", Value: metricsUUID[1].String()},
-			{Name: "ignored", Value: "__uuid__ win"},
+	if *includeID {
+		ids, _, err := cassandraIndex.LookupIDs([][]*prompb.Label{
+			{
+				{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
+				{Name: "ignored", Value: "__metric_id__ win"},
+			},
 		})
 
 		if err != nil {
-			log.Fatalf("LookupUUID(__uuid__ valid) failed: %v", err)
+			log.Fatalf("LookupIDs(__metric_id__ valid) failed: %v", err)
 		}
 
-		if uuid != metricsUUID[1] {
-			log.Fatalf("LookupUUID(__uuid__ valid) = %v, want %v", uuid, metricsUUID[1])
+		if ids[0] != metricsIDs[1] {
+			log.Fatalf("LookupIDs(__metric_id__ valid) = %v, want %v", ids[0], metricsIDs[1])
 		}
 
-		_, _, err = cassandraIndex.LookupUUID([]*prompb.Label{
-			{Name: "__uuid__", Value: "00000000-0000-0000-0000-000000000001"},
-			{Name: "ignored", Value: "__uuid__ win"},
+		_, _, err = cassandraIndex.LookupIDs([][]*prompb.Label{
+			{
+				{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
+				{Name: "ignored", Value: "__metric_id__ win"},
+			},
 		})
 		if err == nil {
-			log.Fatalf("LookupUUID(__uuid__ invalid) succeeded. It must fail")
+			log.Fatalf("LookupIDs(__metric_id__ invalid) succeeded. It must fail")
 		}
 
-		uuids, err := cassandraIndex.Search([]*prompb.LabelMatcher{
-			{Type: prompb.LabelMatcher_EQ, Name: "__uuid__", Value: metricsUUID[1].String()},
-			{Type: prompb.LabelMatcher_EQ, Name: "ignored", Value: "only_uuid_is_used"},
+		ids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
+			{Type: prompb.LabelMatcher_EQ, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
+			{Type: prompb.LabelMatcher_EQ, Name: "ignored", Value: "only_id_is_used"},
 		})
 		if err != nil {
-			log.Fatalf("Search(__uuid__ valid) failed: %v", err)
+			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
 		}
 
-		if len(uuids) != 1 || uuids[0] != metricsUUID[1] {
-			log.Fatalf("Search(__uuid__ valid) = %v, want [%v]", uuids, metricsUUID[1])
+		if len(ids) != 1 || ids[0] != metricsIDs[1] {
+			log.Fatalf("Search(__metric_id__ valid) = %v, want [%v]", ids, metricsIDs[1])
 		}
 
-		uuids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
-			{Type: prompb.LabelMatcher_EQ, Name: "__uuid__", Value: metricsUUID[2].String()},
+		ids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
+			{Type: prompb.LabelMatcher_EQ, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[2]), 10)},
 			{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "up"},
 		})
 		if err != nil {
-			log.Fatalf("Search(__uuid__ valid 2) failed: %v", err)
+			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)
 		}
 
-		if len(uuids) != 1 || uuids[0] != metricsUUID[2] {
-			log.Fatalf("Search(__uuid__ valid 2) = %v, want [%v]", uuids, metricsUUID[2])
+		if len(ids) != 1 || ids[0] != metricsIDs[2] {
+			log.Fatalf("Search(__metric_id__ valid 2) = %v, want [%v]", ids, metricsIDs[2])
 		}
 	}
 
-	for i, uuid := range metricsUUID {
+	for i, id := range metricsIDs {
 		if i == 0 {
 			continue
 		}
 
-		labels, err := cassandraIndex.LookupLabels(uuid)
+		labels, err := cassandraIndex.LookupLabels(id)
 
 		if err != nil {
 			log.Fatalf("LookupLabels(%d) failed: %v", i, err)
@@ -444,19 +448,19 @@ func test(cassandraIndex *index.CassandraIndex) { //nolint: gocognit
 	}
 
 	if !*noDropTables {
-		got, err := cassandraIndex.AllUUIDs()
+		got, err := cassandraIndex.AllIDs()
 		if err != nil {
-			log.Fatalf("AllUUIDs() failed: %v", err)
+			log.Fatalf("AllIDs() failed: %v", err)
 		}
 
-		gotMap := make(map[gouuid.UUID]int, len(got))
+		gotMap := make(map[types.MetricID]int, len(got))
 
 		for _, v := range got {
-			gotMap[v] = UUIDmetrics[v]
+			gotMap[v] = ID2metrics[v]
 		}
 
-		if !reflect.DeepEqual(gotMap, UUIDmetrics) {
-			log.Fatalf("AllUUIDs() = %v, want %v", gotMap, UUIDmetrics)
+		if !reflect.DeepEqual(gotMap, ID2metrics) {
+			log.Fatalf("AllIDs() = %v, want %v", gotMap, ID2metrics)
 		}
 	}
 }

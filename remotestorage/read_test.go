@@ -5,8 +5,11 @@ import (
 	"squirreldb/types"
 	"testing"
 
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
+)
+
+const (
+	MetricIDTest1 = 1
 )
 
 func Test_requestFromPromQuery(t *testing.T) {
@@ -33,11 +36,11 @@ func Test_requestFromPromQuery(t *testing.T) {
 						EndMs:   50000,
 					},
 				},
-				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
+				index: mockIndex{fixedSearchID: MetricIDTest1},
 			},
 			want: types.MetricRequest{
-				UUIDs: []gouuid.UUID{
-					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				IDs: []types.MetricID{
+					MetricIDTest1,
 				},
 				FromTimestamp: 0,
 				ToTimestamp:   50000,
@@ -54,11 +57,11 @@ func Test_requestFromPromQuery(t *testing.T) {
 					Matchers:         nil,
 					Hints:            nil,
 				},
-				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
+				index: mockIndex{fixedSearchID: MetricIDTest1},
 			},
 			want: types.MetricRequest{
-				UUIDs: []gouuid.UUID{
-					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				IDs: []types.MetricID{
+					MetricIDTest1,
 				},
 				FromTimestamp: 0,
 				ToTimestamp:   50000,
@@ -119,12 +122,12 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 						},
 					},
 				},
-				index: mockIndex{fixedSearchUUID: "00000000-0000-0000-0000-000000000001"},
+				index: mockIndex{fixedSearchID: MetricIDTest1},
 			},
 			want: []types.MetricRequest{
 				{
-					UUIDs: []gouuid.UUID{
-						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					IDs: []types.MetricID{
+						MetricIDTest1,
 					},
 					FromTimestamp: 0,
 					ToTimestamp:   50000,
@@ -132,8 +135,8 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 					Function:      "avg",
 				},
 				{
-					UUIDs: []gouuid.UUID{
-						gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+					IDs: []types.MetricID{
+						MetricIDTest1,
 					},
 					FromTimestamp: 50000,
 					ToTimestamp:   100000,
@@ -267,7 +270,7 @@ func Test_promSamplesFromPoints(t *testing.T) {
 
 func Test_promSeriesFromMetric(t *testing.T) {
 	type args struct {
-		uuid  gouuid.UUID
+		id    types.MetricID
 		data  types.MetricData
 		index types.Index
 	}
@@ -279,7 +282,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 		{
 			name: "metric",
 			args: args{
-				uuid: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
+				id: MetricIDTest1,
 				data: types.MetricData{
 					Points: []types.MetricPoint{
 						{
@@ -363,7 +366,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := promSeriesFromMetric(tt.args.uuid, tt.args.data, tt.args.index)
+			got, err := promSeriesFromMetric(tt.args.id, tt.args.data, tt.args.index)
 			if err != nil {
 				t.Errorf("promSeriesFromMetric() failed: %v", err)
 			}
@@ -376,7 +379,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 
 func Test_promTimeseriesFromMetrics(t *testing.T) {
 	type args struct {
-		metrics map[gouuid.UUID]types.MetricData
+		metrics map[types.MetricID]types.MetricData
 		index   types.Index
 	}
 	tests := []struct {
@@ -387,8 +390,8 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		{
 			name: "metrics_filled",
 			args: args{
-				metrics: map[gouuid.UUID]types.MetricData{
-					gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"): {
+				metrics: map[types.MetricID]types.MetricData{
+					MetricIDTest1: {
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -474,7 +477,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		{
 			name: "metrics_empty",
 			args: args{
-				metrics: make(map[gouuid.UUID]types.MetricData),
+				metrics: make(map[types.MetricID]types.MetricData),
 				index:   nil,
 			},
 			want: nil,

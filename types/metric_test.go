@@ -4,42 +4,7 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
-
-	gouuid "github.com/gofrs/uuid"
 )
-
-func TestMetricUUID_Uint64(t *testing.T) {
-	type fields struct {
-		UUID gouuid.UUID
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   uint64
-	}{
-		{
-			name: "uuid_0",
-			fields: fields{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001"),
-			},
-			want: 1,
-		},
-		{
-			name: "uuid_10",
-			fields: fields{
-				UUID: gouuid.FromStringOrNil("00000000-0000-0000-0000-00000000000a"),
-			},
-			want: 10,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := UintFromUUID(tt.fields.UUID); got != tt.want {
-				t.Errorf("Uint64() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestDeduplicatePoints(t *testing.T) {
 	type args struct {

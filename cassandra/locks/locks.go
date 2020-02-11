@@ -11,6 +11,7 @@ import (
 
 	"github.com/gocql/gocql"
 
+	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 )
@@ -72,15 +73,29 @@ func (l *Lock) TryLock() bool {
 	defer l.mutex.Unlock()
 
 	if l.acquired {
+		debug.Print(debug.Level1, logger, "lock %s is already acquired by local instance", l.name)
 		return false
 	}
 
+	var holder string
+
+	start := time.Now()
+
 	locksTableInsertLockQuery := l.locksTableInsertLockQuery()
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
-	applied, err := locksTableInsertLockQuery.ScanCAS(nil, nil, nil, nil)
+	acquired, err := locksTableInsertLockQuery.ScanCAS(nil, &holder, nil)
+
+	locksLockSeconds.Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		logger.Printf("Unable to acquire lock: %v", err)
+		return false
+	}
+
+	if !acquired {
+		locksAlreadyAcquireSeconds.Inc()
+		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s", l.name, holder)
+
 		return false
 	}
 
@@ -96,10 +111,10 @@ func (l *Lock) TryLock() bool {
 		l.updateLock(ctx)
 	}()
 
-	return applied
+	return true
 }
 
-// Lock will call TryLock every minute until is successed
+// Lock will call TryLock every 10 seconds until is successed
 func (l *Lock) Lock() {
 	for {
 		ok := l.TryLock()
@@ -107,7 +122,7 @@ func (l *Lock) Lock() {
 			return
 		}
 
-		time.Sleep(time.Minute)
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -123,10 +138,14 @@ func (l *Lock) Unlock() {
 	l.cancel()
 	l.wg.Wait()
 
+	start := time.Now()
+
 	locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
 
 	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
 	retry.Print(locksTableDeleteLockQuery.Exec, retry.NewExponentialBackOff(retryMaxDelay), logger, "free lock")
+
+	locksUnlockSeconds.Observe(time.Since(start).Seconds())
 
 	l.acquired = false
 }
@@ -141,11 +160,15 @@ func (l *Lock) updateLock(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			retry.Print(func() error {
+				start := time.Now()
+
 				locksTableUpdateLockQuery := l.locksTableUpdateLockQuery()
 
 				locksTableUpdateLockQuery.SerialConsistency(gocql.LocalSerial)
 
 				err := locksTableUpdateLockQuery.Exec()
+
+				locksRefreshSeconds.Observe(time.Since(start).Seconds())
 
 				return err
 			}, retry.NewExponentialBackOff(retryMaxDelay), logger,

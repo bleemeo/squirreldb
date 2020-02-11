@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	goredis "github.com/go-redis/redis"
-	gouuid "github.com/gofrs/uuid"
 
 	"bytes"
 	"encoding/binary"
@@ -52,6 +51,15 @@ func New(options Options) *Redis {
 	return redis
 }
 
+func metricID2String(id types.MetricID) string {
+	return strconv.FormatInt(int64(id), 36)
+}
+
+func string2MetricID(input string) (types.MetricID, error) {
+	v, err := strconv.ParseInt(input, 36, 0)
+	return types.MetricID(v), err
+}
+
 // Append implement batch.TemporaryStore interface
 func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 	start := time.Now()
@@ -78,7 +86,7 @@ func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 			return nil, err
 		}
 
-		key := metricKeyPrefix + data.UUID.String()
+		key := metricKeyPrefix + metricID2String(data.ID)
 
 		commands[i] = pipe.Append(key, string(values))
 	}
@@ -122,7 +130,7 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 	pipe := r.client.Pipeline()
 	commands := make([]*goredis.StringCmd, len(points))
 	results := make([]types.MetricData, len(points))
-	uuids := make([]string, len(points))
+	ids := make([]string, len(points))
 
 	var writtenPointsCount int
 
@@ -134,18 +142,18 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 			return nil, err
 		}
 
-		uuidStr := data.UUID.String()
-		metricKey := metricKeyPrefix + uuidStr
-		offsetKey := offsetKeyPrefix + uuidStr
+		idStr := metricID2String(data.ID)
+		metricKey := metricKeyPrefix + idStr
+		offsetKey := offsetKeyPrefix + idStr
 
 		commands[i] = pipe.GetSet(metricKey, string(values))
-		uuids[i] = uuidStr
+		ids[i] = idStr
 
 		pipe.Expire(metricKey, defaultTTL)
 		pipe.Set(offsetKey, strconv.FormatInt(int64(offsets[i]), 10), defaultTTL)
 	}
 
-	pipe.SAdd(knownMetricsKey, uuids)
+	pipe.SAdd(knownMetricsKey, ids)
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
 		return nil, err
@@ -158,7 +166,7 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 		}
 
 		if err != goredis.Nil {
-			results[i], err = dataFromValues(data.UUID, tmp)
+			results[i], err = dataFromValues(data.ID, tmp)
 			if err != nil {
 				return nil, err
 			}
@@ -171,28 +179,28 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface
-func (r *Redis) ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []int, error) {
+func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) {
 	start := time.Now()
 
 	defer func() {
 		operationSecondsGet.Observe(time.Since(start).Seconds())
 	}()
 
-	if len(uuids) == 0 {
+	if len(ids) == 0 {
 		return nil, nil, nil
 	}
 
-	metrics := make([]types.MetricData, len(uuids))
-	writeOffsets := make([]int, len(uuids))
-	metricCommands := make([]*goredis.StringCmd, len(uuids))
-	offsetCommands := make([]*goredis.StringCmd, len(uuids))
+	metrics := make([]types.MetricData, len(ids))
+	writeOffsets := make([]int, len(ids))
+	metricCommands := make([]*goredis.StringCmd, len(ids))
+	offsetCommands := make([]*goredis.StringCmd, len(ids))
 	pipe := r.client.Pipeline()
 
 	var readPointsCount int
 
-	for i, uuid := range uuids {
-		metricKey := metricKeyPrefix + uuid.String()
-		offsetKey := offsetKeyPrefix + uuid.String()
+	for i, id := range ids {
+		metricKey := metricKeyPrefix + metricID2String(id)
+		offsetKey := offsetKeyPrefix + metricID2String(id)
 
 		metricCommands[i] = pipe.Get(metricKey)
 		offsetCommands[i] = pipe.Get(offsetKey)
@@ -202,7 +210,7 @@ func (r *Redis) ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []
 		return nil, nil, err
 	}
 
-	for i, uuid := range uuids {
+	for i, id := range ids {
 		values, err := metricCommands[i].Bytes()
 
 		if (err != nil) && (err != goredis.Nil) {
@@ -210,7 +218,7 @@ func (r *Redis) ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []
 		}
 
 		if err != goredis.Nil {
-			metrics[i], err = dataFromValues(uuid, values)
+			metrics[i], err = dataFromValues(id, values)
 
 			if err != nil {
 				return nil, nil, err
@@ -232,34 +240,34 @@ func (r *Redis) ReadPointsAndOffset(uuids []gouuid.UUID) ([]types.MetricData, []
 }
 
 // MarkToExpire implement batch.TemporaryStore interface
-func (r *Redis) MarkToExpire(uuids []gouuid.UUID, ttl time.Duration) error {
+func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	start := time.Now()
 
 	defer func() {
 		operationSecondsExpire.Observe(time.Since(start).Seconds())
 	}()
 
-	if len(uuids) == 0 {
+	if len(ids) == 0 {
 		return nil
 	}
 
-	uuidsStr := make([]string, len(uuids))
+	idsStr := make([]string, len(ids))
 	pipe := r.client.Pipeline()
 
-	for i, uuid := range uuids {
-		uuidStr := uuid.String()
-		metricKey := metricKeyPrefix + uuidStr
-		offsetKey := offsetKeyPrefix + uuidStr
-		deadlineKey := deadlineKeyPrefix + uuidStr
+	for i, id := range ids {
+		idStr := metricID2String(id)
+		metricKey := metricKeyPrefix + idStr
+		offsetKey := offsetKeyPrefix + idStr
+		deadlineKey := deadlineKeyPrefix + idStr
 
-		uuidsStr[i] = uuidStr
+		idsStr[i] = idStr
 
 		pipe.Expire(metricKey, ttl)
 		pipe.Expire(offsetKey, ttl)
 		pipe.Expire(deadlineKey, ttl)
 	}
 
-	pipe.SRem(knownMetricsKey, uuidsStr)
+	pipe.SRem(knownMetricsKey, idsStr)
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
 		return err
@@ -269,7 +277,7 @@ func (r *Redis) MarkToExpire(uuids []gouuid.UUID, ttl time.Duration) error {
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface
-func (r *Redis) GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[gouuid.UUID]time.Time, error) {
+func (r *Redis) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {
@@ -281,13 +289,13 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[go
 	}
 
 	pipe := r.client.Pipeline()
-	commands := make(map[gouuid.UUID]*goredis.StringCmd, len(deadlines))
-	results := make(map[gouuid.UUID]time.Time, len(deadlines))
+	commands := make(map[types.MetricID]*goredis.StringCmd, len(deadlines))
+	results := make(map[types.MetricID]time.Time, len(deadlines))
 
-	for uuid, deadline := range deadlines {
-		deadlineKey := deadlineKeyPrefix + uuid.String()
+	for id, deadline := range deadlines {
+		deadlineKey := deadlineKeyPrefix + metricID2String(id)
 
-		commands[uuid] = pipe.GetSet(deadlineKey, deadline.Format(time.RFC3339))
+		commands[id] = pipe.GetSet(deadlineKey, deadline.Format(time.RFC3339))
 
 		pipe.Expire(deadlineKey, defaultTTL)
 	}
@@ -296,14 +304,14 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[go
 		return nil, err
 	}
 
-	for uuid := range deadlines {
-		tmp, err := commands[uuid].Result()
+	for id := range deadlines {
+		tmp, err := commands[id].Result()
 		if err != nil && err != goredis.Nil {
 			return nil, err
 		}
 
 		if err != goredis.Nil {
-			results[uuid], err = time.Parse(time.RFC3339, tmp)
+			results[id], err = time.Parse(time.RFC3339, tmp)
 			if err != nil {
 				return nil, err
 			}
@@ -314,15 +322,15 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[gouuid.UUID]time.Time) (map[go
 }
 
 // AddToTransfert implement batch.TemporaryStore interface
-func (r *Redis) AddToTransfert(uuids []gouuid.UUID) error {
-	if len(uuids) == 0 {
+func (r *Redis) AddToTransfert(ids []types.MetricID) error {
+	if len(ids) == 0 {
 		return nil
 	}
 
-	strings := make([]string, len(uuids))
+	strings := make([]string, len(ids))
 
-	for i, uuid := range uuids {
-		strings[i] = uuid.String()
+	for i, id := range ids {
+		strings[i] = metricID2String(id)
 	}
 
 	_, err := r.client.SAdd(transfertKey, strings).Result()
@@ -331,7 +339,7 @@ func (r *Redis) AddToTransfert(uuids []gouuid.UUID) error {
 }
 
 // GetTransfert implement batch.TemporaryStore interface
-func (r *Redis) GetTransfert(count int) (map[gouuid.UUID]time.Time, error) {
+func (r *Redis) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 	result, err := r.client.SPopN(transfertKey, int64(count)).Result()
 
 	if err != nil && err != goredis.Nil {
@@ -342,7 +350,7 @@ func (r *Redis) GetTransfert(count int) (map[gouuid.UUID]time.Time, error) {
 }
 
 // GetAllKnownMetrics implement batch.TemporaryStore interface
-func (r *Redis) GetAllKnownMetrics() (map[gouuid.UUID]time.Time, error) {
+func (r *Redis) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {
@@ -358,17 +366,17 @@ func (r *Redis) GetAllKnownMetrics() (map[gouuid.UUID]time.Time, error) {
 	return r.getFlushDeadline(result)
 }
 
-func (r *Redis) getFlushDeadline(uuids []string) (map[gouuid.UUID]time.Time, error) {
-	if len(uuids) == 0 {
+func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, error) {
+	if len(ids) == 0 {
 		return nil, nil
 	}
 
 	pipe := r.client.Pipeline()
-	commands := make([]*goredis.StringCmd, len(uuids))
-	results := make(map[gouuid.UUID]time.Time, len(uuids))
+	commands := make([]*goredis.StringCmd, len(ids))
+	results := make(map[types.MetricID]time.Time, len(ids))
 
-	for i, uuidStr := range uuids {
-		deadlineKey := deadlineKeyPrefix + uuidStr
+	for i, idStr := range ids {
+		deadlineKey := deadlineKeyPrefix + idStr
 
 		commands[i] = pipe.Get(deadlineKey)
 	}
@@ -377,19 +385,19 @@ func (r *Redis) getFlushDeadline(uuids []string) (map[gouuid.UUID]time.Time, err
 		return nil, err
 	}
 
-	for i, uuidStr := range uuids {
+	for i, idStr := range ids {
 		tmp, err := commands[i].Result()
 		if err != nil && err != goredis.Nil {
 			return nil, err
 		}
 
 		if err != goredis.Nil {
-			uuid, err := gouuid.FromString(uuidStr)
+			id, err := string2MetricID(idStr)
 			if err != nil {
 				return nil, err
 			}
 
-			results[uuid], err = time.Parse(time.RFC3339, tmp)
+			results[id], err = time.Parse(time.RFC3339, tmp)
 
 			if err != nil {
 				return nil, err
@@ -401,7 +409,7 @@ func (r *Redis) getFlushDeadline(uuids []string) (map[gouuid.UUID]time.Time, err
 }
 
 // Return data from bytes values
-func dataFromValues(uuid gouuid.UUID, values []byte) (types.MetricData, error) {
+func dataFromValues(id types.MetricID, values []byte) (types.MetricData, error) {
 	data := types.MetricData{}
 	buffer := bytes.NewReader(values)
 
@@ -414,7 +422,7 @@ func dataFromValues(uuid gouuid.UUID, values []byte) (types.MetricData, error) {
 
 	data.Points = make([]types.MetricPoint, len(dataSerialized))
 	for i, point := range dataSerialized {
-		data.UUID = uuid
+		data.ID = id
 		data.Points[i] = types.MetricPoint{
 			Timestamp: point.Timestamp,
 			Value:     point.Value,

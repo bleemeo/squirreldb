@@ -3,19 +3,18 @@ package types
 import (
 	"sync"
 
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 )
 
 type Index interface {
-	AllUUIDs() ([]gouuid.UUID, error)
-	LookupLabels(uuid gouuid.UUID) ([]*prompb.Label, error)
-	LookupUUID(labels []*prompb.Label) (gouuid.UUID, int64, error)
-	Search(matchers []*prompb.LabelMatcher) ([]gouuid.UUID, error)
+	AllIDs() ([]MetricID, error)
+	LookupLabels(id MetricID) ([]*prompb.Label, error)
+	LookupIDs(labelsList [][]*prompb.Label) ([]MetricID, []int64, error)
+	Search(matchers []*prompb.LabelMatcher) ([]MetricID, error)
 }
 
 type MetricReader interface {
-	Read(request MetricRequest) (map[gouuid.UUID]MetricData, error)
+	Read(request MetricRequest) (map[MetricID]MetricData, error)
 }
 
 type MetricWriter interface {
@@ -32,9 +31,4 @@ type TryLocker interface {
 type State interface {
 	Read(name string, value interface{}) (bool, error)
 	Write(name string, value interface{}) error
-}
-
-type Instance struct {
-	Hostname string
-	UUID     string
 }

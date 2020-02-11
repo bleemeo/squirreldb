@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	gouuid "github.com/gofrs/uuid"
 )
 
 // bitStringToByte convert a bitstring to []byte
@@ -285,9 +283,9 @@ func Benchmark_gorillaEncode(b *testing.B) {
 
 func Test_gorillaEncodeAggregate(t *testing.T) {
 
-	uuidHunderdHours := gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000100")
-	metrics := map[gouuid.UUID]types.MetricData{
-		uuidHunderdHours: types.MetricData{
+	idHunderdHours := types.MetricID(100)
+	metrics := map[types.MetricID]types.MetricData{
+		idHunderdHours: types.MetricData{
 			TimeToLive: 42,
 			Points:     types.MakePointsForTest(100 * 3600 / 10),
 		},
@@ -367,8 +365,8 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[uuidHunderdHours].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[uuidHunderdHours].Points,
+				t0:               aggregatedMetrics[idHunderdHours].Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetrics[idHunderdHours].Points,
 			},
 		},
 	}
@@ -406,20 +404,20 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 
 func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 
-	uuidOneHour := gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000001")
-	uuidOneDay := gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000024")
-	uuidHunderdHours := gouuid.FromStringOrNil("00000000-0000-0000-0000-000000000100")
+	idOneHour := types.MetricID(1)
+	idOneDay := types.MetricID(741)
+	idHunderdHours := types.MetricID(778955)
 
-	metrics := map[gouuid.UUID]types.MetricData{
-		uuidOneHour: types.MetricData{
+	metrics := map[types.MetricID]types.MetricData{
+		idOneHour: types.MetricData{
 			TimeToLive: 42,
 			Points:     types.MakePointsForTest(3600 / 10),
 		},
-		uuidOneDay: types.MetricData{
+		idOneDay: types.MetricData{
 			TimeToLive: 42,
 			Points:     types.MakePointsForTest(86400 / 10),
 		},
-		uuidHunderdHours: types.MetricData{
+		idHunderdHours: types.MetricData{
 			TimeToLive: 42,
 			Points:     types.MakePointsForTest(100 * 3600 / 10),
 		},
@@ -469,24 +467,24 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 			name: "one_hour",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[uuidOneHour].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[uuidOneHour].Points,
+				t0:               aggregatedMetrics[idOneHour].Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetrics[idOneHour].Points,
 			},
 		},
 		{
 			name: "one_day",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[uuidOneDay].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[uuidOneDay].Points,
+				t0:               aggregatedMetrics[idOneDay].Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetrics[idOneDay].Points,
 			},
 		},
 		{
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[uuidHunderdHours].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[uuidHunderdHours].Points,
+				t0:               aggregatedMetrics[idHunderdHours].Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetrics[idHunderdHours].Points,
 			},
 		},
 	}

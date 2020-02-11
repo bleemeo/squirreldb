@@ -14,6 +14,6 @@ var defaults = map[string]interface{}{
 	"redis.address":                         "",
 	"remote_storage.listen_address":         "localhost:9201",
 	"batch.size":                            "15m",
-	"index.include_uuid":                    false,
+	"index.include_id":                      false,
 	"log.level":                             0,
 }

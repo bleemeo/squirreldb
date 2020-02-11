@@ -67,8 +67,8 @@ func main() {
 		squirrelStore = memorystore.New()
 	}
 
-	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig)
 	squirrelLocks := createSquirrelLocks(squirrelSession)
+	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig, squirrelLocks, squirrelStates)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
 	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch)
@@ -153,12 +153,14 @@ func createSquirrelSession(keyspace string, config *config.Config) *gocql.Sessio
 	return squirrelSession
 }
 
-func createSquirrelIndex(session *gocql.Session, config *config.Config) *index.CassandraIndex {
+func createSquirrelIndex(session *gocql.Session, config *config.Config, lock *locks.CassandraLocks, states types.State) *index.CassandraIndex {
 	var squirrelIndex *index.CassandraIndex
 
 	options := index.Options{
 		DefaultTimeToLive: config.Duration("cassandra.default_time_to_live"),
-		IncludeUUID:       config.Bool("index.include_uuid"),
+		IncludeID:         config.Bool("index.include_id"),
+		LockFactory:       lock,
+		States:            states,
 	}
 
 	retry.Print(func() error {

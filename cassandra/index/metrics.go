@@ -11,31 +11,31 @@ var (
 		Namespace: "squirreldb",
 		Subsystem: "index",
 		Name:      "lookup_labels_seconds",
-		Help:      "Total lookup for labels (from UUID) time in seconds",
+		Help:      "Total lookup for labels (from ID) time in seconds",
 	})
-	lookupUUIDSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	LookupIDSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "lookup_uuid_seconds",
-		Help:      "Total lookup for metric UUID (from labels) time in seconds",
+		Name:      "lookup_id_seconds",
+		Help:      "Total lookup for metric ID (from labels) time in seconds",
 	})
-	lookupUUIDMisses = promauto.NewCounter(prometheus.CounterOpts{
+	LookupIDMisses = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "lookup_uuid_misses_total",
-		Help:      "Total lookup for metric UUID that missed the cache (including new metrics)",
+		Name:      "lookup_id_misses_total",
+		Help:      "Total lookup for metric ID that missed the cache (including new metrics)",
 	})
-	lookupUUIDNew = promauto.NewCounter(prometheus.CounterOpts{
+	LookupIDNew = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "lookup_uuid_new_total",
-		Help:      "Total lookup for metric UUID for new metrics",
+		Name:      "lookup_id_new_total",
+		Help:      "Total lookup for metric ID for new metrics",
 	})
-	lookupUUIDRefresh = promauto.NewCounter(prometheus.CounterOpts{
+	LookupIDRefresh = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "lookup_uuid_refresh_total",
-		Help:      "Total lookup for metric UUID that caused a refresh of TTL",
+		Name:      "lookup_id_refresh_total",
+		Help:      "Total lookup for metric ID that caused a refresh of TTL",
 	})
 	searchMetricsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
@@ -46,7 +46,43 @@ var (
 	searchMetricsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "search_metrics_totals",
+		Name:      "search_metrics_total",
 		Help:      "Total number of metrics matching a serch from labels selector",
+	})
+	expirationMoveSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_move_seconds",
+		Help:      "Total processing time to move metrics ID from one expiration list to another in seconds",
+	})
+	expireMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_metrics_total",
+		Help:      "Total number of metrics processed by the expiration task (deleted or not)",
+	})
+	expireMetricDelete = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_metrics_delete_total",
+		Help:      "Total number of metrics deleted by the expiration task",
+	})
+	expireGhostMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_ghost_metrics_total",
+		Help:      "Total number of \"ghost\" metrics deleted by the expiration task, that is metric partially created",
+	})
+	expireTotalSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_seconds",
+		Help:      "Total processing time of the expiration task in seconds",
+	})
+	expireLockSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_lock_seconds",
+		Help:      "Total processing time with the new-metric lock hold by the task in seconds",
 	})
 )

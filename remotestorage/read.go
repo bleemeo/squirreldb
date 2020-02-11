@@ -1,7 +1,6 @@
 package remotestorage
 
 import (
-	gouuid "github.com/gofrs/uuid"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -98,14 +97,14 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 // Returns a MetricRequest generated from a Query
 func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.MetricRequest, error) {
-	uuids, err := index.Search(promQuery.Matchers)
+	ids, err := index.Search(promQuery.Matchers)
 
 	if err != nil {
 		return types.MetricRequest{}, err
 	}
 
 	request := types.MetricRequest{
-		UUIDs:         uuids,
+		IDs:           ids,
 		FromTimestamp: promQuery.StartTimestampMs,
 		ToTimestamp:   promQuery.EndTimestampMs,
 	}
@@ -158,9 +157,9 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	return promSamples
 }
 
-// Returns a pointer of a TimeSeries generated from a UUID and a MetricData
-func promSeriesFromMetric(uuid gouuid.UUID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
-	labels, err := index.LookupLabels(uuid)
+// Returns a pointer of a TimeSeries generated from a ID and a MetricData
+func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
+	labels, err := index.LookupLabels(id)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +175,7 @@ func promSeriesFromMetric(uuid gouuid.UUID, data types.MetricData, index types.I
 }
 
 // Returns a TimeSeries pointer list generated from a metric list
-func promTimeseriesFromMetrics(metrics map[gouuid.UUID]types.MetricData, index types.Index) ([]*prompb.TimeSeries, error) {
+func promTimeseriesFromMetrics(metrics map[types.MetricID]types.MetricData, index types.Index) ([]*prompb.TimeSeries, error) {
 	if len(metrics) == 0 {
 		return nil, nil
 	}
@@ -185,8 +184,8 @@ func promTimeseriesFromMetrics(metrics map[gouuid.UUID]types.MetricData, index t
 
 	promTimeseries := make([]*prompb.TimeSeries, 0, len(metrics))
 
-	for uuid, data := range metrics {
-		promSeries, err := promSeriesFromMetric(uuid, data, index)
+	for id, data := range metrics {
+		promSeries, err := promSeriesFromMetric(id, data, index)
 		if err != nil {
 			return nil, err
 		}
