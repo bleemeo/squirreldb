@@ -329,7 +329,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]*prompb.Label, now time.Time) 
 
 	if c.options.IncludeID {
 		if err := c.lookupIDsFromLabels(labelsList, idsData, founds); err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("lookup with %s failed: %v", idLabelName, err)
 		}
 	}
 
@@ -353,7 +353,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]*prompb.Label, now time.Time) 
 		if len(duplicatedMetric[sortedLabelsString]) == 1 {
 			requests, err = c.searchMetric(requests, sortedLabelsString, sortedLabels, &idsData[i], &founds[i], ttls[i], now)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("searching metric failed: %v", err)
 			}
 		} else {
 			iFirst := duplicatedMetric[sortedLabelsString][0]
@@ -419,6 +419,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]*prompb.Label, now time.Time) 
 	return ids, ttls, nil
 }
 
+// search metric ID by labels in Cassadran. Update and return requests to create metric if not found
 func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabelsString string, sortedLabels []*prompb.Label, idData *idData, found *bool, ttl int64, now time.Time) ([]createMetricRequest, error) {
 	if id, err := c.store.SelectLabels2ID(sortedLabelsString); err == nil {
 		idData.id = id
@@ -428,7 +429,7 @@ func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabe
 			*found = true
 		}
 
-		if err != nil {
+		if err != nil && err != gocql.ErrNotFound {
 			return nil, err
 		}
 	} else if err != gocql.ErrNotFound {

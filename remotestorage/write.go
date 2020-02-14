@@ -1,6 +1,8 @@
 package remotestorage
 
 import (
+	"fmt"
+
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -56,6 +58,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 	metrics, err := metricsFromTimeseries(writeRequest.Timeseries, w.index)
 	if err != nil {
+		logger.Printf("Unable to convert to internal metric: %v", err)
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorWrite.Inc()
 
@@ -63,6 +66,7 @@ func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	}
 
 	if err := w.writer.Write(metrics); err != nil {
+		logger.Printf("Unable to write metric: %v", err)
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorWrite.Inc()
 
@@ -106,7 +110,7 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Inde
 	ids, ttls, err := index.LookupIDs(labelsList)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("metric ID lookup failed: %v", err)
 	}
 
 	for i, promSeries := range promTimeseries {
