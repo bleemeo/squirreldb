@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  cassandra:
+    image: cassandra
+  squirreldb:
+    image: squirreldb
+    environment:
+    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+    - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  node:
+    image: prom/node-exporter
+    volumes:
+    - /:/rootfs:ro,rslave
+    command: --path.rootfs=/rootfs
+  grafana:
+    image: grafana/grafana
+    ports:
+    - 127.0.0.1:3000:3000

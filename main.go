@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"runtime"
+
 	"github.com/gocql/gocql"
 
 	"context"
@@ -29,6 +32,14 @@ import (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
+// variable set by GoReleaser
+//nolint: gochecknoglobals
+var (
+	version string
+	commit  string
+	date    string
+)
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -43,9 +54,23 @@ func main() {
 		return
 	}
 
+	if squirrelConfig.Bool("version") {
+		fmt.Println(version)
+		return
+	}
+
+	if squirrelConfig.Bool("build-info") {
+		fmt.Printf("Built at %s using %s from commit %s\n", date, runtime.Version(), commit)
+		fmt.Printf("Version %s\n", version)
+
+		return
+	}
+
 	if !squirrelConfig.Validate() {
 		os.Exit(1)
 	}
+
+	logger.Printf("Starting SquirrelDB %s (commit %s)", version, commit)
 
 	debug.Level = squirrelConfig.Int("log.level")
 

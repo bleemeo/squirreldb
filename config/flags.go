@@ -9,6 +9,18 @@ var flags = []flag{
 		usage: "Display help",
 	},
 	{
+		name:  "version",
+		short: "v",
+		value: false,
+		usage: "Show version and exit",
+	},
+	{
+		name:  "build-info",
+		short: "",
+		value: false,
+		usage: "Show build-info and exit",
+	},
+	{
 		name:  "cassandra.addresses",
 		short: "",
 		value: defaults["cassandra.addresses"],

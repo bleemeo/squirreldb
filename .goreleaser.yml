@@ -1,0 +1,41 @@
+project_name: squirreldb
+snapshot:
+  # Our version is based on the date.
+  name_template: '{{ time "06.01.02.150405" }}'
+before:
+  hooks:
+    - go mod download
+builds:
+- env:
+  - CGO_ENABLED=0
+  goos:
+  - linux
+  goarch:
+  - amd64
+  - arm
+  - 386
+  goarm:
+  - 6
+archives:
+- replacements:
+    darwin: Darwin
+    linux: Linux
+    windows: Windows
+    386: i386
+    amd64: x86_64
+  format: binary
+dockers:
+- image_templates:
+  - squirreldb:latest
+  - squirreldb:{{.Version}}
+checksum:
+  name_template: 'checksums.txt'
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
+release:
+  # Don't try to modify Github
+  disable: true
