@@ -55,7 +55,7 @@ mkdir -p /tmp/golangci-lint-cache; docker run --rm -v $(pwd):/app -u $UID -v /tm
 SquirrelDB use Go tests, you may run them with:
 
 ```
-go test squirreldb/... || echo "TEST FAILED"
+go test ./... || echo "TEST FAILED"
 ```
 
 SquirrelDB need a Cassandra database, you may run one with:
