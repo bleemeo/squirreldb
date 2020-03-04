@@ -8,7 +8,7 @@ SquirrelDB store data in Cassandra which allow to rely on Cassandra's scalabilit
 SquirrelDB use goreleaser to build its release, to build the release binaries and Docker images run:
 
 ```
-docker run --rm -u $UID:999 -e HOME=/go/pkg -e CGO_ENABLED=0 \
+docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
    -v $(pwd):/src -w /src \
    -v /var/run/docker.sock:/var/run/docker.sock \
    --entrypoint '' \
