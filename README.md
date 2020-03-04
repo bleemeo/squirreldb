@@ -43,7 +43,10 @@ GOCMD="docker run --net host --rm -ti -v $(pwd):/srv/workspace -w /srv/workspace
 $GOCMD test ./...
 ```
 
-The following will assume "go" is golang 1.13 or more, if not replace it with $GOCMD.
+The following will assume "go" is golang 1.13 or more, if not replace it with $GOCMD or use an alias:
+```
+alias go=$GOCMD
+```
 
 
 SquirrelDB use golangci-lint as linter. You may run it with:
