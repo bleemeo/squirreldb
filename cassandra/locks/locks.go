@@ -38,10 +38,26 @@ type Lock struct {
 }
 
 // New creates a new CassandraLocks object
-func New(session *gocql.Session) (*CassandraLocks, error) {
-	locksTableCreateQuery := locksTableCreateQuery(session)
+func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) {
+	var err error
 
-	if err := locksTableCreateQuery.Exec(); err != nil {
+	// Creation of tables concurrently is not possible on Cassandra.
+	// But we don't yet have lock, so use random jitter to reduce change of
+	// collision.
+	// Improve a bit, and make sure the one which created the keyspace
+	// try first to create the tables.
+	if createdKeySpace {
+		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond)
+
+		err = initTable(session)
+	} else if !tableExists(session) {
+		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
+		debug.Print(1, logger, "created lock tables")
+
+		err = initTable(session)
+	}
+
+	if err != nil {
 		return nil, err
 	}
 
@@ -50,6 +66,18 @@ func New(session *gocql.Session) (*CassandraLocks, error) {
 	}
 
 	return locks, nil
+}
+
+func initTable(session *gocql.Session) error {
+	locksTableCreateQuery := locksTableCreateQuery(session)
+	locksTableCreateQuery.Consistency(gocql.All)
+
+	return locksTableCreateQuery.Exec()
+}
+
+func tableExists(session *gocql.Session) bool {
+	err := session.Query("SELECT name FROM locks WHERE name='test'").Exec()
+	return err == nil
 }
 
 // CreateLock return a Locker for given name.
@@ -65,6 +93,11 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 		c:          c,
 		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)),
 	}
+}
+
+// SchemaLock return a lock to modify the Cassandra schema
+func (c CassandraLocks) SchemaLock() types.TryLocker {
+	return c.CreateLock("cassandra-schema", 10*time.Second)
 }
 
 // TryLock try to acquire the Lock and return true if acquire

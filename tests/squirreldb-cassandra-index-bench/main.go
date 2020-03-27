@@ -49,7 +49,7 @@ func main() {
 		*cassandraAddresses = value
 	}
 
-	cassandraSession, err := session.New(session.Options{
+	cassandraSession, keyspaceCreated, err := session.New(session.Options{
 		Addresses:         strings.Split(*cassandraAddresses, ","),
 		ReplicationFactor: *cassanraReplicationFactor,
 		Keyspace:          *cassandraKeyspace,
@@ -63,12 +63,12 @@ func main() {
 		drop(cassandraSession)
 	}
 
-	squirrelLocks, err := locks.New(cassandraSession)
+	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
 	if err != nil {
 		log.Fatalf("Unable to create locks: %v", err)
 	}
 
-	squirrelStates, err := states.New(cassandraSession)
+	squirrelStates, err := states.New(cassandraSession, squirrelLocks.SchemaLock())
 	if err != nil {
 		log.Fatalf("Unable to create states: %v", err)
 	}
@@ -78,6 +78,7 @@ func main() {
 		IncludeID:         *includeID,
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
+		SchemaLock:        squirrelLocks.SchemaLock(),
 	})
 	if err != nil {
 		log.Fatalf("Unable to create index: %v", err)
@@ -88,6 +89,7 @@ func main() {
 		IncludeID:         *includeID,
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
+		SchemaLock:        squirrelLocks.SchemaLock(),
 	})
 	if err != nil {
 		log.Fatalf("Unable to create 2nd index: %v", err)

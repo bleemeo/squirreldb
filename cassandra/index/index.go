@@ -75,6 +75,7 @@ type Options struct {
 	IncludeID         bool
 	LockFactory       lockFactory
 	States            types.State
+	SchemaLock        sync.Locker
 }
 
 type CassandraIndex struct {
@@ -119,7 +120,8 @@ const (
 func New(session *gocql.Session, options Options) (*CassandraIndex, error) {
 	return new(
 		cassandraStore{
-			session: session,
+			session:    session,
+			schemaLock: options.SchemaLock,
 		},
 		options,
 	)
@@ -1668,7 +1670,8 @@ type bytesIter interface {
 }
 
 type cassandraStore struct {
-	session *gocql.Session
+	session    *gocql.Session
+	schemaLock sync.Locker
 }
 
 type cassandraByteIter struct {
@@ -1697,6 +1700,9 @@ func (i cassandraByteIter) Err() error {
 
 // createTables create all Cassandra tables
 func (s cassandraStore) Init() error {
+	s.schemaLock.Lock()
+	defer s.schemaLock.Unlock()
+
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS index_labels2id (
 			labels text,
@@ -1723,7 +1729,7 @@ func (s cassandraStore) Init() error {
 	}
 
 	for _, query := range queries {
-		if err := s.session.Query(query).Exec(); err != nil {
+		if err := s.session.Query(query).Consistency(gocql.All).Exec(); err != nil {
 			return err
 		}
 	}

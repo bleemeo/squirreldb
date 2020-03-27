@@ -1,6 +1,7 @@
 package tsdb
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -27,6 +28,7 @@ type Options struct {
 	AggregateResolution       time.Duration
 	AggregateSize             time.Duration
 	AggregateIntendedDuration time.Duration
+	SchemaLock                sync.Locker
 }
 
 type lockFactory interface {
@@ -44,13 +46,18 @@ type CassandraTSDB struct {
 
 // New created a new CassandraTSDB object
 func New(session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
+	options.SchemaLock.Lock()
+	defer options.SchemaLock.Unlock()
+
 	dataTableCreateQuery := dataTableCreateQuery(session, options.DefaultTimeToLive)
+	dataTableCreateQuery.Consistency(gocql.All)
 
 	if err := dataTableCreateQuery.Exec(); err != nil {
 		return nil, err
 	}
 
 	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, options.DefaultTimeToLive)
+	aggregateDataTableCreateQuery.Consistency(gocql.All)
 
 	if err := aggregateDataTableCreateQuery.Exec(); err != nil {
 		return nil, err

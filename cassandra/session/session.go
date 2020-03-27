@@ -1,6 +1,11 @@
 package session
 
 import (
+	"log"
+	"math/rand"
+	"os"
+	"squirreldb/debug"
+
 	"github.com/gocql/gocql"
 
 	"strconv"
@@ -8,42 +13,77 @@ import (
 	"time"
 )
 
+//nolint: gochecknoglobals
+var logger = log.New(os.Stdout, "[session] ", log.LstdFlags)
+
 type Options struct {
 	Addresses         []string
 	Keyspace          string
 	ReplicationFactor int
 }
 
-// New creates a new Cassandra object
-func New(options Options) (*gocql.Session, error) {
+// New creates a new Cassandra session and return if the keyspace was create by this instance
+func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 3 * time.Second
 	session, err := cluster.CreateSession()
 
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	session.SetConsistency(gocql.LocalQuorum)
+	defer session.Close()
 
-	replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
-	keyspaceCreateQuery := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
+	session.SetConsistency(gocql.All)
 
-	if err := keyspaceCreateQuery.Exec(); err != nil {
-		session.Close()
-		return nil, err
+	keyspaceCreated := false
+
+	if !keyspaceExists(session, options.Keyspace) {
+		// Not sure if we are allowed to create keyspace concurrently. Add a random jitter to
+		// reduce change of concurrent keyspace creation
+		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
+
+		replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
+		query := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
+
+		err = query.Exec()
+
+		// nolint: gocritic
+		if _, ok := err.(*gocql.RequestErrAlreadyExists); ok {
+			keyspaceCreated = false
+		} else if err != nil {
+			return nil, false, err
+		} else {
+			keyspaceCreated = true
+			debug.Print(1, logger, "keyspace %s created", options.Keyspace)
+		}
 	}
 
 	cluster.Keyspace = options.Keyspace
 
-	return cluster.CreateSession()
+	finalSession, err := cluster.CreateSession()
+	if err != nil {
+		return nil, false, err
+	}
+
+	finalSession.SetConsistency(gocql.LocalQuorum)
+
+	return finalSession, keyspaceCreated, nil
+}
+
+func keyspaceExists(session *gocql.Session, keyspace string) bool {
+	var name string
+
+	err := session.Query("SELECT keyspace_name FROM system_schema.keyspaces where keyspace_name = ?", keyspace).Scan(&name)
+
+	return err == nil
 }
 
 // Returns keyspace create query
 func keyspaceCreateQuery(session *gocql.Session, keyspace, replicationFactor string) *gocql.Query {
 	replacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	query := session.Query(replacer.Replace(`
-		CREATE KEYSPACE IF NOT EXISTS $KEYSPACE
+		CREATE KEYSPACE $KEYSPACE
 		WITH REPLICATION = {
 			'class': 'SimpleStrategy',
 			'replication_factor': $REPLICATION_FACTOR

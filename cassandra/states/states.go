@@ -1,6 +1,8 @@
 package states
 
 import (
+	"sync"
+
 	"github.com/gocql/gocql"
 
 	"fmt"
@@ -12,8 +14,12 @@ type CassandraStates struct {
 }
 
 // New creates a new CassandraStates object
-func New(session *gocql.Session) (*CassandraStates, error) {
+func New(session *gocql.Session, lock sync.Locker) (*CassandraStates, error) {
+	lock.Lock()
+	defer lock.Unlock()
+
 	statesTableCreateQuery := statesTableCreateQuery(session)
+	statesTableCreateQuery.Consistency(gocql.All)
 
 	if err := statesTableCreateQuery.Exec(); err != nil {
 		return nil, err
