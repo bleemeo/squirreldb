@@ -16,7 +16,7 @@ require (
 	github.com/onsi/ginkgo v1.11.0 // indirect
 	github.com/onsi/gomega v1.8.1 // indirect
 	github.com/pelletier/go-toml v1.6.0 // indirect
-	github.com/pilosa/pilosa v1.4.0
+	github.com/pilosa/pilosa/v2 v2.0.0-alpha.1.0.20200317175727-eb73042e820e
 	github.com/prometheus/client_golang v1.3.0
 	github.com/prometheus/common v0.7.0
 	github.com/prometheus/procfs v0.0.8

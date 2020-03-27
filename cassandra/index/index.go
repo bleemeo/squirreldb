@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gocql/gocql"
-	"github.com/pilosa/pilosa/roaring"
+	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/prompb"
 	"golang.org/x/sync/errgroup"
 

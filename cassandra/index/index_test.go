@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/pilosa/pilosa/roaring"
+	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -1872,6 +1872,14 @@ func Test_freeFreeID(t *testing.T) {
 		}
 	}
 
+	// test bug that occured with all IDs assigned between 1 to 36183 (included)
+	// but 31436 and 31437.
+	// This is actually a bug in pilosa :(
+	bug1 := roaring.NewBTreeBitmap()
+	bug1 = bug1.Flip(1, 36183)
+	_, _ = bug1.Remove(31436, 31437)
+	bug1.Optimize()
+
 	tests := []struct {
 		name   string
 		bitmap *roaring.Bitmap
@@ -1911,6 +1919,11 @@ func Test_freeFreeID(t *testing.T) {
 			name:   "startAndEnd",
 			bitmap: startAndEnd,
 			want:   10001,
+		},
+		{
+			name:   "bug1",
+			bitmap: bug1,
+			want:   31436,
 		},
 	}
 	for _, tt := range tests {
