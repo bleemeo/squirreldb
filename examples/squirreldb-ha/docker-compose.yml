@@ -1,0 +1,56 @@
+version: '3'
+
+services:
+  cassandra1:
+    image: cassandra
+    environment:
+    - "MAX_HEAP_SIZE=128M"
+    - "HEAP_NEWSIZE=24M"
+    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+  cassandra2:
+    image: cassandra
+    environment:
+    - "MAX_HEAP_SIZE=128M"
+    - "HEAP_NEWSIZE=24M"
+    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+  cassandra3:
+    image: cassandra
+    environment:
+    - "MAX_HEAP_SIZE=128M"
+    - "HEAP_NEWSIZE=24M"
+    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+
+  redis:
+    image: redis
+
+  squirreldb1:
+    image: squirreldb
+    environment:
+    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
+    - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+    - SQUIRRELDB_REDIS_ADDRESS=redis:6379
+  squirreldb2:
+    image: squirreldb
+    environment:
+    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
+    - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+    - SQUIRRELDB_REDIS_ADDRESS=redis:6379
+
+  nginx:
+    image: nginx
+    volumes:
+    - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+    - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  node:
+    image: prom/node-exporter
+    volumes:
+    - /:/rootfs:ro,rslave
+    command: --path.rootfs=/rootfs
+  grafana:
+    image: grafana/grafana
+    ports:
+    - 127.0.0.1:3000:3000

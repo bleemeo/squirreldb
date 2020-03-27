@@ -29,7 +29,7 @@ docker-compose up -d
 Then, go to http://localhost:3000 and:
 
 * Add a Prometheus datasource (using http://prometheus:9090 as URL)
-* Create your dashboard or import a dashboard.
+* Create your dashboard or import a dashboard (for example import dashboard with ID 1860).
 
 
 ## Test and Develop
@@ -72,6 +72,20 @@ Then run SquirrelDB from source:
 ```
 go run squirreldb
 ```
+
+## HA setup
+
+SquirrelDB allow both availability and scalability:
+
+* The long term storage availability and scalability is done by a Cassandra cluster. Setup
+  a Cassandra cluster and use a replication level > 1 (3 is recommended).
+* The short term storage (by default last 15 minutes) which is store in-memory could be
+  moved to Redis.
+  A Redis cluster will provide availability and scalability of short term storage.
+* When short term storage is provided by Redis, SquirrelDB instance are stateless,
+  scalling them is just adding more of them being a load-balancer (like nginx).
+
+See examples/squirreldb-ha for a quickstart on HA setup.
 
 ### Note on VS code
 
