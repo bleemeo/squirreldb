@@ -7,55 +7,81 @@ services:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
     - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+    networks:
+      default:
+        ipv4_address: 172.28.0.11 # Cassandra don't like if node swap their IPs. Other case should be fine
   cassandra2:
     image: cassandra
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
     - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+    networks:
+      default:
+        ipv4_address: 172.28.0.12
   cassandra3:
     image: cassandra
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
     - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+    networks:
+      default:
+        ipv4_address: 172.28.0.13
 
   redis1:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.21 # Redis need fixed IP of the cluster may fail to recover by itself if node switch their IPs or all node changes their IP.
   redis2:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.22
   redis3:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.23
   redis4:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.24
   redis5:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.25
   redis6:
     image: redis
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
-    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
-    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+    command: ["/etc/redis.conf"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.26
+  redis_init:
+    image: redis
+    volumes:
+    - ./redis-init.sh:/usr/bin/redis-init.sh:ro
+    command: ["/bin/sh", "/usr/bin/redis-init.sh"]
 
   squirreldb1:
     image: squirreldb
@@ -63,12 +89,18 @@ services:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
     - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+    networks:
+      default:
+        ipv4_address: 172.28.0.31 # SquirrelDB don't care about its IP, but nginx will only resolv DNS name on startup. So if SquirrelDB change their IP, nginx will no longer send traffic to them
   squirreldb2:
     image: squirreldb
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
     - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+    networks:
+      default:
+        ipv4_address: 172.28.0.32
 
   nginx:
     image: nginx
@@ -88,3 +120,9 @@ services:
     image: grafana/grafana
     ports:
     - 127.0.0.1:3000:3000
+
+networks:
+  default:
+    ipam:
+      config:
+      - subnet: 172.28.0.0/16
