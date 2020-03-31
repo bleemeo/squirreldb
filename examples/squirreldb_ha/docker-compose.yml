@@ -20,21 +20,55 @@ services:
     - "HEAP_NEWSIZE=24M"
     - "CASSANDRA_SEEDS=cassandra1,cassandra2"
 
-  redis:
+  redis1:
     image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+  redis2:
+    image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+  redis3:
+    image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+  redis4:
+    image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+  redis5:
+    image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
+  redis6:
+    image: redis
+    volumes:
+    - ./redis.conf:/etc/redis.conf:ro
+    - ./redis-fix-ip.sh:/bin/redis-fix-ip.sh
+    command: ["/bin/sh", "/bin/redis-fix-ip.sh"]
 
   squirreldb1:
     image: squirreldb
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
-    - SQUIRRELDB_REDIS_ADDRESS=redis:6379
+    - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
   squirreldb2:
     image: squirreldb
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
-    - SQUIRRELDB_REDIS_ADDRESS=redis:6379
+    - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
 
   nginx:
     image: nginx

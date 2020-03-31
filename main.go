@@ -86,10 +86,10 @@ func main() {
 
 	var squirrelStore batch.TemporaryStore
 
-	redisAddress := squirrelConfig.String("redis.address")
+	redisAddresses := squirrelConfig.Strings("redis.addresses")
 
-	if redisAddress != "" {
-		squirrelStore = createSquirrelRedis(redisAddress)
+	if len(redisAddresses) > 0 {
+		squirrelStore = createSquirrelRedis(redisAddresses)
 	} else {
 		squirrelStore = memorystore.New()
 	}
@@ -114,7 +114,7 @@ func main() {
 		squirrelRemoteStorage.Run,
 	}
 
-	if redisAddress == "" {
+	if len(redisAddresses) == 0 {
 		tasks = append(tasks, squirrelStore.(*memorystore.Store).Run)
 	}
 
@@ -261,9 +261,9 @@ func createSquirrelTSDB(session *gocql.Session, config *config.Config, index typ
 	return squirrelTSDB
 }
 
-func createSquirrelRedis(address string) *redis.Redis {
+func createSquirrelRedis(addresses []string) *redis.Redis {
 	options := redis.Options{
-		Address: address,
+		Addresses: addresses,
 	}
 
 	squirrelRedis := redis.New(options)

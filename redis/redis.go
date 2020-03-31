@@ -2,7 +2,10 @@ package redis
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"strconv"
+	"sync"
 
 	goredis "github.com/go-redis/redis"
 
@@ -21,12 +24,18 @@ const (
 	transfertKey      = "squirreldb-transfert-metrics"
 )
 
+//nolint: gochecknoglobals
+var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
+
 type Options struct {
-	Address string
+	Addresses []string
 }
 
 type Redis struct {
-	client *goredis.Client
+	l             sync.Mutex
+	lastReload    time.Time
+	singleClient  *goredis.Client
+	clusterClient *goredis.ClusterClient
 }
 
 type serializedPoints struct {
@@ -40,15 +49,120 @@ const defaultTTL = 24 * time.Hour
 
 // New creates a new Redis object
 func New(options Options) *Redis {
-	client := goredis.NewClient(&goredis.Options{
-		Addr: options.Address,
+	clusterClient := goredis.NewClusterClient(&goredis.ClusterOptions{
+		Addrs: options.Addresses,
 	})
 
 	redis := &Redis{
-		client: client,
+		clusterClient: clusterClient,
+	}
+
+	if len(options.Addresses) == 1 {
+		client := goredis.NewClient(&goredis.Options{
+			Addr: options.Addresses[0],
+		})
+		redis.singleClient = client
 	}
 
 	return redis
+}
+
+func (r *Redis) fixClient() error {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	if r.singleClient == nil || r.clusterClient == nil {
+		return nil
+	}
+
+	singleErr := r.singleClient.Ping().Err()
+	clusterErr := r.clusterClient.Ping().Err()
+	infoErr := r.singleClient.ClusterInfo().Err()
+
+	switch {
+	case clusterErr == nil:
+		logger.Println("detected cluster")
+
+		r.singleClient = nil
+	case singleErr == nil && infoErr != nil:
+		logger.Println("detected single")
+
+		r.clusterClient = nil
+	default:
+		return clusterErr
+	}
+
+	return nil
+}
+
+// when using redis cluster and a master is down, go-redis took quiet some time
+// to discovery it.
+// If shouldRetry return true, it means it tried to refresh the cluster nodes state
+// and last command may be retried.
+func (r *Redis) shouldRetry() bool {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	if r.lastReload.IsZero() || time.Since(r.lastReload) > 10*time.Second {
+		err := r.clusterClient.ReloadState()
+		r.lastReload = time.Now()
+
+		return err == nil
+	}
+
+	return false
+}
+
+func (r *Redis) pipeline() (goredis.Pipeliner, error) {
+	if err := r.fixClient(); err != nil {
+		return nil, err
+	}
+
+	if r.clusterClient != nil {
+		return r.clusterClient.Pipeline(), nil
+	}
+
+	return r.singleClient.Pipeline(), nil
+}
+
+func (r *Redis) sAdd(key string, members ...interface{}) error {
+	if err := r.fixClient(); err != nil {
+		return err
+	}
+
+	if r.clusterClient != nil {
+		_, err := r.clusterClient.SAdd(key, members...).Result()
+
+		return err
+	}
+
+	_, err := r.singleClient.SAdd(key, members...).Result()
+
+	return err
+}
+
+func (r *Redis) sPopN(key string, count int64) ([]string, error) {
+	if err := r.fixClient(); err != nil {
+		return nil, err
+	}
+
+	if r.clusterClient != nil {
+		return r.clusterClient.SPopN(key, count).Result()
+	}
+
+	return r.singleClient.SPopN(key, count).Result()
+}
+
+func (r *Redis) sMembers(key string) ([]string, error) {
+	if err := r.fixClient(); err != nil {
+		return nil, err
+	}
+
+	if r.clusterClient != nil {
+		return r.clusterClient.SMembers(key).Result()
+	}
+
+	return r.singleClient.SMembers(key).Result()
 }
 
 func metricID2String(id types.MetricID) string {
@@ -72,7 +186,11 @@ func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 		return nil, nil
 	}
 
-	pipe := r.client.Pipeline()
+	pipe, err := r.pipeline()
+	if err != nil {
+		return nil, err
+	}
+
 	commands := make([]*goredis.IntCmd, len(points))
 	results := make([]int, len(points))
 
@@ -92,7 +210,13 @@ func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 	}
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return nil, err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return nil, err
+		}
 	}
 
 	for i := range points {
@@ -127,7 +251,11 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
 	}
 
-	pipe := r.client.Pipeline()
+	pipe, err := r.pipeline()
+	if err != nil {
+		return nil, err
+	}
+
 	commands := make([]*goredis.StringCmd, len(points))
 	results := make([]types.MetricData, len(points))
 	ids := make([]string, len(points))
@@ -156,7 +284,13 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 	pipe.SAdd(knownMetricsKey, ids)
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return nil, err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return nil, err
+		}
 	}
 
 	for i, data := range points {
@@ -179,7 +313,7 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface
-func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) {
+func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) { // nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -194,7 +328,11 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 	writeOffsets := make([]int, len(ids))
 	metricCommands := make([]*goredis.StringCmd, len(ids))
 	offsetCommands := make([]*goredis.StringCmd, len(ids))
-	pipe := r.client.Pipeline()
+
+	pipe, err := r.pipeline()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var readPointsCount int
 
@@ -207,7 +345,13 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 	}
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return nil, nil, err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return nil, nil, err
+		}
 	}
 
 	for i, id := range ids {
@@ -252,7 +396,11 @@ func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	}
 
 	idsStr := make([]string, len(ids))
-	pipe := r.client.Pipeline()
+
+	pipe, err := r.pipeline()
+	if err != nil {
+		return err
+	}
 
 	for i, id := range ids {
 		idStr := metricID2String(id)
@@ -270,7 +418,13 @@ func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	pipe.SRem(knownMetricsKey, idsStr)
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return err
+		}
 	}
 
 	return nil
@@ -288,7 +442,11 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map
 		return nil, nil
 	}
 
-	pipe := r.client.Pipeline()
+	pipe, err := r.pipeline()
+	if err != nil {
+		return nil, err
+	}
+
 	commands := make(map[types.MetricID]*goredis.StringCmd, len(deadlines))
 	results := make(map[types.MetricID]time.Time, len(deadlines))
 
@@ -301,7 +459,13 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map
 	}
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return nil, err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return nil, err
+		}
 	}
 
 	for id := range deadlines {
@@ -333,14 +497,20 @@ func (r *Redis) AddToTransfert(ids []types.MetricID) error {
 		strings[i] = metricID2String(id)
 	}
 
-	_, err := r.client.SAdd(transfertKey, strings).Result()
+	err := r.sAdd(transfertKey, strings)
+	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry() {
+		err = r.sAdd(transfertKey, strings)
+	}
 
 	return err
 }
 
 // GetTransfert implement batch.TemporaryStore interface
 func (r *Redis) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
-	result, err := r.client.SPopN(transfertKey, int64(count)).Result()
+	result, err := r.sPopN(transfertKey, int64(count))
+	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry() {
+		result, err = r.sPopN(transfertKey, int64(count))
+	}
 
 	if err != nil && err != goredis.Nil {
 		return nil, err
@@ -357,7 +527,10 @@ func (r *Redis) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
 		operationSecondsKnownMetrics.Observe(time.Since(start).Seconds())
 	}()
 
-	result, err := r.client.SMembers(knownMetricsKey).Result()
+	result, err := r.sMembers(knownMetricsKey)
+	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry() {
+		result, err = r.sMembers(knownMetricsKey)
+	}
 
 	if err != nil && err != goredis.Nil {
 		return nil, err
@@ -371,7 +544,11 @@ func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, er
 		return nil, nil
 	}
 
-	pipe := r.client.Pipeline()
+	pipe, err := r.pipeline()
+	if err != nil {
+		return nil, err
+	}
+
 	commands := make([]*goredis.StringCmd, len(ids))
 	results := make(map[types.MetricID]time.Time, len(ids))
 
@@ -382,7 +559,13 @@ func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, er
 	}
 
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
-		return nil, err
+		if r.clusterClient != nil && r.shouldRetry() {
+			_, err = pipe.Exec()
+		}
+
+		if err != nil && err != goredis.Nil {
+			return nil, err
+		}
 	}
 
 	for i, idStr := range ids {

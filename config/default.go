@@ -11,7 +11,7 @@ var defaults = map[string]interface{}{
 	"cassandra.aggregate.resolution":        "5m",
 	"cassandra.aggregate.size":              "24h",
 	"cassandra.aggregate.intended_duration": "1m",
-	"redis.address":                         "",
+	"redis.addresses":                       []string{},
 	"remote_storage.listen_address":         "localhost:9201",
 	"batch.size":                            "15m",
 	"index.include_id":                      false,
