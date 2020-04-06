@@ -46,9 +46,10 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	promQueryResults := make([]*prompb.QueryResult, 0, len(requests))
 
-	for _, request := range requests {
+	for i, request := range requests {
 		metrics, err := r.reader.Read(request)
 		if err != nil {
+			logger.Printf("Error: Can't retrieve metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
 			requestsErrorRead.Inc()
 
@@ -57,6 +58,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 		timeseries, err := promTimeseriesFromMetrics(metrics, r.index)
 		if err != nil {
+			logger.Printf("Error: Can't format metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
 			requestsErrorRead.Inc()
 

@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/dgryski/go-tsz"
@@ -31,7 +32,7 @@ func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricID]ty
 			aggregateData, err := c.readAggregateData(id, fromTimestamp, request.ToTimestamp, request.Function)
 
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("readAggragateData: %w", err)
 			}
 
 			data = aggregateData
@@ -49,7 +50,7 @@ func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricID]ty
 		rawData, err := c.readRawData(id, fromTimestamp, request.ToTimestamp)
 
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("readRawData: %w", err)
 		}
 
 		data.Points = append(data.Points, rawData.Points...)
@@ -123,7 +124,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(id types.MetricID, fromTimest
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
-			return types.MetricData{}, err
+			return types.MetricData{}, fmt.Errorf("gorillaDecodeAggregate: %w", err)
 		}
 
 		aggregatePartitionData.Points = append(aggregatePartitionData.Points, points...)
@@ -203,7 +204,7 @@ func (c *CassandraTSDB) readRawPartitionData(id types.MetricID, fromTimestamp, t
 		if err != nil {
 			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
-			return types.MetricData{}, err
+			return types.MetricData{}, fmt.Errorf("gorillaDecode: %w", err)
 		}
 
 		points = filterPoints(points, fromTimestamp, toTimestamp)
