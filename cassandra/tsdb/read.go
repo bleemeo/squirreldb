@@ -99,6 +99,10 @@ func (c *CassandraTSDB) readAggregatePartitionData(id types.MetricID, fromTimest
 
 	fromOffset = compare.MaxInt64(fromOffset, 0)
 
+	if toOffset > c.options.AggregatePartitionSize.Milliseconds() {
+		toOffset = c.options.AggregatePartitionSize.Milliseconds()
+	}
+
 	start := time.Now()
 
 	tableSelectDataIter := c.aggregatedTableSelectDataIter(int64(id), baseTimestamp, fromOffset, toOffset)
@@ -179,6 +183,10 @@ func (c *CassandraTSDB) readRawPartitionData(id types.MetricID, fromTimestamp, t
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 
 	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)
+
+	if toOffsetTimestamp > c.options.RawPartitionSize.Milliseconds() {
+		toOffsetTimestamp = c.options.RawPartitionSize.Milliseconds()
+	}
 
 	start := time.Now()
 
