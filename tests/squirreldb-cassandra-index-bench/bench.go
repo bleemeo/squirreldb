@@ -249,7 +249,7 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 // Metrics may also have additional labels (labelNN), ranging from 0 to 20 additional labels
 // (most of the time, 3 additional labels). Few values for those labels.
 func benchInsert(cassandraIndex *index.CassandraIndex, shardID string, rnd *rand.Rand) time.Duration {
-	metrics := make([][]*prompb.Label, *shardSize)
+	metrics := make([][]prompb.Label, *shardSize)
 
 	// We remove 1 days (and 1 hour) so the expiration of the metrics is yesterday
 	// (the 1 hour is because of index cassandraTTLUpdateDelay)

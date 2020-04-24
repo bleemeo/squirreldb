@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"sync"
 
-	goredis "github.com/go-redis/redis"
+	goredis "github.com/go-redis/redis/v7"
 
 	"bytes"
 	"encoding/binary"

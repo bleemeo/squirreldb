@@ -312,7 +312,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []*prompb.Label{
+					fixedLabels: []prompb.Label{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -325,7 +325,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 				},
 			},
 			want: &prompb.TimeSeries{
-				Labels: []*prompb.Label{
+				Labels: []prompb.Label{
 					{
 						Name:  "__name__",
 						Value: "up",
@@ -421,7 +421,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []*prompb.Label{
+					fixedLabels: []prompb.Label{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -435,7 +435,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 			},
 			want: []*prompb.TimeSeries{
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{
 							Name:  "__name__",
 							Value: "up",

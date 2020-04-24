@@ -16,17 +16,17 @@ const defaultTTL = 3600
 type mockIndex struct {
 	fixedLookupID types.MetricID
 	fixedSearchID types.MetricID
-	fixedLabels   []*prompb.Label
+	fixedLabels   []prompb.Label
 }
 
 func (i mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(id types.MetricID) ([]*prompb.Label, error) {
+func (i mockIndex) LookupLabels(id types.MetricID) ([]prompb.Label, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupIDs(labelsList [][]*prompb.Label) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(labelsList [][]prompb.Label) ([]types.MetricID, []int64, error) {
 	if len(labelsList) != 1 {
 		return nil, nil, errors.New("not implemented for more than one metrics")
 
@@ -70,7 +70,7 @@ func Benchmark_metricsFromPromSeries(b *testing.B) {
 
 func Test_metricsFromTimeseries(t *testing.T) {
 	type args struct {
-		promTimeseries []*prompb.TimeSeries
+		promTimeseries []prompb.TimeSeries
 		index          types.Index
 	}
 	tests := []struct {
@@ -81,9 +81,9 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		{
 			name: "promTimeseries_filled",
 			args: args{
-				promTimeseries: []*prompb.TimeSeries{
+				promTimeseries: []prompb.TimeSeries{
 					{
-						Labels: []*prompb.Label{
+						Labels: []prompb.Label{
 							{
 								Name:  "__name__",
 								Value: "up",
@@ -159,7 +159,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		{
 			name: "promTimeseries_empty",
 			args: args{
-				promTimeseries: []*prompb.TimeSeries{},
+				promTimeseries: []prompb.TimeSeries{},
 				index:          nil,
 			},
 			want: nil,

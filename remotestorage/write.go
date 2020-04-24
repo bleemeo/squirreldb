@@ -91,7 +91,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a metric list generated from a TimeSeries list
-func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
+func metricsFromTimeseries(promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil
 	}
@@ -101,7 +101,7 @@ func metricsFromTimeseries(promTimeseries []*prompb.TimeSeries, index types.Inde
 	totalPoints := 0
 	metrics := make([]types.MetricData, 0, len(promTimeseries))
 
-	labelsList := make([][]*prompb.Label, len(promTimeseries))
+	labelsList := make([][]prompb.Label, len(promTimeseries))
 
 	for i, promSeries := range promTimeseries {
 		labelsList[i] = promSeries.Labels

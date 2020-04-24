@@ -1,7 +1,7 @@
 package retry
 
 import (
-	"github.com/cenkalti/backoff"
+	"github.com/cenkalti/backoff/v4"
 
 	"log"
 	"time"

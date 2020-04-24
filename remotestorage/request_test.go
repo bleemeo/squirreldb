@@ -28,42 +28,42 @@ func Test_decodeRequest(t *testing.T) {
 			file:      "testdata/write_req_empty",
 			wantCount: 4,
 			want: prompb.WriteRequest{
-				Timeseries: []*prompb.TimeSeries{
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "up"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+				Timeseries: []prompb.TimeSeries{
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "up"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.0, Timestamp: 1579537265100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.002502474, Timestamp: 1579537265100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.0, Timestamp: 1579537265100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.0, Timestamp: 1579537265100},
@@ -76,53 +76,53 @@ func Test_decodeRequest(t *testing.T) {
 			file:      "testdata/write_req_one",
 			wantCount: 5,
 			want: prompb.WriteRequest{
-				Timeseries: []*prompb.TimeSeries{
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "dummy_metric"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
-							&prompb.Label{Name: "label_test", Value: "value-test"},
+				Timeseries: []prompb.TimeSeries{
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "dummy_metric"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
+							prompb.Label{Name: "label_test", Value: "value-test"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 42.0, Timestamp: 1579538385100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "up"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "up"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538385100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.003211523, Timestamp: 1579538385100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538385100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538385100},
@@ -135,104 +135,104 @@ func Test_decodeRequest(t *testing.T) {
 			file:      "testdata/write_req_backlog",
 			wantCount: 35,
 			want: prompb.WriteRequest{
-				Timeseries: []*prompb.TimeSeries{
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "dummy_metric"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
-							&prompb.Label{Name: "label_test", Value: "value-test"},
+				Timeseries: []prompb.TimeSeries{
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "dummy_metric"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
+							prompb.Label{Name: "label_test", Value: "value-test"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 42.0, Timestamp: 1579538575100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "up"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "up"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538575100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.000956179, Timestamp: 1579538575100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538575100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538575100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "dummy_metric"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
-							&prompb.Label{Name: "label_test", Value: "value-test"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "dummy_metric"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
+							prompb.Label{Name: "label_test", Value: "value-test"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 42.0, Timestamp: 1579538585100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "up"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "up"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538585100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_duration_seconds"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 0.002707379, Timestamp: 1579538585100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_scraped"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538585100},
 						},
 					},
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
-							&prompb.Label{Name: "instance", Value: "localhost:8574"},
-							&prompb.Label{Name: "job", Value: "empty"},
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "scrape_samples_post_metric_relabeling"},
+							prompb.Label{Name: "instance", Value: "localhost:8574"},
+							prompb.Label{Name: "job", Value: "empty"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Value: 1.0, Timestamp: 1579538585100},
@@ -245,13 +245,13 @@ func Test_decodeRequest(t *testing.T) {
 			file:      "testdata/write_req_large",
 			wantCount: 100,
 			want: prompb.WriteRequest{
-				Timeseries: []*prompb.TimeSeries{
-					&prompb.TimeSeries{
-						Labels: []*prompb.Label{
-							&prompb.Label{Name: "__name__", Value: "promhttp_metric_handler_requests_total"},
-							&prompb.Label{Name: "code", Value: "503"},
-							&prompb.Label{Name: "instance", Value: "localhost:8015"},
-							&prompb.Label{Name: "job", Value: "glouton"},
+				Timeseries: []prompb.TimeSeries{
+					prompb.TimeSeries{
+						Labels: []prompb.Label{
+							prompb.Label{Name: "__name__", Value: "promhttp_metric_handler_requests_total"},
+							prompb.Label{Name: "code", Value: "503"},
+							prompb.Label{Name: "instance", Value: "localhost:8015"},
+							prompb.Label{Name: "job", Value: "glouton"},
 						},
 						Samples: []prompb.Sample{
 							prompb.Sample{Timestamp: 1579537088498},

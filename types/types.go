@@ -8,8 +8,8 @@ import (
 
 type Index interface {
 	AllIDs() ([]MetricID, error)
-	LookupLabels(id MetricID) ([]*prompb.Label, error)
-	LookupIDs(labelsList [][]*prompb.Label) ([]MetricID, []int64, error)
+	LookupLabels(id MetricID) ([]prompb.Label, error)
+	LookupIDs(labelsList [][]prompb.Label) ([]MetricID, []int64, error)
 	Search(matchers []*prompb.LabelMatcher) ([]MetricID, error)
 }
 

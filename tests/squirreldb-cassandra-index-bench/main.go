@@ -127,10 +127,10 @@ func drop(session *gocql.Session) {
 	}
 }
 
-func map2Labels(input map[string]string) []*prompb.Label {
-	result := make([]*prompb.Label, 0, len(input))
+func map2Labels(input map[string]string) []prompb.Label {
+	result := make([]prompb.Label, 0, len(input))
 	for k, v := range input {
-		result = append(result, &prompb.Label{
+		result = append(result, prompb.Label{
 			Name:  k,
 			Value: v,
 		})
@@ -139,7 +139,7 @@ func map2Labels(input map[string]string) []*prompb.Label {
 	return result
 }
 
-func labels2Map(input []*prompb.Label) map[string]string {
+func labels2Map(input []prompb.Label) map[string]string {
 	result := make(map[string]string, len(input))
 	for _, l := range input {
 		result[l.Name] = l.Value
