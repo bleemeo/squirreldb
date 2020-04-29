@@ -6,7 +6,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.0.2
 	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
 	github.com/go-redis/redis/v7 v7.2.0
-	github.com/gocql/gocql v0.0.0-20200410100145-b454769479c6
+	github.com/gocql/gocql v0.0.0-20200103014340-68f928edb90a
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
 	github.com/grpc-ecosystem/grpc-gateway v1.14.4 // indirect
