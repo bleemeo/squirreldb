@@ -83,7 +83,7 @@ SquirrelDB allow both availability and scalability:
   moved to Redis.
   A Redis cluster will provide availability and scalability of short term storage.
 * When short term storage is provided by Redis, SquirrelDB instance are stateless,
-  scalling them is just adding more of them being a load-balancer (like nginx).
+  scalling them is just adding more of them behind a load-balancer (like nginx).
 
 See examples/squirreldb-ha for a quickstart on HA setup.
 
