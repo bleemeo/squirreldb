@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strconv"
 
@@ -36,8 +37,13 @@ const (
 
 // Update TTL of index entries in Cassandra every update delay.
 // The actual TTL used in Cassanra is the metric data TTL + update delay.
+// With long delay, the will be less updates on Cassandra, but entry will stay
+// longer before being expired.
+// This delay will have between 0 and cassandraTTLUpdateJitter added to avoid
+// all update to happen at the same time.
 const (
-	cassandraTTLUpdateDelay = time.Hour
+	cassandraTTLUpdateDelay  = 24 * time.Hour
+	cassandraTTLUpdateJitter = time.Hour
 )
 
 const (
@@ -386,6 +392,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 			for _, i := range duplicatedMetric[req.sortedLabelsString] {
 				wantedEntryExpiration := now.Add(time.Duration(ttls[i]) * time.Second)
 				cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
+				cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
 				idsData[i].id = id
 				idsData[i].cassandraEntryExpiration = cassandraExpiration
 				founds[i] = true
@@ -404,6 +411,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 
 		wantedEntryExpiration := now.Add(time.Duration(ttls[i]) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
+		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
 		needTTLUpdate := idData.cassandraEntryExpiration.Before(wantedEntryExpiration)
 
 		if needTTLUpdate {
@@ -443,6 +451,7 @@ func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabe
 
 		wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
+		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
 
 		requests = append(requests, createMetricRequest{
 			sortedLabelsString:  sortedLabelsString,
@@ -466,6 +475,11 @@ func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time
 	// in a background task to send multiple update at the same time.
 	previousDay := oldExpiration.Truncate(24 * time.Hour)
 	newDay := newExpiration.Truncate(24 * time.Hour)
+
+	if previousDay.Equal(newDay) {
+		return nil
+	}
+
 	req := c.expirationUpdateRequests[previousDay]
 
 	req.RemoveIDs = append(req.RemoveIDs, uint64(id))

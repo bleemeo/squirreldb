@@ -2008,32 +2008,33 @@ func Benchmark_freeFreeID(b *testing.B) {
 }
 
 // Test_expiration will run a small scenario on the index to check expiration.
-// It will:
-// * at Day 1 register 4 metrics. One without TTL (default of 1 year),
-//   one with 13 months TTL, two with 2 day TTL
-// * at Day 2, redo lookup for one of the 2-day TTL (refresh the entry)
-// * at Day 3 check that none are deleted (because we check for metrics that expire the previous day)
-//   also redo lookup for the 1 year TTL but with a 2 days TTL. check that store TTL didn't change
-// * at day 4 check that one metrics get deleted.
-// * at day 5 check that the other metrics get deleted.
-//   also insert expireBatchSize + 10 metrics with 2 days TTL
-// * at day 7, nothing happend
-// * at day 8, check that all metrics are deleted (excepted the 1 year TTL)
-// * at day 400, everything is deleted :)
-//
 func Test_expiration(t *testing.T) {
-	day1 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
-	day2 := day1.Add(24 * time.Hour)
-	day3 := day1.Add(2 * 24 * time.Hour)
-	day4 := day1.Add(3 * 24 * time.Hour)
-	day5 := day1.Add(4 * 24 * time.Hour)
-	day7 := day1.Add(6 * 24 * time.Hour)
-	day8 := day1.Add(7 * 24 * time.Hour)
-	day400 := day1.Add(399 * 24 * time.Hour)
-
+	// For this test, the default TTL must be smaller than longTTL.
+	// It should be big enough to be kept until t5 (months if shortTTL & update delays are days)
 	defaultTTL := 365 * 24 * time.Hour
-	thirtyMonthTTL := 375 * 24 * time.Hour
-	twoDayTTL := 2 * 24 * time.Hour
+	shortTTL := 2 * 24 * time.Hour
+	longTTL := 375 * 24 * time.Hour
+	// current implementation only delete metrics expired the day before
+	implementationDelay := 24 * time.Hour
+	// updateDelay is the delay after which we are guaranted to trigger an TTL update
+	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
+
+	// At t0, we will create 4 metrics: two with shortTLL, one with longTTL and without TTL (so using default TTL)
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	// At t1 nothing expired and we refresh TTL of one shortTTL entry
+	t1 := t0.Add(updateDelay).Add(implementationDelay)
+	// At t2, the non-refreshed entry expired and is deleted
+	// At t2, also refresh the longTTL entry but with 2-days TTL. This will NOT update the expiration date
+	t2 := t0.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	// At t3, the entry refreshed at t1 expired and is deleted
+	// At t3, also insert expireBatchSize + 10 metrics with shortTTL
+	t3 := t1.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	// At t4, check that nothing happened
+	t4 := t3.Add(updateDelay).Add(shortTTL - time.Hour)
+	// At t5, metrics added at t3 have expired and are deleted
+	t5 := t3.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	// At t6, all metrics are expired and deleted
+	t6 := t2.Add(updateDelay).Add(longTTL).Add(implementationDelay)
 
 	metrics := []map[string]string{
 		map[string]string{
@@ -2062,9 +2063,9 @@ func Test_expiration(t *testing.T) {
 	}
 	metricsTTL := []time.Duration{
 		defaultTTL,
-		thirtyMonthTTL,
-		twoDayTTL,
-		twoDayTTL,
+		longTTL,
+		shortTTL,
+		shortTTL,
 	}
 	metricsID := make([]types.MetricID, len(metrics))
 	for n := 1; n < len(metrics); n++ {
@@ -2090,7 +2091,7 @@ func Test_expiration(t *testing.T) {
 		labelsList[i] = labelsMapToList(m, false)
 	}
 
-	metricsID, ttls, err = index.lookupIDs(labelsList, day1)
+	metricsID, ttls, err = index.lookupIDs(labelsList, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2109,17 +2110,18 @@ func Test_expiration(t *testing.T) {
 		if !reflect.DeepEqual(store.id2labels[id], labels) {
 			t.Errorf("id2labels[%d] = %v, want %v", id, store.id2labels[id], labels)
 		}
-		wantExpire := day1.Add(metricsTTL[n]).Add(cassandraTTLUpdateDelay)
-		if !store.id2expiration[id].Equal(wantExpire) {
-			t.Errorf("id2expiration[%d] = %v, want %v", id, store.id2expiration[id], wantExpire)
+		wantMinExpire := t0.Add(metricsTTL[n]).Add(cassandraTTLUpdateDelay)
+		wantMaxExpire := t0.Add(metricsTTL[n]).Add(updateDelay)
+		if store.id2expiration[id].After(wantMaxExpire) || store.id2expiration[id].Before(wantMinExpire) {
+			t.Errorf("id2expiration[%d] = %v, want between %v and %v", id, store.id2expiration[id], wantMinExpire, wantMaxExpire)
 		}
 		if len(store.expiration) != 3 {
 			t.Errorf("len(store.expiration) = %v, want 3", len(store.expiration))
 		}
 	}
 
-	index.expire(day1)
-	index.cassandraExpire(day1)
+	index.expire(t0)
+	index.cassandraExpire(t0)
 
 	allIds, err := index.AllIDs()
 	if err != nil {
@@ -2130,13 +2132,13 @@ func Test_expiration(t *testing.T) {
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
-	ids, ttls, err := index.lookupIDs(labelsList[3:4], day2)
+	ids, ttls, err := index.lookupIDs(labelsList[3:4], t1)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock may be hold
 	}
-	if ttls[0] != int64(twoDayTTL.Seconds()) {
-		t.Errorf("ttl = %d, want %f", ttls[0], twoDayTTL.Seconds())
+	if ttls[0] != int64(shortTTL.Seconds()) {
+		t.Errorf("ttl = %d, want %f", ttls[0], shortTTL.Seconds())
 	}
 	if ids[0] != metricsID[3] {
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
@@ -2147,19 +2149,26 @@ func Test_expiration(t *testing.T) {
 	if len(store.expiration) != 4 {
 		t.Errorf("len(store.expiration) = %v, want 4", len(store.expiration))
 	}
-	wantExpire := day1.Add(metricsTTL[2]).Add(cassandraTTLUpdateDelay).Truncate(24 * time.Hour)
-	bitmap := roaring.NewBTreeBitmap()
-	bitmap.UnmarshalBinary(store.expiration[wantExpire])
-	got := bitmap.Slice()
-	want := []uint64{
-		uint64(metricsID[2]),
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("store.expiration[%v] = %v,  %v", wantExpire, got, want)
+	for _, id := range []types.MetricID{metricsID[2], metricsID[3]} {
+		expire := store.id2expiration[id].Truncate(24 * time.Hour)
+		bitmap := roaring.NewBTreeBitmap()
+		bitmap.UnmarshalBinary(store.expiration[expire])
+
+		got := bitmap.Slice()
+		want := []uint64{
+			uint64(id),
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("store.expiration[%v == expiration of id %d] = %v,  %v", expire, id, got, want)
+		}
 	}
 
-	index.expire(day2)
-	index.cassandraExpire(day2)
+	index.expire(t1)
+	// each call to cassandraExpire do one day, but calling multiple time
+	// isn't an issue but it must be called at least once per day
+	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t1)
+	}
 
 	allIds, err = index.AllIDs()
 	if err != nil {
@@ -2169,43 +2178,29 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	index.expire(day3)
-	index.cassandraExpire(day3)
-
-	metrics[0]["__ttl__"] = strconv.FormatInt(int64(twoDayTTL.Seconds()), 10)
+	metrics[0]["__ttl__"] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
-	ids, ttls, err = index.lookupIDs(labelsList[0:1], day3)
+	ids, ttls, err = index.lookupIDs(labelsList[0:1], t2)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock make be hold
 	}
-	if ttls[0] != int64(twoDayTTL.Seconds()) {
-		t.Errorf("ttl = %d, want %f", ttls[0], twoDayTTL.Seconds())
+	if ttls[0] != int64(shortTTL.Seconds()) {
+		t.Errorf("ttl = %d, want %f", ttls[0], shortTTL.Seconds())
 	}
 	if ids[0] != metricsID[0] {
 		t.Errorf("id = %d, want %d", ids[0], metricsID[0])
 	}
 	// But store expiration is still using 1 year
-	wantExpire = day1.Add(defaultTTL).Add(cassandraTTLUpdateDelay)
-	if !store.id2expiration[ids[0]].Equal(wantExpire) {
-		t.Errorf("id2expiration[%d] = %v, want %v", ids[0], store.id2expiration[ids[0]], wantExpire)
+	wantMinExpire := t0.Add(defaultTTL).Add(cassandraTTLUpdateDelay)
+	if store.id2expiration[ids[0]].Before(wantMinExpire) {
+		t.Errorf("id2expiration[%d] = %v, want > %v", ids[0], store.id2expiration[ids[0]], wantMinExpire)
 	}
 
-	// BTW, each call to cassandraExpire do one day, but calling multiple time
-	// isn't an issue
-	index.cassandraExpire(day3)
-	index.cassandraExpire(day3)
-
-	allIds, err = index.AllIDs()
-	if err != nil {
-		t.Error(err)
+	index.expire(t2)
+	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t2)
 	}
-	if len(allIds) != 4 {
-		t.Errorf("len(allIds) = %d, want 4", len(allIds))
-	}
-
-	index.expire(day4)
-	index.cassandraExpire(day4)
 
 	allIds, err = index.AllIDs()
 	if err != nil {
@@ -2220,8 +2215,10 @@ func Test_expiration(t *testing.T) {
 		}
 	}
 
-	index.expire(day5)
-	index.cassandraExpire(day5)
+	index.expire(t3)
+	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t3)
+	}
 
 	allIds, err = index.AllIDs()
 	if err != nil {
@@ -2236,12 +2233,12 @@ func Test_expiration(t *testing.T) {
 		labels := map[string]string{
 			"__name__": "filler",
 			"id":       strconv.FormatInt(int64(n), 10),
-			"__ttl__":  strconv.FormatInt(int64(twoDayTTL.Seconds()), 10),
+			"__ttl__":  strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		}
 		labelsList[n] = labelsMapToList(labels, false)
 	}
 
-	_, _, err = index.lookupIDs(labelsList, day5)
+	_, _, err = index.lookupIDs(labelsList, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2254,9 +2251,9 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
 	}
 
-	// call at least once per day
-	for n := 5; n <= 7; n++ {
-		index.cassandraExpire(day7)
+	index.expire(t4)
+	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t4)
 	}
 
 	allIds, err = index.AllIDs()
@@ -2267,7 +2264,10 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
 	}
 
-	index.cassandraExpire(day8)
+	index.expire(t5)
+	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t5)
+	}
 
 	allIds, err = index.AllIDs()
 	if err != nil {
@@ -2277,10 +2277,11 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	// call at least once per day
-	for n := 8; n <= 400; n++ {
-		index.cassandraExpire(day400)
+	index.expire(t6)
+	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
+		index.cassandraExpire(t6)
 	}
+
 	allIds, err = index.AllIDs()
 	if err != nil {
 		t.Error(err)
