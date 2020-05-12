@@ -88,7 +88,7 @@ func main() {
 
 	redisAddresses := squirrelConfig.Strings("redis.addresses")
 
-	if len(redisAddresses) > 0 {
+	if len(redisAddresses) > 0 && redisAddresses[0] != "" {
 		squirrelStore = createSquirrelRedis(redisAddresses)
 	} else {
 		squirrelStore = memorystore.New()
