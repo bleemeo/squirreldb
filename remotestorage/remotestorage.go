@@ -19,6 +19,7 @@ const (
 	readPattern               = "/read"
 	writePattern              = "/write"
 	flushPattern              = "/flush"
+	preAggregatePattern       = "/debug_preaggregate"
 	httpServerShutdownTimeout = 10 * time.Second
 )
 
@@ -26,8 +27,9 @@ const (
 var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type Options struct {
-	ListenAddress string
-	FlushCallback func() error
+	ListenAddress        string
+	FlushCallback        func() error
+	PreAggregateCallback func(from, to time.Time) error
 }
 
 type RemoteStorage struct {
@@ -63,6 +65,33 @@ func New(options Options, index types.Index, reader types.MetricReader, writer t
 			}
 		}
 		fmt.Fprintln(w, "Flush points (of this SquirrelDB instance) from temporary store to TSDB done")
+	})
+	router.HandleFunc(preAggregatePattern, func(w http.ResponseWriter, req *http.Request) {
+		fromRaw := req.URL.Query().Get("from")
+		toRaw := req.URL.Query().Get("to")
+
+		from, err := time.Parse(time.RFC3339, fromRaw)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		to, err := time.Parse(time.RFC3339, toRaw)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		start := time.Now()
+		if options.PreAggregateCallback != nil {
+			err := options.PreAggregateCallback(from, to)
+			if err != nil {
+				logger.Printf("pre-aggregation failed: %v", err)
+				http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
+				return
+			}
+		}
+		fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 	})
 
 	server := &http.Server{

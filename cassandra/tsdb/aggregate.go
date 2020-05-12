@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"squirreldb/aggregate"
 	"squirreldb/debug"
@@ -88,6 +89,48 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// ForcePreAggregation will pre-aggregate all metrics between two given time
+// The forced pre-aggregation will run even if data are already pre-aggregated and
+// will no change the stored position where pre-aggregation think it stopped.
+// The from & to will be extended to be aligned with the aggregation size.
+//
+// Forcing pre-aggregation should only serve when:
+// 1) a bug caused the normal pre-aggregation to have anormal result
+// 2) data were inserted with too many delay and normal pre-aggregation already
+//    processed the time range.
+func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error {
+	var ids []types.MetricID
+
+	logger.Printf("Forced pre-aggregation requested between %v and %v", from, to)
+
+	retry.Print(func() error {
+		var err error
+		ids, err = c.index.AllIDs()
+
+		return err
+	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		"get IDs from the index",
+	)
+
+	currentFrom := from
+	currentFrom = currentFrom.Truncate(c.options.AggregateSize)
+
+	for !to.Before(currentFrom) {
+		currentTo := currentFrom.Add(c.options.AggregateSize)
+
+		retry.Print(func() error {
+			return c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+			fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
+		)
+		logger.Printf("Forced pre-aggregation from %v to %v completed", currentFrom, currentTo)
+
+		currentFrom = currentFrom.Add(c.options.AggregateSize)
+	}
+
+	return nil
 }
 
 // aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.

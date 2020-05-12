@@ -97,7 +97,7 @@ func main() {
 	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig, squirrelLocks, squirrelStates)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
-	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch)
+	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelTSDB)
 
 	signalChan := make(chan os.Signal, 1)
 
@@ -279,10 +279,11 @@ func createSquirrelBatch(config *config.Config, store batch.TemporaryStore, read
 	return squirrelBatch
 }
 
-func createSquirrelRemoteStorage(config *config.Config, index types.Index, batch *batch.Batch) *remotestorage.RemoteStorage {
+func createSquirrelRemoteStorage(config *config.Config, index types.Index, batch *batch.Batch, squirrelTSDB *tsdb.CassandraTSDB) *remotestorage.RemoteStorage {
 	options := remotestorage.Options{
-		ListenAddress: config.String("remote_storage.listen_address"),
-		FlushCallback: batch.Flush,
+		ListenAddress:        config.String("remote_storage.listen_address"),
+		FlushCallback:        batch.Flush,
+		PreAggregateCallback: squirrelTSDB.ForcePreAggregation,
 	}
 
 	squirrelRemoteStorage := remotestorage.New(options, index, batch, batch)
