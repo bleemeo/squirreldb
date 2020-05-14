@@ -283,14 +283,12 @@ func Benchmark_gorillaEncode(b *testing.B) {
 
 func Test_gorillaEncodeAggregate(t *testing.T) {
 
-	idHunderdHours := types.MetricID(100)
-	metrics := map[types.MetricID]types.MetricData{
-		idHunderdHours: types.MetricData{
-			TimeToLive: 42,
-			Points:     types.MakePointsForTest(100 * 3600 / 10),
-		},
+	metricHunderdHours := types.MetricData{
+		ID:         types.MetricID(100),
+		TimeToLive: 42,
+		Points:     types.MakePointsForTest(100 * 3600 / 10),
 	}
-	aggregatedMetrics := aggregate.Aggregate(metrics, 300000)
+	aggregatedMetricHunderdHours := aggregate.Aggregate(metricHunderdHours, 300000)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -365,8 +363,8 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[idHunderdHours].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[idHunderdHours].Points,
+				t0:               aggregatedMetricHunderdHours.Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetricHunderdHours.Points,
 			},
 		},
 	}
@@ -404,25 +402,24 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 
 func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 
-	idOneHour := types.MetricID(1)
-	idOneDay := types.MetricID(741)
-	idHunderdHours := types.MetricID(778955)
-
-	metrics := map[types.MetricID]types.MetricData{
-		idOneHour: types.MetricData{
-			TimeToLive: 42,
-			Points:     types.MakePointsForTest(3600 / 10),
-		},
-		idOneDay: types.MetricData{
-			TimeToLive: 42,
-			Points:     types.MakePointsForTest(86400 / 10),
-		},
-		idHunderdHours: types.MetricData{
-			TimeToLive: 42,
-			Points:     types.MakePointsForTest(100 * 3600 / 10),
-		},
+	metricOneHour := types.MetricData{
+		ID:         types.MetricID(1),
+		TimeToLive: 42,
+		Points:     types.MakePointsForTest(3600 / 10),
 	}
-	aggregatedMetrics := aggregate.Aggregate(metrics, 300000)
+	metricOneDay := types.MetricData{
+		ID:         types.MetricID(741),
+		TimeToLive: 42,
+		Points:     types.MakePointsForTest(86400 / 10),
+	}
+	metricHundredHours := types.MetricData{
+		ID:         types.MetricID(778955),
+		TimeToLive: 42,
+		Points:     types.MakePointsForTest(100 * 3600 / 10),
+	}
+	aggregatedMetricOneHour := aggregate.Aggregate(metricOneHour, 300000)
+	aggregatedMetricOneDay := aggregate.Aggregate(metricOneDay, 300000)
+	aggregatedMetricHundredHours := aggregate.Aggregate(metricHundredHours, 300000)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -467,24 +464,24 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 			name: "one_hour",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[idOneHour].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[idOneHour].Points,
+				t0:               aggregatedMetricOneHour.Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetricOneHour.Points,
 			},
 		},
 		{
 			name: "one_day",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[idOneDay].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[idOneDay].Points,
+				t0:               aggregatedMetricOneDay.Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetricOneDay.Points,
 			},
 		},
 		{
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetrics[idHunderdHours].Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetrics[idHunderdHours].Points,
+				t0:               aggregatedMetricHundredHours.Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetricHundredHours.Points,
 			},
 		},
 	}

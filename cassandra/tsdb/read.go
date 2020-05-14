@@ -15,50 +15,76 @@ import (
 	"time"
 )
 
-// Read returns metrics according to the request made
-func (c *CassandraTSDB) Read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
-	if len(request.IDs) == 0 {
-		return nil, nil
+type readIter struct {
+	c       *CassandraTSDB
+	request types.MetricRequest
+	err     error
+	current types.MetricData
+	offset  int
+}
+
+// ReadIter returns metrics according to the request made
+func (c *CassandraTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+	return &readIter{
+		c:       c,
+		request: request,
+	}, nil
+}
+
+func (i *readIter) Err() error {
+	return i.err
+}
+
+func (i *readIter) At() types.MetricData {
+	return i.current
+}
+
+func (i *readIter) Next() bool {
+	readAggregate := i.request.StepMs >= i.c.options.AggregateResolution.Milliseconds()
+
+	if i.offset >= len(i.request.IDs) {
+		return false
 	}
 
-	readAggregate := request.StepMs >= c.options.AggregateResolution.Milliseconds()
-	metrics := make(map[types.MetricID]types.MetricData, len(request.IDs))
+	id := i.request.IDs[i.offset]
+	i.offset++
 
-	for _, id := range request.IDs {
-		data := types.MetricData{}
-		fromTimestamp := request.FromTimestamp
+	data := types.MetricData{
+		ID: id,
+	}
+	fromTimestamp := i.request.FromTimestamp
 
-		if readAggregate {
-			aggregateData, err := c.readAggregateData(id, fromTimestamp, request.ToTimestamp, request.Function)
-
-			if err != nil {
-				return nil, fmt.Errorf("readAggragateData: %w", err)
-			}
-
-			data = aggregateData
-
-			if len(data.Points) != 0 {
-				lastPoint := data.Points[len(data.Points)-1]
-				fromTimestamp = lastPoint.Timestamp + c.options.AggregateResolution.Milliseconds()
-			}
-		}
-
-		if fromTimestamp > request.ToTimestamp {
-			return metrics, nil
-		}
-
-		rawData, err := c.readRawData(id, fromTimestamp, request.ToTimestamp)
+	if readAggregate {
+		aggregateData, err := i.c.readAggregateData(id, fromTimestamp, i.request.ToTimestamp, i.request.Function)
 
 		if err != nil {
-			return nil, fmt.Errorf("readRawData: %w", err)
+			i.err = fmt.Errorf("readAggragateData: %w", err)
+			return false
+		}
+
+		data = aggregateData
+
+		if len(data.Points) != 0 {
+			lastPoint := data.Points[len(data.Points)-1]
+			fromTimestamp = lastPoint.Timestamp + i.c.options.AggregateResolution.Milliseconds()
+		}
+	}
+
+	if fromTimestamp <= i.request.ToTimestamp {
+		rawData, err := i.c.readRawData(id, fromTimestamp, i.request.ToTimestamp)
+
+		if err != nil {
+			i.err = fmt.Errorf("readRawData: %w", err)
+			return false
 		}
 
 		data.Points = append(data.Points, rawData.Points...)
 		data.TimeToLive = compare.MaxInt64(data.TimeToLive, rawData.TimeToLive)
-		metrics[id] = data
 	}
 
-	return metrics, nil
+	i.current = data
+
+	return true
 }
 
 // Returns aggregated data between the specified timestamps of the requested metric
@@ -67,7 +93,9 @@ func (c *CassandraTSDB) readAggregateData(id types.MetricID, fromTimestamp, toTi
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.AggregatePartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.AggregatePartitionSize.Milliseconds())
-	aggregateData := types.MetricData{}
+	aggregateData := types.MetricData{
+		ID: id,
+	}
 
 	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.AggregatePartitionSize.Milliseconds() {
 		aggregatePartitionData, err := c.readAggregatePartitionData(id, fromTimestamp, toTimestamp, baseTimestamp, function)

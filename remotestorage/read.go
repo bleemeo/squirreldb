@@ -47,7 +47,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	promQueryResults := make([]*prompb.QueryResult, 0, len(requests))
 
 	for i, request := range requests {
-		metrics, err := r.reader.Read(request)
+		metricIter, err := r.reader.ReadIter(request)
 		if err != nil {
 			logger.Printf("Error: Can't retrieve metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
@@ -56,7 +56,7 @@ func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			return
 		}
 
-		timeseries, err := promTimeseriesFromMetrics(metrics, r.index)
+		timeseries, err := promTimeseriesFromMetrics(metricIter, r.index, len(request.IDs))
 		if err != nil {
 			logger.Printf("Error: Can't format metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
@@ -177,17 +177,15 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.
 }
 
 // Returns a TimeSeries pointer list generated from a metric list
-func promTimeseriesFromMetrics(metrics map[types.MetricID]types.MetricData, index types.Index) ([]*prompb.TimeSeries, error) {
-	if len(metrics) == 0 {
-		return nil, nil
-	}
-
+func promTimeseriesFromMetrics(metrics types.MetricDataSet, index types.Index, sizeHint int) ([]*prompb.TimeSeries, error) {
 	totalPoints := 0
 
-	promTimeseries := make([]*prompb.TimeSeries, 0, len(metrics))
+	promTimeseries := make([]*prompb.TimeSeries, 0, sizeHint)
 
-	for id, data := range metrics {
-		promSeries, err := promSeriesFromMetric(id, data, index)
+	for metrics.Next() {
+		data := metrics.At()
+
+		promSeries, err := promSeriesFromMetric(data.ID, data, index)
 		if err != nil {
 			return nil, err
 		}
@@ -199,5 +197,5 @@ func promTimeseriesFromMetrics(metrics map[types.MetricID]types.MetricData, inde
 
 	requestsPointsTotalRead.Add(float64(totalPoints))
 
-	return promTimeseries, nil
+	return promTimeseries, metrics.Err()
 }

@@ -12,117 +12,6 @@ const (
 	MetricIDTest2 = 2
 )
 
-func TestAggregate(t *testing.T) {
-	type args struct {
-		metrics    map[types.MetricID]types.MetricData
-		resolution int64
-	}
-	tests := []struct {
-		name string
-		args args
-		want map[types.MetricID]AggregatedData
-	}{
-		{
-			name: "test",
-			args: args{
-				metrics: map[types.MetricID]types.MetricData{
-					MetricIDTest1: {
-						Points: []types.MetricPoint{
-							{
-								Timestamp: 0,
-								Value:     10,
-							},
-							{
-								Timestamp: 10000,
-								Value:     20,
-							},
-							{
-								Timestamp: 20000,
-								Value:     30,
-							},
-							{
-								Timestamp: 30000,
-								Value:     40,
-							},
-							{
-								Timestamp: 40000,
-								Value:     50,
-							},
-						},
-						TimeToLive: 300,
-					},
-					MetricIDTest2: {
-						Points: []types.MetricPoint{
-							{
-								Timestamp: 0,
-								Value:     50,
-							},
-							{
-								Timestamp: 20000,
-								Value:     100,
-							},
-							{
-								Timestamp: 40000,
-								Value:     150,
-							},
-							{
-								Timestamp: 60000,
-								Value:     200,
-							},
-							{
-								Timestamp: 80000,
-								Value:     250,
-							},
-						},
-						TimeToLive: 1200,
-					},
-				},
-				resolution: 50000,
-			},
-			want: map[types.MetricID]AggregatedData{
-				MetricIDTest1: {
-					Points: []AggregatedPoint{
-						{
-							Timestamp: 0,
-							Min:       10,
-							Max:       50,
-							Average:   30,
-							Count:     5,
-						},
-					},
-					TimeToLive: 300,
-				},
-				MetricIDTest2: {
-					Points: []AggregatedPoint{
-						{
-							Timestamp: 0,
-							Min:       50,
-							Max:       150,
-							Average:   100,
-							Count:     3,
-						},
-						{
-							Timestamp: 50000,
-							Min:       200,
-							Max:       250,
-							Average:   225,
-							Count:     2,
-						},
-					},
-					TimeToLive: 1200,
-				},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Aggregate(tt.args.metrics, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Aggregate() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_aggregateData(t *testing.T) {
 	type args struct {
 		data       types.MetricData
@@ -137,6 +26,7 @@ func Test_aggregateData(t *testing.T) {
 			name: "test",
 			args: args{
 				data: types.MetricData{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -164,6 +54,7 @@ func Test_aggregateData(t *testing.T) {
 				resolution: 200000,
 			},
 			want: AggregatedData{
+				ID: MetricIDTest1,
 				Points: []AggregatedPoint{
 					{
 						Timestamp: 0,
@@ -194,6 +85,7 @@ func Test_aggregateData(t *testing.T) {
 			name: "test-real-timestamp",
 			args: args{
 				data: types.MetricData{
+					ID: MetricIDTest2,
 					Points: []types.MetricPoint{
 						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
 						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
@@ -206,6 +98,7 @@ func Test_aggregateData(t *testing.T) {
 				resolution: 300000,
 			},
 			want: AggregatedData{
+				ID: MetricIDTest2,
 				Points: []AggregatedPoint{
 					{
 						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
@@ -221,7 +114,7 @@ func Test_aggregateData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := aggregateData(tt.args.data, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
+			if got := Aggregate(tt.args.data, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("aggregateData() = %v, want %v", got, tt.want)
 			}
 		})
@@ -328,7 +221,7 @@ func Benchmark_aggregateData(b *testing.B) {
 			}
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				_ = aggregateData(data, tt.Resolution)
+				_ = Aggregate(data, tt.Resolution)
 			}
 		})
 	}

@@ -67,38 +67,13 @@ func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData) {
 	}
 }
 
-// Writes all specified aggregated metrics
-func (c *CassandraTSDB) writeAggregate(aggregatedMetrics map[types.MetricID]aggregate.AggregatedData) error {
-	if len(aggregatedMetrics) == 0 {
+// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together
+func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedData) error {
+	if len(aggregatedData.Points) == 0 {
 		return nil
 	}
 
 	start := time.Now()
-
-	var aggregatePointsCount int
-
-	for id, aggregatedData := range aggregatedMetrics {
-		aggregatePointsCount += len(aggregatedData.Points)
-
-		if err := c.writeAggregateData(id, aggregatedData); err != nil {
-			requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
-			requestsPointsTotalWriteAggregated.Add(float64(aggregatePointsCount))
-
-			return err
-		}
-	}
-
-	requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
-	requestsPointsTotalWriteAggregated.Add(float64(aggregatePointsCount))
-
-	return nil
-}
-
-// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together
-func (c *CassandraTSDB) writeAggregateData(id types.MetricID, aggregatedData aggregate.AggregatedData) error {
-	if len(aggregatedData.Points) == 0 {
-		return nil
-	}
 
 	baseTimestampAggregatedPoints := make(map[int64][]aggregate.AggregatedPoint)
 
@@ -114,10 +89,16 @@ func (c *CassandraTSDB) writeAggregateData(id types.MetricID, aggregatedData agg
 			TimeToLive: aggregatedData.TimeToLive,
 		}
 
-		if err := c.writeAggregateRow(id, aggregatedPartitionData, baseTimestamp); err != nil {
+		if err := c.writeAggregateRow(aggregatedData.ID, aggregatedPartitionData, baseTimestamp); err != nil {
+			requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
+			requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
+
 			return err
 		}
 	}
+
+	requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
+	requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
 
 	return nil
 }

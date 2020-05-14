@@ -235,15 +235,21 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 		FromTimestamp: fromTimestamp,
 		ToTimestamp:   toTimestamp,
 	}
-	metrics, err := c.Read(request)
+	metrics, err := c.ReadIter(request)
 
 	if err != nil {
 		return err
 	}
 
-	aggregatedMetrics := aggregate.Aggregate(metrics, resolution)
+	for metrics.Next() {
+		metric := metrics.At()
+		aggregatedMetric := aggregate.Aggregate(metric, resolution)
 
-	err = c.writeAggregate(aggregatedMetrics)
+		err := c.writeAggregateData(aggregatedMetric)
+		if err != nil {
+			return err
+		}
+	}
 
-	return err
+	return metrics.Err()
 }

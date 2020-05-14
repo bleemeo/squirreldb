@@ -3,7 +3,7 @@ package batch
 import (
 	"context"
 	"reflect"
-	"squirreldb/compare"
+	"sort"
 	"squirreldb/memorystore"
 	"squirreldb/types"
 	"testing"
@@ -50,99 +50,100 @@ func dumpMemoryStore(store TemporaryStore) []types.MetricData {
 	return results
 }
 
-func metricsToMap(metrics []types.MetricData) map[types.MetricID]types.MetricData {
-	metricsMap := make(map[types.MetricID]types.MetricData)
-	for _, data := range metrics {
-		metricsMap[data.ID] = data
+func dataEqual(orderMatter bool, a, b []types.MetricData) bool {
+	if len(a) == len(b) && len(a) == 0 {
+		return true
 	}
 
-	return metricsMap
-}
+	if orderMatter {
+		return reflect.DeepEqual(a, b)
+	}
 
-type mockStore struct {
-	metrics map[types.MetricID]types.MetricData
+	aCopy := make([]types.MetricData, len(a))
+	for i, x := range a {
+		aCopy[i] = x
+	}
+
+	bCopy := make([]types.MetricData, len(b))
+	for i, x := range b {
+		bCopy[i] = x
+	}
+
+	sort.Slice(aCopy, func(i, j int) bool {
+		return aCopy[i].ID < aCopy[j].ID
+	})
+
+	sort.Slice(bCopy, func(i, j int) bool {
+		return bCopy[i].ID < bCopy[j].ID
+	})
+
+	return reflect.DeepEqual(aCopy, bCopy)
 }
 
 type mockMetricReader struct {
-	metrics map[types.MetricID]types.MetricData
+	metrics []types.MetricData
 }
 
 type mockMetricWriter struct {
-	metrics    map[types.MetricID]types.MetricData
+	metrics    []types.MetricData
 	writeCount int
 }
 
-func (m *mockStore) Append(newMetrics, existingMetrics []types.MetricData, _ int64) error {
-	for _, data := range newMetrics {
-		storeData := m.metrics[data.ID]
-
-		storeData.Points = append(storeData.Points, data.Points...)
-		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-
-		m.metrics[data.ID] = storeData
-	}
-
-	for _, data := range existingMetrics {
-		storeData := m.metrics[data.ID]
-
-		storeData.Points = append(storeData.Points, data.Points...)
-		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-
-		m.metrics[data.ID] = storeData
-	}
-
-	return nil
-}
-
-func (m *mockStore) Get(ids []types.MetricID) (map[types.MetricID]types.MetricData, error) {
-	metrics := make(map[types.MetricID]types.MetricData)
-
-	for _, id := range ids {
-		storeData, exists := m.metrics[id]
-
-		if exists {
-			metrics[id] = storeData
-		}
-	}
-
-	return metrics, nil
-}
-
-func (m *mockStore) Set(metrics []types.MetricData, _ int64) error {
-	for _, data := range metrics {
-		m.metrics[data.ID] = data
-	}
-
-	return nil
-}
-
-func (m *mockMetricReader) Read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
-	metrics := make(map[types.MetricID]types.MetricData)
+func (m *mockMetricReader) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+	metrics := make([]types.MetricData, 0)
 
 	for _, id := range request.IDs {
-		data, exists := m.metrics[id]
-
-		if exists {
-			metrics[id] = data
+		for _, data := range m.metrics {
+			if data.ID == id {
+				metrics = append(metrics, data)
+			}
 		}
 	}
 
-	return metrics, nil
+	return &mockIter{all: metrics, offset: 0}, nil
+}
+
+type mockIter struct {
+	all     []types.MetricData
+	current types.MetricData
+	offset  int
+}
+
+func (i *mockIter) Next() bool {
+	if i.offset >= len(i.all) {
+		return false
+	}
+
+	i.current = i.all[i.offset]
+	i.offset++
+
+	return true
+}
+
+func (i *mockIter) At() types.MetricData {
+	return i.current
+}
+
+func (i *mockIter) Err() error {
+	return nil
 }
 
 func (m *mockMetricWriter) Write(metrics []types.MetricData) error {
 	m.writeCount++
 
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	m.metrics = make(map[types.MetricID]types.MetricData)
-	for _, data := range metrics {
-		m.metrics[data.ID] = data
-	}
-
+	m.metrics = metrics
 	return nil
+}
+
+func iterToList(i types.MetricDataSet) ([]types.MetricData, error) {
+	results := make([]types.MetricData, 0)
+
+	for i.Next() {
+		tmp := i.At()
+		results = append(results, tmp)
+	}
+
+	return results, i.Err()
 }
 
 func TestBatch_read(t *testing.T) {
@@ -160,7 +161,7 @@ func TestBatch_read(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    map[types.MetricID]types.MetricData
+		want    []types.MetricData
 		wantErr bool
 	}{
 		{
@@ -182,7 +183,6 @@ func TestBatch_read(t *testing.T) {
 							},
 						},
 					},
-
 					{
 						ID: MetricIDTest2,
 						Points: []types.MetricPoint{
@@ -198,8 +198,9 @@ func TestBatch_read(t *testing.T) {
 					},
 				}),
 				reader: &mockMetricReader{
-					metrics: map[types.MetricID]types.MetricData{
-						MetricIDTest1: {
+					metrics: []types.MetricData{
+						{
+							ID: MetricIDTest1,
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -223,7 +224,8 @@ func TestBatch_read(t *testing.T) {
 								},
 							},
 						},
-						MetricIDTest2: {
+						{
+							ID: MetricIDTest2,
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -263,8 +265,9 @@ func TestBatch_read(t *testing.T) {
 					Function:      "",
 				},
 			},
-			want: map[types.MetricID]types.MetricData{
-				MetricIDTest1: {
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -296,7 +299,8 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				MetricIDTest2: {
+				{
+					ID: MetricIDTest2,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -381,8 +385,9 @@ func TestBatch_read(t *testing.T) {
 					Function:      "",
 				},
 			},
-			want: map[types.MetricID]types.MetricData{
-				MetricIDTest1: {
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50000,
@@ -394,7 +399,8 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				MetricIDTest2: {
+				{
+					ID: MetricIDTest2,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 100000,
@@ -416,8 +422,9 @@ func TestBatch_read(t *testing.T) {
 				states:      nil,
 				memoryStore: newMemoryStore(nil),
 				reader: &mockMetricReader{
-					metrics: map[types.MetricID]types.MetricData{
-						MetricIDTest1: {
+					metrics: []types.MetricData{
+						{
+							ID: MetricIDTest1,
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -441,7 +448,8 @@ func TestBatch_read(t *testing.T) {
 								},
 							},
 						},
-						MetricIDTest2: {
+						{
+							ID: MetricIDTest2,
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -481,8 +489,9 @@ func TestBatch_read(t *testing.T) {
 					Function:      "",
 				},
 			},
-			want: map[types.MetricID]types.MetricData{
-				MetricIDTest1: {
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -506,7 +515,8 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				},
-				MetricIDTest2: {
+				{
+					ID: MetricIDTest2,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -556,7 +566,7 @@ func TestBatch_read(t *testing.T) {
 					Function:      "",
 				},
 			},
-			want:    map[types.MetricID]types.MetricData{},
+			want:    []types.MetricData{},
 			wantErr: false,
 		},
 		{
@@ -592,8 +602,9 @@ func TestBatch_read(t *testing.T) {
 					},
 				}),
 				reader: &mockMetricReader{
-					metrics: map[types.MetricID]types.MetricData{
-						MetricIDTest1: {
+					metrics: []types.MetricData{
+						{
+							ID: MetricIDTest1,
 							Points: []types.MetricPoint{
 								{
 									Timestamp: 0,
@@ -632,8 +643,9 @@ func TestBatch_read(t *testing.T) {
 					Function:      "",
 				},
 			},
-			want: map[types.MetricID]types.MetricData{
-				MetricIDTest1: {
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 0,
@@ -670,13 +682,20 @@ func TestBatch_read(t *testing.T) {
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
 			}
-			got, err := b.read(tt.args.request)
+			got, err := b.ReadIter(tt.args.request)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("read() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("read() got = %v, want %v", got, tt.want)
+
+			gotList, err := iterToList(got)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !dataEqual(true, gotList, tt.want) {
+				t.Errorf("read() got = %v, want %v", gotList, tt.want)
 			}
 		})
 	}
@@ -691,13 +710,15 @@ func TestBatch_readTemporary(t *testing.T) {
 		writer      types.MetricWriter
 	}
 	type args struct {
-		request types.MetricRequest
+		ids           []types.MetricID
+		fromTimestamp int64
+		toTimestamp   int64
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    map[types.MetricID]types.MetricData
+		want    []types.MetricData
 		wantErr bool
 	}{
 		{
@@ -737,19 +758,16 @@ func TestBatch_readTemporary(t *testing.T) {
 				writer: nil,
 			},
 			args: args{
-				request: types.MetricRequest{
-					IDs: []types.MetricID{
-						MetricIDTest1,
-						MetricIDTest2,
-					},
-					FromTimestamp: 0,
-					ToTimestamp:   200000,
-					StepMs:        0,
-					Function:      "",
+				ids: []types.MetricID{
+					MetricIDTest1,
+					MetricIDTest2,
 				},
+				fromTimestamp: 0,
+				toTimestamp:   200000,
 			},
-			want: map[types.MetricID]types.MetricData{
-				MetricIDTest1: {
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 50000,
@@ -761,7 +779,8 @@ func TestBatch_readTemporary(t *testing.T) {
 						},
 					},
 				},
-				MetricIDTest2: {
+				{
+					ID: MetricIDTest2,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: 100000,
@@ -786,18 +805,14 @@ func TestBatch_readTemporary(t *testing.T) {
 				writer:      nil,
 			},
 			args: args{
-				request: types.MetricRequest{
-					IDs: []types.MetricID{
-						MetricIDTest1,
-						MetricIDTest2,
-					},
-					FromTimestamp: 0,
-					ToTimestamp:   200000,
-					StepMs:        0,
-					Function:      "",
+				ids: []types.MetricID{
+					MetricIDTest1,
+					MetricIDTest2,
 				},
+				fromTimestamp: 0,
+				toTimestamp:   200000,
 			},
-			want:    make(map[types.MetricID]types.MetricData),
+			want:    []types.MetricData{},
 			wantErr: false,
 		},
 	}
@@ -810,12 +825,12 @@ func TestBatch_readTemporary(t *testing.T) {
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
 			}
-			got, err := b.readTemporary(tt.args.request)
+			got, err := b.readTemporary(tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readTemporary() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if !dataEqual(true, got, tt.want) {
 				t.Errorf("readTemporary() got = %v, want %v", got, tt.want)
 			}
 		})
@@ -1167,15 +1182,13 @@ func TestBatch_flush(t *testing.T) {
 			}
 			b.flush(tt.args.ids, tt.args.now, tt.args.shutdown)
 
-			wantWriter := metricsToMap(tt.wantWriter)
-			if !reflect.DeepEqual(tt.fields.writer.metrics, wantWriter) {
-				t.Errorf("writer = %v, want = %v", tt.fields.writer.metrics, wantWriter)
+			if !dataEqual(true, tt.fields.writer.metrics, tt.wantWriter) {
+				t.Errorf("writer = %v, want = %v", tt.fields.writer.metrics, tt.wantWriter)
 			}
 
-			gotMemoryStore := metricsToMap(dumpMemoryStore(tt.fields.memoryStore))
-			wantMemoryStore := metricsToMap(tt.wantMemoryStore)
-			if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
-				t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
+			gotMemoryStore := dumpMemoryStore(tt.fields.memoryStore)
+			if !dataEqual(true, gotMemoryStore, tt.wantMemoryStore) {
+				t.Errorf("memory store = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 			}
 		})
 	}
@@ -1188,10 +1201,10 @@ func TestBatch_write(t *testing.T) {
 	batchSize := 100 * time.Second
 	memoryStore := memorystore.New()
 	writer1 := &mockMetricWriter{
-		metrics: map[types.MetricID]types.MetricData{},
+		metrics: []types.MetricData{},
 	}
 	writer2 := &mockMetricWriter{
-		metrics: map[types.MetricID]types.MetricData{},
+		metrics: []types.MetricData{},
 	}
 	batch1 := New(batchSize, memoryStore, nil, writer1)
 	batch2 := New(batchSize, memoryStore, nil, writer2)
@@ -1654,9 +1667,8 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.wantWriter1 != nil {
-				wantWriter := metricsToMap(tt.wantWriter1)
-				if !reflect.DeepEqual(writer1.metrics, wantWriter) {
-					t.Errorf("writer1 = %v, want = %v", writer1.metrics, wantWriter)
+				if !dataEqual(true, writer1.metrics, tt.wantWriter1) {
+					t.Errorf("writer1 = %v, want = %v", writer1.metrics, tt.wantWriter1)
 				}
 			}
 
@@ -1667,9 +1679,8 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.wantWriter2 != nil {
-				wantWriter := metricsToMap(tt.wantWriter2)
-				if !reflect.DeepEqual(writer2.metrics, wantWriter) {
-					t.Errorf("writer2 = %v, want = %v", writer2.metrics, wantWriter)
+				if !dataEqual(true, writer2.metrics, tt.wantWriter2) {
+					t.Errorf("writer2 = %v, want = %v", writer2.metrics, tt.wantWriter2)
 				}
 			}
 
@@ -1680,10 +1691,9 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.wantMemoryStore != nil {
-				gotMemoryStore := metricsToMap(dumpMemoryStore(memoryStore))
-				wantMemoryStore := metricsToMap(tt.wantMemoryStore)
-				if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
-					t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
+				gotMemoryStore := dumpMemoryStore(memoryStore)
+				if !dataEqual(false, gotMemoryStore, tt.wantMemoryStore) {
+					t.Errorf("memory store = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 				}
 			}
 
@@ -1694,8 +1704,8 @@ func TestBatch_write(t *testing.T) {
 				batch2 = New(batchSize, memoryStore, nil, writer2)
 			}
 
-			writer1.metrics = map[types.MetricID]types.MetricData{}
-			writer2.metrics = map[types.MetricID]types.MetricData{}
+			writer1.metrics = []types.MetricData{}
+			writer2.metrics = []types.MetricData{}
 		})
 		if !ok {
 			break
@@ -1722,10 +1732,10 @@ func Test_takeover(t *testing.T) {
 	batchSize := 100 * time.Second
 	memoryStore := memorystore.New()
 	writer1 := &mockMetricWriter{
-		metrics: map[types.MetricID]types.MetricData{},
+		metrics: []types.MetricData{},
 	}
 	writer2 := &mockMetricWriter{
-		metrics: map[types.MetricID]types.MetricData{},
+		metrics: []types.MetricData{},
 	}
 	batch1 := New(batchSize, memoryStore, nil, writer1)
 	batch2 := New(batchSize, memoryStore, nil, writer2)
@@ -1775,8 +1785,8 @@ func Test_takeover(t *testing.T) {
 		time.Unix(20, 0),
 	)
 
-	wantWriter1 := metricsToMap([]types.MetricData{})
-	wantWriter2 := metricsToMap([]types.MetricData{})
+	wantWriter1 := []types.MetricData{}
+	wantWriter2 := []types.MetricData{}
 	wantState1 := map[types.MetricID]stateData{
 		MetricIDTest1: {
 			flushDeadline: flushTimestamp(MetricIDTest1, time.Unix(10, 0), batchSize),
@@ -1787,7 +1797,7 @@ func Test_takeover(t *testing.T) {
 			flushDeadline: flushTimestamp(MetricIDTest2, time.Unix(10, 0), batchSize),
 		},
 	}
-	wantMemoryStore := metricsToMap([]types.MetricData{
+	wantMemoryStore := []types.MetricData{
 		{
 			ID:         MetricIDTest1,
 			TimeToLive: 42,
@@ -1804,12 +1814,12 @@ func Test_takeover(t *testing.T) {
 				{Timestamp: 21000},
 			},
 		},
-	})
+	}
 
-	if !reflect.DeepEqual(writer1.metrics, wantWriter1) {
+	if !dataEqual(true, writer1.metrics, wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.metrics, wantWriter1)
 	}
-	if !reflect.DeepEqual(writer2.metrics, wantWriter2) {
+	if !dataEqual(true, writer2.metrics, wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.metrics, wantWriter2)
 	}
 	if !reflect.DeepEqual(batch1.states, wantState1) {
@@ -1818,8 +1828,8 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
-	gotMemoryStore := metricsToMap(dumpMemoryStore(memoryStore))
-	if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
+	gotMemoryStore := dumpMemoryStore(memoryStore)
+	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
 
@@ -1828,7 +1838,7 @@ func Test_takeover(t *testing.T) {
 	batch2.checkTakeover(ctx, now)
 	batch2.check(ctx, now, false, false)
 
-	wantWriter2 = metricsToMap([]types.MetricData{
+	wantWriter2 = []types.MetricData{
 		{
 			ID:         MetricIDTest2,
 			TimeToLive: 42,
@@ -1837,9 +1847,9 @@ func Test_takeover(t *testing.T) {
 				{Timestamp: 21000},
 			},
 		},
-	})
+	}
 	wantState2 = map[types.MetricID]stateData{}
-	wantMemoryStore = metricsToMap([]types.MetricData{
+	wantMemoryStore = []types.MetricData{
 		{
 			ID:         MetricIDTest1,
 			TimeToLive: 42,
@@ -1848,12 +1858,12 @@ func Test_takeover(t *testing.T) {
 				{Timestamp: 20000},
 			},
 		},
-	})
+	}
 
-	if !reflect.DeepEqual(writer1.metrics, wantWriter1) {
+	if !dataEqual(true, writer1.metrics, wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.metrics, wantWriter1)
 	}
-	if !reflect.DeepEqual(writer2.metrics, wantWriter2) {
+	if !dataEqual(true, writer2.metrics, wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.metrics, wantWriter2)
 	}
 	if !reflect.DeepEqual(batch1.states, wantState1) {
@@ -1862,8 +1872,8 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
-	gotMemoryStore = metricsToMap(dumpMemoryStore(memoryStore))
-	if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
+	gotMemoryStore = dumpMemoryStore(memoryStore)
+	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
 
@@ -1872,7 +1882,7 @@ func Test_takeover(t *testing.T) {
 	batch2.checkTakeover(ctx, now)
 	batch2.check(ctx, now, false, false)
 
-	wantWriter2 = metricsToMap([]types.MetricData{
+	wantWriter2 = []types.MetricData{
 		{
 			ID:         MetricIDTest1,
 			TimeToLive: 42,
@@ -1881,13 +1891,13 @@ func Test_takeover(t *testing.T) {
 				{Timestamp: 20000},
 			},
 		},
-	})
-	wantMemoryStore = metricsToMap([]types.MetricData{})
+	}
+	wantMemoryStore = []types.MetricData{}
 
-	if !reflect.DeepEqual(writer1.metrics, wantWriter1) {
+	if !dataEqual(true, writer1.metrics, wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.metrics, wantWriter1)
 	}
-	if !reflect.DeepEqual(writer2.metrics, wantWriter2) {
+	if !dataEqual(true, writer2.metrics, wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.metrics, wantWriter2)
 	}
 	if !reflect.DeepEqual(batch1.states, wantState1) {
@@ -1896,8 +1906,8 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
-	gotMemoryStore = metricsToMap(dumpMemoryStore(memoryStore))
-	if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
+	gotMemoryStore = dumpMemoryStore(memoryStore)
+	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
 
@@ -1905,10 +1915,10 @@ func Test_takeover(t *testing.T) {
 	batch1.check(ctx, now, false, false)
 	wantState1 = map[types.MetricID]stateData{}
 
-	if !reflect.DeepEqual(writer1.metrics, wantWriter1) {
+	if !dataEqual(true, writer1.metrics, wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.metrics, wantWriter1)
 	}
-	if !reflect.DeepEqual(writer2.metrics, wantWriter2) {
+	if !dataEqual(true, writer2.metrics, wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.metrics, wantWriter2)
 	}
 	if !reflect.DeepEqual(batch1.states, wantState1) {
@@ -1917,9 +1927,8 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
-	gotMemoryStore = metricsToMap(dumpMemoryStore(memoryStore))
-	if !reflect.DeepEqual(gotMemoryStore, wantMemoryStore) {
-		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
+	gotMemoryStore = dumpMemoryStore(memoryStore)
+	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
+		t.Errorf("memory store = %#v, want = %#v", gotMemoryStore, wantMemoryStore)
 	}
-
 }

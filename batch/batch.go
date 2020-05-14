@@ -121,9 +121,20 @@ func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.Metri
 	return batch
 }
 
-// Read implements MetricReader
-func (b *Batch) Read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
-	return b.read(request)
+type readIter struct {
+	b       *Batch
+	request types.MetricRequest
+	err     error
+	current types.MetricData
+	offset  int
+}
+
+// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
+func (b *Batch) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+	return &readIter{
+		b:       b,
+		request: request,
+	}, nil
 }
 
 // Write implements MetricWriter
@@ -615,91 +626,101 @@ func sortMetrics(input []types.MetricData) int {
 	return count
 }
 
-// Returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
-func (b *Batch) read(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
-	start := time.Now()
+func (i *readIter) Err() error {
+	return i.err
+}
 
-	defer func() {
-		requestsSecondsRead.Observe(time.Since(start).Seconds())
-	}()
+func (i *readIter) At() types.MetricData {
+	return i.current
+}
 
-	if len(request.IDs) == 0 {
-		return nil, nil
-	}
+func (i *readIter) Next() bool {
+	for {
+		if i.offset >= len(i.request.IDs) {
+			return false
+		}
 
-	metrics := make(map[types.MetricID]types.MetricData, len(request.IDs))
+		id := i.request.IDs[i.offset]
+		i.offset++
 
-	var readPointsCount int
+		start := time.Now()
 
-	for _, id := range request.IDs {
+		defer func() {
+			requestsSecondsRead.Observe(time.Since(start).Seconds())
+		}()
+
 		idRequest := types.MetricRequest{
 			IDs:           []types.MetricID{id},
-			FromTimestamp: request.FromTimestamp,
-			ToTimestamp:   request.ToTimestamp,
-			StepMs:        request.StepMs,
-			Function:      request.Function,
+			FromTimestamp: i.request.FromTimestamp,
+			ToTimestamp:   i.request.ToTimestamp,
+			StepMs:        i.request.StepMs,
+			Function:      i.request.Function,
 		}
 
-		temporaryMetrics, err := b.readTemporary(idRequest)
+		temporaryMetrics, err := i.b.readTemporary([]types.MetricID{id}, i.request.FromTimestamp, i.request.ToTimestamp)
 		if err != nil {
-			return nil, err
-		}
-
-		temporaryData := temporaryMetrics[id]
-
-		if len(temporaryData.Points) > 0 {
-			idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
+			i.err = err
+			return false
 		}
 
 		data := types.MetricData{
-			Points: temporaryData.Points,
+			ID: id,
 		}
 
-		if idRequest.ToTimestamp >= idRequest.FromTimestamp {
-			persistentMetrics, err := b.reader.Read(idRequest)
+		if len(temporaryMetrics) > 0 && len(temporaryMetrics[0].Points) > 0 {
+			temporaryData := temporaryMetrics[0]
+			idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
+			data.Points = temporaryData.Points
+		}
+
+		if idRequest.FromTimestamp <= idRequest.ToTimestamp {
+			persistentMetrics, err := i.b.reader.ReadIter(idRequest)
 			if err != nil {
-				return nil, err
+				i.err = err
+				return false
 			}
 
-			persistentData := persistentMetrics[id]
-			data.Points = append(persistentData.Points, data.Points...)
+			for persistentMetrics.Next() {
+				persistentData := persistentMetrics.At()
+				if persistentData.ID == id {
+					data.Points = append(persistentData.Points, data.Points...)
+					break
+				}
+			}
 		}
 
 		if len(data.Points) > 0 {
-			metrics[id] = data
-			readPointsCount += len(data.Points)
+			i.current = data
+			requestsPointsTotalRead.Add(float64(len(data.Points)))
+
+			return true
 		}
 	}
-
-	requestsPointsTotalRead.Add(float64(readPointsCount))
-
-	return metrics, nil
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request
-func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricID]types.MetricData, error) {
-	metrics, _, err := b.memoryStore.ReadPointsAndOffset(request.IDs)
+func (b *Batch) readTemporary(ids []types.MetricID, fromTimestamp int64, toTimestamp int64) ([]types.MetricData, error) {
+	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ids)
 
 	if err != nil {
 		return nil, err
 	}
 
-	temporaryMetrics := make(map[types.MetricID]types.MetricData, len(request.IDs))
+	temporaryMetrics := make([]types.MetricData, 0, len(ids))
 
-	for i, data := range metrics {
+	for _, data := range metrics {
 		var (
 			maxTS    int64
 			needSort bool
 		)
 
-		id := request.IDs[i]
-
 		temporaryData := types.MetricData{
+			ID:         data.ID,
 			TimeToLive: data.TimeToLive,
 		}
 
 		for i, point := range data.Points {
-			if (point.Timestamp >= request.FromTimestamp) && (point.Timestamp <= request.ToTimestamp) {
+			if (point.Timestamp >= fromTimestamp) && (point.Timestamp <= toTimestamp) {
 				if i == 0 || point.Timestamp > maxTS {
 					temporaryData.Points = append(temporaryData.Points, point)
 					maxTS = point.Timestamp
@@ -714,8 +735,8 @@ func (b *Batch) readTemporary(request types.MetricRequest) (map[types.MetricID]t
 			temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
 		}
 
-		if len(data.Points) > 0 {
-			temporaryMetrics[id] = temporaryData
+		if len(temporaryData.Points) > 0 {
+			temporaryMetrics = append(temporaryMetrics, temporaryData)
 		}
 	}
 

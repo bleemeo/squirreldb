@@ -13,8 +13,14 @@ type Index interface {
 	Search(matchers []*prompb.LabelMatcher) ([]MetricID, error)
 }
 
+type MetricDataSet interface {
+	Next() bool
+	At() MetricData
+	Err() error
+}
+
 type MetricReader interface {
-	Read(request MetricRequest) (map[MetricID]MetricData, error)
+	ReadIter(request MetricRequest) (MetricDataSet, error)
 }
 
 type MetricWriter interface {

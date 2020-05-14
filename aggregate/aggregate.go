@@ -14,30 +14,13 @@ type AggregatedPoint struct {
 }
 
 type AggregatedData struct {
+	ID         types.MetricID
 	Points     []AggregatedPoint
 	TimeToLive int64
 }
 
-// Aggregate returns an aggregated metric list from a metric list
-// points must be sorted in ascending order
-func Aggregate(metrics map[types.MetricID]types.MetricData, resolution int64) map[types.MetricID]AggregatedData {
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	aggregatedMetrics := make(map[types.MetricID]AggregatedData)
-
-	for id, data := range metrics {
-		aggregatedData := aggregateData(data, resolution)
-
-		aggregatedMetrics[id] = aggregatedData
-	}
-
-	return aggregatedMetrics
-}
-
-// Returns aggregated data from data
-func aggregateData(data types.MetricData, resolution int64) AggregatedData {
+// Aggregate aggregates data
+func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 	if len(data.Points) == 0 {
 		return AggregatedData{}
 	}
@@ -48,6 +31,7 @@ func aggregateData(data types.MetricData, resolution int64) AggregatedData {
 
 	aggregatedData := AggregatedData{
 		TimeToLive: data.TimeToLive,
+		ID:         data.ID,
 	}
 
 	for i, point := range data.Points {

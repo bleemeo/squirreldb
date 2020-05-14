@@ -12,6 +12,31 @@ const (
 	MetricIDTest1 = 1
 )
 
+type mockIter struct {
+	all     []types.MetricData
+	current types.MetricData
+	offset  int
+}
+
+func (i *mockIter) Next() bool {
+	if i.offset >= len(i.all) {
+		return false
+	}
+
+	i.current = i.all[i.offset]
+	i.offset++
+
+	return true
+}
+
+func (i *mockIter) At() types.MetricData {
+	return i.current
+}
+
+func (i *mockIter) Err() error {
+	return nil
+}
+
 func Test_requestFromPromQuery(t *testing.T) {
 	type args struct {
 		promQuery *prompb.Query
@@ -379,7 +404,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 
 func Test_promTimeseriesFromMetrics(t *testing.T) {
 	type args struct {
-		metrics map[types.MetricID]types.MetricData
+		metrics []types.MetricData
 		index   types.Index
 	}
 	tests := []struct {
@@ -390,8 +415,9 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		{
 			name: "metrics_filled",
 			args: args{
-				metrics: map[types.MetricID]types.MetricData{
-					MetricIDTest1: {
+				metrics: []types.MetricData{
+					{
+						ID: MetricIDTest1,
 						Points: []types.MetricPoint{
 							{
 								Timestamp: 0,
@@ -477,10 +503,10 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		{
 			name: "metrics_empty",
 			args: args{
-				metrics: make(map[types.MetricID]types.MetricData),
+				metrics: make([]types.MetricData, 0),
 				index:   nil,
 			},
-			want: nil,
+			want: []*prompb.TimeSeries{},
 		},
 		{
 			name: "metrics_nil",
@@ -488,15 +514,16 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 				metrics: nil,
 				index:   nil,
 			},
-			want: nil,
+			want: []*prompb.TimeSeries{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := promTimeseriesFromMetrics(tt.args.metrics, tt.args.index)
+			got, err := promTimeseriesFromMetrics(&mockIter{all: tt.args.metrics}, tt.args.index, 0)
 			if err != nil {
 				t.Errorf("promTimeseriesFromMetrics() failed: %v", err)
 			}
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("promTimeseriesFromMetrics() = %v, want %v", got, tt.want)
 			}
