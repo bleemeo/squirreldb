@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"squirreldb/api"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
@@ -21,7 +22,6 @@ import (
 	"squirreldb/debug"
 	"squirreldb/memorystore"
 	"squirreldb/redis"
-	"squirreldb/remotestorage"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -97,7 +97,6 @@ func main() {
 	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig, squirrelLocks, squirrelStates)
 	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
 	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
-	squirrelRemoteStorage := createSquirrelRemoteStorage(squirrelConfig, squirrelIndex, squirrelBatch, squirrelTSDB)
 
 	signalChan := make(chan os.Signal, 1)
 
@@ -111,7 +110,14 @@ func main() {
 		squirrelIndex.Run,
 		squirrelTSDB.Run,
 		squirrelBatch.Run,
-		squirrelRemoteStorage.Run,
+		api.API{
+			ListenAddress:        squirrelConfig.String("remote_storage.listen_address"),
+			FlushCallback:        squirrelBatch.Flush,
+			PreAggregateCallback: squirrelTSDB.ForcePreAggregation,
+			Index:                squirrelIndex,
+			Reader:               squirrelBatch,
+			Writer:               squirrelBatch,
+		}.Run,
 	}
 
 	if len(redisAddresses) == 0 {
@@ -277,16 +283,4 @@ func createSquirrelBatch(config *config.Config, store batch.TemporaryStore, read
 	squirrelBatch := batch.New(squirrelBatchSize, store, reader, writer)
 
 	return squirrelBatch
-}
-
-func createSquirrelRemoteStorage(config *config.Config, index types.Index, batch *batch.Batch, squirrelTSDB *tsdb.CassandraTSDB) *remotestorage.RemoteStorage {
-	options := remotestorage.Options{
-		ListenAddress:        config.String("remote_storage.listen_address"),
-		FlushCallback:        batch.Flush,
-		PreAggregateCallback: squirrelTSDB.ForcePreAggregation,
-	}
-
-	squirrelRemoteStorage := remotestorage.New(options, index, batch, batch)
-
-	return squirrelRemoteStorage
 }

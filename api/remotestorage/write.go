@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-type WriteMetrics struct {
+type writeMetrics struct {
 	index    types.Index
 	writer   types.MetricWriter
 	reqCtxCh chan *requestContext
 }
 
-func (w *WriteMetrics) getRequestContext() *requestContext {
+func (w *writeMetrics) getRequestContext() *requestContext {
 	select {
 	case reqCtx := <-w.reqCtxCh:
 		return reqCtx
@@ -27,7 +27,7 @@ func (w *WriteMetrics) getRequestContext() *requestContext {
 	}
 }
 
-func (w *WriteMetrics) putRequestContext(reqCtx *requestContext) {
+func (w *writeMetrics) putRequestContext(reqCtx *requestContext) {
 	select {
 	case w.reqCtxCh <- reqCtx:
 	default:
@@ -35,7 +35,7 @@ func (w *WriteMetrics) putRequestContext(reqCtx *requestContext) {
 }
 
 // ServeHTTP handles writing requests
-func (w *WriteMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
 	defer func() {

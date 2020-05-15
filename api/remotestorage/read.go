@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-type ReadMetrics struct {
+type readMetrics struct {
 	index  types.Index
 	reader types.MetricReader
 }
 
 // ServeHTTP handles read requests
-func (r *ReadMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
 	defer func() {

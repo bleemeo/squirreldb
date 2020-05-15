@@ -5,12 +5,14 @@ go 1.13
 require (
 	github.com/cenkalti/backoff/v4 v4.0.2
 	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
+	github.com/go-kit/kit v0.10.0
 	github.com/go-redis/redis/v7 v7.2.0
 	github.com/gocql/gocql v0.0.0-20200103014340-68f928edb90a
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.4.1 // indirect
 	github.com/golang/snappy v0.0.1
 	github.com/grpc-ecosystem/grpc-gateway v1.14.5 // indirect
+	github.com/json-iterator/go v1.1.9
 	github.com/knadh/koanf v0.10.0
 	github.com/mitchellh/mapstructure v1.3.0 // indirect
 	github.com/onsi/ginkgo v1.12.0 // indirect
