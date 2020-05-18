@@ -302,8 +302,10 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 	start := time.Now()
 
 	defer func() {
-		LookupIDSeconds.Observe(time.Since(start).Seconds())
+		LookupIDRequestSeconds.Observe(time.Since(start).Seconds())
 	}()
+
+	LookupIDs.Add(float64(len(labelsList)))
 
 	idsData := make([]idData, len(labelsList))
 	founds := make([]bool, len(labelsList))
@@ -619,6 +621,8 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 			// Be sure no-one registered the metric before we took the lock.
 			if id, err := c.store.SelectLabels2ID(req.sortedLabelsString); err == nil {
 				requests[i].newID = uint64(id)
+
+				LookupIDConcurrentNew.Inc()
 			} else if err != gocql.ErrNotFound {
 				return nil, err
 			}

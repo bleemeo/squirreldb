@@ -13,11 +13,17 @@ var (
 		Name:      "lookup_labels_seconds",
 		Help:      "Total lookup for labels (from ID) time in seconds",
 	})
-	LookupIDSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+	LookupIDRequestSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
-		Name:      "lookup_id_seconds",
-		Help:      "Total lookup for metric ID (from labels) time in seconds",
+		Name:      "lookup_id_request_seconds",
+		Help:      "Total lookup request for metric IDs (from labels) time in seconds",
+	})
+	LookupIDs = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "lookup_id_total",
+		Help:      "Total metric looked-up for ID by labels",
 	})
 	LookupIDMisses = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
@@ -30,6 +36,12 @@ var (
 		Subsystem: "index",
 		Name:      "lookup_id_new_total",
 		Help:      "Total lookup for metric ID for new metrics",
+	})
+	LookupIDConcurrentNew = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "lookup_id_concurrent_new_total",
+		Help:      "Total lookup for metric ID for new metrics happened concurrently for the same metric",
 	})
 	LookupIDRefresh = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
