@@ -87,6 +87,10 @@ func tableExists(session *gocql.Session) bool {
 func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
 	hostname, _ := os.Hostname()
 
+	if timeToLive < 2*time.Second {
+		logger.Printf("Warning: lock TTL = %v but should be at least 2s or two SquirrelDB may acquire the lock", timeToLive)
+	}
+
 	return &Lock{
 		name:       name,
 		timeToLive: timeToLive,
@@ -186,7 +190,15 @@ func (l *Lock) Unlock() {
 	locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
 
 	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
-	retry.Print(locksTableDeleteLockQuery.Exec, retry.NewExponentialBackOff(retryMaxDelay), logger, "free lock")
+	retry.Print(func() error {
+		applied, err := locksTableDeleteLockQuery.ScanCAS(nil)
+		if err == nil && !applied {
+			logger.Printf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
+		}
+
+		return err
+	},
+		retry.NewExponentialBackOff(retryMaxDelay), logger, "free lock")
 
 	locksUnlockSeconds.Observe(time.Since(start).Seconds())
 

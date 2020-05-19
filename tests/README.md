@@ -22,6 +22,17 @@ And tell test programs to use this Cassandra:
 export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
 ```
 
+# squirreldb-cassandra-lock-bench
+
+This test does few validation test and the will create a "shard" with a fixed number of metrics.
+Think "shard" a one tenant, queries will only ask metric from one shard.
+
+Run it with:
+```
+go run ./tests/squirreldb-cassandra-lock-bench/
+go run ./tests/squirreldb-cassandra-lock-bench/ -try-lock-duration 1ms
+```
+
 # squirreldb-cassandra-index-bench
 
 This test does few validation test and the will create a "shard" with a fixed number of metrics.
