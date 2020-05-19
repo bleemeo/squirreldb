@@ -374,9 +374,6 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 		}
 	}
 
-	c.lookupIDMutex.Lock()
-	defer c.lookupIDMutex.Unlock()
-
 	if len(requests) > 0 {
 		c.newMetricLock.Lock()
 
@@ -401,6 +398,9 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 			}
 		}
 	}
+
+	c.lookupIDMutex.Lock()
+	defer c.lookupIDMutex.Unlock()
 
 	ids := make([]types.MetricID, len(labelsList))
 
