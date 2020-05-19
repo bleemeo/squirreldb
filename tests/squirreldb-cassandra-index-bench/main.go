@@ -37,18 +37,13 @@ var (
 	shardEnd                  = flag.Int("bench.shard-end", 5, "End at shard number N (included)")
 	insertBatchSize           = flag.Int("bench.batch-size", 1000, "Number of metrics to lookup at once")
 	noDropTables              = flag.Bool("no-drop", false, "Don't drop tables before (in such case, you should not change shardSize and seed)")
+	workerThreads             = flag.Int("bench.worker-max-threads", 1, "Number of concurrent threads inserting data (1 == not threaded)")
+	workerProcesses           = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
+	workerClients             = flag.Int("bench.worker-client", 1, "Number of concurrent client inserting data")
+	fairLB                    = flag.Bool("force-fair-lb", false, "Force fair load-balancing even if worker is busy")
 )
 
-func main() {
-	flag.Parse()
-
-	debug.Level = 1
-
-	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
-	if found {
-		*cassandraAddresses = value
-	}
-
+func makeSession() (*gocql.Session, bool) {
 	cassandraSession, keyspaceCreated, err := session.New(session.Options{
 		Addresses:         strings.Split(*cassandraAddresses, ","),
 		ReplicationFactor: *cassanraReplicationFactor,
@@ -58,10 +53,11 @@ func main() {
 		log.Fatalf("Unable to open Cassandra session: %v", err)
 	}
 
-	if !*noDropTables {
-		log.Printf("Droping tables")
-		drop(cassandraSession)
-	}
+	return cassandraSession, keyspaceCreated
+}
+
+func makeIndex() *index.CassandraIndex {
+	cassandraSession, keyspaceCreated := makeSession()
 
 	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
 	if err != nil {
@@ -84,28 +80,39 @@ func main() {
 		log.Fatalf("Unable to create index: %v", err)
 	}
 
-	cassandraIndex2, err := index.New(cassandraSession, index.Options{
-		DefaultTimeToLive: *defaultTimeToLive,
-		IncludeID:         *includeID,
-		LockFactory:       squirrelLocks,
-		States:            squirrelStates,
-		SchemaLock:        squirrelLocks.SchemaLock(),
-	})
-	if err != nil {
-		log.Fatalf("Unable to create 2nd index: %v", err)
+	return cassandraIndex
+}
+
+func main() {
+	flag.Parse()
+
+	debug.Level = 1
+
+	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
+	if found {
+		*cassandraAddresses = value
+	}
+
+	if !*noDropTables {
+		log.Printf("Droping tables")
+
+		session, _ := makeSession()
+		drop(session)
 	}
 
 	rand.Seed(*seed)
+
+	cassandraIndex := makeIndex()
 
 	log.Printf("Start validating test")
 	test(cassandraIndex)
 	log.Printf("Re-run validating test")
 	test(cassandraIndex)
 	log.Printf("Re-run validating test on fresh index")
-	test(cassandraIndex2)
+	test(makeIndex())
 
 	rnd := rand.New(rand.NewSource(*seed))
-	bench(cassandraIndex, rnd, squirrelStates)
+	bench(makeIndex, rnd)
 
 	result, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range result {

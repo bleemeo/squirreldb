@@ -103,6 +103,7 @@ func (c CassandraLocks) SchemaLock() types.TryLocker {
 // TryLock try to acquire the Lock and return true if acquire
 func (l *Lock) TryLock() bool {
 	start := time.Now()
+
 	defer func() {
 		locksTryLockSeconds.Observe(time.Since(start).Seconds())
 	}()
@@ -153,6 +154,7 @@ func (l *Lock) TryLock() bool {
 // Lock will call TryLock every 10 seconds until is successed
 func (l *Lock) Lock() {
 	start := time.Now()
+
 	defer func() {
 		locksLockSeconds.Observe(time.Since(start).Seconds())
 	}()

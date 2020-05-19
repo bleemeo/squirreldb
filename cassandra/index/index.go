@@ -883,6 +883,19 @@ func (c *CassandraIndex) applyExpirationUpdateRequests() {
 	}
 }
 
+// InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
+// This should only be used in test & benchmark.
+func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error {
+	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
+	if acquired := lock.TryLock(); !acquired {
+		return errors.New("lock held, please retry")
+	}
+
+	defer lock.Unlock()
+
+	return c.options.States.Write(expireMetricStateName, value.Format(time.RFC3339))
+}
+
 // cassandraExpire remove all entry in Cassandra that have expired
 func (c *CassandraIndex) cassandraExpire(now time.Time) {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)

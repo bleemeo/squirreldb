@@ -8,8 +8,8 @@ import (
 	"os"
 	"sort"
 	"squirreldb/cassandra/index"
-	"squirreldb/cassandra/states"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/procfs"
@@ -74,7 +74,7 @@ var (
 	}
 )
 
-func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates *states.CassandraStates) { //nolint: gocognit
+func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) { //nolint: gocognit
 	proc, err := procfs.NewProc(os.Getpid())
 
 	if err != nil {
@@ -83,6 +83,8 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 
 	var maxRSS int
 
+	cassandraIndex := cassandraIndexFactory()
+
 	ids, err := cassandraIndex.AllIDs()
 	if err != nil {
 		log.Fatalf("AllIDs() failed: %v", err)
@@ -90,35 +92,58 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 
 	metricsBefore := len(ids)
 
-	var sumInsertTime time.Duration
+	var wg sync.WaitGroup
 
 	shardCount := *shardEnd - *shardStart + 1
+	workChannel := make(chan [][]prompb.Label)
+	resultChan := make(chan int, (*workerProcesses)*(*workerThreads))
+	channels := make([]chan [][]prompb.Label, *workerProcesses)
 
-	for n := 0; n < shardCount; n++ {
-		if *shardSize == 0 {
-			break
+	if *fairLB {
+		for n := 0; n < len(channels); n++ {
+			channels[n] = make(chan [][]prompb.Label)
 		}
 
-		shardID := *shardStart + n
-		shardStr := fmt.Sprintf("shard%06d", shardID)
-		insertTime := benchInsert(cassandraIndex, shardStr, rnd)
+		wg.Add(1)
 
-		if n%10 == 0 || shardID == *shardEnd {
-			log.Printf("Insert for shard %d took %v/query", shardID, (insertTime / time.Duration(*shardSize)).Round(time.Microsecond))
-		}
-
-		sumInsertTime += insertTime
-
-		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
-			maxRSS = stat.ResidentMemory()
-		}
+		go func() {
+			defer wg.Done()
+			loadBalancer(workChannel, channels)
+		}()
 	}
 
-	if *shardSize > 0 && shardCount > 0 {
-		log.Printf("Average insert for %d shards took %v/query", shardCount, (sumInsertTime / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
+	for p := 0; p < *workerProcesses; p++ {
+		p := p
+		localIndex := cassandraIndexFactory()
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			if *fairLB {
+				worker(localIndex, channels[p], resultChan)
+			} else {
+				worker(localIndex, workChannel, resultChan)
+			}
+		}()
 	}
 
 	start := time.Now()
+
+	if rss := sentInsertRequest(rnd, proc, workChannel, resultChan); rss > maxRSS {
+		maxRSS = rss
+	}
+
+	close(workChannel)
+	wg.Wait()
+	close(resultChan)
+
+	if *shardSize > 0 && shardCount > 0 {
+		log.Printf("Average insert for %d shards took %v/query", shardCount, (time.Since(start) / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
+	}
+
+	start = time.Now()
 	ids, err = cassandraIndex.AllIDs()
 
 	if err != nil {
@@ -210,8 +235,8 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 	if *runExpiration {
 		beforePurge := len(ids)
 		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
-		err = squirrelStates.Write("index-expired-until", beforeYesterday.Format(time.RFC3339))
 
+		err = cassandraIndex.InternalForceExpirationTimestamp(beforeYesterday)
 		if err != nil {
 			log.Fatalf("state.Write() failed: %v", err)
 		}
@@ -237,6 +262,134 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
 }
 
+func sentInsertRequest(rnd *rand.Rand, proc procfs.Proc, workChannel chan [][]prompb.Label, resultChan chan int) int { // nolint: gocognit
+	shardCount := *shardEnd - *shardStart + 1
+	instantStart := time.Now()
+	instantCount := 0
+	globalStart := time.Now()
+	globalCount := 0
+	pendingRequest := 0
+	maxRSS := 0
+
+	for n := 0; n < shardCount; n++ {
+		if *shardSize == 0 {
+			break
+		}
+
+		shardID := *shardStart + n
+		shardStr := fmt.Sprintf("shard%06d", shardID)
+
+		requests := makeInsertRequests(shardStr, rnd)
+
+		for startIndex := 0; startIndex < len(requests); startIndex += *insertBatchSize {
+			endIndex := startIndex + *insertBatchSize
+			if endIndex > len(requests) {
+				endIndex = len(requests)
+			}
+
+			for {
+				var r int
+
+				if pendingRequest >= *workerClients {
+					r = <-resultChan
+				} else {
+					select {
+					case r = <-resultChan:
+					default:
+						r = -1
+					}
+				}
+
+				if r == -1 {
+					break
+				}
+
+				pendingRequest--
+
+				instantCount += r
+				globalCount += r
+
+				if globalCount%(10*(*shardSize)) == 0 {
+					log.Printf(
+						"Registered %d metrics at speed %v/query (global %d at %v/query)",
+						instantCount,
+						(time.Since(instantStart) / time.Duration(instantCount)).Round(time.Microsecond),
+						globalCount,
+						(time.Since(globalStart) / time.Duration(globalCount)).Round(time.Microsecond),
+					)
+
+					instantCount = 0
+					instantStart = time.Now()
+				}
+			}
+
+			pendingRequest++
+			workChannel <- requests[startIndex:endIndex]
+		}
+
+		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
+			maxRSS = stat.ResidentMemory()
+		}
+	}
+
+	return maxRSS
+}
+
+// loadBalancer will sent requests to each outputs one after one, regardless if the outputs is busy/blocked.
+//
+// This more or less match default nginx behavior
+func loadBalancer(input chan [][]prompb.Label, outputs []chan [][]prompb.Label) {
+	n := 0
+
+	var wg sync.WaitGroup
+
+	for w := range input {
+		wg.Add(1)
+
+		go func(n int, w [][]prompb.Label) {
+			defer wg.Done()
+			outputs[n] <- w
+		}(n, w)
+
+		n++
+		n %= len(outputs)
+	}
+
+	wg.Wait()
+
+	for _, c := range outputs {
+		close(c)
+	}
+}
+
+// worker is more or less equivalent to on SquirrelDB process
+func worker(localIndex *index.CassandraIndex, workChanel chan [][]prompb.Label, result chan int) {
+	token := make(chan bool, *workerThreads)
+	for n := 0; n < *workerThreads; n++ {
+		token <- true
+	}
+
+	for work := range workChanel {
+		work := work
+
+		<-token
+
+		go func() {
+			_, _, err := localIndex.LookupIDs(work)
+			if err != nil {
+				log.Fatalf("LookupIDs() failed: %v", err)
+			}
+
+			result <- len(work)
+			token <- true
+		}()
+	}
+
+	for n := 0; n < *workerThreads; n++ {
+		<-token
+	}
+}
+
 // benchInsert insert *metricCount metrics with random labels.
 //
 // It have:
@@ -248,7 +401,7 @@ func bench(cassandraIndex *index.CassandraIndex, rnd *rand.Rand, squirrelStates 
 //
 // Metrics may also have additional labels (labelNN), ranging from 0 to 20 additional labels
 // (most of the time, 3 additional labels). Few values for those labels.
-func benchInsert(cassandraIndex *index.CassandraIndex, shardID string, rnd *rand.Rand) time.Duration {
+func makeInsertRequests(shardID string, rnd *rand.Rand) [][]prompb.Label {
 	metrics := make([][]prompb.Label, *shardSize)
 
 	// We remove 1 days (and 1 hour) so the expiration of the metrics is yesterday
@@ -292,21 +445,7 @@ func benchInsert(cassandraIndex *index.CassandraIndex, shardID string, rnd *rand
 		metrics[n] = promLabel
 	}
 
-	start := time.Now()
-
-	for startIndex := 0; startIndex < len(metrics); startIndex += *insertBatchSize {
-		endIndex := startIndex + *insertBatchSize
-		if endIndex > len(metrics) {
-			endIndex = len(metrics)
-		}
-
-		_, _, err := cassandraIndex.LookupIDs(metrics[startIndex:endIndex])
-		if err != nil {
-			log.Fatalf("benchInsert() failed: %v", err)
-		}
-	}
-
-	return time.Since(start)
+	return metrics
 }
 
 func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*prompb.LabelMatcher) queryResult {
