@@ -28,9 +28,9 @@ services:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
     - "CASSANDRA_SEEDS=cassandra1,cassandra2"
-    networks:
-      default:
-        ipv4_address: 172.28.0.13
+    # We don't fix Cassandra 3 IP because:
+    # * in a 3 nodes cluster, with the first two having fixed IP avoid any swap of node IP
+    # * it make easier to run some test with higher number of Cassandra. Just scale cassandra3
 
   redis1:
     image: redis
