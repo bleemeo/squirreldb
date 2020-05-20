@@ -6,25 +6,39 @@ services:
     restart: unless-stopped
     cap_add:
     - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+    labels:
+        # Glouton is the monitoring agent made by Bleemeo.
+        # On real setup of SquirrelDB, you probably want to monitor component, but
+        # this docker-compose is a quick-start used to test and evaluate SquirrelDB so disable
+        # monitoring to avoid false notification.
+        glouton.enable: "false"
   squirreldb:
     image: squirreldb
     restart: unless-stopped
+    labels:
+        glouton.enable: "false"
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
 
   prometheus:
     image: prom/prometheus
     restart: unless-stopped
+    labels:
+        glouton.enable: "false"
     volumes:
     - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
   node:
     image: prom/node-exporter
     restart: unless-stopped
+    labels:
+        glouton.enable: "false"
     volumes:
     - /:/rootfs:ro,rslave
     command: --path.rootfs=/rootfs
   grafana:
     image: grafana/grafana
     restart: unless-stopped
+    labels:
+        glouton.enable: "false"
     ports:
     - 127.0.0.1:3000:3000
