@@ -606,10 +606,15 @@ type createMetricRequest struct {
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
 func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.MetricID, error) { // nolint: gocognit
+	start := time.Now()
 	results := make([]types.MetricID, len(requests))
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 	postingUpdates := make([]postingUpdateRequest, 0)
 	labelToPostingUpdates := make(map[string]map[string]int)
+
+	defer func() {
+		CreateMetricSeconds.Observe(time.Since(start).Seconds())
+	}()
 
 	allPosting, err := c.postings(allPostingLabelName, allPostingLabelValue)
 	if err != nil {

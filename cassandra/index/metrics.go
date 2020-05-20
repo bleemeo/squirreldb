@@ -7,6 +7,12 @@ import (
 
 //nolint: gochecknoglobals
 var (
+	CreateMetricSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "create_seconds",
+		Help:      "Total metric creation time in seconds (excluding time to took lock)",
+	})
 	lookupLabelsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",
