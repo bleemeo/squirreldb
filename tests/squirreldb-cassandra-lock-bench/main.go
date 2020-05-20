@@ -11,6 +11,7 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/debug"
 	"squirreldb/types"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +77,15 @@ func main() {
 	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
 	if found {
 		*cassandraAddresses = value
+	}
+
+	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
+	if found {
+		tmp, err := strconv.ParseInt(value, 10, 0)
+		if err != nil {
+			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
+		}
+		*cassanraReplicationFactor = int(tmp)
 	}
 
 	rand.Seed(*seed)

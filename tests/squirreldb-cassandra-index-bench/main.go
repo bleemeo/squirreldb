@@ -10,6 +10,7 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +92,15 @@ func main() {
 	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
 	if found {
 		*cassandraAddresses = value
+	}
+
+	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
+	if found {
+		tmp, err := strconv.ParseInt(value, 10, 0)
+		if err != nil {
+			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
+		}
+		*cassanraReplicationFactor = int(tmp)
 	}
 
 	if !*noDropTables {
