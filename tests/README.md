@@ -77,3 +77,24 @@ The first command will:
 * Create 30k metrics that all are set to expire, but don't run the expiration
 * The second will update metric, and keep only 1/2 to expire. The other will get the expiration date updated.
   Then run the expiration which should only delete 15k metrics
+
+# Run on Cassandra cluster
+
+To run those program with a Cassandra cluster, the easiest way is:
+
+* Start a Cassandra cluster using example/squirreldb_ha:
+```
+(cd examples/squirreldb_ha; docker-compose up -d --scale cassandra3=1 cassandra1 cassandra2 cassandra3)
+```
+* Configure program to use those Cassandra and use replication 3:
+```
+export SQUIRRELDB_CASSANDRA_ADDRESSES=172.28.0.11:9042,172.28.0.12:9042
+export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+```
+* Run tests:
+```
+go run ./tests/squirreldb-cassandra-index-bench/
+```
+
+Note: the replication factor is only used at initial creation. To change its value, you need
+to destroy (docker-compose down -v) and re-create the Cassandra cluster.
