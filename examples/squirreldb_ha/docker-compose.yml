@@ -3,6 +3,7 @@ version: '3'
 services:
   cassandra1:
     image: cassandra
+    restart: unless-stopped
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
@@ -12,6 +13,7 @@ services:
         ipv4_address: 172.28.0.11 # Cassandra don't like if node swap their IPs. Other case should be fine
   cassandra2:
     image: cassandra
+    restart: unless-stopped
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
@@ -21,6 +23,7 @@ services:
         ipv4_address: 172.28.0.12
   cassandra3:
     image: cassandra
+    restart: unless-stopped
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
@@ -31,6 +34,7 @@ services:
 
   redis1:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -39,6 +43,7 @@ services:
         ipv4_address: 172.28.0.21 # Redis need fixed IP of the cluster may fail to recover by itself if node switch their IPs or all node changes their IP.
   redis2:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -47,6 +52,7 @@ services:
         ipv4_address: 172.28.0.22
   redis3:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -55,6 +61,7 @@ services:
         ipv4_address: 172.28.0.23
   redis4:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -63,6 +70,7 @@ services:
         ipv4_address: 172.28.0.24
   redis5:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -71,6 +79,7 @@ services:
         ipv4_address: 172.28.0.25
   redis6:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis.conf:/etc/redis.conf:ro
     command: ["/etc/redis.conf"]
@@ -79,12 +88,14 @@ services:
         ipv4_address: 172.28.0.26
   redis_init:
     image: redis
+    restart: unless-stopped
     volumes:
     - ./redis-init.sh:/usr/bin/redis-init.sh:ro
     command: ["/bin/sh", "/usr/bin/redis-init.sh"]
 
   squirreldb1:
     image: squirreldb
+    restart: unless-stopped
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
@@ -94,6 +105,7 @@ services:
         ipv4_address: 172.28.0.31 # SquirrelDB don't care about its IP, but nginx will only resolv DNS name on startup. So if SquirrelDB change their IP, nginx will no longer send traffic to them
   squirreldb2:
     image: squirreldb
+    restart: unless-stopped
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
@@ -104,20 +116,24 @@ services:
 
   nginx:
     image: nginx
+    restart: unless-stopped
     volumes:
     - ./nginx.conf:/etc/nginx/nginx.conf:ro
 
   prometheus:
     image: prom/prometheus
+    restart: unless-stopped
     volumes:
     - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
   node:
     image: prom/node-exporter
+    restart: unless-stopped
     volumes:
     - /:/rootfs:ro,rslave
     command: --path.rootfs=/rootfs
   grafana:
     image: grafana/grafana
+    restart: unless-stopped
     ports:
     - 127.0.0.1:3000:3000
 

@@ -3,21 +3,26 @@ version: '3'
 services:
   cassandra:
     image: cassandra
+    restart: unless-stopped
   squirreldb:
     image: squirreldb
+    restart: unless-stopped
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
 
   prometheus:
     image: prom/prometheus
+    restart: unless-stopped
     volumes:
     - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
   node:
     image: prom/node-exporter
+    restart: unless-stopped
     volumes:
     - /:/rootfs:ro,rslave
     command: --path.rootfs=/rootfs
   grafana:
     image: grafana/grafana
+    restart: unless-stopped
     ports:
     - 127.0.0.1:3000:3000
