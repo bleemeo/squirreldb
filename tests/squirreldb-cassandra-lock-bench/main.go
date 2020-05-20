@@ -85,6 +85,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
 		}
+
 		*cassanraReplicationFactor = int(tmp)
 	}
 
