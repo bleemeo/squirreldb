@@ -73,9 +73,6 @@ docker-compose start cassandra1
 docker-compose rm --force --stop -v squirreldb2
 docker-compose up -d squirreldb2
 
-# Note: the above may require a restart of nginx if SquirrelDB changed its IP
-docker-compose restart nginx
-
 docker-compose stop -t0 redis4
 docker-compose up -d redis4
 docker-compose stop -t0 redis2
