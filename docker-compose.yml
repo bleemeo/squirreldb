@@ -4,6 +4,8 @@ services:
   cassandra:
     image: cassandra
     restart: unless-stopped
+    cap_add:
+    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
   squirreldb:
     image: squirreldb
     restart: unless-stopped

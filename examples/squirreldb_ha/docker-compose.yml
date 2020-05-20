@@ -4,6 +4,8 @@ services:
   cassandra1:
     image: cassandra
     restart: unless-stopped
+    cap_add:
+    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
@@ -14,6 +16,8 @@ services:
   cassandra2:
     image: cassandra
     restart: unless-stopped
+    cap_add:
+    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
@@ -24,6 +28,8 @@ services:
   cassandra3:
     image: cassandra
     restart: unless-stopped
+    cap_add:
+    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     environment:
     - "MAX_HEAP_SIZE=128M"
     - "HEAP_NEWSIZE=24M"
