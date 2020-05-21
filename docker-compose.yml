@@ -17,6 +17,8 @@ services:
     restart: unless-stopped
     labels:
         glouton.enable: "false"
+    ports:
+    - 127.0.0.1:9201:9201
     environment:
     - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
 

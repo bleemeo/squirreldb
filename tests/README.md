@@ -78,6 +78,24 @@ The first command will:
 * The second will update metric, and keep only 1/2 to expire. The other will get the expiration date updated.
   Then run the expiration which should only delete 15k metrics
 
+# remote-storage-test
+
+This program do some testing on remote write & remote read. It verify that what was
+written could be re-read.
+
+Unlike the other one, it do require a running SquirrelDB (or actually any remote read/write storage).
+
+To run it, start SquirrelDB (for example using docker-compose sample file):
+```
+docker-compose up -d
+```
+
+Then run it:
+```
+go run ./tests/remote-storage-test
+```
+
+
 # Run on Cassandra cluster
 
 To run those program with a Cassandra cluster, the easiest way is:
