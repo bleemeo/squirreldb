@@ -132,7 +132,7 @@ func read(now time.Time) {
 		},
 	}
 	workChannel <- readRequest{
-		name: "mutliple-query",
+		name: "multiple-query",
 		request: prompb.ReadRequest{
 			Queries: []*prompb.Query{
 				{
@@ -234,6 +234,7 @@ func read(now time.Time) {
 				},
 			},
 		}
+
 		i := rand.Intn(6)
 		workChannel <- readRequest{
 			name: fmt.Sprintf("filler-batch-full-%d", n),
@@ -372,6 +373,7 @@ func samplesEqual(got, want []prompb.Sample) string {
 
 		return msg
 	}
+
 	if len(got) != len(want) {
 		return fmt.Sprintf("len(got) = %d want %d", len(got), len(want))
 	}
@@ -400,7 +402,6 @@ func samplesEqual2(got, want []prompb.Sample) string {
 }
 
 func sortedCopySample(v []prompb.Sample) []prompb.Sample {
-
 	v2 := make([]prompb.Sample, len(v))
 
 	copy(v2, v)
@@ -437,7 +438,7 @@ func sortTimeseries(v []*prompb.TimeSeries) []*prompb.TimeSeries {
 	v2 := make([]*prompb.TimeSeries, len(v))
 	copy(v2, v)
 
-	// TODO: should this sort be done by SquirrelDB ?
+	// should this sort be done by SquirrelDB ?
 	sort.Slice(v2, func(i, j int) bool {
 		return cmpLabels(v2[i].Labels, v2[j].Labels) < 0
 	})

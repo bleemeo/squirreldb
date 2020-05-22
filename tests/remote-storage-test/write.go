@@ -14,10 +14,6 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-type writeReq struct {
-	req prompb.WriteRequest
-}
-
 func write(now time.Time) {
 	log.Println("Starting write phase")
 
@@ -129,6 +125,7 @@ func write(now time.Time) {
 				},
 			},
 		}
+
 		for i := 0; i < 6; i++ {
 			workChannel <- prompb.WriteRequest{
 				Timeseries: []prompb.TimeSeries{
@@ -180,7 +177,11 @@ func writeWorker(workChannel chan prompb.WriteRequest) {
 			log.Fatalf("Response code = %d, content: %s", response.StatusCode, content)
 		}
 
-		io.Copy(ioutil.Discard, response.Body)
+		_, err = io.Copy(ioutil.Discard, response.Body)
+		if err != nil {
+			log.Fatalf("Failed to read response: %v", err)
+		}
+
 		response.Body.Close()
 	}
 }

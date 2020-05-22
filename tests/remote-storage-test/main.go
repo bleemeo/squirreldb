@@ -12,7 +12,6 @@ import (
 var (
 	remoteWrite = flag.String("write-url", "http://localhost:9201/write", "URL of remote write")
 	remoteRead  = flag.String("read-url", "http://localhost:9201/read", "URL of read write")
-	seed        = flag.Int64("seed", 42, "Seed used in random generator")
 	threads     = flag.Int("threads", 1, "Number of writing/reading threads")
 	scale       = flag.Int("scale", 1, "Scaling factor")
 	skipWrite   = flag.Bool("skip-write", false, "Skip write phase")
@@ -33,6 +32,7 @@ func main() {
 	if !*skipWrite {
 		write(now)
 	}
+
 	if !*skipRead {
 		read(now)
 	}
