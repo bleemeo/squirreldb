@@ -514,7 +514,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_ = keyFromLabels(tt.labels)
+				_ = tt.labels.Hash()
 			}
 		})
 	}
@@ -572,11 +572,11 @@ func Benchmark_labelsToID(b *testing.B) {
 	}
 	for _, tt := range tests {
 		c := CassandraIndex{
-			labelsToID: make(map[string]idData),
+			labelsToID: make(map[uint64][]idData),
 		}
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				key := keyFromLabels(tt.labels)
+				key := tt.labels.Hash()
 				idData, _ := c.getIDData(key, tt.labels)
 				c.setIDData(key, idData)
 			}

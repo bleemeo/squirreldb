@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"squirreldb/debug"
 	"squirreldb/types"
-	"strings"
 	"sync"
 	"time"
 )
@@ -68,6 +67,7 @@ type labelsData struct {
 
 type idData struct {
 	id                       types.MetricID
+	unsortedLabels           labels.Labels
 	cassandraEntryExpiration time.Time
 	cacheExpirationTime      time.Time
 }
@@ -91,19 +91,38 @@ type CassandraIndex struct {
 	lookupIDMutex            sync.Mutex
 	newMetricLock            types.TryLocker
 	expirationUpdateRequests map[time.Time]expirationUpdateRequest
-	labelsToID               map[string]idData
+	labelsToID               map[uint64][]idData
 
 	searchMutex sync.Mutex
 	idsToLabels map[types.MetricID]labelsData
 }
 
-func (c *CassandraIndex) getIDData(key string, _ labels.Labels) (idData, bool) {
-	r, found := c.labelsToID[key]
-	return r, found
+func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
+	list := c.labelsToID[key]
+
+	for _, r := range list {
+		if labels.Equal(r.unsortedLabels, unsortedLabels) {
+			return r, true
+		}
+	}
+
+	return idData{}, false
 }
 
-func (c *CassandraIndex) setIDData(key string, value idData) {
-	c.labelsToID[key] = value
+func (c *CassandraIndex) setIDData(key uint64, value idData) {
+	list := c.labelsToID[key]
+
+	for i, r := range list {
+		if labels.Equal(r.unsortedLabels, value.unsortedLabels) {
+			list[i] = value
+			c.labelsToID[key] = list
+
+			return
+		}
+	}
+
+	list = append(list, value)
+	c.labelsToID[key] = list
 }
 
 type storeImpl interface {
@@ -146,7 +165,7 @@ func new(store storeImpl, options Options) (*CassandraIndex, error) {
 	index := &CassandraIndex{
 		store:                    store,
 		options:                  options,
-		labelsToID:               make(map[string]idData),
+		labelsToID:               make(map[uint64][]idData),
 		idsToLabels:              make(map[types.MetricID]labelsData),
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
@@ -320,7 +339,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 	founds := make([]bool, len(labelsList))
 	foundCount := 0
 	ttls := make([]int64, len(labelsList))
-	labelsKeys := make([]string, len(labelsList))
+	labelsKeys := make([]uint64, len(labelsList))
 
 	for i, labels := range labelsList {
 		if len(labels) == 0 {
@@ -335,7 +354,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 
 	c.lookupIDMutex.Lock()
 	for i, labels := range labelsList {
-		labelsKeys[i] = keyFromLabels(labels)
+		labelsKeys[i] = labels.Hash()
 		idsData[i], founds[i] = c.getIDData(labelsKeys[i], labels)
 
 		if founds[i] {
@@ -434,6 +453,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 		}
 
 		idData.cacheExpirationTime = now.Add(cacheExpirationDelay)
+		idData.unsortedLabels = labelsList[i]
 		c.setIDData(labelsKeys[i], idData)
 	}
 
@@ -841,9 +861,15 @@ func (c *CassandraIndex) expire(now time.Time) {
 	defer c.lookupIDMutex.Unlock()
 	defer c.searchMutex.Unlock()
 
-	for key, idData := range c.labelsToID {
-		if idData.cacheExpirationTime.Before(now) {
-			delete(c.labelsToID, key)
+	for key, idsData := range c.labelsToID {
+		for _, idData := range idsData {
+			if idData.cacheExpirationTime.Before(now) {
+				// This may delete too many entry, but:
+				// 1) normally only 1 entry match the hash
+				// 2) it's a cache, we don't loss data
+				delete(c.labelsToID, key)
+				break
+			}
 		}
 	}
 
@@ -1217,9 +1243,15 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 
 		c.searchMutex.Unlock()
 
-		for k, v := range c.labelsToID {
-			if deleteIDsMap[v.id] {
-				delete(c.labelsToID, k)
+		for key, idsData := range c.labelsToID {
+			for _, v := range idsData {
+				if deleteIDsMap[v.id] {
+					// This may delete too many entry, but:
+					// 1) normally only 1 entry match the hash
+					// 2) it's a cache, we don't loss data
+					delete(c.labelsToID, key)
+					break
+				}
 			}
 		}
 		c.lookupIDMutex.Unlock()
@@ -1582,24 +1614,6 @@ func (c *CassandraIndex) cassandraGetExpirationList(day time.Time) (*roaring.Bit
 	err = tmp.UnmarshalBinary(buffer)
 
 	return tmp, err
-}
-
-// keyFromLabels returns a string key generated from a labels.Label list
-func keyFromLabels(labels labels.Labels) string {
-	if len(labels) == 0 {
-		return ""
-	}
-
-	strLabels := make([]string, len(labels)*2)
-
-	for i, label := range labels {
-		strLabels[i*2] = label.Name
-		strLabels[i*2+1] = label.Value
-	}
-
-	str := strings.Join(strLabels, "\x00")
-
-	return str
 }
 
 // popLabelsValue get and delete value via its name from a labels.Label list
