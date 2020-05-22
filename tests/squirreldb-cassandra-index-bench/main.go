@@ -17,7 +17,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
-	"github.com/prometheus/prometheus/prompb"
 )
 
 // nolint: gochecknoglobals
@@ -143,25 +142,4 @@ func drop(session *gocql.Session) {
 			log.Fatalf("Unable to drop table: %v", err)
 		}
 	}
-}
-
-func map2Labels(input map[string]string) []prompb.Label {
-	result := make([]prompb.Label, 0, len(input))
-	for k, v := range input {
-		result = append(result, prompb.Label{
-			Name:  k,
-			Value: v,
-		})
-	}
-
-	return result
-}
-
-func labels2Map(input []prompb.Label) map[string]string {
-	result := make(map[string]string, len(input))
-	for _, l := range input {
-		result[l.Name] = l.Value
-	}
-
-	return result
 }

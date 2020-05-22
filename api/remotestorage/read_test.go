@@ -5,6 +5,7 @@ import (
 	"squirreldb/types"
 	"testing"
 
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -337,7 +338,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []prompb.Label{
+					fixedLabels: labels.Labels{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -447,7 +448,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 					},
 				},
 				index: mockIndex{
-					fixedLabels: []prompb.Label{
+					fixedLabels: labels.Labels{
 						{
 							Name:  "__name__",
 							Value: "up",

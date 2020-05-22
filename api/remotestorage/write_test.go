@@ -8,6 +8,7 @@ import (
 	"squirreldb/types"
 	"testing"
 
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -16,17 +17,17 @@ const defaultTTL = 3600
 type mockIndex struct {
 	fixedLookupID types.MetricID
 	fixedSearchID types.MetricID
-	fixedLabels   []prompb.Label
+	fixedLabels   labels.Labels
 }
 
 func (i mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(id types.MetricID) ([]prompb.Label, error) {
+func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupIDs(labelsList [][]prompb.Label) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	if len(labelsList) != 1 {
 		return nil, nil, errors.New("not implemented for more than one metrics")
 
@@ -35,7 +36,7 @@ func (i mockIndex) LookupIDs(labelsList [][]prompb.Label) ([]types.MetricID, []i
 	return []types.MetricID{i.fixedLookupID}, []int64{defaultTTL}, nil
 }
 
-func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]types.MetricID, error) {
+func (i mockIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
 	return []types.MetricID{i.fixedSearchID}, nil
 }
 

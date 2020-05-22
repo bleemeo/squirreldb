@@ -7,7 +7,6 @@ import (
 	"squirreldb/types"
 
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -28,45 +27,11 @@ func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 	return querier{index: s.Index, reader: s.Reader, mint: mint, maxt: maxt}, nil
 }
 
-func toLabelMatchers(matchers []*labels.Matcher) ([]*prompb.LabelMatcher, error) {
-	pbMatchers := make([]*prompb.LabelMatcher, 0, len(matchers))
-
-	for _, m := range matchers {
-		var mType prompb.LabelMatcher_Type
-
-		switch m.Type {
-		case labels.MatchEqual:
-			mType = prompb.LabelMatcher_EQ
-		case labels.MatchNotEqual:
-			mType = prompb.LabelMatcher_NEQ
-		case labels.MatchRegexp:
-			mType = prompb.LabelMatcher_RE
-		case labels.MatchNotRegexp:
-			mType = prompb.LabelMatcher_NRE
-		default:
-			return nil, errors.New("invalid matcher type")
-		}
-
-		pbMatchers = append(pbMatchers, &prompb.LabelMatcher{
-			Type:  mType,
-			Name:  m.Name,
-			Value: m.Value,
-		})
-	}
-
-	return pbMatchers, nil
-}
-
 // Select returns a set of series that matches the given label matchers.
 // Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
 // It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
 func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) (storage.SeriesSet, storage.Warnings, error) {
-	promMatcher, err := toLabelMatchers(matchers)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ids, err := q.index.Search(promMatcher)
+	ids, err := q.index.Search(matchers)
 	if err != nil {
 		return nil, nil, err
 	}

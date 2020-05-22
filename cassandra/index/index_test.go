@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"squirreldb/types"
 	"strconv"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 const (
@@ -134,7 +135,7 @@ type mockStore struct {
 
 	labels2id     map[string]types.MetricID
 	postings      map[string]map[string][]byte
-	id2labels     map[types.MetricID][]prompb.Label
+	id2labels     map[types.MetricID]labels.Labels
 	id2expiration map[types.MetricID]time.Time
 	expiration    map[time.Time][]byte
 }
@@ -145,7 +146,7 @@ func (s *mockStore) Init() error {
 
 	s.labels2id = make(map[string]types.MetricID)
 	s.postings = make(map[string]map[string][]byte)
-	s.id2labels = make(map[types.MetricID][]prompb.Label)
+	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
 	s.expiration = make(map[time.Time][]byte)
 	return nil
@@ -163,7 +164,7 @@ func (s mockStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, e
 	return result, nil
 }
 
-func (s *mockStore) SelectID2Labels(id types.MetricID) ([]prompb.Label, error) {
+func (s *mockStore) SelectID2Labels(id types.MetricID) (labels.Labels, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -308,7 +309,7 @@ func (s *mockStore) InsertPostings(name string, value string, bitset []byte) err
 	return nil
 }
 
-func (s *mockStore) InsertID2Labels(id types.MetricID, sortedLabels []prompb.Label, expiration time.Time) error {
+func (s *mockStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -410,20 +411,20 @@ func (s *mockStore) DeletePostings(name string, value string) error {
 	return nil
 }
 
-func labelsMapToList(m map[string]string, dropSpecialLabel bool) []prompb.Label {
-	results := make([]prompb.Label, 0, len(m))
+func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
+	results := make(labels.Labels, 0, len(m))
 
 	for k, v := range m {
 		if dropSpecialLabel && (k == timeToLiveLabelName || k == idLabelName) {
 			continue
 		}
-		results = append(results, prompb.Label{
+		results = append(results, labels.Label{
 			Name:  k,
 			Value: v,
 		})
 	}
 
-	results = sortLabels(results)
+	sort.Sort(results)
 	return results
 }
 
@@ -438,7 +439,7 @@ func mockIndexFromMetrics(metrics map[types.MetricID]map[string]string) *Cassand
 
 	for id, labels := range metrics {
 		sortedLabels := labelsMapToList(labels, true)
-		sortedLabelsString := stringFromLabels(sortedLabels)
+		sortedLabelsString := sortedLabels.String()
 		savedIDs, err := index.createMetrics([]createMetricRequest{
 			{
 				newID:               uint64(id),
@@ -463,24 +464,24 @@ func mockIndexFromMetrics(metrics map[types.MetricID]map[string]string) *Cassand
 func Benchmark_keyFromLabels(b *testing.B) {
 	tests := []struct {
 		name   string
-		labels []prompb.Label
+		labels labels.Labels
 	}{
 		{
 			name: "simple",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "test", Value: "value"},
 			},
 		},
 		{
 			name: "two",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: "value1"},
 				{Name: "label2", Value: "value2"},
 			},
 		},
 		{
 			name: "ten-labels",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: "value1"},
 				{Name: "label2", Value: "value2"},
 				{Name: "label3", Value: "value3"},
@@ -495,7 +496,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 		},
 		{
 			name: "five-longer-labels",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "the-label-one", Value: "the-first-value"},
 				{Name: "the-second-label", Value: "another-value"},
 				{Name: "the-label-after-two", Value: "all-value-are-different"},
@@ -505,7 +506,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 		},
 		{
 			name: "need-quoting2",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: `value1\",label2=\"value2`},
 			},
 		},
@@ -522,44 +523,44 @@ func Benchmark_keyFromLabels(b *testing.B) {
 func Test_timeToLiveFromLabels(t *testing.T) {
 	tests := []struct {
 		name       string
-		labels     []prompb.Label
+		labels     labels.Labels
 		want       int64
-		wantLabels []prompb.Label
+		wantLabels labels.Labels
 	}{
 		{
 			name: "no ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 			},
 			want: 0,
-			wantLabels: []prompb.Label{
+			wantLabels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 			},
 		},
 		{
 			name: "with ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 				{Name: "__ttl__", Value: "3600"},
 			},
 			want: 3600,
-			wantLabels: []prompb.Label{
+			wantLabels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 			},
 		},
 		{
 			name: "with ttl2",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "__ttl__", Value: "3600"},
 				{Name: "job", Value: "scrape"},
 			},
 			want: 3600,
-			wantLabels: []prompb.Label{
+			wantLabels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 			},
@@ -581,21 +582,21 @@ func Test_timeToLiveFromLabels(t *testing.T) {
 func Benchmark_timeToLiveFromLabels(b *testing.B) {
 	tests := []struct {
 		name       string
-		labels     []prompb.Label
+		labels     labels.Labels
 		wantTTL    int64
-		wantLabels []prompb.Label
+		wantLabels labels.Labels
 		wantErr    bool
 	}{
 		{
 			name: "no ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "job", Value: "scrape"},
 			},
 		},
 		{
 			name: "with ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
 				{Name: "__ttl__", Value: "3600"},
 				{Name: "job", Value: "scrape"},
@@ -603,7 +604,7 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 		},
 		{
 			name: "12 labels no ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "job", Value: "scrape"},
 				{Name: "__name__", Value: "up"},
 				{Name: "labels1", Value: "value1"},
@@ -620,7 +621,7 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 		},
 		{
 			name: "12 labels ttl",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "job", Value: "scrape"},
 				{Name: "__name__", Value: "up"},
 				{Name: "labels1", Value: "value1"},
@@ -640,7 +641,7 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				labelsIn := make([]prompb.Label, len(tt.labels))
+				labelsIn := make(labels.Labels, len(tt.labels))
 				copy(labelsIn, tt.labels)
 				_ = timeToLiveFromLabels(&labelsIn)
 			}
@@ -648,93 +649,9 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 	}
 }
 
-func Test_getLabelsValue(t *testing.T) {
-	type args struct {
-		labels []prompb.Label
-		name   string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "contains",
-			args: args{
-				labels: []prompb.Label{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-				name: "monitor",
-			},
-			want: "codelab",
-		},
-		{
-			name: "contains_empty_value",
-			args: args{
-				labels: []prompb.Label{
-					{
-						Name:  "__name__",
-						Value: "down",
-					},
-					{
-						Name:  "job",
-						Value: "",
-					},
-				},
-				name: "job",
-			},
-			want: "",
-		},
-		{
-			name: "no_contains",
-			args: args{
-				labels: []prompb.Label{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
-				name: "monitor",
-			},
-			want: "",
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: []prompb.Label{},
-				name:   "monitor",
-			},
-			want: "",
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-				name:   "monitor",
-			},
-			want: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getLabelsValue(tt.args.labels, tt.args.name)
-			if got != tt.want {
-				t.Errorf("getLabelsValue() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_getMatchersValue(t *testing.T) {
 	type args struct {
-		matchers []*prompb.LabelMatcher
+		matchers []*labels.Matcher
 		name     string
 	}
 	tests := []struct {
@@ -746,7 +663,7 @@ func Test_getMatchersValue(t *testing.T) {
 		{
 			name: "contains",
 			args: args{
-				matchers: []*prompb.LabelMatcher{
+				matchers: []*labels.Matcher{
 					{
 						Name:  "__name__",
 						Value: "up",
@@ -764,7 +681,7 @@ func Test_getMatchersValue(t *testing.T) {
 		{
 			name: "contains_empty_value",
 			args: args{
-				matchers: []*prompb.LabelMatcher{
+				matchers: []*labels.Matcher{
 					{
 						Name:  "__name__",
 						Value: "down",
@@ -782,7 +699,7 @@ func Test_getMatchersValue(t *testing.T) {
 		{
 			name: "no_contains",
 			args: args{
-				matchers: []*prompb.LabelMatcher{
+				matchers: []*labels.Matcher{
 					{
 						Name:  "__name__",
 						Value: "up",
@@ -796,7 +713,7 @@ func Test_getMatchersValue(t *testing.T) {
 		{
 			name: "labels_empty",
 			args: args{
-				matchers: []*prompb.LabelMatcher{},
+				matchers: []*labels.Matcher{},
 				name:     "monitor",
 			},
 			want:  "",
@@ -827,17 +744,17 @@ func Test_getMatchersValue(t *testing.T) {
 
 func Test_sortLabels(t *testing.T) {
 	type args struct {
-		labels []prompb.Label
+		labels labels.Labels
 	}
 	tests := []struct {
 		name string
 		args args
-		want []prompb.Label
+		want labels.Labels
 	}{
 		{
 			name: "sorted",
 			args: args{
-				labels: []prompb.Label{
+				labels: labels.Labels{
 					{
 						Name:  "__name__",
 						Value: "up",
@@ -848,7 +765,7 @@ func Test_sortLabels(t *testing.T) {
 					},
 				},
 			},
-			want: []prompb.Label{
+			want: labels.Labels{
 				{
 					Name:  "__name__",
 					Value: "up",
@@ -862,7 +779,7 @@ func Test_sortLabels(t *testing.T) {
 		{
 			name: "no_sorted",
 			args: args{
-				labels: []prompb.Label{
+				labels: labels.Labels{
 					{
 						Name:  "monitor",
 						Value: "codelab",
@@ -873,7 +790,7 @@ func Test_sortLabels(t *testing.T) {
 					},
 				},
 			},
-			want: []prompb.Label{
+			want: labels.Labels{
 				{
 					Name:  "__name__",
 					Value: "up",
@@ -887,16 +804,16 @@ func Test_sortLabels(t *testing.T) {
 		{
 			name: "labels_empty",
 			args: args{
-				labels: []prompb.Label{},
+				labels: labels.Labels{},
 			},
-			want: nil,
+			want: labels.Labels{},
 		},
 		{
 			name: "labels_nil",
 			args: args{
 				labels: nil,
 			},
-			want: nil,
+			want: labels.Labels{},
 		},
 	}
 	for _, tt := range tests {
@@ -910,11 +827,11 @@ func Test_sortLabels(t *testing.T) {
 
 func Test_stringFromLabelsCollision(t *testing.T) {
 	tests := []struct {
-		input1 []prompb.Label
-		input2 []prompb.Label
+		input1 labels.Labels
+		input2 labels.Labels
 	}{
 		{
-			input1: []prompb.Label{
+			input1: labels.Labels{
 				{
 					Name:  "label1",
 					Value: "value1",
@@ -924,7 +841,7 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 					Value: "value2",
 				},
 			},
-			input2: []prompb.Label{
+			input2: labels.Labels{
 				{
 					Name:  "label1",
 					Value: "value1,label2=value2",
@@ -932,7 +849,7 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 			},
 		},
 		{
-			input1: []prompb.Label{
+			input1: labels.Labels{
 				{
 					Name:  "label1",
 					Value: "value1",
@@ -942,7 +859,7 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 					Value: "value2",
 				},
 			},
-			input2: []prompb.Label{
+			input2: labels.Labels{
 				{
 					Name:  "label1",
 					Value: `value1",label2="value2`,
@@ -951,62 +868,65 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		got1 := stringFromLabels(tt.input1)
-		got2 := stringFromLabels(tt.input2)
+		got1 := tt.input1.String()
+		got2 := tt.input2.String()
 		if got1 == got2 {
 			t.Errorf("StringFromLabels(%v) == StringFromLabels(%v) want not equal", tt.input1, tt.input2)
 		}
 	}
 }
 
+// Test_stringFromLabels is indeed testing Prometheus code which already has test,
+// but this test actually serve to ensure Prometheus result don't change, because
+// the result must not change.
 func Test_stringFromLabels(t *testing.T) {
 	tests := []struct {
 		name   string
-		labels []prompb.Label
+		labels labels.Labels
 		want   string
 	}{
 		{
 			name: "simple",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "test", Value: "value"},
 			},
-			want: `test="value"`,
+			want: `{test="value"}`,
 		},
 		{
 			name: "two",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: "value1"},
 				{Name: "label2", Value: "value2"},
 			},
-			want: `label1="value1",label2="value2"`,
+			want: `{label1="value1", label2="value2"}`,
 		},
 		{
 			name: "two-unordered",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label2", Value: "value2"},
 				{Name: "label1", Value: "value1"},
 			},
-			want: `label2="value2",label1="value1"`,
+			want: `{label2="value2", label1="value1"}`,
 		},
 		{
 			name: "need-quoting",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: `value1",label2="value2`},
 			},
-			want: `label1="value1\",label2=\"value2"`,
+			want: `{label1="value1\",label2=\"value2"}`,
 		},
 		{
 			name: "need-quoting2",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: `value1\",label2=\"value2`},
 			},
-			want: `label1="value1\\\",label2=\\\"value2"`,
+			want: `{label1="value1\\\",label2=\\\"value2"}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := stringFromLabels(tt.labels); got != tt.want {
-				t.Errorf("StringFromLabels() = %v, want %v", got, tt.want)
+			if got := tt.labels.String(); got != tt.want {
+				t.Errorf("tt.labels.String() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1015,24 +935,24 @@ func Test_stringFromLabels(t *testing.T) {
 func Benchmark_stringFromLabels(b *testing.B) {
 	tests := []struct {
 		name   string
-		labels []prompb.Label
+		labels labels.Labels
 	}{
 		{
 			name: "simple",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "test", Value: "value"},
 			},
 		},
 		{
 			name: "two",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: "value1"},
 				{Name: "label2", Value: "value2"},
 			},
 		},
 		{
 			name: "ten-labels",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: "value1"},
 				{Name: "label2", Value: "value2"},
 				{Name: "label3", Value: "value3"},
@@ -1047,7 +967,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 		},
 		{
 			name: "five-longer-labels",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "the-label-one", Value: "the-first-value"},
 				{Name: "the-second-label", Value: "another-value"},
 				{Name: "the-label-after-two", Value: "all-value-are-different"},
@@ -1057,7 +977,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 		},
 		{
 			name: "need-quoting2",
-			labels: []prompb.Label{
+			labels: labels.Labels{
 				{Name: "label1", Value: `value1\",label2=\"value2`},
 			},
 		},
@@ -1065,7 +985,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_ = stringFromLabels(tt.labels)
+				_ = tt.labels.String()
 			}
 		})
 	}
@@ -1188,16 +1108,16 @@ func Test_postingsForMatchers(t *testing.T) {
 	tests := []struct {
 		name     string
 		index    *CassandraIndex
-		matchers []*prompb.LabelMatcher
+		matchers []*labels.Matcher
 		want     []types.MetricID
 		wantLen  int
 	}{
 		{
 			name:  "eq",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "up",
 				},
@@ -1211,14 +1131,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-eq",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_cpu_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "mode",
 					Value: "user",
 				},
@@ -1231,14 +1151,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-neq",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_cpu_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "mode",
 					Value: "user",
 				},
@@ -1250,14 +1170,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-nolabel",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "",
 				},
@@ -1269,14 +1189,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-label",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "environment",
 					Value: "",
 				},
@@ -1290,9 +1210,9 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "u.",
 				},
@@ -1306,14 +1226,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-re",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_cpu_.*",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "mode",
 					Value: "^u.*",
 				},
@@ -1326,14 +1246,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-nre",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_(cpu|disk)_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "mode",
 					Value: "u\\wer",
 				},
@@ -1345,14 +1265,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-re_nolabel",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
@@ -1364,14 +1284,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-re_label",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
@@ -1385,14 +1305,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-re*",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "environment",
 					Value: ".*",
 				},
@@ -1407,14 +1327,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "re-nre*",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: ".*",
 				},
@@ -1424,14 +1344,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-nre_empty_and_devel",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "(|devel)",
 				},
@@ -1444,19 +1364,19 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-nre-eq same label",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "devel",
 				},
@@ -1468,19 +1388,19 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "eq-eq-no_label",
 			index: index1,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "production",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "userID",
 					Value: "",
 				},
@@ -1492,9 +1412,9 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-eq",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "generated_042",
 				},
@@ -1510,14 +1430,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-eq-eq",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "generated_042",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
@@ -1533,14 +1453,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-eq-neq",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "multiple_2",
 					Value: "false",
 				},
@@ -1556,14 +1476,14 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-eq-neq-2",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
@@ -1574,24 +1494,24 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-re-neq-eq-neq",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "generated_04.",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "__name__",
 					Value: "generated_042",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "multiple_5",
 					Value: "false",
 				},
@@ -1607,24 +1527,24 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index2-re-nre-eq-neq",
 			index: index2,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "generated_04.",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "__name__",
 					Value: "(generated_04(0|2)|)",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "multiple_2",
 					Value: "true",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "multiple_5",
 					Value: "false",
 				},
@@ -1640,9 +1560,9 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index3-exact-32-bits",
 			index: index3,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "value",
 					Value: "exactly-32bits",
 				},
@@ -1654,9 +1574,9 @@ func Test_postingsForMatchers(t *testing.T) {
 		{
 			name:  "index3-max-id",
 			index: index3,
-			matchers: []*prompb.LabelMatcher{
+			matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "value",
 					Value: "largest-id",
 				},
@@ -2086,7 +2006,7 @@ func Test_expiration(t *testing.T) {
 
 	var ttls []int64
 
-	labelsList := make([][]prompb.Label, len(metrics))
+	labelsList := make([]labels.Labels, len(metrics))
 	for i, m := range metrics {
 		labelsList[i] = labelsMapToList(m, false)
 	}
@@ -2228,7 +2148,7 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	labelsList = make([][]prompb.Label, expireBatchSize+10)
+	labelsList = make([]labels.Labels, expireBatchSize+10)
 	for n := 0; n < expireBatchSize+10; n++ {
 		labels := map[string]string{
 			"__name__": "filler",

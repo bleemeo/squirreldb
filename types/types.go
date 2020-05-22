@@ -3,14 +3,14 @@ package types
 import (
 	"sync"
 
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 type Index interface {
 	AllIDs() ([]MetricID, error)
-	LookupLabels(id MetricID) ([]prompb.Label, error)
-	LookupIDs(labelsList [][]prompb.Label) ([]MetricID, []int64, error)
-	Search(matchers []*prompb.LabelMatcher) ([]MetricID, error)
+	LookupLabels(id MetricID) (labels.Labels, error)
+	LookupIDs(labelsList []labels.Labels) ([]MetricID, []int64, error)
+	Search(matchers []*labels.Matcher) ([]MetricID, error)
 }
 
 type MetricDataSet interface {

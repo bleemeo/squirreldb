@@ -6,7 +6,7 @@ import (
 	"squirreldb/types"
 	"strconv"
 
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 func test(cassandraIndex types.Index) { //nolint: gocognit
@@ -88,14 +88,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 
 	tests := []struct {
 		Name            string
-		Matchers        []*prompb.LabelMatcher
+		Matchers        []*labels.Matcher
 		MatchingMetrics []int
 	}{
 		{
 			Name: "eq",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "up",
 				},
@@ -104,14 +104,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-eq",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_cpu_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "mode",
 					Value: "user",
 				},
@@ -120,14 +120,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-neq",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_cpu_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "mode",
 					Value: "user",
 				},
@@ -136,14 +136,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-nolabel",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "",
 				},
@@ -152,14 +152,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-label",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NEQ,
+					Type:  labels.MatchNotEqual,
 					Name:  "environment",
 					Value: "",
 				},
@@ -168,9 +168,9 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "u.",
 				},
@@ -179,14 +179,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-re",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_cpu_.*",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "mode",
 					Value: "^u.*",
 				},
@@ -195,14 +195,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-nre",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_(cpu|disk)_seconds_total",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "mode",
 					Value: "u\\wer",
 				},
@@ -211,14 +211,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-re_nolabel",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
@@ -227,14 +227,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-re_label",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
@@ -243,14 +243,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-re*",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "environment",
 					Value: ".*",
 				},
@@ -259,14 +259,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "re-nre*",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_RE,
+					Type:  labels.MatchRegexp,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes$",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: ".*",
 				},
@@ -275,14 +275,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-nre_empty_and_devel",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "(|devel)",
 				},
@@ -291,19 +291,19 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-nre-eq same label",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_NRE,
+					Type:  labels.MatchNotRegexp,
 					Name:  "environment",
 					Value: "^$",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "devel",
 				},
@@ -312,19 +312,19 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		},
 		{
 			Name: "eq-eq-no_label",
-			Matchers: []*prompb.LabelMatcher{
+			Matchers: []*labels.Matcher{
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "__name__",
 					Value: "node_filesystem_avail_bytes",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "environment",
 					Value: "production",
 				},
 				{
-					Type:  prompb.LabelMatcher_EQ,
+					Type:  labels.MatchEqual,
 					Name:  "userID",
 					Value: "",
 				},
@@ -336,14 +336,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 	metricsIDs := make([]types.MetricID, len(metrics))
 	ID2metrics := make(map[types.MetricID]int, len(metrics))
 
-	for i, labels := range metrics {
+	for i, labelsMap := range metrics {
 		if i == 0 {
 			continue
 		}
 
-		ids, ttls, err := cassandraIndex.LookupIDs([][]prompb.Label{map2Labels(labels)})
+		ids, ttls, err := cassandraIndex.LookupIDs([]labels.Labels{labels.FromMap(labelsMap)})
 		if err != nil {
-			log.Fatalf("LookupIDs(%v) failed: %v", labels, err)
+			log.Fatalf("LookupIDs(%v) failed: %v", labelsMap, err)
 		}
 
 		if ttls[0] != int64(defaultTimeToLive.Seconds()) {
@@ -379,7 +379,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 	}
 
 	if *includeID {
-		ids, _, err := cassandraIndex.LookupIDs([][]prompb.Label{
+		ids, _, err := cassandraIndex.LookupIDs([]labels.Labels{
 			{
 				{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
 				{Name: "ignored", Value: "__metric_id__ win"},
@@ -394,7 +394,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupIDs(__metric_id__ valid) = %v, want %v", ids[0], metricsIDs[1])
 		}
 
-		_, _, err = cassandraIndex.LookupIDs([][]prompb.Label{
+		_, _, err = cassandraIndex.LookupIDs([]labels.Labels{
 			{
 				{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
 				{Name: "ignored", Value: "__metric_id__ win"},
@@ -404,9 +404,9 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupIDs(__metric_id__ invalid) succeeded. It must fail")
 		}
 
-		ids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
-			{Type: prompb.LabelMatcher_EQ, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
-			{Type: prompb.LabelMatcher_EQ, Name: "ignored", Value: "only_id_is_used"},
+		ids, err = cassandraIndex.Search([]*labels.Matcher{
+			{Type: labels.MatchEqual, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
+			{Type: labels.MatchEqual, Name: "ignored", Value: "only_id_is_used"},
 		})
 		if err != nil {
 			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
@@ -416,9 +416,9 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid) = %v, want [%v]", ids, metricsIDs[1])
 		}
 
-		ids, err = cassandraIndex.Search([]*prompb.LabelMatcher{
-			{Type: prompb.LabelMatcher_EQ, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[2]), 10)},
-			{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "up"},
+		ids, err = cassandraIndex.Search([]*labels.Matcher{
+			{Type: labels.MatchEqual, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[2]), 10)},
+			{Type: labels.MatchNotEqual, Name: "__name__", Value: "up"},
 		})
 		if err != nil {
 			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)
@@ -440,7 +440,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupLabels(%d) failed: %v", i, err)
 		}
 
-		got := labels2Map(labels)
+		got := labels.Map()
 
 		if !reflect.DeepEqual(got, metrics[i]) {
 			log.Fatalf("LookupLabels(%d) = %v, want %v", i, got, metrics[i])

@@ -2,6 +2,7 @@ package remotestorage
 
 import (
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/storage/remote"
 
 	"net/http"
 	"squirreldb/types"
@@ -99,7 +100,12 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 // Returns a MetricRequest generated from a Query
 func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.MetricRequest, error) {
-	ids, err := index.Search(promQuery.Matchers)
+	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
+	if err != nil {
+		return types.MetricRequest{}, err
+	}
+
+	ids, err := index.Search(matchers)
 
 	if err != nil {
 		return types.MetricRequest{}, err
@@ -169,7 +175,7 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.
 	promSample := promSamplesFromPoints(data.Points)
 
 	promQueryResult := &prompb.TimeSeries{
-		Labels:  labels,
+		Labels:  labelsToLabelsProto(labels, nil),
 		Samples: promSample,
 	}
 

@@ -10,7 +10,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/labels"
 	"golang.org/x/sync/errgroup"
 
 	"context"
@@ -62,7 +62,7 @@ const (
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 type labelsData struct {
-	labels         []prompb.Label
+	labels         labels.Labels
 	expirationTime time.Time
 }
 
@@ -100,14 +100,14 @@ type CassandraIndex struct {
 type storeImpl interface {
 	Init() error
 	SelectLabels2ID(sortedLabelsString string) (types.MetricID, error)
-	SelectID2Labels(id types.MetricID) ([]prompb.Label, error)
+	SelectID2Labels(id types.MetricID) (labels.Labels, error)
 	SelectExpiration(day time.Time) ([]byte, error)
 	SelectID2LabelsExpiration(id types.MetricID) (time.Time, error)
 	SelectPostingByName(name string) bytesIter
 	SelectPostingByNameValue(name string, value string) ([]byte, error)
 	SelectValueForName(name string) ([]string, error)
 	InsertPostings(name string, value string, bitset []byte) error
-	InsertID2Labels(id types.MetricID, sortedLabels []prompb.Label, expiration time.Time) error
+	InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error
 	InsertLabels2ID(sortedLabelsString string, id types.MetricID) error
 	InsertExpiration(day time.Time, bitset []byte) error
 	UpdateID2LabelsExpiration(id types.MetricID, expiration time.Time) error
@@ -235,12 +235,12 @@ func (c *CassandraIndex) postings(name string, value string) (*roaring.Bitmap, e
 	return result, err
 }
 
-// LookupLabels returns a prompb.Label list corresponding to the specified ID
-func (c *CassandraIndex) LookupLabels(id types.MetricID) ([]prompb.Label, error) {
+// LookupLabels returns a Label list corresponding to the specified ID
+func (c *CassandraIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	return c.lookupLabels(id, c.options.IncludeID, time.Now())
 }
 
-func (c *CassandraIndex) lookupLabels(id types.MetricID, addID bool, now time.Time) ([]prompb.Label, error) {
+func (c *CassandraIndex) lookupLabels(id types.MetricID, addID bool, now time.Time) (labels.Labels, error) {
 	start := time.Now()
 
 	c.searchMutex.Lock()
@@ -269,36 +269,36 @@ func (c *CassandraIndex) lookupLabels(id types.MetricID, addID bool, now time.Ti
 
 	c.searchMutex.Unlock()
 
-	labels := make([]prompb.Label, len(labelsData.labels))
+	labelList := make(labels.Labels, len(labelsData.labels))
 	for i, v := range labelsData.labels {
-		labels[i] = prompb.Label{
+		labelList[i] = labels.Label{
 			Name:  v.Name,
 			Value: v.Value,
 		}
 	}
 
 	if addID {
-		label := prompb.Label{
+		label := labels.Label{
 			Name:  idLabelName,
 			Value: strconv.FormatInt(int64(id), 10),
 		}
 
-		labels = append(labels, label)
+		labelList = append(labelList, label)
 	}
 
 	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
-	return labels, nil
+	return labelList, nil
 }
 
-// LookupIDs returns a IDs corresponding to the specified prompb.Label lists
+// LookupIDs returns a IDs corresponding to the specified labels.Label lists
 // It also return the metric TTLs
 // The result list will be the same length as input lists and using the same order.
-func (c *CassandraIndex) LookupIDs(labelsList [][]prompb.Label) ([]types.MetricID, []int64, error) {
+func (c *CassandraIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	return c.lookupIDs(labelsList, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
+func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -356,7 +356,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 		}
 
 		sortedLabels := sortLabels(labels)
-		sortedLabelsString := stringFromLabels(sortedLabels)
+		sortedLabelsString := sortedLabels.String()
 
 		duplicatedMetric[sortedLabelsString] = append(duplicatedMetric[sortedLabelsString], i)
 
@@ -432,7 +432,7 @@ func (c *CassandraIndex) lookupIDs(labelsList [][]prompb.Label, now time.Time) (
 }
 
 // search metric ID by labels in Cassadran. Update and return requests to create metric if not found
-func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabelsString string, sortedLabels []prompb.Label, idData *idData, found *bool, ttl int64, now time.Time) ([]createMetricRequest, error) {
+func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabelsString string, sortedLabels labels.Labels, idData *idData, found *bool, ttl int64, now time.Time) ([]createMetricRequest, error) {
 	if id, err := c.store.SelectLabels2ID(sortedLabelsString); err == nil {
 		idData.id = id
 		idData.cassandraEntryExpiration, err = c.store.SelectID2LabelsExpiration(idData.id)
@@ -496,13 +496,13 @@ func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time
 }
 
 // lookupIDsFromLabels will idData for metrics which as the idLabelName label
-func (c *CassandraIndex) lookupIDsFromLabels(labelsList [][]prompb.Label, idsData []idData, founds []bool) error {
+func (c *CassandraIndex) lookupIDsFromLabels(labelsList []labels.Labels, idsData []idData, founds []bool) error {
 	for i, labels := range labelsList {
 		if founds[i] {
 			continue
 		}
 
-		idStr := getLabelsValue(labels, idLabelName)
+		idStr := labels.Get(idLabelName)
 		if idStr != "" {
 			id, err := strconv.ParseInt(idStr, 10, 0)
 			if err != nil {
@@ -571,7 +571,7 @@ func freeFreeID(bitmap *roaring.Bitmap) uint64 {
 
 type createMetricRequest struct {
 	sortedLabelsString  string
-	sortedLabels        []prompb.Label
+	sortedLabels        labels.Labels
 	cassandraExpiration time.Time
 	newID               uint64
 }
@@ -780,7 +780,7 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 //   currently found metrics are not in the list of metrics having this label.
 //   Note: this means that it must already have found some metrics (and that this filter is applied at the end) but PromQL forbid to only
 //   have label-not-defined matcher, so some other matcher must exists.
-func (c *CassandraIndex) Search(matchers []*prompb.LabelMatcher) ([]types.MetricID, error) {
+func (c *CassandraIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
 	start := time.Now()
 
 	defer func() {
@@ -1079,7 +1079,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 			return err
 		}
 
-		sortedLabelsString := stringFromLabels(sortedLabels)
+		sortedLabelsString := sortedLabels.String()
 		deleteLabels = append(deleteLabels, sortedLabelsString)
 		deleteIDs = append(deleteIDs, intID)
 
@@ -1163,7 +1163,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 	}
 
 	err = c.postingUpdate(postingUpdateRequest{
-		Label:     prompb.Label{Name: allPostingLabelName, Value: allPostingLabelValue},
+		Label:     labels.Label{Name: allPostingLabelName, Value: allPostingLabelValue},
 		RemoveIDs: deleteIDs,
 	})
 	if err != nil {
@@ -1253,7 +1253,7 @@ func (c *CassandraIndex) concurrentTasks(queryGenerator func(ctx context.Context
 }
 
 type postingUpdateRequest struct {
-	Label     prompb.Label
+	Label     labels.Label
 	AddIDs    []uint64
 	RemoveIDs []uint64
 }
@@ -1328,7 +1328,7 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 	return c.store.InsertExpiration(job.Day, buffer.Bytes())
 }
 
-func matchValues(matcher *prompb.LabelMatcher, re *regexp.Regexp, value string) bool {
+func matchValues(matcher *labels.Matcher, re *regexp.Regexp, value string) bool {
 	var match bool
 
 	if re != nil {
@@ -1337,28 +1337,28 @@ func matchValues(matcher *prompb.LabelMatcher, re *regexp.Regexp, value string) 
 		match = (value == matcher.Value)
 	}
 
-	if matcher.Type == prompb.LabelMatcher_NEQ || matcher.Type == prompb.LabelMatcher_NRE {
+	if matcher.Type == labels.MatchNotEqual || matcher.Type == labels.MatchNotRegexp {
 		return !match
 	}
 
 	return match
 }
 
-func inverseMatcher(m *prompb.LabelMatcher) *prompb.LabelMatcher {
-	mInv := prompb.LabelMatcher{
+func inverseMatcher(m *labels.Matcher) *labels.Matcher {
+	mInv := labels.Matcher{
 		Name:  m.Name,
 		Value: m.Value,
 	}
 
 	switch m.Type {
-	case prompb.LabelMatcher_EQ:
-		mInv.Type = prompb.LabelMatcher_NEQ
-	case prompb.LabelMatcher_NEQ:
-		mInv.Type = prompb.LabelMatcher_EQ
-	case prompb.LabelMatcher_RE:
-		mInv.Type = prompb.LabelMatcher_NRE
-	case prompb.LabelMatcher_NRE:
-		mInv.Type = prompb.LabelMatcher_RE
+	case labels.MatchEqual:
+		mInv.Type = labels.MatchNotEqual
+	case labels.MatchNotEqual:
+		mInv.Type = labels.MatchEqual
+	case labels.MatchRegexp:
+		mInv.Type = labels.MatchNotRegexp
+	case labels.MatchNotRegexp:
+		mInv.Type = labels.MatchRegexp
 	}
 
 	return &mInv
@@ -1366,12 +1366,12 @@ func inverseMatcher(m *prompb.LabelMatcher) *prompb.LabelMatcher {
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is taken from Prometheus PostingsForMatchers (in querier.go)
-func (c *CassandraIndex) postingsForMatchers(matchers []*prompb.LabelMatcher) (ids []types.MetricID, err error) { //nolint: gocognit
+func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit
 	re := make([]*regexp.Regexp, len(matchers))
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for i, m := range matchers {
-		if m.Type == prompb.LabelMatcher_RE || m.Type == prompb.LabelMatcher_NRE {
+		if m.Type == labels.MatchRegexp || m.Type == labels.MatchNotRegexp {
 			re[i], err = regexp.Compile("^(?:" + m.Value + ")$")
 
 			if err != nil {
@@ -1389,7 +1389,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*prompb.LabelMatcher) (i
 	for i, m := range matchers {
 		if labelMustBeSet[m.Name] {
 			matchesEmpty := matchValues(m, re[i], "")
-			isNot := m.Type == prompb.LabelMatcher_NEQ || m.Type == prompb.LabelMatcher_NRE
+			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 
 			// nolint: gocritic
 			if isNot && matchesEmpty { // l!="foo"
@@ -1466,8 +1466,8 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*prompb.LabelMatcher) (i
 
 // postingsForMatcher return id that match one matcher.
 // This method will not return postings for missing labels.
-func (c *CassandraIndex) postingsForMatcher(m *prompb.LabelMatcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
-	if m.Type == prompb.LabelMatcher_EQ {
+func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
+	if m.Type == labels.MatchEqual {
 		return c.postings(m.Name, m.Value)
 	}
 
@@ -1507,7 +1507,7 @@ func (c *CassandraIndex) postingsForMatcher(m *prompb.LabelMatcher, re *regexp.R
 	return it, nil
 }
 
-func (c *CassandraIndex) inversePostingsForMatcher(m *prompb.LabelMatcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
 	values, err := c.labelValues(m.Name)
 
 	if err != nil {
@@ -1575,8 +1575,8 @@ func (c *CassandraIndex) cassandraGetExpirationList(day time.Time) (*roaring.Bit
 	return tmp, err
 }
 
-// keyFromLabels returns a string key generated from a prompb.Label list
-func keyFromLabels(labels []prompb.Label) string {
+// keyFromLabels returns a string key generated from a labels.Label list
+func keyFromLabels(labels labels.Labels) string {
 	if len(labels) == 0 {
 		return ""
 	}
@@ -1593,8 +1593,8 @@ func keyFromLabels(labels []prompb.Label) string {
 	return str
 }
 
-// popLabelsValue get and delete value via its name from a prompb.Label list
-func popLabelsValue(labels *[]prompb.Label, key string) (string, bool) {
+// popLabelsValue get and delete value via its name from a labels.Label list
+func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {
 			*labels = append((*labels)[:i], (*labels)[i+1:]...)
@@ -1605,19 +1605,8 @@ func popLabelsValue(labels *[]prompb.Label, key string) (string, bool) {
 	return "", false
 }
 
-// getLabelsValue gets value via its name from a prompb.Label list
-func getLabelsValue(labels []prompb.Label, name string) string {
-	for _, label := range labels {
-		if label.Name == name {
-			return label.Value
-		}
-	}
-
-	return ""
-}
-
-// getMatchersValue gets value via its name from a prompb.LabelMatcher list
-func getMatchersValue(matchers []*prompb.LabelMatcher, name string) (string, bool) {
+// getMatchersValue gets value via its name from a labels.Matcher list
+func getMatchersValue(matchers []*labels.Matcher, name string) (string, bool) {
 	for _, matcher := range matchers {
 		if matcher.Name == name {
 			return matcher.Value, true
@@ -1627,49 +1616,16 @@ func getMatchersValue(matchers []*prompb.LabelMatcher, name string) (string, boo
 	return "", false
 }
 
-// sortLabels returns the prompb.Label list sorted by name
-func sortLabels(labels []prompb.Label) []prompb.Label {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	sortedLabels := make([]prompb.Label, len(labels))
-	for i, v := range labels {
-		sortedLabels[i] = prompb.Label{
-			Name:  v.Name,
-			Value: v.Value,
-		}
-	}
-
-	sort.Slice(sortedLabels, func(i, j int) bool {
-		return sortedLabels[i].Name < sortedLabels[j].Name
-	})
+// sortLabels returns the labels.Label list sorted by name
+func sortLabels(labelList labels.Labels) labels.Labels {
+	sortedLabels := labelList.Copy()
+	sort.Sort(sortedLabels)
 
 	return sortedLabels
 }
 
-// stringFromLabels returns a string generated from a prompb.Label list
-func stringFromLabels(labels []prompb.Label) string {
-	if len(labels) == 0 {
-		return ""
-	}
-
-	strLabels := make([]string, 0, len(labels))
-	quoter := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
-
-	for _, label := range labels {
-		str := label.Name + "=\"" + quoter.Replace(label.Value) + "\""
-
-		strLabels = append(strLabels, str)
-	}
-
-	str := strings.Join(strLabels, ",")
-
-	return str
-}
-
-// Returns and delete time to live from a prompb.Label list
-func timeToLiveFromLabels(labels *[]prompb.Label) int64 {
+// Returns and delete time to live from a labels.Label list
+func timeToLiveFromLabels(labels *labels.Labels) int64 {
 	value, exists := popLabelsValue(labels, timeToLiveLabelName)
 
 	var timeToLive int64
@@ -1708,11 +1664,6 @@ type bytesIter interface {
 type cassandraStore struct {
 	session    *gocql.Session
 	schemaLock sync.Locker
-}
-
-type simpleLabel struct {
-	Name  string
-	Value string
 }
 
 type cassandraByteIter struct {
@@ -1785,17 +1736,10 @@ func (s cassandraStore) InsertPostings(name string, value string, bitset []byte)
 	).Exec()
 }
 
-func (s cassandraStore) InsertID2Labels(id types.MetricID, sortedLabels []prompb.Label, expiration time.Time) error {
-	simpleLabels := make([]simpleLabel, len(sortedLabels))
-
-	for i, l := range sortedLabels {
-		simpleLabels[i].Name = l.Name
-		simpleLabels[i].Value = l.Value
-	}
-
+func (s cassandraStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
 	return s.session.Query(
 		"INSERT INTO index_id2labels (id, labels, expiration_date) VALUES (?, ?, ?)",
-		id, simpleLabels, expiration,
+		id, sortedLabels, expiration,
 	).Exec()
 }
 func (s cassandraStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID) error {
@@ -1853,20 +1797,13 @@ func (s cassandraStore) SelectLabels2ID(sortedLabelsString string) (types.Metric
 	return types.MetricID(cqlID), err
 }
 
-func (s cassandraStore) SelectID2Labels(id types.MetricID) (labels []prompb.Label, err error) {
+func (s cassandraStore) SelectID2Labels(id types.MetricID) (labelList labels.Labels, err error) {
 	query := s.session.Query(
 		"SELECT labels FROM index_id2labels WHERE id = ?",
 		int64(id),
 	)
 
-	simpleLabels := []simpleLabel{}
-	err = query.Scan(&simpleLabels)
-	labels = make([]prompb.Label, len(simpleLabels))
-
-	for i, l := range simpleLabels {
-		labels[i].Name = l.Name
-		labels[i].Value = l.Value
-	}
+	err = query.Scan(&labelList)
 
 	return
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -85,7 +84,7 @@ type mockIndex struct {
 	lookupMap    map[types.MetricID][]labels.Label
 }
 
-func (i mockIndex) Search(matchers []*prompb.LabelMatcher) ([]types.MetricID, error) {
+func (i mockIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
 	return i.searchReplay, nil
 }
 
@@ -93,14 +92,14 @@ func (i mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (i mockIndex) LookupLabels(id types.MetricID) ([]prompb.Label, error) {
+func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	l, ok := i.lookupMap[id]
 	if ok {
 
-		l2 := make([]prompb.Label, len(l))
+		l2 := make(labels.Labels, len(l))
 
 		for i, x := range l {
-			l2[i] = prompb.Label{
+			l2[i] = labels.Label{
 				Name:  x.Name,
 				Value: x.Value,
 			}
@@ -111,7 +110,7 @@ func (i mockIndex) LookupLabels(id types.MetricID) ([]prompb.Label, error) {
 	return nil, errors.New("not found")
 }
 
-func (i mockIndex) LookupIDs(labelsList [][]prompb.Label) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 

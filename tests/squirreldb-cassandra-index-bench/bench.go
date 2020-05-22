@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/prometheus/procfs"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 type queryResult struct {
@@ -95,13 +95,13 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 	var wg sync.WaitGroup
 
 	shardCount := *shardEnd - *shardStart + 1
-	workChannel := make(chan [][]prompb.Label)
+	workChannel := make(chan []labels.Labels)
 	resultChan := make(chan int, (*workerProcesses)*(*workerThreads))
-	channels := make([]chan [][]prompb.Label, *workerProcesses)
+	channels := make([]chan []labels.Labels, *workerProcesses)
 
 	if *fairLB {
 		for n := 0; n < len(channels); n++ {
-			channels[n] = make(chan [][]prompb.Label)
+			channels[n] = make(chan []labels.Labels)
 		}
 
 		wg.Add(1)
@@ -154,59 +154,59 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 
 	queries := []struct {
 		Name string
-		Fun  func(i int) []*prompb.LabelMatcher
+		Fun  func(i int) []*labels.Matcher
 	}{
 		{
 			Name: "shard=N",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
 				}
 			},
 		},
 		{
 			Name: "shard=N name=X",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
 				}
 			},
 		},
 		{
 			Name: "name=X shard=N",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
 				}
 			},
 		},
 		{
 			Name: "shard=N name!=X",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: labels.MatchNotEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
 				}
 			},
 		},
 		{
 			Name: "shard=N name=~X",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: names[rnd.Intn(len(names))][:6] + ".*"},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: labels.MatchRegexp, Name: "__name__", Value: names[rnd.Intn(len(names))][:6] + ".*"},
 				}
 			},
 		},
 		{
 			Name: "shard=N name=node_.* name!=node_netstat_Udp_InErrors",
-			Fun: func(_ int) []*prompb.LabelMatcher {
-				return []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: prompb.LabelMatcher_RE, Name: "__name__", Value: "node_.*"},
-					{Type: prompb.LabelMatcher_NEQ, Name: "__name__", Value: "node_netstat_Udp_InErrors"},
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: labels.MatchRegexp, Name: "__name__", Value: "node_.*"},
+					{Type: labels.MatchNotEqual, Name: "__name__", Value: "node_netstat_Udp_InErrors"},
 				}
 			},
 		},
@@ -262,7 +262,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
 }
 
-func sentInsertRequest(rnd *rand.Rand, proc procfs.Proc, workChannel chan [][]prompb.Label, resultChan chan int) int { // nolint: gocognit
+func sentInsertRequest(rnd *rand.Rand, proc procfs.Proc, workChannel chan []labels.Labels, resultChan chan int) int { // nolint: gocognit
 	shardCount := *shardEnd - *shardStart + 1
 	instantStart := time.Now()
 	instantCount := 0
@@ -338,7 +338,7 @@ func sentInsertRequest(rnd *rand.Rand, proc procfs.Proc, workChannel chan [][]pr
 // loadBalancer will sent requests to each outputs one after one, regardless if the outputs is busy/blocked.
 //
 // This more or less match default nginx behavior
-func loadBalancer(input chan [][]prompb.Label, outputs []chan [][]prompb.Label) {
+func loadBalancer(input chan []labels.Labels, outputs []chan []labels.Labels) {
 	n := 0
 
 	var wg sync.WaitGroup
@@ -346,7 +346,7 @@ func loadBalancer(input chan [][]prompb.Label, outputs []chan [][]prompb.Label) 
 	for w := range input {
 		wg.Add(1)
 
-		go func(n int, w [][]prompb.Label) {
+		go func(n int, w []labels.Labels) {
 			defer wg.Done()
 			outputs[n] <- w
 		}(n, w)
@@ -363,7 +363,7 @@ func loadBalancer(input chan [][]prompb.Label, outputs []chan [][]prompb.Label) 
 }
 
 // worker is more or less equivalent to on SquirrelDB process
-func worker(localIndex *index.CassandraIndex, workChanel chan [][]prompb.Label, result chan int) {
+func worker(localIndex *index.CassandraIndex, workChanel chan []labels.Labels, result chan int) {
 	token := make(chan bool, *workerThreads)
 	for n := 0; n < *workerThreads; n++ {
 		token <- true
@@ -401,8 +401,8 @@ func worker(localIndex *index.CassandraIndex, workChanel chan [][]prompb.Label, 
 //
 // Metrics may also have additional labels (labelNN), ranging from 0 to 20 additional labels
 // (most of the time, 3 additional labels). Few values for those labels.
-func makeInsertRequests(shardID string, rnd *rand.Rand) [][]prompb.Label {
-	metrics := make([][]prompb.Label, *shardSize)
+func makeInsertRequests(shardID string, rnd *rand.Rand) []labels.Labels {
+	metrics := make([]labels.Labels, *shardSize)
 
 	// We remove 1 days (and 1 hour) so the expiration of the metrics is yesterday
 	// (the 1 hour is because of index cassandraTTLUpdateDelay)
@@ -410,7 +410,7 @@ func makeInsertRequests(shardID string, rnd *rand.Rand) [][]prompb.Label {
 
 	for n := 0; n < *shardSize; n++ {
 		userID := strconv.FormatInt(rnd.Int63n(100000), 10)
-		labels := map[string]string{
+		labelsMap := map[string]string{
 			"__name__":                               names[rnd.Intn(len(names))],
 			"shardID":                                shardID,
 			"randomID":                               userID,
@@ -427,19 +427,17 @@ func makeInsertRequests(shardID string, rnd *rand.Rand) [][]prompb.Label {
 		}
 
 		for i := 0; i < addN; i++ {
-			labels[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rnd.Int63n(20), 10)
+			labelsMap[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rnd.Int63n(20), 10)
 		}
 
 		if *expiredFaction > 0 && n%*expiredFaction == 0 {
-			labels["__ttl__"] = negativeTTL
+			labelsMap["__ttl__"] = negativeTTL
 		}
 
-		promLabel := map2Labels(labels)
+		promLabel := labels.FromMap(labelsMap)
 
 		if *sortInsert {
-			sort.Slice(promLabel, func(i, j int) bool {
-				return promLabel[i].Name < promLabel[j].Name
-			})
+			sort.Sort(promLabel)
 		}
 
 		metrics[n] = promLabel
@@ -448,7 +446,7 @@ func makeInsertRequests(shardID string, rnd *rand.Rand) [][]prompb.Label {
 	return metrics
 }
 
-func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*prompb.LabelMatcher) queryResult {
+func runQuery(name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*labels.Matcher) queryResult {
 	start := time.Now()
 	count := 0
 

@@ -3,6 +3,7 @@ package remotestorage
 import (
 	"fmt"
 
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -101,10 +102,10 @@ func metricsFromTimeseries(promTimeseries []prompb.TimeSeries, index types.Index
 	totalPoints := 0
 	metrics := make([]types.MetricData, 0, len(promTimeseries))
 
-	labelsList := make([][]prompb.Label, len(promTimeseries))
+	labelsList := make([]labels.Labels, len(promTimeseries))
 
 	for i, promSeries := range promTimeseries {
-		labelsList[i] = promSeries.Labels
+		labelsList[i] = labelProtosToLabels(promSeries.Labels)
 	}
 
 	ids, ttls, err := index.LookupIDs(labelsList)
