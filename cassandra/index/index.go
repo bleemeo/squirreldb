@@ -97,6 +97,15 @@ type CassandraIndex struct {
 	idsToLabels map[types.MetricID]labelsData
 }
 
+func (c *CassandraIndex) getIDData(key string, _ labels.Labels) (idData, bool) {
+	r, found := c.labelsToID[key]
+	return r, found
+}
+
+func (c *CassandraIndex) setIDData(key string, value idData) {
+	c.labelsToID[key] = value
+}
+
 type storeImpl interface {
 	Init() error
 	SelectLabels2ID(sortedLabelsString string) (types.MetricID, error)
@@ -327,7 +336,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 	c.lookupIDMutex.Lock()
 	for i, labels := range labelsList {
 		labelsKeys[i] = keyFromLabels(labels)
-		idsData[i], founds[i] = c.labelsToID[labelsKeys[i]]
+		idsData[i], founds[i] = c.getIDData(labelsKeys[i], labels)
 
 		if founds[i] {
 			foundCount++
@@ -425,7 +434,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 		}
 
 		idData.cacheExpirationTime = now.Add(cacheExpirationDelay)
-		c.labelsToID[labelsKeys[i]] = idData
+		c.setIDData(labelsKeys[i], idData)
 	}
 
 	return ids, ttls, nil
@@ -832,9 +841,9 @@ func (c *CassandraIndex) expire(now time.Time) {
 	defer c.lookupIDMutex.Unlock()
 	defer c.searchMutex.Unlock()
 
-	for labelsString, idData := range c.labelsToID {
+	for key, idData := range c.labelsToID {
 		if idData.cacheExpirationTime.Before(now) {
-			delete(c.labelsToID, labelsString)
+			delete(c.labelsToID, key)
 		}
 	}
 

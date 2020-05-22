@@ -520,6 +520,70 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	}
 }
 
+func Benchmark_labelsToID(b *testing.B) {
+	tests := []struct {
+		name   string
+		labels labels.Labels
+	}{
+		{
+			name: "simple",
+			labels: labels.Labels{
+				{Name: "test", Value: "value"},
+			},
+		},
+		{
+			name: "two",
+			labels: labels.Labels{
+				{Name: "label1", Value: "value1"},
+				{Name: "label2", Value: "value2"},
+			},
+		},
+		{
+			name: "ten-labels",
+			labels: labels.Labels{
+				{Name: "label1", Value: "value1"},
+				{Name: "label2", Value: "value2"},
+				{Name: "label3", Value: "value3"},
+				{Name: "label4", Value: "value4"},
+				{Name: "label5", Value: "value5"},
+				{Name: "label6", Value: "value6"},
+				{Name: "label7", Value: "value7"},
+				{Name: "label8", Value: "value8"},
+				{Name: "label9", Value: "value9"},
+				{Name: "label0", Value: "value0"},
+			},
+		},
+		{
+			name: "five-longer-labels",
+			labels: labels.Labels{
+				{Name: "the-label-one", Value: "the-first-value"},
+				{Name: "the-second-label", Value: "another-value"},
+				{Name: "the-label-after-two", Value: "all-value-are-different"},
+				{Name: "the-label-four", Value: "sort"},
+				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
+			},
+		},
+		{
+			name: "need-quoting2",
+			labels: labels.Labels{
+				{Name: "label1", Value: `value1\",label2=\"value2`},
+			},
+		},
+	}
+	for _, tt := range tests {
+		c := CassandraIndex{
+			labelsToID: make(map[string]idData),
+		}
+		b.Run(tt.name, func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				key := keyFromLabels(tt.labels)
+				idData, _ := c.getIDData(key, tt.labels)
+				c.setIDData(key, idData)
+			}
+		})
+	}
+}
+
 func Test_timeToLiveFromLabels(t *testing.T) {
 	tests := []struct {
 		name       string
