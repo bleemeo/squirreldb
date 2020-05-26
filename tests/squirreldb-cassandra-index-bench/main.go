@@ -64,7 +64,7 @@ func makeIndex() *index.CassandraIndex {
 		log.Fatalf("Unable to create locks: %v", err)
 	}
 
-	squirrelStates, err := states.New(cassandraSession, squirrelLocks.SchemaLock())
+	squirrelStates, err := states.New(cassandraSession, squirrelLocks.CreateLock("schema-lock", 10*time.Second))
 	if err != nil {
 		log.Fatalf("Unable to create states: %v", err)
 	}
@@ -74,7 +74,7 @@ func makeIndex() *index.CassandraIndex {
 		IncludeID:         *includeID,
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
-		SchemaLock:        squirrelLocks.SchemaLock(),
+		SchemaLock:        squirrelLocks.CreateLock("schema-lock", 10*time.Second),
 	})
 	if err != nil {
 		log.Fatalf("Unable to create index: %v", err)

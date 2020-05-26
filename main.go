@@ -20,6 +20,7 @@ import (
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
 	"squirreldb/debug"
+	"squirreldb/dummy"
 	"squirreldb/memorystore"
 	"squirreldb/redis"
 	"squirreldb/retry"
@@ -27,6 +28,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+)
+
+const (
+	backendCassandra = "cassandra"
+	backendDummy     = "dummy"
+	backendBatcher   = "batcher"
 )
 
 //nolint: gochecknoglobals
@@ -40,93 +47,174 @@ var (
 	date    string
 )
 
+type lockFactory interface {
+	CreateLock(name string, timeToLive time.Duration) types.TryLocker
+}
+
+type metricReadWriter interface {
+	types.MetricReader
+	types.MetricWriter
+}
+
+// SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store
+type SquirrelDB struct {
+	Config                   *config.Config
+	cassandraSession         *gocql.Session
+	cassandraKeyspaceCreated bool
+	lockFactory              lockFactory
+	states                   types.State
+	temporaryStore           batch.TemporaryStore
+	index                    types.Index
+	persistentStore          metricReadWriter
+	store                    metricReadWriter
+	api                      api.API
+
+	tasks []func(context.Context)
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	squirrelConfig, err := config.New()
+	cfg, err := config.New()
 
 	if err != nil {
 		logger.Fatalf("Error: Can't load config: %v", err)
 	}
 
-	if squirrelConfig.Bool("help") {
-		squirrelConfig.FlagSet.PrintDefaults()
+	if cfg.Bool("help") {
+		cfg.FlagSet.PrintDefaults()
 		return
 	}
 
-	if squirrelConfig.Bool("version") {
+	if cfg.Bool("version") {
 		fmt.Println(version)
 		return
 	}
 
-	if squirrelConfig.Bool("build-info") {
+	if cfg.Bool("build-info") {
 		fmt.Printf("Built at %s using %s from commit %s\n", date, runtime.Version(), commit)
 		fmt.Printf("Version %s\n", version)
 
 		return
 	}
 
-	if !squirrelConfig.Validate() {
+	if !cfg.Validate() {
 		os.Exit(1)
 	}
 
 	logger.Printf("Starting SquirrelDB %s (commit %s)", version, commit)
 
-	debug.Level = squirrelConfig.Int("log.level")
-
-	keyspace := squirrelConfig.String("cassandra.keyspace")
-	squirrelSession, keyspaceCreated := createSquirrelSession(keyspace, squirrelConfig)
-	squirrelLocks := createSquirrelLocks(squirrelSession, keyspaceCreated)
-
-	squirrelStates := createSquirrelStates(squirrelSession, squirrelLocks.SchemaLock())
-
-	if !squirrelConfig.ValidateRemote(squirrelStates) {
-		os.Exit(1)
+	debug.Level = cfg.Int("log.level")
+	squirreldb := &SquirrelDB{
+		Config: cfg,
 	}
-
-	var squirrelStore batch.TemporaryStore
-
-	redisAddresses := squirrelConfig.Strings("redis.addresses")
-
-	if len(redisAddresses) > 0 && redisAddresses[0] != "" {
-		squirrelStore = createSquirrelRedis(redisAddresses)
-	} else {
-		squirrelStore = memorystore.New()
-	}
-
-	squirrelIndex := createSquirrelIndex(squirrelSession, squirrelConfig, squirrelLocks, squirrelStates)
-	squirrelTSDB := createSquirrelTSDB(squirrelSession, squirrelConfig, squirrelIndex, squirrelLocks, squirrelStates)
-	squirrelBatch := createSquirrelBatch(squirrelConfig, squirrelStore, squirrelTSDB, squirrelTSDB)
-
 	signalChan := make(chan os.Signal, 1)
 
+	squirreldb.Init()
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	runTerminated := make(chan bool)
+
+	go func() {
+		squirreldb.Run(ctx)
+		close(runTerminated)
+	}()
+	logger.Println("SquirrelDB is ready")
+
+	running := true
+	firstStop := true
+
+	for running {
+		select {
+		case <-runTerminated:
+			debug.Print(2, logger, "All services have been successfully stopped")
+
+			running = false
+		case <-signalChan:
+			if firstStop {
+				logger.Println("Received stop signal, gracefully stopping SquirrelDB")
+				cancel()
+
+				firstStop = false
+			} else {
+				logger.Println("Forced stop")
+
+				running = false
+			}
+		}
+	}
+
+	signal.Stop(signalChan)
+	close(signalChan)
+
+	debug.Print(1, logger, "SquirrelDB is stopped")
+}
+
+// SchemaLock return a lock to modify the Cassandra schema
+func (s *SquirrelDB) SchemaLock() types.TryLocker {
+	return s.lockFactory.CreateLock("cassandra-schema", 10*time.Second)
+}
+
+// Init initialize and open connection to 3rd party stores
+func (s *SquirrelDB) Init() {
+	s.api.ListenAddress = s.Config.String("remote_storage.listen_address")
+
+	retry.Print(
+		s.createLockFactory,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create locks",
+	)
+
+	retry.Print(
+		s.createStates,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create states",
+	)
+
+	if !s.Config.ValidateRemote(s.states) {
+		os.Exit(1)
+	}
+
+	retry.Print(
+		s.createTemporaryStore,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create temporary store",
+	)
+
+	retry.Print(
+		s.createIndex,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create index",
+	)
+
+	retry.Print(
+		s.createTSDB,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create persistent TSDB",
+	)
+
+	retry.Print(
+		s.createStore,
+		retry.NewExponentialBackOff(30*time.Second), logger,
+		"create store",
+	)
+
+	s.api.Index = s.index
+	s.api.Reader = s.store
+	s.api.Writer = s.store
+}
+
+// Run start SquirrelDB
+func (s *SquirrelDB) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 
-	tasks := []func(context.Context){
-		squirrelIndex.Run,
-		squirrelTSDB.Run,
-		squirrelBatch.Run,
-		api.API{
-			ListenAddress:        squirrelConfig.String("remote_storage.listen_address"),
-			FlushCallback:        squirrelBatch.Flush,
-			PreAggregateCallback: squirrelTSDB.ForcePreAggregation,
-			Index:                squirrelIndex,
-			Reader:               squirrelBatch,
-			Writer:               squirrelBatch,
-		}.Run,
-	}
+	s.tasks = append(s.tasks, s.api.Run)
 
-	if len(redisAddresses) == 0 {
-		tasks = append(tasks, squirrelStore.(*memorystore.Store).Run)
-	}
+	wg.Add(len(s.tasks))
 
-	wg.Add(len(tasks))
-
-	for _, runner := range tasks {
+	for _, runner := range s.tasks {
 		runner := runner
 
 		go func() {
@@ -135,152 +223,191 @@ func main() {
 		}()
 	}
 
-	logger.Println("SquirrelDB is ready")
+	wg.Wait()
 
-	<-signalChan
+	if s.cassandraSession != nil {
+		s.cassandraSession.Close()
+	}
+}
 
-	logger.Println("Stopping...")
+func (s *SquirrelDB) getCassandraSession() (*gocql.Session, error) {
+	if s.cassandraSession == nil {
+		options := session.Options{
+			Addresses:         s.Config.Strings("cassandra.addresses"),
+			ReplicationFactor: s.Config.Int("cassandra.replication_factor"),
+			Keyspace:          s.Config.String("cassandra.keyspace"),
+		}
 
-	cancel()
+		session, keyspaceCreated, err := session.New(options)
+		if err != nil {
+			return nil, err
+		}
 
-	waitChan := make(chan bool)
-
-	go func() {
-		wg.Wait()
-		close(waitChan)
-	}()
-
-	select {
-	case <-waitChan:
-		debug.Print(2, logger, "All services have been successfully stopped")
-	case <-signalChan:
-		logger.Println("Force stop")
+		s.cassandraSession = session
+		s.cassandraKeyspaceCreated = keyspaceCreated
 	}
 
-	squirrelSession.Close()
-	signal.Stop(signalChan)
-	close(signalChan)
-
-	debug.Print(1, logger, "SquirrelDB is stopped")
+	return s.cassandraSession, nil
 }
 
-func createSquirrelSession(keyspace string, config *config.Config) (*gocql.Session, bool) {
-	options := session.Options{
-		Addresses:         config.Strings("cassandra.addresses"),
-		ReplicationFactor: config.Int("cassandra.replication_factor"),
-		Keyspace:          keyspace,
+func (s *SquirrelDB) createIndex() error {
+	switch s.Config.String("internal.index") {
+	case backendCassandra:
+		session, err := s.getCassandraSession()
+		if err != nil {
+			return err
+		}
+
+		options := index.Options{
+			DefaultTimeToLive: s.Config.Duration("cassandra.default_time_to_live"),
+			IncludeID:         s.Config.Bool("index.include_id"),
+			LockFactory:       s.lockFactory,
+			States:            s.states,
+			SchemaLock:        s.SchemaLock(),
+		}
+
+		index, err := index.New(session, options)
+		if err != nil {
+			return err
+		}
+
+		s.index = index
+		s.tasks = append(s.tasks, index.Run)
+	case backendDummy:
+		logger.Println("Warning: Using dummy for index (only do this for testing)")
+
+		s.index = &dummy.Index{
+			StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
+			FixedValue:            types.MetricID(s.Config.Int64("internal.dummy_index_fixed_id")),
+		}
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
 	}
 
-	var (
-		squirrelSession *gocql.Session
-		keyspaceCreated bool
-	)
-
-	retry.Print(func() error {
-		var err error
-		squirrelSession, keyspaceCreated, err = session.New(options)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"create Cassandra session",
-	)
-
-	return squirrelSession, keyspaceCreated
+	return nil
 }
 
-func createSquirrelIndex(session *gocql.Session, config *config.Config, lock *locks.CassandraLocks, states types.State) *index.CassandraIndex {
-	var squirrelIndex *index.CassandraIndex
+func (s *SquirrelDB) createLockFactory() error {
+	switch s.Config.String("internal.locks") {
+	case backendCassandra:
+		session, err := s.getCassandraSession()
+		if err != nil {
+			return err
+		}
 
-	options := index.Options{
-		DefaultTimeToLive: config.Duration("cassandra.default_time_to_live"),
-		IncludeID:         config.Bool("index.include_id"),
-		LockFactory:       lock,
-		States:            states,
-		SchemaLock:        lock.SchemaLock(),
+		factory, err := locks.New(session, s.cassandraKeyspaceCreated)
+		if err != nil {
+			return err
+		}
+
+		s.lockFactory = factory
+	case backendDummy:
+		logger.Println("Warning: Using dummy lock factory (only work on single node)")
+
+		s.lockFactory = &dummy.Locks{}
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.locks"))
 	}
 
-	retry.Print(func() error {
-		var err error
-		squirrelIndex, err = index.New(session, options)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"create Cassandra index",
-	)
-
-	return squirrelIndex
+	return nil
 }
 
-func createSquirrelLocks(session *gocql.Session, keyspaceCreated bool) *locks.CassandraLocks {
-	var squirrelLocks *locks.CassandraLocks
+func (s *SquirrelDB) createStates() error {
+	switch s.Config.String("internal.states") {
+	case backendCassandra:
+		session, err := s.getCassandraSession()
+		if err != nil {
+			return err
+		}
 
-	retry.Print(func() error {
-		var err error
-		squirrelLocks, err = locks.New(session, keyspaceCreated)
+		states, err := states.New(session, s.SchemaLock())
+		if err != nil {
+			return err
+		}
 
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"create Cassandra locks",
-	)
+		s.states = states
+	case backendDummy:
+		logger.Println("Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)")
 
-	return squirrelLocks
-}
-
-func createSquirrelStates(session *gocql.Session, lock sync.Locker) *states.CassandraStates {
-	var squirrelStates *states.CassandraStates
-
-	retry.Print(func() error {
-		var err error
-		squirrelStates, err = states.New(session, lock)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"create Cassandra state",
-	)
-
-	return squirrelStates
-}
-
-func createSquirrelTSDB(session *gocql.Session, config *config.Config, index types.Index, lockFactory *locks.CassandraLocks, state types.State) *tsdb.CassandraTSDB {
-	options := tsdb.Options{
-		DefaultTimeToLive:         config.Duration("cassandra.default_time_to_live"),
-		BatchSize:                 config.Duration("batch.size"),
-		RawPartitionSize:          config.Duration("cassandra.partition_size.raw"),
-		AggregatePartitionSize:    config.Duration("cassandra.partition_size.aggregate"),
-		AggregateResolution:       config.Duration("cassandra.aggregate.resolution"),
-		AggregateSize:             config.Duration("cassandra.aggregate.size"),
-		AggregateIntendedDuration: config.Duration("cassandra.aggregate.intended_duration"),
-		SchemaLock:                lockFactory.SchemaLock(),
+		s.states = &dummy.States{}
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.states"))
 	}
 
-	var squirrelTSDB *tsdb.CassandraTSDB
-
-	retry.Print(func() error {
-		var err error
-		squirrelTSDB, err = tsdb.New(session, options, index, lockFactory, state)
-
-		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
-		"create Cassandra TSDB",
-	)
-
-	return squirrelTSDB
+	return nil
 }
 
-func createSquirrelRedis(addresses []string) *redis.Redis {
-	options := redis.Options{
-		Addresses: addresses,
+func (s *SquirrelDB) createTSDB() error {
+	switch s.Config.String("internal.tsdb") {
+	case backendCassandra:
+		session, err := s.getCassandraSession()
+		if err != nil {
+			return err
+		}
+
+		options := tsdb.Options{
+			DefaultTimeToLive:         s.Config.Duration("cassandra.default_time_to_live"),
+			BatchSize:                 s.Config.Duration("batch.size"),
+			RawPartitionSize:          s.Config.Duration("cassandra.partition_size.raw"),
+			AggregatePartitionSize:    s.Config.Duration("cassandra.partition_size.aggregate"),
+			AggregateResolution:       s.Config.Duration("cassandra.aggregate.resolution"),
+			AggregateSize:             s.Config.Duration("cassandra.aggregate.size"),
+			AggregateIntendedDuration: s.Config.Duration("cassandra.aggregate.intended_duration"),
+			SchemaLock:                s.SchemaLock(),
+		}
+
+		tsdb, err := tsdb.New(session, options, s.index, s.lockFactory, s.states)
+		if err != nil {
+			return err
+		}
+
+		s.tasks = append(s.tasks, tsdb.Run)
+		s.persistentStore = tsdb
+		s.api.PreAggregateCallback = tsdb.ForcePreAggregation
+	case backendDummy:
+		logger.Println("Warning: Cassandra is disabled for TSDB. Using dummy states store that discard every write")
+
+		s.persistentStore = &dummy.DiscardTSDB{}
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.tsdb"))
 	}
 
-	squirrelRedis := redis.New(options)
-
-	return squirrelRedis
+	return nil
 }
 
-func createSquirrelBatch(config *config.Config, store batch.TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *batch.Batch {
-	squirrelBatchSize := config.Duration("batch.size")
+func (s *SquirrelDB) createTemporaryStore() error {
+	redisAddresses := s.Config.Strings("redis.addresses")
+	if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+		options := redis.Options{
+			Addresses: redisAddresses,
+		}
 
-	squirrelBatch := batch.New(squirrelBatchSize, store, reader, writer)
+		s.temporaryStore = redis.New(options)
+	} else {
+		mem := memorystore.New()
+		s.temporaryStore = mem
+		s.tasks = append(s.tasks, mem.Run)
+	}
 
-	return squirrelBatch
+	return nil
+}
+
+func (s *SquirrelDB) createStore() error {
+	switch s.Config.String("internal.store") {
+	case backendBatcher:
+		squirrelBatchSize := s.Config.Duration("batch.size")
+
+		batch := batch.New(squirrelBatchSize, s.temporaryStore, s.persistentStore, s.persistentStore)
+		s.store = batch
+		s.tasks = append(s.tasks, batch.Run)
+		s.api.FlushCallback = batch.Flush
+	case backendDummy:
+		logger.Println("Warning: SquirrelDB is configured to discard every write")
+
+		s.store = dummy.DiscardTSDB{}
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
+	}
+
+	return nil
 }

@@ -95,5 +95,5 @@ Enable "Use Language Server" in VS code option for Go.
 To install or update gopls, use:
 
 ```
-(cd /tmp; GO112MODULE=on go get golang.org/x/tools/gopls@latest)
+(cd /tmp; GO111MODULE=on go get golang.org/x/tools/gopls@latest)
 ```

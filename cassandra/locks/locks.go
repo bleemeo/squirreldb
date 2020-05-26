@@ -99,11 +99,6 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 	}
 }
 
-// SchemaLock return a lock to modify the Cassandra schema
-func (c CassandraLocks) SchemaLock() types.TryLocker {
-	return c.CreateLock("cassandra-schema", 10*time.Second)
-}
-
 // TryLock try to acquire the Lock and return true if acquire
 func (l *Lock) TryLock() bool {
 	start := time.Now()

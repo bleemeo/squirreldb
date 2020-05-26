@@ -16,4 +16,11 @@ var defaults = map[string]interface{}{
 	"batch.size":                            "15m",
 	"index.include_id":                      false,
 	"log.level":                             0,
+	"internal.index":                        "cassandra",
+	"internal.index_dummy_check_conflict":   true,
+	"internal.index_dummy_fixed_id":         0,
+	"internal.tsdb":                         "cassandra",
+	"internal.locks":                        "cassandra",
+	"internal.states":                       "cassandra",
+	"internal.store":                        "batcher",
 }
