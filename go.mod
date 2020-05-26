@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/cenkalti/backoff/v4 v4.0.2
+	github.com/dgraph-io/badger/v2 v2.0.3
 	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
 	github.com/go-kit/kit v0.10.0
 	github.com/go-redis/redis/v7 v7.2.0

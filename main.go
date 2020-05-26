@@ -12,12 +12,14 @@ import (
 	"os"
 	"os/signal"
 	"squirreldb/api"
+	"squirreldb/badger"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
+	"squirreldb/cassandra/wal"
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/dummy"
@@ -69,7 +71,8 @@ type SquirrelDB struct {
 	store                    metricReadWriter
 	api                      api.API
 
-	tasks []func(context.Context)
+	tasks     []func(context.Context)
+	finalizer []func()
 }
 
 func main() {
@@ -225,8 +228,8 @@ func (s *SquirrelDB) Run(ctx context.Context) {
 
 	wg.Wait()
 
-	if s.cassandraSession != nil {
-		s.cassandraSession.Close()
+	for _, f := range s.finalizer {
+		f()
 	}
 }
 
@@ -245,6 +248,7 @@ func (s *SquirrelDB) getCassandraSession() (*gocql.Session, error) {
 
 		s.cassandraSession = session
 		s.cassandraKeyspaceCreated = keyspaceCreated
+		s.finalizer = append(s.finalizer, session.Close)
 	}
 
 	return s.cassandraSession, nil
@@ -405,6 +409,28 @@ func (s *SquirrelDB) createStore() error {
 		logger.Println("Warning: SquirrelDB is configured to discard every write")
 
 		s.store = dummy.DiscardTSDB{}
+	case "cassandraWal":
+		wal := &wal.Cassandra{
+			Session:    s.cassandraSession,
+			SchemaLock: s.SchemaLock(),
+		}
+		err := wal.Init()
+
+		if err != nil {
+			return err
+		}
+
+		s.store = wal
+	case "badgerWal":
+		wal := &badger.Badger{}
+		err := wal.Init()
+
+		if err != nil {
+			return err
+		}
+
+		s.store = wal
+		s.finalizer = append(s.finalizer, wal.Close)
 	default:
 		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
 	}
