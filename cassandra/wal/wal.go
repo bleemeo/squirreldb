@@ -3,9 +3,11 @@ package wal
 import (
 	"bytes"
 	"encoding/gob"
+	"log"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"sync"
+	"time"
 
 	"github.com/gocql/gocql"
 )
@@ -14,6 +16,11 @@ type Cassandra struct {
 	dummy.DiscardTSDB
 	Session    *gocql.Session
 	SchemaLock sync.Locker
+
+	mutex     sync.Mutex
+	encoder   *gob.Encoder
+	buffer    bytes.Buffer
+	lastFlush time.Time
 }
 
 func (c *Cassandra) Init() error {
@@ -34,21 +41,43 @@ func (c *Cassandra) Init() error {
 		}
 	}
 
+	c.encoder = gob.NewEncoder(&c.buffer)
+
 	return nil
 }
 
+func (c *Cassandra) Close() {
+	c.mutex.Lock()
+	c.mutex.Unlock()
+
+	c.flush()
+}
+
 func (c *Cassandra) Write(metrics []types.MetricData) error {
-	var buffer bytes.Buffer
-
-	enc := gob.NewEncoder(&buffer)
-
-	err := enc.Encode(metrics)
+	err := c.encoder.Encode(metrics)
 	if err != nil {
 		return err
 	}
 
-	return c.Session.Query(
+	c.mutex.Lock()
+	c.mutex.Unlock()
+
+	if time.Since(c.lastFlush) > 10*time.Second || c.buffer.Len() > 10000000 {
+		c.flush()
+	}
+
+	return nil
+}
+
+func (c *Cassandra) flush() {
+	err := c.Session.Query(
 		"INSERT INTO wal_log(insert_time, values) VALUES(now(), ?) USING TTL 3600",
-		buffer.Bytes(),
+		c.buffer.Bytes(),
 	).Exec()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	c.buffer.Reset()
+	c.lastFlush = time.Now()
 }

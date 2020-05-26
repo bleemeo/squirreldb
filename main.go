@@ -228,8 +228,8 @@ func (s *SquirrelDB) Run(ctx context.Context) {
 
 	wg.Wait()
 
-	for _, f := range s.finalizer {
-		f()
+	for i := len(s.finalizer) - 1; i >= 0; i-- {
+		s.finalizer[i]()
 	}
 }
 
@@ -421,6 +421,7 @@ func (s *SquirrelDB) createStore() error {
 		}
 
 		s.store = wal
+		s.finalizer = append(s.finalizer, wal.Close)
 	case "badgerWal":
 		wal := &badger.Badger{}
 		err := wal.Init()
