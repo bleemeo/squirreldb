@@ -27,6 +27,7 @@ import (
 	"squirreldb/dummy"
 	"squirreldb/ledis"
 	"squirreldb/memorystore"
+	"squirreldb/olric"
 	"squirreldb/redis"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -467,6 +468,16 @@ func (s *SquirrelDB) createStore() error {
 		wal := &badger.Badger{}
 		err := wal.Init()
 
+		if err != nil {
+			return err
+		}
+
+		s.store = wal
+		s.finalizer = append(s.finalizer, wal.Close)
+	case "olricWal":
+		wal := &olric.Wal{}
+
+		err := wal.Init()
 		if err != nil {
 			return err
 		}
