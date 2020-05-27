@@ -2,10 +2,7 @@ package ledis
 
 import (
 	"fmt"
-	"log"
-	"os"
 	"strconv"
-	"sync"
 
 	"github.com/ledisdb/ledisdb/config"
 	"github.com/ledisdb/ledisdb/ledis"
@@ -25,14 +22,9 @@ const (
 	transfertKey      = "squirreldb-transfert-metrics"
 )
 
-//nolint: gochecknoglobals
-var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
-
 type Ledis struct {
-	ledis      *ledis.Ledis
-	db         *ledis.DB
-	l          sync.Mutex
-	lastReload time.Time
+	ledis *ledis.Ledis
+	db    *ledis.DB
 }
 
 type serializedPoints struct {
@@ -170,7 +162,10 @@ func (l *Ledis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 		}
 	}
 
-	l.db.SAdd([]byte(knownMetricsKey), ids...)
+	_, err := l.db.SAdd([]byte(knownMetricsKey), ids...)
+	if err != nil {
+		return nil, err
+	}
 
 	operationPointssSet.Add(float64(writtenPointsCount))
 

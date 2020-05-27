@@ -27,7 +27,7 @@ type Wal struct {
 }
 
 func (w *Wal) Init() error {
-	w.instanceID = rand.Int()
+	w.instanceID = rand.Int() // nolint: gosec
 	ready := make(chan interface{})
 	cfg := config.New("local")
 
@@ -82,7 +82,5 @@ func (w *Wal) Close() {
 func (w *Wal) Write(metrics []types.MetricData) error {
 	key := fmt.Sprintf("pid-%d-rnd-%d-ts-%d", os.Getgid(), w.instanceID, time.Now().Unix())
 
-	w.walMap.Put(key, metrics)
-
-	return nil
+	return w.walMap.Put(key, metrics)
 }

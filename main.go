@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"sync"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/gocql/gocql"
 	ledisConfig "github.com/ledisdb/ledisdb/config"
 	"github.com/ledisdb/ledisdb/server"
@@ -31,7 +33,6 @@ import (
 	"squirreldb/redis"
 	"squirreldb/retry"
 	"squirreldb/types"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -74,9 +75,11 @@ type SquirrelDB struct {
 	persistentStore          metricReadWriter
 	store                    metricReadWriter
 	api                      api.API
+}
 
-	tasks     []func(context.Context)
-	finalizer []func()
+type namedTasks struct {
+	Name string
+	Task types.Task
 }
 
 func main() {
@@ -117,24 +120,29 @@ func main() {
 	}
 	signalChan := make(chan os.Signal, 1)
 
-	squirreldb.Init()
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	runTerminated := make(chan bool)
+	runTerminated := make(chan interface{})
+	readiness := make(chan error)
 
 	go func() {
-		squirreldb.Run(ctx)
+		squirreldb.Run(ctx, readiness)
 		close(runTerminated)
 	}()
-	logger.Println("SquirrelDB is ready")
 
 	running := true
 	firstStop := true
 
 	for running {
 		select {
+		case err := <-readiness:
+			if err != nil {
+				logger.Fatalf("SquirrelDB failed to start: %v", err)
+			}
+
+			logger.Println("SquirrelDB is ready")
 		case <-runTerminated:
 			debug.Print(2, logger, "All services have been successfully stopped")
 
@@ -164,76 +172,101 @@ func (s *SquirrelDB) SchemaLock() types.TryLocker {
 	return s.lockFactory.CreateLock("cassandra-schema", 10*time.Second)
 }
 
-// Init initialize and open connection to 3rd party stores
-func (s *SquirrelDB) Init() {
+func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.ListenAddress = s.Config.String("remote_storage.listen_address")
-
-	retry.Print(
-		s.createLockFactory,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create locks",
-	)
-
-	retry.Print(
-		s.createStates,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create states",
-	)
-
-	if !s.Config.ValidateRemote(s.states) {
-		os.Exit(1)
-	}
-
-	retry.Print(
-		s.createTemporaryStore,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create temporary store",
-	)
-
-	retry.Print(
-		s.createIndex,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create index",
-	)
-
-	retry.Print(
-		s.createTSDB,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create persistent TSDB",
-	)
-
-	retry.Print(
-		s.createStore,
-		retry.NewExponentialBackOff(30*time.Second), logger,
-		"create store",
-	)
-
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
+
+	readiness <- nil
+
+	s.api.Run(ctx)
 }
 
 // Run start SquirrelDB
-func (s *SquirrelDB) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-
-	s.tasks = append(s.tasks, s.api.Run)
-
-	wg.Add(len(s.tasks))
-
-	for _, runner := range s.tasks {
-		runner := runner
-
-		go func() {
-			defer wg.Done()
-			runner(ctx)
-		}()
+func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
+	tasks := []namedTasks{
+		{
+			Name: "locks",
+			Task: types.TaskFun(s.lockTask),
+		},
+		{
+			Name: "states",
+			Task: types.TaskFun(s.statesTask),
+		},
+		{
+			Name: "index",
+			Task: types.TaskFun(s.indexTask),
+		},
+		{
+			Name: "persistent store",
+			Task: types.TaskFun(s.tsdbTask),
+		},
+		{
+			Name: "batching store",
+			Task: types.TaskFun(s.batchStoreTask),
+		},
+		{
+			Name: "API",
+			Task: types.TaskFun(s.apiTask),
+		},
 	}
 
-	wg.Wait()
+	ctxs := make([]context.Context, len(tasks))
+	cancels := make([]context.CancelFunc, len(tasks))
+	waitChan := make([]chan interface{}, len(tasks))
 
-	for i := len(s.finalizer) - 1; i >= 0; i-- {
-		s.finalizer[i]()
+	for i, task := range tasks {
+		task := task
+		i := i
+		subReadiness := make(chan error)
+
+		ctxs[i], cancels[i] = context.WithCancel(context.Background())
+
+		err := retry.Print(func() error {
+			waitChan[i] = make(chan interface{})
+
+			go func() {
+				task.Task.Run(ctxs[i], subReadiness)
+				close(waitChan[i])
+			}()
+
+			err := <-subReadiness
+			if err != nil {
+				<-waitChan[i]
+			}
+
+			return err
+		}, backoff.WithContext(retry.NewExponentialBackOff(30*time.Second), ctx),
+			logger,
+			fmt.Sprintf("Starting %s", task.Name),
+		)
+
+		if ctx.Err() != nil {
+			if err == nil {
+				tasks = tasks[:i+1]
+			} else {
+				tasks = tasks[:i]
+			}
+
+			break
+		} else {
+			debug.Print(2, logger, "Task %s started", task.Name)
+		}
+	}
+
+	readiness <- ctx.Err()
+
+	<-ctx.Done()
+
+	for i := len(tasks) - 1; i >= 0; i-- {
+		cancels[i]()
+		<-waitChan[i]
+		debug.Print(2, logger, "Task %s stopped", tasks[i].Name)
+	}
+
+	if s.cassandraSession != nil {
+		s.cassandraSession.Close()
 	}
 }
 
@@ -252,18 +285,18 @@ func (s *SquirrelDB) getCassandraSession() (*gocql.Session, error) {
 
 		s.cassandraSession = session
 		s.cassandraKeyspaceCreated = keyspaceCreated
-		s.finalizer = append(s.finalizer, session.Close)
 	}
 
 	return s.cassandraSession, nil
 }
 
-func (s *SquirrelDB) createIndex() error {
+func (s *SquirrelDB) indexTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.index") {
 	case backendCassandra:
 		session, err := s.getCassandraSession()
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		options := index.Options{
@@ -276,11 +309,15 @@ func (s *SquirrelDB) createIndex() error {
 
 		index, err := index.New(session, options)
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		s.index = index
-		s.tasks = append(s.tasks, index.Run)
+
+		readiness <- nil
+
+		index.Run(ctx)
 	case backendDummy:
 		logger.Println("Warning: Using dummy for index (only do this for testing)")
 
@@ -288,24 +325,27 @@ func (s *SquirrelDB) createIndex() error {
 			StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
 			FixedValue:            types.MetricID(s.Config.Int64("internal.dummy_index_fixed_id")),
 		}
-	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
-	}
+		readiness <- nil
 
-	return nil
+		<-ctx.Done()
+	default:
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
+	}
 }
 
-func (s *SquirrelDB) createLockFactory() error {
+func (s *SquirrelDB) lockTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.locks") {
 	case backendCassandra:
 		session, err := s.getCassandraSession()
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		factory, err := locks.New(session, s.cassandraKeyspaceCreated)
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		s.lockFactory = factory
@@ -314,23 +354,30 @@ func (s *SquirrelDB) createLockFactory() error {
 
 		s.lockFactory = &dummy.Locks{}
 	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.locks"))
+		err := fmt.Errorf("unknown backend: %v", s.Config.String("internal.locks"))
+		readiness <- err
+
+		return
 	}
 
-	return nil
+	readiness <- nil
+
+	<-ctx.Done()
 }
 
-func (s *SquirrelDB) createStates() error {
+func (s *SquirrelDB) statesTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.states") {
 	case backendCassandra:
 		session, err := s.getCassandraSession()
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		states, err := states.New(session, s.SchemaLock())
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		s.states = states
@@ -339,18 +386,26 @@ func (s *SquirrelDB) createStates() error {
 
 		s.states = &dummy.States{}
 	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.states"))
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.states"))
+		return
 	}
 
-	return nil
+	if !s.Config.ValidateRemote(s.states) {
+		os.Exit(1)
+	}
+
+	readiness <- nil
+
+	<-ctx.Done()
 }
 
-func (s *SquirrelDB) createTSDB() error {
+func (s *SquirrelDB) tsdbTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.tsdb") {
 	case backendCassandra:
 		session, err := s.getCassandraSession()
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		options := tsdb.Options{
@@ -366,24 +421,28 @@ func (s *SquirrelDB) createTSDB() error {
 
 		tsdb, err := tsdb.New(session, options, s.index, s.lockFactory, s.states)
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
-		s.tasks = append(s.tasks, tsdb.Run)
 		s.persistentStore = tsdb
 		s.api.PreAggregateCallback = tsdb.ForcePreAggregation
+		readiness <- nil
+
+		tsdb.Run(ctx)
 	case backendDummy:
 		logger.Println("Warning: Cassandra is disabled for TSDB. Using dummy states store that discard every write")
 
 		s.persistentStore = &dummy.DiscardTSDB{}
-	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.tsdb"))
-	}
+		readiness <- nil
 
-	return nil
+		<-ctx.Done()
+	default:
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.tsdb"))
+	}
 }
 
-func (s *SquirrelDB) createTemporaryStore() error {
+func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.temporary_store") {
 	case "redis":
 		redisAddresses := s.Config.Strings("redis.addresses")
@@ -393,17 +452,25 @@ func (s *SquirrelDB) createTemporaryStore() error {
 			}
 
 			s.temporaryStore = redis.New(options)
+			readiness <- nil
+
+			<-ctx.Done()
 		} else {
 			mem := memorystore.New()
 			s.temporaryStore = mem
-			s.tasks = append(s.tasks, mem.Run)
+			readiness <- nil
+			mem.Run(ctx)
 		}
 	case "ledis":
 		mem := &ledis.Ledis{}
-		mem.Init()
+		_ = mem.Init()
 		s.temporaryStore = mem
 
-		s.finalizer = append(s.finalizer, mem.Close)
+		readiness <- nil
+
+		<-ctx.Done()
+
+		mem.Close()
 	case "ledisServer":
 		cfg := ledisConfig.NewConfigDefault()
 		cfg.Addr = "127.0.0.1:6380"
@@ -411,7 +478,8 @@ func (s *SquirrelDB) createTemporaryStore() error {
 
 		app, err := server.NewApp(cfg)
 		if err != nil {
-			return err
+			readiness <- nil
+			return
 		}
 
 		waitChan := make(chan interface{})
@@ -427,66 +495,140 @@ func (s *SquirrelDB) createTemporaryStore() error {
 
 		s.temporaryStore = redis.New(options)
 
-		s.finalizer = append(s.finalizer, func() {
-			app.Close()
-			<-waitChan
-		})
-	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
-	}
+		readiness <- nil
 
-	return nil
+		<-ctx.Done()
+
+		app.Close()
+		<-waitChan
+	default:
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
+	}
 }
 
-func (s *SquirrelDB) createStore() error {
+func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.store") {
 	case backendBatcher:
 		squirrelBatchSize := s.Config.Duration("batch.size")
 
+		var wg sync.WaitGroup
+
+		subCtx, cancel := context.WithCancel(context.Background())
+		subReady := make(chan error)
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			s.temporaryStoreTask(subCtx, subReady)
+		}()
+
+		err := <-subReady
+		if err != nil {
+			cancel()
+			readiness <- err
+
+			wg.Wait()
+
+			return
+		}
+
 		batch := batch.New(squirrelBatchSize, s.temporaryStore, s.persistentStore, s.persistentStore)
 		s.store = batch
-		s.tasks = append(s.tasks, batch.Run)
 		s.api.FlushCallback = batch.Flush
+
+		readiness <- nil
+
+		batch.Run(ctx)
+		cancel()
+		wg.Wait()
 	case backendDummy:
 		logger.Println("Warning: SquirrelDB is configured to discard every write")
 
 		s.store = dummy.DiscardTSDB{}
-	case "cassandraWal":
-		wal := &wal.Cassandra{
-			Session:    s.cassandraSession,
+
+		readiness <- nil
+
+		<-ctx.Done()
+	case "wal":
+		session, err := s.getCassandraSession()
+		if err != nil {
+			readiness <- err
+			return
+		}
+
+		tmp := &wal.Cassandra{
+			ShardID:    1,
+			Session:    session,
 			SchemaLock: s.SchemaLock(),
 		}
-		err := wal.Init()
+		wal := &batch.WalBatcher{
+			WalStore:       tmp,
+			PersitentStore: s.persistentStore,
+		}
 
+		var wg sync.WaitGroup
+
+		subCtx, cancel := context.WithCancel(context.Background())
+		subReady := make(chan error)
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			tmp.Run(subCtx, subReady)
+		}()
+
+		err = <-subReady
 		if err != nil {
-			return err
+			cancel()
+
+			readiness <- err
+
+			wg.Done()
+
+			return
 		}
 
 		s.store = wal
-		s.finalizer = append(s.finalizer, wal.Close)
+		s.api.FlushCallback = func() error { wal.Flush(); return nil }
+
+		wal.Run(ctx, readiness)
+		cancel()
+		wg.Wait()
 	case "badgerWal":
 		wal := &badger.Badger{}
 		err := wal.Init()
 
 		if err != nil {
-			return err
+			readiness <- nil
+			return
 		}
 
 		s.store = wal
-		s.finalizer = append(s.finalizer, wal.Close)
+
+		readiness <- nil
+
+		<-ctx.Done()
+
+		wal.Close()
 	case "olricWal":
 		wal := &olric.Wal{}
 
 		err := wal.Init()
 		if err != nil {
-			return err
+			readiness <- err
+			return
 		}
 
 		s.store = wal
-		s.finalizer = append(s.finalizer, wal.Close)
-	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
-	}
 
-	return nil
+		readiness <- nil
+
+		<-ctx.Done()
+
+		wal.Close()
+	default:
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
+	}
 }

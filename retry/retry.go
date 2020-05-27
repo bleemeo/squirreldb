@@ -17,10 +17,10 @@ func NewExponentialBackOff(maxInterval time.Duration) backoff.BackOff {
 }
 
 // Print displays if an error message has occurred, the time before the next attempt and a resolution message
-func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action string) {
+func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action string) error {
 	tried := false
 
-	_ = backoff.RetryNotify(o, b, func(err error, duration time.Duration) {
+	err := backoff.RetryNotify(o, b, func(err error, duration time.Duration) {
 		if err != nil {
 			tried = true
 			logger.Printf("Error during %s: %v", action, err)
@@ -28,7 +28,9 @@ func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action st
 		}
 	})
 
-	if tried {
+	if tried && err == nil {
 		logger.Printf("Resolved %s", action)
 	}
+
+	return err
 }

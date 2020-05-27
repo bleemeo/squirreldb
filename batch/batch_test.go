@@ -13,6 +13,7 @@ import (
 const (
 	MetricIDTest1 = 1
 	MetricIDTest2 = 2
+	MetricIDTest3 = 3
 )
 
 func newMemoryStore(initialData []types.MetricData) *memorystore.Store {
@@ -1667,7 +1668,7 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.wantWriter1 != nil {
-				if !dataEqual(true, writer1.metrics, tt.wantWriter1) {
+				if !dataEqual(false, writer1.metrics, tt.wantWriter1) {
 					t.Errorf("writer1 = %v, want = %v", writer1.metrics, tt.wantWriter1)
 				}
 			}
@@ -1829,7 +1830,7 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
 	gotMemoryStore := dumpMemoryStore(memoryStore)
-	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
+	if !dataEqual(false, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
 

@@ -78,10 +78,27 @@ func sortPoints(points []MetricPoint) {
 // It generate point from timestamp Tue Sep 17 07:42:44 UTC 2019 with 10 seconds
 // between each points.
 func MakePointsForTest(size int) []MetricPoint {
+	return MakePointsForTestOffset(size, 0)
+}
+
+// MakePointsForTestOffset is like MakePointsForTest but include a timestamp offset
+func MakePointsForTestOffset(size int, offsetMillisecond int64) []MetricPoint {
 	result := make([]MetricPoint, size)
 	for i := 0; i < size; i++ {
-		result[i].Timestamp = int64(1568706164+i*10) * 1000
+		result[i].Timestamp = int64(1568706164+i*10)*1000 + offsetMillisecond
 		result[i].Value = float64(i)
+	}
+
+	return result
+}
+
+// MakeMetricDataForTest generate a list a MetricData for testing
+func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond int64) []MetricData {
+	result := make([]MetricData, countMetric)
+	for i := range result {
+		result[i].ID = MetricID(100 + i)
+		result[i].TimeToLive = 86400
+		result[i].Points = MakePointsForTestOffset(countPoints, offsetMillisecond)
 	}
 
 	return result

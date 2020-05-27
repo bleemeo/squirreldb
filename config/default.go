@@ -23,5 +23,5 @@ var defaults = map[string]interface{}{
 	"internal.temporary_store":              "redis",
 	"internal.locks":                        "cassandra",
 	"internal.states":                       "cassandra",
-	"internal.store":                        "batcher",
+	"internal.store":                        "wal",
 }

@@ -96,7 +96,7 @@ func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	if a.FlushCallback != nil {
 		err := a.FlushCallback()
 		if err != nil {
-			http.Error(w, "Flush failed", http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}

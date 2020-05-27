@@ -35,6 +35,13 @@ var (
 		Help:        "Total processing time in seconds",
 		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
+	requestsSecondsFlush = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "batch",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds",
+		ConstLabels: prometheus.Labels{"operation": "flush"},
+	})
 	duplicatedPointsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "batch",

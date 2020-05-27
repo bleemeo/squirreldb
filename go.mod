@@ -14,6 +14,7 @@ require (
 	github.com/golang/protobuf v1.4.1 // indirect
 	github.com/golang/snappy v0.0.1
 	github.com/grpc-ecosystem/grpc-gateway v1.14.5 // indirect
+	github.com/hashicorp/memberlist v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.9
 	github.com/knadh/koanf v0.10.0
 	github.com/ledisdb/ledisdb v0.0.0-20200510135210-d35789ec47e6
