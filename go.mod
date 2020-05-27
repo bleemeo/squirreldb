@@ -15,8 +15,8 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway v1.14.5 // indirect
 	github.com/json-iterator/go v1.1.9
 	github.com/knadh/koanf v0.10.0
+	github.com/ledisdb/ledisdb v0.0.0-20200510135210-d35789ec47e6
 	github.com/mitchellh/mapstructure v1.3.0 // indirect
-	github.com/onsi/ginkgo v1.12.0 // indirect
 	github.com/onsi/gomega v1.9.0 // indirect
 	github.com/pilosa/pilosa/v2 v2.0.0-alpha.1.0.20200317175727-eb73042e820e
 	github.com/prometheus/client_golang v1.6.0
@@ -24,6 +24,7 @@ require (
 	github.com/prometheus/procfs v0.0.11
 	github.com/prometheus/prometheus v1.8.2-0.20200507164740-ecee9c8abfd1 // This is 2.18.1
 	github.com/spf13/pflag v1.0.5
+	github.com/ugorji/go/codec v1.1.7 // indirect
 	golang.org/x/net v0.0.0-20200513185701-a91f0712d120 // indirect
 	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
 	golang.org/x/sys v0.0.0-20200513112337-417ce2331b5c // indirect

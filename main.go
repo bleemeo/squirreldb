@@ -5,6 +5,8 @@ import (
 	"runtime"
 
 	"github.com/gocql/gocql"
+	ledisConfig "github.com/ledisdb/ledisdb/config"
+	"github.com/ledisdb/ledisdb/server"
 
 	"context"
 	"log"
@@ -23,6 +25,7 @@ import (
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/dummy"
+	"squirreldb/ledis"
 	"squirreldb/memorystore"
 	"squirreldb/redis"
 	"squirreldb/retry"
@@ -380,17 +383,55 @@ func (s *SquirrelDB) createTSDB() error {
 }
 
 func (s *SquirrelDB) createTemporaryStore() error {
-	redisAddresses := s.Config.Strings("redis.addresses")
-	if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+	switch s.Config.String("internal.temporary_store") {
+	case "redis":
+		redisAddresses := s.Config.Strings("redis.addresses")
+		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+			options := redis.Options{
+				Addresses: redisAddresses,
+			}
+
+			s.temporaryStore = redis.New(options)
+		} else {
+			mem := memorystore.New()
+			s.temporaryStore = mem
+			s.tasks = append(s.tasks, mem.Run)
+		}
+	case "ledis":
+		mem := &ledis.Ledis{}
+		mem.Init()
+		s.temporaryStore = mem
+
+		s.finalizer = append(s.finalizer, mem.Close)
+	case "ledisServer":
+		cfg := ledisConfig.NewConfigDefault()
+		cfg.Addr = "127.0.0.1:6380"
+		cfg.DataDir = "/tmp/ledis"
+
+		app, err := server.NewApp(cfg)
+		if err != nil {
+			return err
+		}
+
+		waitChan := make(chan interface{})
+
+		go func() {
+			app.Run()
+			close(waitChan)
+		}()
+
 		options := redis.Options{
-			Addresses: redisAddresses,
+			Addresses: []string{"localhost:6380"},
 		}
 
 		s.temporaryStore = redis.New(options)
-	} else {
-		mem := memorystore.New()
-		s.temporaryStore = mem
-		s.tasks = append(s.tasks, mem.Run)
+
+		s.finalizer = append(s.finalizer, func() {
+			app.Close()
+			<-waitChan
+		})
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
 	}
 
 	return nil

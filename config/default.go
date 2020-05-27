@@ -20,6 +20,7 @@ var defaults = map[string]interface{}{
 	"internal.index_dummy_check_conflict":   true,
 	"internal.index_dummy_fixed_id":         0,
 	"internal.tsdb":                         "cassandra",
+	"internal.temporary_store":              "redis",
 	"internal.locks":                        "cassandra",
 	"internal.states":                       "cassandra",
 	"internal.store":                        "batcher",
