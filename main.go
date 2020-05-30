@@ -7,8 +7,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/gocql/gocql"
-	ledisConfig "github.com/ledisdb/ledisdb/config"
-	"github.com/ledisdb/ledisdb/server"
 
 	"context"
 	"log"
@@ -16,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"squirreldb/api"
-	"squirreldb/badger"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
@@ -27,9 +24,7 @@ import (
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/dummy"
-	"squirreldb/ledis"
 	"squirreldb/memorystore"
-	"squirreldb/olric"
 	"squirreldb/redis"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -461,46 +456,6 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 			readiness <- nil
 			mem.Run(ctx)
 		}
-	case "ledis":
-		mem := &ledis.Ledis{}
-		_ = mem.Init()
-		s.temporaryStore = mem
-
-		readiness <- nil
-
-		<-ctx.Done()
-
-		mem.Close()
-	case "ledisServer":
-		cfg := ledisConfig.NewConfigDefault()
-		cfg.Addr = "127.0.0.1:6380"
-		cfg.DataDir = "/tmp/ledis"
-
-		app, err := server.NewApp(cfg)
-		if err != nil {
-			readiness <- nil
-			return
-		}
-
-		waitChan := make(chan interface{})
-
-		go func() {
-			app.Run()
-			close(waitChan)
-		}()
-
-		options := redis.Options{
-			Addresses: []string{"localhost:6380"},
-		}
-
-		s.temporaryStore = redis.New(options)
-
-		readiness <- nil
-
-		<-ctx.Done()
-
-		app.Close()
-		<-waitChan
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
 	}
@@ -596,38 +551,6 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		wal.Run(ctx, readiness)
 		cancel()
 		wg.Wait()
-	case "badgerWal":
-		wal := &badger.Badger{}
-		err := wal.Init()
-
-		if err != nil {
-			readiness <- nil
-			return
-		}
-
-		s.store = wal
-
-		readiness <- nil
-
-		<-ctx.Done()
-
-		wal.Close()
-	case "olricWal":
-		wal := &olric.Wal{}
-
-		err := wal.Init()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		s.store = wal
-
-		readiness <- nil
-
-		<-ctx.Done()
-
-		wal.Close()
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
 	}
