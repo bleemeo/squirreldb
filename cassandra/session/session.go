@@ -26,15 +26,12 @@ type Options struct {
 func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 3 * time.Second
+	cluster.Consistency = gocql.All
 	session, err := cluster.CreateSession()
 
 	if err != nil {
 		return nil, false, err
 	}
-
-	defer session.Close()
-
-	session.SetConsistency(gocql.All)
 
 	keyspaceCreated := false
 
@@ -52,6 +49,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 		if _, ok := err.(*gocql.RequestErrAlreadyExists); ok {
 			keyspaceCreated = false
 		} else if err != nil {
+			session.Close()
 			return nil, false, err
 		} else {
 			keyspaceCreated = true
@@ -59,14 +57,15 @@ func New(options Options) (*gocql.Session, bool, error) {
 		}
 	}
 
+	session.Close()
+
 	cluster.Keyspace = options.Keyspace
+	cluster.Consistency = gocql.LocalQuorum
 
 	finalSession, err := cluster.CreateSession()
 	if err != nil {
 		return nil, false, err
 	}
-
-	finalSession.SetConsistency(gocql.LocalQuorum)
 
 	return finalSession, keyspaceCreated, nil
 }
