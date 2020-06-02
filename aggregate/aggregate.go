@@ -19,7 +19,7 @@ type AggregatedData struct {
 	TimeToLive int64
 }
 
-// Aggregate aggregates data
+// Aggregate aggregates data.
 func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 	if len(data.Points) == 0 {
 		return AggregatedData{}
@@ -57,7 +57,7 @@ func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 	return aggregatedData
 }
 
-// Returns an aggregated point from a point list
+// Returns an aggregated point from a point list.
 func aggregatePoints(points []types.MetricPoint, timestamp int64) AggregatedPoint {
 	aggregatedPoint := AggregatedPoint{
 		Timestamp: timestamp,

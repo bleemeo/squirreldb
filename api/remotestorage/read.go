@@ -14,7 +14,7 @@ type readMetrics struct {
 	reader types.MetricReader
 }
 
-// ServeHTTP handles read requests
+// ServeHTTP handles read requests.
 func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
@@ -98,7 +98,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 }
 
-// Returns a MetricRequest generated from a Query
+// Returns a MetricRequest generated from a Query.
 func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.MetricRequest, error) {
 	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
 	if err != nil {
@@ -125,7 +125,7 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.Met
 	return request, nil
 }
 
-// Returns a MetricRequest list generated from a ReadRequest
+// Returns a MetricRequest list generated from a ReadRequest.
 func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, error) {
 	if len(promReadRequest.Queries) == 0 {
 		return nil, nil
@@ -145,7 +145,7 @@ func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index type
 	return requests, nil
 }
 
-// Returns a Sample list generated from a MetricPoint list
+// Returns a Sample list generated from a MetricPoint list.
 func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	if len(points) == 0 {
 		return nil
@@ -165,7 +165,7 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 	return promSamples
 }
 
-// Returns a pointer of a TimeSeries generated from a ID and a MetricData
+// Returns a pointer of a TimeSeries generated from a ID and a MetricData.
 func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
 	labels, err := index.LookupLabels(id)
 	if err != nil {
@@ -182,7 +182,7 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.
 	return promQueryResult, nil
 }
 
-// Returns a TimeSeries pointer list generated from a metric list
+// Returns a TimeSeries pointer list generated from a metric list.
 func promTimeseriesFromMetrics(metrics types.MetricDataSet, index types.Index, sizeHint int) ([]*prompb.TimeSeries, error) {
 	totalPoints := 0
 

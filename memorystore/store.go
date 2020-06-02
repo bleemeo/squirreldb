@@ -33,7 +33,7 @@ type Store struct {
 	mutex            sync.Mutex
 }
 
-// New creates a new Store object
+// New creates a new Store object.
 func New() *Store {
 	store := &Store{
 		metrics:      make(map[types.MetricID]storeData),
@@ -43,7 +43,7 @@ func New() *Store {
 	return store
 }
 
-// Append implement batch.TemporaryStore interface
+// Append implement batch.TemporaryStore interface.
 func (s *Store) Append(points []types.MetricData) ([]int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -72,7 +72,7 @@ func (s *Store) Append(points []types.MetricData) ([]int, error) {
 	return pointCount, nil
 }
 
-// GetSetPointsAndOffset implement batch.TemporaryStore interface
+// GetSetPointsAndOffset implement batch.TemporaryStore interface.
 func (s *Store) GetSetPointsAndOffset(points []types.MetricData, offsets []int) ([]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -112,7 +112,7 @@ func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, 
 	return oldData, nil
 }
 
-// ReadPointsAndOffset implement batch.TemporaryStore interface
+// ReadPointsAndOffset implement batch.TemporaryStore interface.
 func (s *Store) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -136,7 +136,7 @@ func (s *Store) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 	return metrics, writeOffsets, nil
 }
 
-// MarkToExpire implement batch.TemporaryStore interface
+// MarkToExpire implement batch.TemporaryStore interface.
 func (s *Store) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -157,7 +157,7 @@ func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.T
 	return nil
 }
 
-// GetSetFlushDeadline implement batch.TemporaryStore interface
+// GetSetFlushDeadline implement batch.TemporaryStore interface.
 func (s *Store) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -174,7 +174,7 @@ func (s *Store) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map
 	return results, nil
 }
 
-// AddToTransfert implement batch.TemporaryStore interface
+// AddToTransfert implement batch.TemporaryStore interface.
 func (s *Store) AddToTransfert(ids []types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -184,7 +184,7 @@ func (s *Store) AddToTransfert(ids []types.MetricID) error {
 	return nil
 }
 
-// GetTransfert implement batch.TemporaryStore interface
+// GetTransfert implement batch.TemporaryStore interface.
 func (s *Store) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -207,7 +207,7 @@ func (s *Store) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 	return results, nil
 }
 
-// GetAllKnownMetrics implement batch.TemporaryStore interface
+// GetAllKnownMetrics implement batch.TemporaryStore interface.
 func (s *Store) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -221,7 +221,7 @@ func (s *Store) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
 	return results, nil
 }
 
-// Run starts all Store services
+// Run starts all Store services.
 func (s *Store) Run(ctx context.Context) {
 	interval := expiratorInterval * time.Second
 	ticker := time.NewTicker(interval)
@@ -239,7 +239,7 @@ func (s *Store) Run(ctx context.Context) {
 	}
 }
 
-// Deletes all expired metrics
+// Deletes all expired metrics.
 func (s *Store) expire(now time.Time) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

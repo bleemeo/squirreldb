@@ -44,7 +44,7 @@ type CassandraTSDB struct {
 	state       types.State
 }
 
-// New created a new CassandraTSDB object
+// New created a new CassandraTSDB object.
 func New(session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
@@ -74,7 +74,7 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 	return tsdb, nil
 }
 
-// Returns data table create Query
+// Returns data table create Query.
 func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duration) *gocql.Query {
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
@@ -102,7 +102,7 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duratio
 	return query
 }
 
-// Returns aggregate data table create Query
+// Returns aggregate data table create Query.
 func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duration) *gocql.Query {
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`

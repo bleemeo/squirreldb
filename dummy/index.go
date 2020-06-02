@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-// Index implement a non-working index. It only useful for testing/benchmark. See each function for their limitation
+// Index implement a non-working index. It only useful for testing/benchmark. See each function for their limitation.
 type Index struct {
 	StoreMetricIDInMemory bool
 	FixedValue            types.MetricID
@@ -26,7 +26,7 @@ func (idx *Index) AllIDs() ([]types.MetricID, error) {
 	return nil, nil
 }
 
-// LookupLabels required StoreMetricIDInMemory (so not persistent after restart)
+// LookupLabels required StoreMetricIDInMemory (so not persistent after restart).
 func (idx *Index) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
@@ -87,12 +87,12 @@ func (idx *Index) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int
 	return ids, ttls, nil
 }
 
-// Search is not implemented at all
+// Search is not implemented at all.
 func (idx *Index) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-// copied from cassandra/index
+// copied from cassandra/index.
 func timeToLiveFromLabels(labels *labels.Labels) int64 {
 	value, exists := popLabelsValue(labels, "__ttl__")
 
@@ -111,7 +111,7 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 	return timeToLive
 }
 
-// copied from cassandra/index
+// copied from cassandra/index.
 func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {

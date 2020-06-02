@@ -47,7 +47,7 @@ type serializedPoints struct {
 const serializedSize = 24
 const defaultTTL = 24 * time.Hour
 
-// New creates a new Redis object
+// New creates a new Redis object.
 func New(options Options) *Redis {
 	clusterClient := goredis.NewClusterClient(&goredis.ClusterOptions{
 		Addrs: options.Addresses,
@@ -174,7 +174,7 @@ func string2MetricID(input string) (types.MetricID, error) {
 	return types.MetricID(v), err
 }
 
-// Append implement batch.TemporaryStore interface
+// Append implement batch.TemporaryStore interface.
 func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 	start := time.Now()
 
@@ -235,7 +235,7 @@ func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 	return results, nil
 }
 
-// GetSetPointsAndOffset implement batch.TemporaryStore interface
+// GetSetPointsAndOffset implement batch.TemporaryStore interface.
 func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) ([]types.MetricData, error) {
 	start := time.Now()
 
@@ -312,7 +312,7 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 	return results, nil
 }
 
-// ReadPointsAndOffset implement batch.TemporaryStore interface
+// ReadPointsAndOffset implement batch.TemporaryStore interface.
 func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) { // nolint: gocognit
 	start := time.Now()
 
@@ -383,7 +383,7 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 	return metrics, writeOffsets, nil
 }
 
-// MarkToExpire implement batch.TemporaryStore interface
+// MarkToExpire implement batch.TemporaryStore interface.
 func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	start := time.Now()
 
@@ -430,7 +430,7 @@ func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 	return nil
 }
 
-// GetSetFlushDeadline implement batch.TemporaryStore interface
+// GetSetFlushDeadline implement batch.TemporaryStore interface.
 func (r *Redis) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
@@ -485,7 +485,7 @@ func (r *Redis) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map
 	return results, nil
 }
 
-// AddToTransfert implement batch.TemporaryStore interface
+// AddToTransfert implement batch.TemporaryStore interface.
 func (r *Redis) AddToTransfert(ids []types.MetricID) error {
 	if len(ids) == 0 {
 		return nil
@@ -505,7 +505,7 @@ func (r *Redis) AddToTransfert(ids []types.MetricID) error {
 	return err
 }
 
-// GetTransfert implement batch.TemporaryStore interface
+// GetTransfert implement batch.TemporaryStore interface.
 func (r *Redis) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 	result, err := r.sPopN(transfertKey, int64(count))
 	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry() {
@@ -519,7 +519,7 @@ func (r *Redis) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 	return r.getFlushDeadline(result)
 }
 
-// GetAllKnownMetrics implement batch.TemporaryStore interface
+// GetAllKnownMetrics implement batch.TemporaryStore interface.
 func (r *Redis) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
@@ -591,7 +591,7 @@ func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, er
 	return results, nil
 }
 
-// Return data from bytes values
+// Return data from bytes values.
 func dataFromValues(id types.MetricID, values []byte) (types.MetricData, error) {
 	data := types.MetricData{}
 	buffer := bytes.NewReader(values)
@@ -616,7 +616,7 @@ func dataFromValues(id types.MetricID, values []byte) (types.MetricData, error) 
 	return data, nil
 }
 
-// Return bytes values from data
+// Return bytes values from data.
 func valuesFromData(data types.MetricData) ([]byte, error) {
 	buffer := new(bytes.Buffer)
 	buffer.Grow(len(data.Points) * 24)

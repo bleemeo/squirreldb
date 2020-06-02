@@ -14,7 +14,7 @@ import (
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
-// metrics points should be sorted and deduplicated
+// metrics points should be sorted and deduplicated.
 func (c *CassandraTSDB) Write(metrics []types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
@@ -56,7 +56,7 @@ func (c *CassandraTSDB) Write(metrics []types.MetricData) error {
 	return nil
 }
 
-// Write writes all specified metrics of the slice
+// Write writes all specified metrics of the slice.
 func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData) {
 	for _, data := range metrics {
 		retry.Print(func() error {
@@ -67,7 +67,7 @@ func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData) {
 	}
 }
 
-// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together
+// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together.
 func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedData) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
@@ -103,7 +103,7 @@ func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedDa
 	return nil
 }
 
-// writeAggregateRow writes one aggregated row
+// writeAggregateRow writes one aggregated row.
 func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggregate.AggregatedData, baseTimestamp int64) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
@@ -126,7 +126,7 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 	return nil
 }
 
-// Write raw data per partition
+// Write raw data per partition.
 func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 	if len(data.Points) == 0 {
 		return nil
@@ -176,7 +176,7 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 	return nil
 }
 
-// Write raw partition data
+// Write raw partition data.
 func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
@@ -201,7 +201,7 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 	return nil
 }
 
-// Returns table insert raw data Query
+// Returns table insert raw data Query.
 func (c *CassandraTSDB) tableInsertRawDataQuery(id int64, baseTimestamp, offsetMs, timeToLive int64, values []byte) *gocql.Query {
 	query := c.session.Query(`
 		INSERT INTO data (metric_id, base_ts, offset_ms, insert_time, values)
@@ -212,7 +212,7 @@ func (c *CassandraTSDB) tableInsertRawDataQuery(id int64, baseTimestamp, offsetM
 	return query
 }
 
-// Returns table insert aggregated data Query
+// Returns table insert aggregated data Query.
 func (c *CassandraTSDB) tableInsertAggregatedDataQuery(id int64, baseTimestamp, offsetSecond, timeToLive int64, values []byte) *gocql.Query {
 	query := c.session.Query(`
 		INSERT INTO data_aggregated (metric_id, base_ts, offset_second, values)
@@ -239,7 +239,7 @@ func (c *CassandraTSDB) tableInsertAggregatedDataQuery(id int64, baseTimestamp, 
 // * baseTimestamp must be *strickly* less than all point timestamps and t0
 // * t0 must be less or equal to all points timestamps
 // * Delta with biggest timestamp and baseTimestamp must be less than 49 days (fit in 32 bits integer)
-// * delta with first point timestamp and t0 must fit in 14-bits integer (that is ~16 seconds)
+// * delta with first point timestamp and t0 must fit in 14-bits integer (that is ~16 seconds).
 func gorillaEncode(points []types.MetricPoint, t0 int64, baseTimestamp int64) []byte {
 	s := tsz.New(uint32(t0 - baseTimestamp))
 
@@ -256,7 +256,7 @@ func gorillaEncode(points []types.MetricPoint, t0 int64, baseTimestamp int64) []
 
 // gorillaEncodeAggregate encode aggregated points
 // It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened
-// It also means that same constraint as gorillaEncode apply
+// It also means that same constraint as gorillaEncode apply.
 func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTimestamp int64) []byte {
 	// Gorilla encoding worst case is ~14 bytes per points. So on 64k we could store ~4000 points,
 	// since it's aggregated points, with 5 minutes resolution it's ~13 days.

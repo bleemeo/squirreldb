@@ -150,7 +150,7 @@ const (
 	allPostingLabelValue = "__all|metrics__"
 )
 
-// New creates a new CassandraIndex object
+// New creates a new CassandraIndex object.
 func New(session *gocql.Session, options Options) (*CassandraIndex, error) {
 	return new(
 		cassandraStore{
@@ -178,7 +178,7 @@ func new(store storeImpl, options Options) (*CassandraIndex, error) {
 	return index, nil
 }
 
-// Run starts all Cassandra Index services
+// Run starts all Cassandra Index services.
 func (c *CassandraIndex) Run(ctx context.Context) {
 	ticker := time.NewTicker(backgroundCheckInterval)
 
@@ -197,14 +197,14 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 
 // RunOnce run the tasks scheduled by Run.
 // Prefer using Run() than calling RunOnce multiple time. RunOnce is mostly here
-// for squirreldb-cassandra-index-bench program
+// for squirreldb-cassandra-index-bench program.
 func (c *CassandraIndex) RunOnce(ctx context.Context) {
 	c.expire(time.Now())
 	c.applyExpirationUpdateRequests()
 	c.cassandraExpire(time.Now())
 }
 
-// AllIDs returns all ids stored in the index
+// AllIDs returns all ids stored in the index.
 func (c *CassandraIndex) AllIDs() ([]types.MetricID, error) {
 	bitmap, err := c.postings(allPostingLabelName, allPostingLabelName)
 
@@ -215,13 +215,13 @@ func (c *CassandraIndex) AllIDs() ([]types.MetricID, error) {
 	return bitsetToIDs(bitmap), nil
 }
 
-// labelValues return values for given label name
+// labelValues return values for given label name.
 func (c *CassandraIndex) labelValues(name string) ([]string, error) {
 	return c.store.SelectValueForName(name)
 }
 
 // postings return ids matching give Label name & value
-// If value is the empty string, it match any values (but the label must be set)
+// If value is the empty string, it match any values (but the label must be set).
 func (c *CassandraIndex) postings(name string, value string) (*roaring.Bitmap, error) {
 	if name == allPostingLabelName {
 		value = allPostingLabelValue
@@ -263,7 +263,7 @@ func (c *CassandraIndex) postings(name string, value string) (*roaring.Bitmap, e
 	return result, err
 }
 
-// LookupLabels returns a Label list corresponding to the specified ID
+// LookupLabels returns a Label list corresponding to the specified ID.
 func (c *CassandraIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	return c.lookupLabels(id, c.options.IncludeID, time.Now())
 }
@@ -460,7 +460,7 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 	return ids, ttls, nil
 }
 
-// search metric ID by labels in Cassadran. Update and return requests to create metric if not found
+// search metric ID by labels in Cassadran. Update and return requests to create metric if not found.
 func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabelsString string, sortedLabels labels.Labels, idData *idData, found *bool, ttl int64, now time.Time) ([]createMetricRequest, error) {
 	if id, err := c.store.SelectLabels2ID(sortedLabelsString); err == nil {
 		idData.id = id
@@ -524,7 +524,7 @@ func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time
 	return nil
 }
 
-// lookupIDsFromLabels will idData for metrics which as the idLabelName label
+// lookupIDsFromLabels will idData for metrics which as the idLabelName label.
 func (c *CassandraIndex) lookupIDsFromLabels(labelsList []labels.Labels, idsData []idData, founds []bool) error {
 	for i, labels := range labelsList {
 		if founds[i] {
@@ -555,7 +555,7 @@ func (c *CassandraIndex) lookupIDsFromLabels(labelsList []labels.Labels, idsData
 	return nil
 }
 
-// Search a free ID using dichotomy
+// Search a free ID using dichotomy.
 func freeFreeID(bitmap *roaring.Bitmap) uint64 {
 	card := bitmap.Count()
 	if card == 0 {
@@ -854,7 +854,7 @@ func (c *CassandraIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, e
 	return ids, nil
 }
 
-// Deletes all expired cache entries
+// Deletes all expired cache entries.
 func (c *CassandraIndex) expire(now time.Time) {
 	c.lookupIDMutex.Lock()
 	c.searchMutex.Lock()
@@ -936,7 +936,7 @@ func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error
 	return c.options.States.Write(expireMetricStateName, value.Format(time.RFC3339))
 }
 
-// cassandraExpire remove all entry in Cassandra that have expired
+// cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(now time.Time) {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
 	if acquired := lock.TryLock(); !acquired {
@@ -1406,7 +1406,7 @@ func inverseMatcher(m *labels.Matcher) *labels.Matcher {
 }
 
 // postingsForMatchers return metric IDs matching given matcher.
-// The logic is taken from Prometheus PostingsForMatchers (in querier.go)
+// The logic is taken from Prometheus PostingsForMatchers (in querier.go).
 func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit
 	re := make([]*regexp.Regexp, len(matchers))
 	labelMustBeSet := make(map[string]bool, len(matchers))
@@ -1586,7 +1586,7 @@ func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp
 	return it, nil
 }
 
-// substractResult remove from main all ID found in on lists
+// substractResult remove from main all ID found in on lists.
 func substractResult(main *roaring.Bitmap, lists ...*roaring.Bitmap) *roaring.Bitmap {
 	if len(lists) == 0 {
 		return main
@@ -1616,7 +1616,7 @@ func (c *CassandraIndex) cassandraGetExpirationList(day time.Time) (*roaring.Bit
 	return tmp, err
 }
 
-// popLabelsValue get and delete value via its name from a labels.Label list
+// popLabelsValue get and delete value via its name from a labels.Label list.
 func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {
@@ -1628,7 +1628,7 @@ func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	return "", false
 }
 
-// getMatchersValue gets value via its name from a labels.Matcher list
+// getMatchersValue gets value via its name from a labels.Matcher list.
 func getMatchersValue(matchers []*labels.Matcher, name string) (string, bool) {
 	for _, matcher := range matchers {
 		if matcher.Name == name {
@@ -1639,7 +1639,7 @@ func getMatchersValue(matchers []*labels.Matcher, name string) (string, bool) {
 	return "", false
 }
 
-// sortLabels returns the labels.Label list sorted by name
+// sortLabels returns the labels.Label list sorted by name.
 func sortLabels(labelList labels.Labels) labels.Labels {
 	sortedLabels := labelList.Copy()
 	sort.Sort(sortedLabels)
@@ -1647,7 +1647,7 @@ func sortLabels(labelList labels.Labels) labels.Labels {
 	return sortedLabels
 }
 
-// Returns and delete time to live from a labels.Label list
+// Returns and delete time to live from a labels.Label list.
 func timeToLiveFromLabels(labels *labels.Labels) int64 {
 	value, exists := popLabelsValue(labels, timeToLiveLabelName)
 
@@ -1677,7 +1677,7 @@ func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 	return results
 }
 
-// HasNext() must always be called once before each Next() (and next called once)
+// HasNext() must always be called once before each Next() (and next called once).
 type bytesIter interface {
 	HasNext() bool
 	Next() []byte
@@ -1713,7 +1713,7 @@ func (i cassandraByteIter) Err() error {
 	return i.err
 }
 
-// createTables create all Cassandra tables
+// createTables create all Cassandra tables.
 func (s cassandraStore) Init() error {
 	s.schemaLock.Lock()
 	defer s.schemaLock.Unlock()

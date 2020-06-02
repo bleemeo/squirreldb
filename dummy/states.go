@@ -7,7 +7,7 @@ import (
 )
 
 // States is a in-memory single-node "states", that is a map :)
-// Only useful for tests
+// Only useful for tests.
 type States struct {
 	mutex  sync.Mutex
 	values map[string]string

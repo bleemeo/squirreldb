@@ -5,17 +5,17 @@ import (
 	"sync"
 )
 
-// DiscardTSDB will write metrics to /dev/null :)
+// DiscardTSDB will write metrics to /dev/null.
 type DiscardTSDB struct{}
 
 type emptyResult struct{}
 
-// ReadIter return an empty result
+// ReadIter return an empty result.
 func (d DiscardTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
 	return emptyResult{}, nil
 }
 
-// Write discard metrics
+// Write discard metrics.
 func (d DiscardTSDB) Write(metrics []types.MetricData) error {
 	return nil
 }
@@ -32,7 +32,7 @@ func (r emptyResult) Err() error {
 	return nil
 }
 
-// MemoryTSDB store all value in memory. Only useful in unittest
+// MemoryTSDB store all value in memory. Only useful in unittest.
 type MemoryTSDB struct {
 	mutex sync.Mutex
 	Data  map[types.MetricID]types.MetricData
@@ -45,7 +45,7 @@ type readIter struct {
 	current types.MetricData
 }
 
-// ReadIter return an empty result
+// ReadIter return an empty result.
 func (db *MemoryTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
 	return &readIter{
 		request: request,
@@ -53,7 +53,7 @@ func (db *MemoryTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet
 	}, nil
 }
 
-// Write store in memory
+// Write store in memory.
 func (db *MemoryTSDB) Write(metrics []types.MetricData) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()

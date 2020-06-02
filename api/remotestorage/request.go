@@ -8,7 +8,7 @@ import (
 	"github.com/golang/snappy"
 )
 
-// Returns the encoded response
+// Returns the encoded response.
 func encodeResponse(pb proto.Marshaler) ([]byte, error) {
 	marshal, err := pb.Marshal()
 
@@ -27,7 +27,7 @@ type requestContext struct {
 	pb            proto.Message
 }
 
-// Decodes the request
+// Decodes the request.
 func decodeRequest(reader io.Reader, reqCtx *requestContext) error {
 	reqCtx.buffer.Reset()
 

@@ -58,7 +58,7 @@ type metricReadWriter interface {
 	types.MetricWriter
 }
 
-// SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store
+// SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
 	Config                   *config.Config
 	cassandraSession         *gocql.Session
@@ -162,7 +162,7 @@ func main() {
 	debug.Print(1, logger, "SquirrelDB is stopped")
 }
 
-// SchemaLock return a lock to modify the Cassandra schema
+// SchemaLock return a lock to modify the Cassandra schema.
 func (s *SquirrelDB) SchemaLock() types.TryLocker {
 	return s.lockFactory.CreateLock("cassandra-schema", 10*time.Second)
 }
@@ -178,7 +178,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Run(ctx)
 }
 
-// Run start SquirrelDB
+// Run start SquirrelDB.
 func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
 	tasks := []namedTasks{
 		{

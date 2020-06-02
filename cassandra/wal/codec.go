@@ -111,7 +111,7 @@ func (p *pool) Len() int {
 	return int(tmp)
 }
 
-// BytesAndReset will return the current Bytes() of the encoder and reset it
+// BytesAndReset will return the current Bytes() of the encoder and reset it.
 func (p *pool) BytesAndReset() []byte {
 	p.mutex.Lock()
 

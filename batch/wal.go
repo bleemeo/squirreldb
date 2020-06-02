@@ -20,7 +20,7 @@ const flushDelay = 15 * time.Minute
 //
 // On startup, WalBatcher will ask WAL store to re-read all data in order to pre-fill in-memory cache of data.
 //
-// Finally the WalBatcher allow to query for it's in-memory data
+// Finally the WalBatcher allow to query for it's in-memory data.
 type WalBatcher struct {
 	WalStore                types.WalStore
 	PersitentStore          types.MetricReadWriter
@@ -113,7 +113,7 @@ func (w *WalBatcher) initFromWal() {
 	w.writeLock.L.Unlock()
 }
 
-// Flush write
+// Flush write.
 func (w *WalBatcher) Flush() {
 	start := time.Now()
 

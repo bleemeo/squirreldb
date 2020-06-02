@@ -34,7 +34,7 @@ type Config struct {
 	FlagSet *pflag.FlagSet
 }
 
-// New creates a new Config object
+// New creates a new Config object.
 func New() (*Config, error) {
 	instance := koanf.New(delimiter)
 
@@ -94,7 +94,7 @@ func (c *Config) Duration(key string) time.Duration {
 
 // string2Duration convert a string to a time.Duration
 // In addition to time.ParseDuration, it also allow simple number and assume
-// it value to be second
+// it value to be second.
 func string2Duration(value string) time.Duration {
 	result, err := time.ParseDuration(value)
 	if err == nil {
@@ -110,7 +110,7 @@ func string2Duration(value string) time.Duration {
 	return 0
 }
 
-// Validate checks if the configuration is valid and consistent
+// Validate checks if the configuration is valid and consistent.
 func (c *Config) Validate() bool {
 	keyspace := c.String("cassandra.keyspace")
 	replicationFactor := c.Int("cassandra.replication_factor")
@@ -188,7 +188,7 @@ func (c *Config) Validate() bool {
 	return valid
 }
 
-// ValidateRemote checks if the local configuration is consistent with the remote configuration
+// ValidateRemote checks if the local configuration is consistent with the remote configuration.
 func (c *Config) ValidateRemote(state types.State) bool {
 	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
@@ -245,16 +245,16 @@ func (c *Config) ValidateRemote(state types.State) bool {
 	return valid
 }
 
-// writeRemote writes the remote constant value
+// writeRemote writes the remote constant value.
 func (c *Config) writeRemote(state types.State, name string, value string) {
 	retry.Print(func() error {
-		return state.Write(name, value) // nolint: scopelint
+		return state.Write(name, value)
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
 		"write config state "+name,
 	)
 }
 
-// Return file paths
+// Return file paths.
 func filePaths(root string, fileExtensions []string) ([]string, error) {
 	filesInfo, err := ioutil.ReadDir(root)
 
@@ -280,7 +280,7 @@ filesLoop:
 	return filePaths, nil
 }
 
-// Returns a flag set generated from a flag list
+// Returns a flag set generated from a flag list.
 func flagSetFromFlags(flags []flag) *pflag.FlagSet {
 	flagSet := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 

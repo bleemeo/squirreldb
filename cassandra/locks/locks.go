@@ -37,7 +37,7 @@ type Lock struct {
 	cancel   context.CancelFunc
 }
 
-// New creates a new CassandraLocks object
+// New creates a new CassandraLocks object.
 func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) {
 	var err error
 
@@ -83,7 +83,7 @@ func tableExists(session *gocql.Session) bool {
 // CreateLock return a Locker for given name.
 // This Locker will be common across all SquirrelDB instance connected to the
 // same Cassandra.
-// If the instance holder crash, the lock will be released after timeToLive
+// If the instance holder crash, the lock will be released after timeToLive.
 func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
 	hostname, _ := os.Hostname()
 
@@ -99,7 +99,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 	}
 }
 
-// TryLock try to acquire the Lock and return true if acquire
+// TryLock try to acquire the Lock and return true if acquire.
 func (l *Lock) TryLock() bool {
 	start := time.Now()
 
@@ -150,7 +150,7 @@ func (l *Lock) TryLock() bool {
 	return true
 }
 
-// Lock will call TryLock every 10 seconds until is successed
+// Lock will call TryLock every 10 seconds until is successed.
 func (l *Lock) Lock() {
 	start := time.Now()
 
@@ -168,7 +168,7 @@ func (l *Lock) Lock() {
 	}
 }
 
-// Unlock free a Lock
+// Unlock free a Lock.
 func (l *Lock) Unlock() {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -230,7 +230,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 	}
 }
 
-// Returns locks table delete lock Query
+// Returns locks table delete lock Query.
 func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
 	query := l.c.session.Query(`
 		DELETE FROM "locks"
@@ -241,7 +241,7 @@ func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
 	return query
 }
 
-// Returns locks table insert lock Query
+// Returns locks table insert lock Query.
 func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
 	query := l.c.session.Query(`
 		INSERT INTO locks (name, lock_id, timestamp)
@@ -253,7 +253,7 @@ func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
 	return query
 }
 
-// Returns locks table update lock Query
+// Returns locks table update lock Query.
 func (l *Lock) locksTableUpdateLockQuery() *gocql.Query {
 	query := l.c.session.Query(`
 		UPDATE locks USING TTL ?
@@ -265,7 +265,7 @@ func (l *Lock) locksTableUpdateLockQuery() *gocql.Query {
 	return query
 }
 
-// Returns locks table create Query
+// Returns locks table create Query.
 func locksTableCreateQuery(session *gocql.Session) *gocql.Query {
 	query := session.Query(`
 		CREATE TABLE IF NOT EXISTS locks (

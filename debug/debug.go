@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-// Debugging levels
+// Debugging levels.
 const (
 	Level0 = 0
 	Level1 = 1
@@ -16,7 +16,7 @@ const (
 //nolint: gochecknoglobals
 var Level = 0
 
-// Print displays a debug message according to its level
+// Print displays a debug message according to its level.
 func Print(level int, logger *log.Logger, msg string, v ...interface{}) {
 	if level <= Level {
 		levelString := strconv.Itoa(level)

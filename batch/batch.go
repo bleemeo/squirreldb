@@ -89,7 +89,7 @@ type TemporaryStore interface {
 	GetAllKnownMetrics() (map[types.MetricID]time.Time, error)
 }
 
-// stateData contains information about points stored in memory store for one metrics
+// stateData contains information about points stored in memory store for one metrics.
 type stateData struct {
 	flushDeadline time.Time
 }
@@ -108,7 +108,7 @@ type Batch struct {
 	writer      types.MetricWriter
 }
 
-// New creates a new Batch object
+// New creates a new Batch object.
 func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
@@ -129,7 +129,7 @@ type readIter struct {
 	offset  int
 }
 
-// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage according to the request
+// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage according to the request.
 func (b *Batch) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
 	return &readIter{
 		b:       b,
@@ -137,12 +137,12 @@ func (b *Batch) ReadIter(request types.MetricRequest) (types.MetricDataSet, erro
 	}, nil
 }
 
-// Write implements MetricWriter
+// Write implements MetricWriter.
 func (b *Batch) Write(metrics []types.MetricData) error {
 	return b.write(metrics, time.Now())
 }
 
-// Run starts Batch service (e.g. flushing points after a deadline)
+// Run starts Batch service (e.g. flushing points after a deadline).
 func (b *Batch) Run(ctx context.Context) {
 	tickerBackground := time.NewTicker(backgroundTaskInterval)
 	tickerTakeover := time.NewTicker(takeoverInterval)
@@ -165,15 +165,16 @@ func (b *Batch) Run(ctx context.Context) {
 	}
 }
 
-// Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB
+// Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB.
 func (b *Batch) Flush() error {
 	b.check(context.Background(), time.Now(), true, false)
 
 	return nil
 }
 
-// Checks the current states and flush those whose flush date has expired
-// If force is true, each state is flushed
+// Checks the current states and flush those whose flush date has expired.
+//
+// If force is true, each state is flushed.
 func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown bool) {
 	start := time.Now()
 
@@ -231,7 +232,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 	backgroundSeconds.Observe(time.Since(start).Seconds())
 }
 
-// randomDuration return a delay with a +/- 20% jitter
+// randomDuration return a delay with a +/- 20% jitter.
 func randomDuration(target time.Duration) time.Duration {
 	jitter := target / 5
 	jitterFactor := rand.Float64()*2 - 1
@@ -304,7 +305,7 @@ func (b *Batch) takeoverMetrics(metrics map[types.MetricID]time.Time, now time.T
 //
 // It return a boolean telling if there is points for each metrics in the memory store
 //
-// This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion
+// This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
 func (b *Batch) setPointsAndOffset(previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) []bool { // nolint: gocognit
 	var currentMetrics []types.MetricData
 
@@ -431,7 +432,7 @@ func (b *Batch) setPointsAndOffset(previousMetrics []types.MetricData, setMetric
 // * Send all points after write offset to TSDB (excepted for new metrics, we write nothing)
 // * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points that come from states)
 // * Get + Set to memoryStore the points filtered
-// * Update states (in-memory and in temporaryStore)
+// * Update states (in-memory and in temporaryStore).
 func (b *Batch) flush(ids []types.MetricID, now time.Time, shutdown bool) {
 	states := make([]stateData, len(ids))
 
@@ -454,7 +455,7 @@ func (b *Batch) flush(ids []types.MetricID, now time.Time, shutdown bool) {
 
 	retry.Print(func() error {
 		var err error
-		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ids) // nolint: scopelint
+		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ids)
 
 		return err
 	}, retry.NewExponentialBackOff(30*time.Second), logger,
@@ -593,7 +594,7 @@ func (b *Batch) flush(ids []types.MetricID, now time.Time, shutdown bool) {
 
 // sortMetrics sorts and deduplicate points only if needed.
 // It do a copy if sort is needed.
-// Return the number of point that were duplicated
+// Return the number of point that were duplicated.
 func sortMetrics(input []types.MetricData) int {
 	var count int
 
@@ -698,7 +699,7 @@ func (i *readIter) Next() bool {
 	}
 }
 
-// Returns the deduplicated and sorted points read from the temporary storage according to the request
+// Returns the deduplicated and sorted points read from the temporary storage according to the request.
 func (b *Batch) readTemporary(ids []types.MetricID, fromTimestamp int64, toTimestamp int64) ([]types.MetricData, error) {
 	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ids)
 
@@ -745,7 +746,7 @@ func (b *Batch) readTemporary(ids []types.MetricID, fromTimestamp int64, toTimes
 
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
-// If this is the case, the state is added to the list of states to flush
+// If this is the case, the state is added to the list of states to flush.
 func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 	start := time.Now()
 
@@ -860,7 +861,7 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 
 // Returns a flush date
 // It follows the formula:
-// timestamp = (now + batchSize) - (now + batchSize + (id.int % batchSize)) % batchSize
+// timestamp = (now + batchSize) - (now + batchSize + (id.int % batchSize)) % batchSize.
 func flushTimestamp(id types.MetricID, now time.Time, batchSize time.Duration) time.Time {
 	timestamp := now.Unix() + int64(batchSize.Seconds())
 	offset := int64(id) % int64(batchSize.Seconds())

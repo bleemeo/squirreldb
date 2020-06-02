@@ -23,7 +23,7 @@ type readIter struct {
 	offset  int
 }
 
-// ReadIter returns metrics according to the request made
+// ReadIter returns metrics according to the request made.
 func (c *CassandraTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
 	return &readIter{
 		c:       c,
@@ -87,7 +87,7 @@ func (i *readIter) Next() bool {
 	return true
 }
 
-// Returns aggregated data between the specified timestamps of the requested metric
+// Returns aggregated data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readAggregateData(id types.MetricID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
 	start := time.Now()
 
@@ -120,7 +120,7 @@ func (c *CassandraTSDB) readAggregateData(id types.MetricID, fromTimestamp, toTi
 	return aggregateData, nil
 }
 
-// Returns aggregated partition data between the specified timestamps of the requested metric
+// Returns aggregated partition data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readAggregatePartitionData(id types.MetricID, fromTimestamp, toTimestamp, baseTimestamp int64, function string) (types.MetricData, error) {
 	fromOffset := fromTimestamp - baseTimestamp - c.options.AggregateSize.Milliseconds()
 	toOffset := toTimestamp - baseTimestamp
@@ -174,7 +174,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(id types.MetricID, fromTimest
 	return aggregatePartitionData, nil
 }
 
-// Returns raw data between the specified timestamps of the requested metric
+// Returns raw data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readRawData(id types.MetricID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
 	start := time.Now()
 
@@ -205,7 +205,7 @@ func (c *CassandraTSDB) readRawData(id types.MetricID, fromTimestamp, toTimestam
 	return rawData, nil
 }
 
-// Returns raw partition data between the specified timestamps of the requested metric
+// Returns raw partition data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readRawPartitionData(id types.MetricID, fromTimestamp, toTimestamp, baseTimestamp int64) (types.MetricData, error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.BatchSize.Milliseconds()
 	toOffsetTimestamp := toTimestamp - baseTimestamp
@@ -262,7 +262,7 @@ func (c *CassandraTSDB) readRawPartitionData(id types.MetricID, fromTimestamp, t
 	return rawPartitionData, nil
 }
 
-// Returns table select data Query
+// Returns table select data Query.
 func (c *CassandraTSDB) rawTableSelectDataIter(id int64, baseTimestamp, fromOffset, toOffset int64) *gocql.Iter {
 	query := c.session.Query(`
 		SELECT offset_ms, TTL(values), values FROM data

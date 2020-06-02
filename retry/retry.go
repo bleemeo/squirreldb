@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// NewExponentialBackOff creates a new ExponentialBackOff object
+// NewExponentialBackOff creates a new ExponentialBackOff object.
 func NewExponentialBackOff(maxInterval time.Duration) backoff.BackOff {
 	exponentialBackOff := backoff.NewExponentialBackOff()
 
@@ -16,7 +16,7 @@ func NewExponentialBackOff(maxInterval time.Duration) backoff.BackOff {
 	return exponentialBackOff
 }
 
-// Print displays if an error message has occurred, the time before the next attempt and a resolution message
+// Print displays if an error message has occurred, the time before the next attempt and a resolution message.
 func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action string) error {
 	tried := false
 

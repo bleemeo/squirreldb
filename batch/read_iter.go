@@ -103,7 +103,7 @@ func (i *walReadIter) At() types.MetricData {
 	return i.current
 }
 
-// req must contains only one ID and datas assume be be for this ID or nil
+// req must contains only one ID and datas assume be be for this ID or nil.
 func filterPoints(req types.MetricRequest, datas ...types.MetricData) types.MetricData {
 	result := types.MetricData{
 		ID: req.IDs[0],

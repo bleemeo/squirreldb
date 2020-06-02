@@ -35,7 +35,7 @@ func (w *writeMetrics) putRequestContext(reqCtx *requestContext) {
 	}
 }
 
-// ServeHTTP handles writing requests
+// ServeHTTP handles writing requests.
 func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
 
@@ -75,7 +75,7 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	}
 }
 
-// Returns a MetricPoint list generated from a Sample list
+// Returns a MetricPoint list generated from a Sample list.
 func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	if len(promSamples) == 0 {
 		return nil
@@ -91,7 +91,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 	return points
 }
 
-// Returns a metric list generated from a TimeSeries list
+// Returns a metric list generated from a TimeSeries list.
 func metricsFromTimeseries(promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil

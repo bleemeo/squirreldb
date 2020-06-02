@@ -4,5 +4,8 @@ linters:
     - lll
     - funlen
     - gomnd  # too picky. For example it say that 1000 (used in number of ms in one second) is a magic number.
+    - testpackage # Require to review all our tests. Should be done
+    - goerr113 # Require to refactor how we return error. But would be useful
+    - nestif # Too many error for now, which would require significant refactor.
 run:
   tests: false

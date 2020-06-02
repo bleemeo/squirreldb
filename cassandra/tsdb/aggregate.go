@@ -25,7 +25,7 @@ const (
 // they won't be aggregated.
 const backlogMargin = time.Hour
 
-// Run starts all CassandraTSDB services
+// Run starts all CassandraTSDB services.
 func (c *CassandraTSDB) Run(ctx context.Context) {
 	shard := rand.Intn(shardNumber)
 	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
@@ -224,7 +224,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 	return true, toTime
 }
 
-// doAggregation perform the aggregation for given parameter
+// doAggregation perform the aggregation for given parameter.
 func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTimestamp, resolution int64) error {
 	if len(ids) == 0 {
 		return nil

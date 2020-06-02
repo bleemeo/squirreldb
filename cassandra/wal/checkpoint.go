@@ -9,7 +9,7 @@ import (
 	"github.com/golang/snappy"
 )
 
-// Abort undo a checkpoint which re-add all write to pending list
+// Abort undo a checkpoint which re-add all write to pending list.
 func (chk *Checkpoint) Abort() {
 	chk.c.flushDone.L.Lock()
 	defer chk.c.flushDone.L.Unlock()
@@ -19,7 +19,7 @@ func (chk *Checkpoint) Abort() {
 	}
 }
 
-// Purge delete all write stored in Cassandra WAL that are covered by this Checkpoint
+// Purge delete all write stored in Cassandra WAL that are covered by this Checkpoint.
 func (chk *Checkpoint) Purge() {
 	start := time.Now()
 	allIDs := chk.extraTxnIDs
@@ -45,7 +45,7 @@ func (chk *Checkpoint) Purge() {
 	requestsSecondsPurge.Observe(time.Since(start).Seconds())
 }
 
-// ReadOther search in Cassandra for write done by other SquirrelDB
+// ReadOther search in Cassandra for write done by other SquirrelDB.
 func (chk *Checkpoint) ReadOther() ([]types.MetricData, error) {
 	var (
 		txnIDs []gocql.UUID

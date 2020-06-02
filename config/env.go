@@ -10,7 +10,7 @@ import (
 
 // An Koanf.Provider for environment that support string list.
 // list items are separated by ","
-// To decide is something is a list of not, we use defaults
+// To decide is something is a list of not, we use defaults.
 type listEnvProvider struct {
 	koanf.Provider
 }

@@ -337,7 +337,7 @@ func sentInsertRequest(rnd *rand.Rand, proc procfs.Proc, workChannel chan []labe
 
 // loadBalancer will sent requests to each outputs one after one, regardless if the outputs is busy/blocked.
 //
-// This more or less match default nginx behavior
+// This more or less match default nginx behavior.
 func loadBalancer(input chan []labels.Labels, outputs []chan []labels.Labels) {
 	n := 0
 
@@ -362,7 +362,7 @@ func loadBalancer(input chan []labels.Labels, outputs []chan []labels.Labels) {
 	}
 }
 
-// worker is more or less equivalent to on SquirrelDB process
+// worker is more or less equivalent to on SquirrelDB process.
 func worker(localIndex *index.CassandraIndex, workChanel chan []labels.Labels, result chan int) {
 	token := make(chan bool, *workerThreads)
 	for n := 0; n < *workerThreads; n++ {

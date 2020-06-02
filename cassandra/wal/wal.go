@@ -190,7 +190,7 @@ func (c *Cassandra) Checkpoint() types.WalCheckpoint {
 	}
 }
 
-// ReadWAL read all WAL for this shard and mark those WAL as belonging to this instance (e.g. ReadOther from checkpoint won't return them)
+// ReadWAL read all WAL for this shard and mark those WAL as belonging to this instance (e.g. ReadOther from checkpoint won't return them).
 func (c *Cassandra) ReadWAL() ([]types.MetricData, error) {
 	var (
 		txnIDs           []gocql.UUID

@@ -20,7 +20,7 @@ const (
 	httpServerShutdownTimeout = 10 * time.Second
 )
 
-// API it the SquirrelDB HTTP API server
+// API it the SquirrelDB HTTP API server.
 type API struct {
 	ListenAddress        string
 	Index                types.Index
@@ -32,7 +32,7 @@ type API struct {
 	logger log.Logger
 }
 
-// Run start the HTTP api server
+// Run start the HTTP api server.
 func (a API) Run(ctx context.Context) {
 	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	router := route.New()

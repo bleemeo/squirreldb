@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-// Store implement Prometheus.Queryable and read from SquirrelDB store
+// Store implement Prometheus.Queryable and read from SquirrelDB store.
 type Store struct {
 	Index  types.Index
 	Reader types.MetricReader
@@ -22,7 +22,7 @@ type querier struct {
 	mint, maxt int64
 }
 
-// Querier returns a storage.Querier to read from SquirrelDB store
+// Querier returns a storage.Querier to read from SquirrelDB store.
 func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
 	return querier{index: s.Index, reader: s.Reader, mint: mint, maxt: maxt}, nil
 }

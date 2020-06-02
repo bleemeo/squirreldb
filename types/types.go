@@ -47,7 +47,7 @@ type MetricReadWriter interface {
 	MetricWriter
 }
 
-// TryLocker is a Locker with an additional TryLock() method
+// TryLocker is a Locker with an additional TryLock() method.
 type TryLocker interface {
 	sync.Locker
 	// TryLock try to acquire a lock but return false if unable to acquire it.

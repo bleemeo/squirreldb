@@ -26,7 +26,7 @@ type MetricRequest struct {
 	Function      string
 }
 
-// CopyPoints returns a copy of points
+// CopyPoints returns a copy of points.
 func CopyPoints(points []MetricPoint) []MetricPoint {
 	if len(points) == 0 {
 		return nil
@@ -39,7 +39,7 @@ func CopyPoints(points []MetricPoint) []MetricPoint {
 	return copiedPoints
 }
 
-// DeduplicatePoints returns the MetricPoint list deduplicated and sorted by timestamp
+// DeduplicatePoints returns the MetricPoint list deduplicated and sorted by timestamp.
 func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	if len(points) <= 1 {
 		return points
@@ -63,7 +63,7 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 	return result
 }
 
-// sortPoints returns the MetricPoint list sorted by timestamp
+// sortPoints returns the MetricPoint list sorted by timestamp.
 func sortPoints(points []MetricPoint) {
 	if len(points) <= 1 {
 		return
@@ -81,7 +81,7 @@ func MakePointsForTest(size int) []MetricPoint {
 	return MakePointsForTestOffset(size, 0)
 }
 
-// MakePointsForTestOffset is like MakePointsForTest but include a timestamp offset
+// MakePointsForTestOffset is like MakePointsForTest but include a timestamp offset.
 func MakePointsForTestOffset(size int, offsetMillisecond int64) []MetricPoint {
 	result := make([]MetricPoint, size)
 	for i := 0; i < size; i++ {
@@ -92,7 +92,7 @@ func MakePointsForTestOffset(size int, offsetMillisecond int64) []MetricPoint {
 	return result
 }
 
-// MakeMetricDataForTest generate a list a MetricData for testing
+// MakeMetricDataForTest generate a list a MetricData for testing.
 func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond int64) []MetricData {
 	result := make([]MetricData, countMetric)
 	for i := range result {
@@ -104,7 +104,7 @@ func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond i
 	return result
 }
 
-// AddDuplicateForTest add duplicate points to a list of MetricPoint for testing
+// AddDuplicateForTest add duplicate points to a list of MetricPoint for testing.
 func AddDuplicateForTest(input []MetricPoint, numberDuplicate int) []MetricPoint {
 	duplicates := make([]int, numberDuplicate)
 	for i := 0; i < numberDuplicate; i++ {
@@ -134,7 +134,7 @@ func AddDuplicateForTest(input []MetricPoint, numberDuplicate int) []MetricPoint
 	return result
 }
 
-// ShuffleForTest shuffle a list of MetricPoint for testing
+// ShuffleForTest shuffle a list of MetricPoint for testing.
 func ShuffleForTest(input []MetricPoint) []MetricPoint {
 	rand.Shuffle(len(input), func(i, j int) {
 		input[i], input[j] = input[j], input[i]

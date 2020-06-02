@@ -22,7 +22,7 @@ type Options struct {
 	ReplicationFactor int
 }
 
-// New creates a new Cassandra session and return if the keyspace was create by this instance
+// New creates a new Cassandra session and return if the keyspace was create by this instance.
 func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 3 * time.Second
@@ -79,7 +79,7 @@ func keyspaceExists(session *gocql.Session, keyspace string) bool {
 	return err == nil
 }
 
-// Returns keyspace create query
+// Returns keyspace create query.
 func keyspaceCreateQuery(session *gocql.Session, keyspace, replicationFactor string) *gocql.Query {
 	replacer := strings.NewReplacer("$KEYSPACE", keyspace, "$REPLICATION_FACTOR", replicationFactor)
 	query := session.Query(replacer.Replace(`
