@@ -2,6 +2,10 @@ package config
 
 //nolint: gochecknoglobals
 var defaults = map[string]interface{}{
+	"cluster.enabled":                       true,
+	"cluster.shard":                         4,
+	"cluster.bind_address":                  "",
+	"cluster.bind_port":                     0,
 	"cassandra.addresses":                   []string{"localhost:9042"},
 	"cassandra.keyspace":                    "squirreldb",
 	"cassandra.replication_factor":          1,
@@ -23,5 +27,5 @@ var defaults = map[string]interface{}{
 	"internal.temporary_store":              "redis",
 	"internal.locks":                        "cassandra",
 	"internal.states":                       "cassandra",
-	"internal.store":                        "wal",
+	"internal.store":                        "distributor",
 }

@@ -42,6 +42,30 @@ func (w *WalBatcher) Run(ctx context.Context, readiness chan error) {
 	w.writeLock = sync.NewCond(&sync.Mutex{})
 	w.flushToken = make(chan interface{}, 1)
 
+	var wg sync.WaitGroup
+
+	subCtx, cancel := context.WithCancel(context.Background())
+
+	if task, ok := w.WalStore.(types.Task); ok {
+		subReadiness := make(chan error)
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			task.Run(subCtx, subReadiness)
+		}()
+
+		err := <-subReadiness
+		if err != nil {
+			cancel()
+			wg.Wait()
+			readiness <- err
+
+			return
+		}
+	}
+
 	readiness <- nil
 
 	w.initFromWal()
@@ -71,6 +95,9 @@ func (w *WalBatcher) Run(ctx context.Context, readiness chan error) {
 	if w.WriteToPersistentOnStop {
 		w.Flush()
 	}
+
+	cancel()
+	wg.Wait()
 }
 
 func (w *WalBatcher) initFromWal() {
@@ -161,8 +188,6 @@ func (w *WalBatcher) Flush() {
 
 	w.writing, _, _ = merge(w.writing, tmp)
 
-	w.writeLock.L.Unlock()
-
 	dataList := make([]types.MetricData, len(w.writing))
 	i := 0
 
@@ -171,6 +196,8 @@ func (w *WalBatcher) Flush() {
 		dataList[i] = v
 		i++
 	}
+
+	w.writeLock.L.Unlock()
 
 	retry.Print(func() error {
 		return w.PersitentStore.Write(dataList)

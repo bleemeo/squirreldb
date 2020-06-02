@@ -1,6 +1,7 @@
 package dummy
 
 import (
+	"context"
 	"squirreldb/types"
 	"sync"
 )
@@ -18,6 +19,15 @@ func (d DiscardTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet,
 // Write discard metrics.
 func (d DiscardTSDB) Write(metrics []types.MetricData) error {
 	return nil
+}
+
+func (d DiscardTSDB) Run(ctx context.Context, readiness chan error) {
+	readiness <- nil
+
+	<-ctx.Done()
+}
+
+func (d DiscardTSDB) Flush() {
 }
 
 func (r emptyResult) Next() bool {

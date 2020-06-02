@@ -21,8 +21,11 @@ import (
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/cassandra/wal"
+	"squirreldb/cluster/memberlist"
+	"squirreldb/cluster/memberlist/seed"
 	"squirreldb/config"
 	"squirreldb/debug"
+	"squirreldb/distributor"
 	"squirreldb/dummy"
 	"squirreldb/memorystore"
 	"squirreldb/redis"
@@ -70,6 +73,7 @@ type SquirrelDB struct {
 	persistentStore          metricReadWriter
 	store                    metricReadWriter
 	api                      api.API
+	memberlist               types.Memberlist
 }
 
 type namedTasks struct {
@@ -173,9 +177,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Reader = s.store
 	s.api.Writer = s.store
 
-	readiness <- nil
-
-	s.api.Run(ctx)
+	s.api.Run(ctx, readiness)
 }
 
 // Run start SquirrelDB.
@@ -196,6 +198,10 @@ func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
 		{
 			Name: "persistent store",
 			Task: types.TaskFun(s.tsdbTask),
+		},
+		{
+			Name: "memberlist",
+			Task: types.TaskFun(s.memberlistTask),
 		},
 		{
 			Name: "batching store",
@@ -251,6 +257,8 @@ func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
 	}
 
 	readiness <- ctx.Err()
+
+	s.api.Ready()
 
 	<-ctx.Done()
 
@@ -358,6 +366,61 @@ func (s *SquirrelDB) lockTask(ctx context.Context, readiness chan error) {
 	readiness <- nil
 
 	<-ctx.Done()
+}
+
+func (s *SquirrelDB) memberlistTask(ctx context.Context, readiness chan error) {
+	if s.Config.Bool("cluster.enabled") {
+		session, err := s.getCassandraSession()
+		if err != nil {
+			readiness <- err
+			return
+		}
+
+		seeds := &seed.Cassandra{
+			Session:    session,
+			SchemaLock: s.SchemaLock(),
+		}
+
+		var wg sync.WaitGroup
+
+		subCtx, cancel := context.WithCancel(context.Background())
+		subReady := make(chan error)
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			seeds.Run(subCtx, subReady)
+		}()
+
+		err = <-subReady
+		if err != nil {
+			cancel()
+			readiness <- err
+
+			wg.Wait()
+
+			return
+		}
+
+		m := &memberlist.Memberlist{
+			SeedProvider:     seeds,
+			APIListenAddress: s.Config.String("remote_storage.listen_address"),
+			ClusterAddress:   s.Config.String("cluster.bind_address"),
+			ClusterPort:      s.Config.Int("cluster.bind_port"),
+		}
+
+		s.memberlist = m
+		m.Run(ctx, readiness)
+		cancel()
+		wg.Wait()
+	} else {
+		logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
+
+		s.memberlist = nil
+		readiness <- nil
+		<-ctx.Done()
+	}
 }
 
 func (s *SquirrelDB) statesTask(ctx context.Context, readiness chan error) {
@@ -512,45 +575,53 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		tmp := &wal.Cassandra{
-			ShardID:    1,
-			Session:    session,
-			SchemaLock: s.SchemaLock(),
-		}
 		wal := &batch.WalBatcher{
-			WalStore:       tmp,
+			WalStore: &wal.Cassandra{
+				ShardID:    1,
+				Session:    session,
+				SchemaLock: s.SchemaLock(),
+			},
 			PersitentStore: s.persistentStore,
-		}
-
-		var wg sync.WaitGroup
-
-		subCtx, cancel := context.WithCancel(context.Background())
-		subReady := make(chan error)
-
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			tmp.Run(subCtx, subReady)
-		}()
-
-		err = <-subReady
-		if err != nil {
-			cancel()
-
-			readiness <- err
-
-			wg.Done()
-
-			return
 		}
 
 		s.store = wal
 		s.api.FlushCallback = func() error { wal.Flush(); return nil }
 
 		wal.Run(ctx, readiness)
-		cancel()
-		wg.Wait()
+	case "distributor", "distributor2discard":
+		session, err := s.getCassandraSession()
+		if err != nil {
+			readiness <- err
+			return
+		}
+
+		store := &distributor.Distributor{
+			Memberlist: s.memberlist,
+			ShardCount: s.Config.Int("cluster.shard"),
+			StoreFactory: func(shardID int) distributor.FlushableStore {
+				if s.Config.String("internal.store") == "distributor2discard" {
+					return &dummy.DiscardTSDB{}
+				}
+				return &batch.WalBatcher{
+					WalStore: &wal.Cassandra{
+						ShardID:    shardID,
+						Session:    session,
+						SchemaLock: s.SchemaLock(),
+					},
+					PersitentStore: s.persistentStore,
+				}
+			},
+		}
+
+		if s.memberlist == nil {
+			// Cluster is disabled, no need to spread on multiple shard
+			store.ShardCount = 1
+		}
+
+		s.store = store
+		s.api.FlushCallback = store.Flush
+
+		store.Run(ctx, readiness)
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
 	}

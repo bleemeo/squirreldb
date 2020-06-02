@@ -137,7 +137,7 @@ func (p *pool) BytesAndReset() []byte {
 		}
 	}
 
-	p.byteSize = 0
+	atomic.StoreInt32(&p.byteSize, 0)
 
 	p.mutex.Unlock()
 
