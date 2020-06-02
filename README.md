@@ -12,7 +12,7 @@ docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CG
    -v $(pwd):/src -w /src \
    -v /var/run/docker.sock:/var/run/docker.sock \
    --entrypoint '' \
-   goreleaser/goreleaser sh -c 'go test ./... && goreleaser --rm-dist --snapshot'
+   goreleaser/goreleaser:v0.137 sh -c 'go test ./... && goreleaser --rm-dist --snapshot'
 ```
 
 The resulting binaries are in dist/ folder and a Docker image named "squirreldb" is built
