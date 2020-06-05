@@ -170,8 +170,8 @@ func (c *Cluster) sendUsingCluster(tmp types.Node, requestType uint8, data []byt
 		return nil, errors.New("node is not a object from cluster package. Can't use it")
 	}
 
-	replyChan := make(chan []byte)
-	replyError := make(chan error)
+	replyChan := make(chan []byte, 1)
+	replyError := make(chan error, 1)
 
 	c.mutex.Lock()
 	id := c.nextRequestID
@@ -389,21 +389,13 @@ func (c *Cluster) processPacket(msg []byte) {
 		}
 
 		if packet.PacketType == msgReply {
-			select {
-			case rpc.replyChan <- packet.Payload:
-				messageReply.Inc()
-			default:
-				logger.Printf("RPC reply arrived too late, dropping response for RPC id %d", packet.RequestID)
-				messageNoRequest.Inc()
-			}
+			rpc.replyChan <- packet.Payload
+
+			messageReply.Inc()
 		} else {
-			select {
-			case rpc.replyError <- errors.New(string(packet.Payload)):
-				messageReplyErr.Inc()
-			default:
-				logger.Printf("RPC reply arrived too late, dropping response for RPC id %d", packet.RequestID)
-				messageNoRequest.Inc()
-			}
+			rpc.replyError <- errors.New(string(packet.Payload))
+
+			messageReplyErr.Inc()
 		}
 	} else {
 		c.mutex.Lock()
