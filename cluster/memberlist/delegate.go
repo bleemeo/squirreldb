@@ -3,6 +3,7 @@ package memberlist
 import "squirreldb/debug"
 
 type delegate struct {
+	m        *Memberlist
 	nodeMeta []byte
 }
 
@@ -23,7 +24,15 @@ func (d delegate) NodeMeta(limit int) []byte {
 // so would block the entire UDP packet receive loop. Additionally, the byte
 // slice may be modified after the call returns, so it should be copied if needed.
 func (d delegate) NotifyMsg(msg []byte) {
-	debug.Print(2, logger, "NotifyMsg(%v)", msg)
+	d.m.mutex.Lock()
+	closing := d.m.closing
+	d.m.mutex.Unlock()
+
+	if closing {
+		return
+	}
+
+	d.m.notifyChan <- msg
 }
 
 // GetBroadcasts is called when user data messages can be broadcast.

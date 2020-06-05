@@ -1,18 +1,32 @@
 package distributor
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"errors"
 	"log"
 	"os"
+	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 )
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[distributor] ", log.LstdFlags)
+
+var (
+	ErrEmptyCluster = errors.New("the cluster contains 0 node")
+)
+
+const (
+	requestTypeWrite = 1
+	requestTypeRead  = 2
+)
 
 type FlushableStore interface {
 	types.MetricReadWriter
@@ -56,6 +70,8 @@ type runningStore struct {
 func (d *Distributor) Run(ctx context.Context, readiness chan error) {
 	d.activeStore = make(map[int]*runningStore)
 	readiness <- nil
+
+	d.Memberlist.SetRequestHandler(d.clusterRequest)
 
 	<-ctx.Done()
 
@@ -125,7 +141,7 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 	members := d.Memberlist.Nodes()
 
 	if len(members) == 0 {
-		return errors.New("the cluster contains 0 node, can't write")
+		return ErrEmptyCluster
 	}
 
 	var (
@@ -149,7 +165,7 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 			err2 := d.writeShardPart(members, i, metricsByShard[i])
 			if err2 != nil {
 				l.Lock()
-				if err != nil {
+				if err == nil {
 					err = err2
 				}
 				l.Unlock()
@@ -193,7 +209,7 @@ func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet
 	requestByShard := splitReadByShards(request, d.ShardCount)
 
 	if len(members) == 0 {
-		return nil, errors.New("the cluster contains 0 node, can't write")
+		return nil, ErrEmptyCluster
 	}
 
 	return &readIter{
@@ -276,7 +292,50 @@ func (d *Distributor) writeShardPart(members []types.Node, shardID int, metrics 
 		return d.writeToSelf(shardID, metrics)
 	}
 
-	return errors.New("not implemented")
+	pointsCount := 0
+
+	for _, m := range metrics {
+		pointsCount += len(m.Points)
+	}
+
+	pointsSendWrite.Add(float64(pointsCount))
+
+	var (
+		buffer bytes.Buffer
+	)
+
+	encoder := gob.NewEncoder(&buffer)
+
+	err := encoder.Encode(metrics)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	err = backoff.Retry(func() error {
+		if len(members) == 0 {
+			err = ErrEmptyCluster
+			targetNode = nil
+		} else {
+			targetNode = members[shardID%len(members)]
+		}
+
+		if targetNode != nil && targetNode.IsSelf() {
+			err = d.writeToSelf(shardID, metrics)
+		} else if targetNode != nil {
+			_, err = d.Memberlist.Send(targetNode, requestTypeWrite, buffer.Bytes())
+		}
+
+		if err != nil {
+			members = d.Memberlist.Nodes()
+		}
+
+		return err
+	}, backoff.WithContext(retry.NewExponentialBackOff(5*time.Second), ctx))
+
+	return err
 }
 
 func (d *Distributor) readShardPart(members []types.Node, shardID int, request types.MetricRequest) (types.MetricDataSet, error) {
@@ -285,7 +344,54 @@ func (d *Distributor) readShardPart(members []types.Node, shardID int, request t
 		return d.readFromSelf(shardID, request)
 	}
 
-	return nil, errors.New("not implemented")
+	var (
+		buffer      bytes.Buffer
+		reply       []byte
+		metrics     []types.MetricData
+		metricsIter types.MetricDataSet
+	)
+
+	encoder := gob.NewEncoder(&buffer)
+
+	err := encoder.Encode(request)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	err = backoff.Retry(func() error {
+		if len(members) == 0 {
+			err = ErrEmptyCluster
+			targetNode = nil
+		} else {
+			targetNode = members[shardID%len(members)]
+		}
+
+		if targetNode != nil && targetNode.IsSelf() {
+			metricsIter, err = d.readFromSelf(shardID, request)
+		} else if targetNode != nil {
+			reply, err = d.Memberlist.Send(targetNode, requestTypeRead, buffer.Bytes())
+
+			if err == nil {
+				decoder := gob.NewDecoder(bytes.NewReader(reply))
+				err = decoder.Decode(&metrics)
+			}
+		}
+
+		if err != nil {
+			members = d.Memberlist.Nodes()
+		}
+
+		return err
+	}, backoff.WithContext(retry.NewExponentialBackOff(5*time.Second), ctx))
+
+	if metricsIter == nil && metrics != nil {
+		metricsIter = types.MetricIterFromList(metrics)
+	}
+
+	return metricsIter, err
 }
 
 func splitWriteByShards(metrics []types.MetricData, shardCount int) [][]types.MetricData {
@@ -332,4 +438,116 @@ func splitReadByShards(requests types.MetricRequest, shardCount int) []types.Met
 	}
 
 	return results
+}
+
+func (d *Distributor) clusterRequest(requestType uint8, data []byte) ([]byte, error) {
+	switch requestType {
+	case requestTypeWrite:
+		return d.writeFromCluster(data)
+	case requestTypeRead:
+		return d.readFromCluster(data)
+	default:
+		return nil, errors.New("unknown request type")
+	}
+}
+
+func (d *Distributor) readFromCluster(data []byte) ([]byte, error) {
+	start := time.Now()
+
+	defer func() {
+		requestsSecondsClusterRead.Observe(time.Since(start).Seconds())
+	}()
+
+	var request types.MetricRequest
+
+	reader := bytes.NewReader(data)
+	decoder := gob.NewDecoder(reader)
+
+	err := decoder.Decode(&request)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(request.IDs) == 0 {
+		return nil, nil
+	}
+
+	// We assume all IDs belong to the same shard
+	shardID := int(int64(request.IDs[0]) % int64(d.ShardCount))
+	members := d.Memberlist.Nodes()
+
+	if len(members) == 0 {
+		return nil, ErrEmptyCluster
+	}
+
+	targetNode := members[shardID%len(members)]
+	if !targetNode.IsSelf() {
+		return nil, errors.New("read sent to non-owner SquirrelDB")
+	}
+
+	metricsIter, err := d.readFromSelf(shardID, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		metrics     []types.MetricData
+		buffer      bytes.Buffer
+		pointsCount int
+	)
+
+	for metricsIter.Next() {
+		m := metricsIter.At()
+		metrics = append(metrics, m)
+		pointsCount += len(m.Points)
+	}
+
+	err = metricsIter.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	pointsSendWrite.Add(float64(pointsCount))
+
+	enc := gob.NewEncoder(&buffer)
+	err = enc.Encode(metrics)
+
+	return buffer.Bytes(), err
+}
+
+func (d *Distributor) writeFromCluster(data []byte) ([]byte, error) {
+	start := time.Now()
+
+	defer func() {
+		requestsSecondsClusterWrite.Observe(time.Since(start).Seconds())
+	}()
+
+	var metrics []types.MetricData
+
+	reader := bytes.NewReader(data)
+	decoder := gob.NewDecoder(reader)
+
+	err := decoder.Decode(&metrics)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(metrics) == 0 {
+		return nil, nil
+	}
+
+	// We assume all metrics belong to the same shard
+	shardID := int(int64(metrics[0].ID) % int64(d.ShardCount))
+	members := d.Memberlist.Nodes()
+
+	if len(members) == 0 {
+		return nil, ErrEmptyCluster
+	}
+
+	targetNode := members[shardID%len(members)]
+	if !targetNode.IsSelf() {
+		return nil, errors.New("write sent to non-owner SquirrelDB")
+	}
+
+	return nil, d.writeToSelf(shardID, metrics)
 }

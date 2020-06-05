@@ -13,6 +13,13 @@ var (
 		Name:      "active_shard",
 		Help:      "Total shard active on this node",
 	})
+	pointsSendWrite = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "distributor",
+		Name:        "points_send_total",
+		Help:        "Total points send to another SquirrelDB",
+		ConstLabels: prometheus.Labels{"operation": "write"},
+	})
 	requestsSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "distributor",
@@ -26,5 +33,19 @@ var (
 		Name:        "requests_seconds",
 		Help:        "Total processing time in seconds",
 		ConstLabels: prometheus.Labels{"operation": "write"},
+	})
+	requestsSecondsClusterWrite = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "distributor",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds",
+		ConstLabels: prometheus.Labels{"operation": "cluster_write"},
+	})
+	requestsSecondsClusterRead = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "distributor",
+		Name:        "requests_seconds",
+		Help:        "Total processing time in seconds",
+		ConstLabels: prometheus.Labels{"operation": "cluster_read"},
 	})
 )

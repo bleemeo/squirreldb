@@ -26,6 +26,8 @@ type Memberlist interface {
 	// It also return which index in the list is self.
 	// This list (once memberlist has converged) will be the same on everyone, including the order.
 	Nodes() []Node
+	Send(n Node, requestType uint8, data []byte) ([]byte, error)
+	SetRequestHandler(func(requestType uint8, data []byte) ([]byte, error))
 }
 
 type Node interface {

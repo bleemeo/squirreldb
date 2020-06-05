@@ -18,6 +18,9 @@ func (l filteringLogger) Write(p []byte) (n int, err error) {
 	case strings.HasPrefix(str, "[WARN]"):
 		str = strings.TrimPrefix(str, "[WARN]")
 		debug.Print(debug.Level1, logger, "%s", str)
+	case strings.HasPrefix(str, "[INFO]"):
+		str = strings.TrimPrefix(str, "[INFO]")
+		debug.Print(debug.Level1, logger, "%s", str)
 	case strings.HasPrefix(str, "[DEBUG]"):
 		str = strings.TrimPrefix(str, "[DEBUG]")
 		debug.Print(debug.Level2, logger, "%s", str)
