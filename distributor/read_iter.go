@@ -35,6 +35,10 @@ func (i *readIter) Next() bool {
 			i.nextShard++
 		}
 
+		if i.currentData == nil {
+			continue
+		}
+
 		ok := i.currentData.Next()
 		if !ok {
 			err := i.currentData.Err()
