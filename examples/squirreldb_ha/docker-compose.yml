@@ -148,7 +148,7 @@ services:
       default:
         ipv4_address: 172.28.0.32
 
-  nginx:
+  squirreldb:
     image: nginx
     labels:
         glouton.enable: "false"

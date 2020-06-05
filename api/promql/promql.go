@@ -1,3 +1,7 @@
+// Disable stylecheck because is complain on error message (should not be capitalized)
+// but we prefer keeping the exact message used by Prometheus.
+
+// nolint: stylecheck
 package promql
 
 import (
@@ -16,6 +20,8 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/route"
+	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
@@ -30,6 +36,12 @@ type status string
 const (
 	statusSuccess status = "success"
 	statusError   status = "error"
+)
+
+// nolint: gochecknoglobals
+var (
+	minTime = time.Unix(math.MinInt64/1000+62135596801, 0).UTC()
+	maxTime = time.Unix(math.MaxInt64/1000-62135596801, 999999999).UTC()
 )
 
 type response struct {
@@ -94,8 +106,12 @@ func (p *PromQL) Register(r *route.Router) {
 		}.ServeHTTP
 	}
 
+	r.Get("/query", wrap(p.query))
+	r.Post("/query", wrap(p.query))
 	r.Get("/query_range", wrap(p.queryRange))
 	r.Post("/query_range", wrap(p.queryRange))
+	r.Get("/series", wrap(p.series))
+	r.Post("/series", wrap(p.series))
 }
 
 func (p *PromQL) init() {
@@ -146,6 +162,20 @@ func parseTime(s string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("cannot parse %q to a valid timestamp", s)
+}
+
+func parseTimeParam(r *http.Request, paramName string, defaultValue time.Time) (time.Time, error) {
+	val := r.FormValue(paramName)
+	if val == "" {
+		return defaultValue, nil
+	}
+
+	result, err := parseTime(val)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("Invalid time value for '%s': %w", paramName, err)
+	}
+
+	return result, nil
 }
 
 func parseDuration(s string) (time.Duration, error) {
@@ -264,6 +294,137 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 		Result:     res.Value,
 		Stats:      qs,
 	}, nil, res.Warnings, qry.Close}
+}
+
+func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
+	ts, err := parseTimeParam(r, "time", time.Now())
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+	}
+
+	ctx := r.Context()
+
+	if to := r.FormValue("timeout"); to != "" {
+		var cancel context.CancelFunc
+
+		timeout, err := parseDuration(to)
+		if err != nil {
+			err = fmt.Errorf("invalid parameter 'timeout': %w", err)
+			return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+		}
+
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	qry, err := p.queryEngine.NewInstantQuery(p.queryable, r.FormValue("query"), ts)
+	if err != nil {
+		err = fmt.Errorf("invalid parameter 'query': %w", err)
+		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+	}
+	// From now on, we must only return with a finalizer in the result (to
+	// be called by the caller) or call qry.Close ourselves (which is
+	// required in the case of a panic).
+	defer func() {
+		if result.finalizer == nil {
+			qry.Close()
+		}
+	}()
+
+	ctx = httputil.ContextFromRequest(ctx, r)
+
+	res := qry.Exec(ctx)
+	if res.Err != nil {
+		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
+	}
+
+	// Optional stats field in response if parameter "stats" is not empty.
+	var qs *stats.QueryStats
+	if r.FormValue("stats") != "" {
+		qs = stats.NewQueryStats(qry.Stats())
+	}
+
+	return apiFuncResult{&queryData{
+		ResultType: res.Value.Type(),
+		Result:     res.Value,
+		Stats:      qs,
+	}, nil, res.Warnings, qry.Close}
+}
+
+func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
+	if err := r.ParseForm(); err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("error parsing form values: %w", err)}, nil, nil}
+	}
+
+	if len(r.Form["match[]"]) == 0 {
+		return apiFuncResult{nil, &apiError{errorBadData, errors.New("no match[] parameter provided")}, nil, nil}
+	}
+
+	start, err := parseTimeParam(r, "start", minTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+	}
+
+	end, err := parseTimeParam(r, "end", maxTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+	}
+
+	matcherSets := make([][]*labels.Matcher, 0, len(r.Form["match[]"]))
+
+	for _, s := range r.Form["match[]"] {
+		matchers, err := parser.ParseMetricSelector(s)
+		if err != nil {
+			return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
+		}
+
+		matcherSets = append(matcherSets, matchers)
+	}
+
+	q, err := p.queryable.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
+	}
+	// From now on, we must only return with a finalizer in the result (to
+	// be called by the caller) or call q.Close ourselves (which is required
+	// in the case of a panic).
+	defer func() {
+		if result.finalizer == nil {
+			q.Close()
+		}
+	}()
+
+	closer := func() {
+		q.Close()
+	}
+
+	var warnings storage.Warnings
+
+	sets := make([]storage.SeriesSet, 0, len(matcherSets))
+
+	for _, mset := range matcherSets {
+		s, wrn, err := q.Select(false, nil, mset...)
+		warnings = append(warnings, wrn...)
+
+		if err != nil {
+			return apiFuncResult{nil, &apiError{errorExec, err}, warnings, closer}
+		}
+
+		sets = append(sets, s)
+	}
+
+	set := storage.NewMergeSeriesSet(sets, storage.ChainedSeriesMerge)
+	metrics := []labels.Labels{}
+
+	for set.Next() {
+		metrics = append(metrics, set.At().Labels())
+	}
+
+	if set.Err() != nil {
+		return apiFuncResult{nil, &apiError{errorExec, set.Err()}, warnings, closer}
+	}
+
+	return apiFuncResult{metrics, nil, warnings, closer}
 }
 
 func (p *PromQL) respond(w http.ResponseWriter, data interface{}, warnings storage.Warnings) {

@@ -28,7 +28,7 @@ docker-compose up -d
 
 Then, go to http://localhost:3000 (default credentials are admin/admin) and:
 
-* Add a Prometheus datasource (using http://prometheus:9090 as URL)
+* Add a Prometheus datasource (using http://squirreldb:9090 as URL)
 * Create your dashboard or import a dashboard (for example import dashboard with ID 1860).
 
 
