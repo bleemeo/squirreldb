@@ -91,7 +91,6 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	if err != nil {
 		logger.Printf("Error: Can't write the read response (%v)", err)
-		http.Error(writer, "Can't write the read response", http.StatusBadRequest)
 		requestsErrorRead.Inc()
 
 		return
