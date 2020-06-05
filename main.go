@@ -21,8 +21,8 @@ import (
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/cassandra/wal"
-	"squirreldb/cluster/memberlist"
-	"squirreldb/cluster/memberlist/seed"
+	"squirreldb/cluster"
+	"squirreldb/cluster/seed"
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/distributor"
@@ -73,7 +73,7 @@ type SquirrelDB struct {
 	persistentStore          metricReadWriter
 	store                    metricReadWriter
 	api                      api.API
-	memberlist               types.Memberlist
+	cluster                  types.Cluster
 }
 
 type namedTasks struct {
@@ -200,8 +200,8 @@ func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
 			Task: types.TaskFun(s.tsdbTask),
 		},
 		{
-			Name: "memberlist",
-			Task: types.TaskFun(s.memberlistTask),
+			Name: "cluster",
+			Task: types.TaskFun(s.clusterTask),
 		},
 		{
 			Name: "batching store",
@@ -368,7 +368,7 @@ func (s *SquirrelDB) lockTask(ctx context.Context, readiness chan error) {
 	<-ctx.Done()
 }
 
-func (s *SquirrelDB) memberlistTask(ctx context.Context, readiness chan error) {
+func (s *SquirrelDB) clusterTask(ctx context.Context, readiness chan error) {
 	if s.Config.Bool("cluster.enabled") {
 		session, err := s.getCassandraSession()
 		if err != nil {
@@ -403,21 +403,21 @@ func (s *SquirrelDB) memberlistTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		m := &memberlist.Memberlist{
+		m := &cluster.Cluster{
 			SeedProvider:     seeds,
 			APIListenAddress: s.Config.String("remote_storage.listen_address"),
 			ClusterAddress:   s.Config.String("cluster.bind_address"),
 			ClusterPort:      s.Config.Int("cluster.bind_port"),
 		}
 
-		s.memberlist = m
+		s.cluster = m
 		m.Run(ctx, readiness)
 		cancel()
 		wg.Wait()
 	} else {
 		logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
 
-		s.memberlist = nil
+		s.cluster = nil
 		readiness <- nil
 		<-ctx.Done()
 	}
@@ -596,7 +596,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		}
 
 		store := &distributor.Distributor{
-			Memberlist: s.memberlist,
+			Cluster:    s.cluster,
 			ShardCount: s.Config.Int("cluster.shard"),
 			StoreFactory: func(shardID int) distributor.FlushableStore {
 				if s.Config.String("internal.store") == "distributor2discard" {
@@ -613,7 +613,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			},
 		}
 
-		if s.memberlist == nil {
+		if s.cluster == nil {
 			// Cluster is disabled, no need to spread on multiple shard
 			store.ShardCount = 1
 		}

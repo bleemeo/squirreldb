@@ -1,4 +1,4 @@
-package memberlist
+package cluster
 
 import (
 	"context"
@@ -23,14 +23,14 @@ const (
 )
 
 //nolint: gochecknoglobals
-var logger = log.New(os.Stdout, "[memberlist] ", log.LstdFlags)
+var logger = log.New(os.Stdout, "[cluster] ", log.LstdFlags)
 
 type SeedProvider interface {
 	SetAddress(clusterAddress string, apiAddress string) error
 	Seeds() ([]string, error)
 }
 
-type Memberlist struct {
+type Cluster struct {
 	SeedProvider     SeedProvider
 	APIListenAddress string
 	ClusterPort      int
@@ -54,8 +54,8 @@ type rpcRequest struct {
 }
 
 // Run the Cassandra seed provider.
-func (m *Memberlist) Run(ctx context.Context, readiness chan error) {
-	err := m.init()
+func (c *Cluster) Run(ctx context.Context, readiness chan error) {
+	err := c.init()
 
 	readiness <- err
 
@@ -70,11 +70,11 @@ func (m *Memberlist) Run(ctx context.Context, readiness chan error) {
 		select {
 		case <-ctx.Done():
 		case <-ticker.C:
-			num := m.memberlist.NumMembers()
+			num := c.memberlist.NumMembers()
 			numberNodes.Set(float64(num))
 
 			if num == 1 {
-				err := m.join()
+				err := c.join()
 				if err != nil {
 					logger.Printf("Unable to join cluster: %v", err)
 				}
@@ -82,19 +82,19 @@ func (m *Memberlist) Run(ctx context.Context, readiness chan error) {
 		}
 	}
 
-	err = m.memberlist.Leave(15 * time.Second)
+	err = c.memberlist.Leave(15 * time.Second)
 	if err != nil {
 		logger.Printf("Unable to leave cluster: %v", err)
 	}
 
-	m.mutex.Lock()
-	m.closing = true
-	m.mutex.Unlock()
+	c.mutex.Lock()
+	c.closing = true
+	c.mutex.Unlock()
 
 	// Give short delay or it's likely that memberlist complain about "use of closed network connection"
 	time.Sleep(100 * time.Millisecond)
 
-	err = m.memberlist.Shutdown()
+	err = c.memberlist.Shutdown()
 	if err != nil {
 		logger.Printf("Unable to shutdown memberlist: %v", err)
 	}
@@ -106,10 +106,10 @@ func (m *Memberlist) Run(ctx context.Context, readiness chan error) {
 
 	// Wait for completion of every pending request.
 	for n := 0; n < concurrentRequest; n++ {
-		<-m.requestToken
+		<-c.requestToken
 	}
-	close(m.notifyChan)
-	m.wg.Wait()
+	close(c.notifyChan)
+	c.wg.Wait()
 }
 
 type node struct {
@@ -120,15 +120,15 @@ type node struct {
 }
 
 // Nodes return list of known nodes of the cluster, in a consistent order.
-func (m *Memberlist) Nodes() []types.Node {
+func (c *Cluster) Nodes() []types.Node {
 	start := time.Now()
 
 	defer func() {
 		requestsSecondsNode.Observe(time.Since(start).Seconds())
 	}()
 
-	nodes := m.memberlist.Members()
-	self := m.memberlist.LocalNode()
+	nodes := c.memberlist.Members()
+	self := c.memberlist.LocalNode()
 	results := make([]types.Node, len(nodes))
 
 	for i, n := range nodes {
@@ -150,40 +150,40 @@ func (m *Memberlist) Nodes() []types.Node {
 	return results
 }
 
-func (m *Memberlist) Send(n types.Node, requestType uint8, data []byte) ([]byte, error) {
-	return m.sendUsingCluster(n, requestType, data)
+func (c *Cluster) Send(n types.Node, requestType uint8, data []byte) ([]byte, error) {
+	return c.sendUsingCluster(n, requestType, data)
 }
 
-func (m *Memberlist) SetRequestHandler(f func(requestType uint8, data []byte) ([]byte, error)) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+func (c *Cluster) SetRequestHandler(f func(requestType uint8, data []byte) ([]byte, error)) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	m.requestHandler = f
+	c.requestHandler = f
 }
 
 // sendUsingCluster send message (and wait reply using cluster messaging).
-func (m *Memberlist) sendUsingCluster(tmp types.Node, requestType uint8, data []byte) ([]byte, error) {
+func (c *Cluster) sendUsingCluster(tmp types.Node, requestType uint8, data []byte) ([]byte, error) {
 	start := time.Now()
 
 	n, ok := tmp.(node)
 	if !ok {
-		return nil, errors.New("node is not a object from memberlist package. Can't use it")
+		return nil, errors.New("node is not a object from cluster package. Can't use it")
 	}
 
 	replyChan := make(chan []byte)
 	replyError := make(chan error)
 
-	m.mutex.Lock()
-	id := m.nextRequestID
-	m.nextRequestID++
-	m.sentRPC[id] = rpcRequest{
+	c.mutex.Lock()
+	id := c.nextRequestID
+	c.nextRequestID++
+	c.sentRPC[id] = rpcRequest{
 		sentTime:   time.Now(),
 		replyChan:  replyChan,
 		replyError: replyError,
 	}
-	m.mutex.Unlock()
+	c.mutex.Unlock()
 
-	mySelf := m.memberlist.LocalNode()
+	mySelf := c.memberlist.LocalNode()
 	packet := rpcPacket{
 		PacketType:     msgRequest,
 		RequestID:      id,
@@ -197,7 +197,7 @@ func (m *Memberlist) sendUsingCluster(tmp types.Node, requestType uint8, data []
 	)
 
 	buffer := packet.Encode()
-	err := m.memberlist.SendReliable(n.node, buffer)
+	err := c.memberlist.SendReliable(n.node, buffer)
 
 	if err != nil {
 		sentRequestFailed.Inc()
@@ -230,9 +230,9 @@ func (m *Memberlist) sendUsingCluster(tmp types.Node, requestType uint8, data []
 		}
 	}
 
-	m.mutex.Lock()
-	delete(m.sentRPC, id)
-	m.mutex.Unlock()
+	c.mutex.Lock()
+	delete(c.sentRPC, id)
+	c.mutex.Unlock()
 
 	requestsSecondsWaitReplay.Observe(time.Since(start).Seconds())
 
@@ -251,56 +251,56 @@ func (n node) IsSelf() bool {
 	return n.isSelf
 }
 
-func (m *Memberlist) init() (err error) {
-	m.notifyChan = make(chan []byte, 1000)
-	m.requestToken = make(chan interface{}, concurrentRequest)
-	m.sentRPC = make(map[uint32]rpcRequest)
+func (c *Cluster) init() (err error) {
+	c.notifyChan = make(chan []byte, 1000)
+	c.requestToken = make(chan interface{}, concurrentRequest)
+	c.sentRPC = make(map[uint32]rpcRequest)
 
 	for i := 0; i < concurrentRequest; i++ {
-		m.requestToken <- nil
+		c.requestToken <- nil
 	}
 
-	m.wg.Add(1)
+	c.wg.Add(1)
 
-	go m.processNotify()
+	go c.processNotify()
 
 	cfg := memberlist.DefaultLANConfig()
 
 	cfg.Delegate = delegate{
-		nodeMeta: []byte(m.APIListenAddress),
-		m:        m,
+		nodeMeta: []byte(c.APIListenAddress),
+		c:        c,
 	}
 
-	if m.ClusterPort != 0 {
-		cfg.AdvertisePort = m.ClusterPort
-		cfg.BindPort = m.ClusterPort
+	if c.ClusterPort != 0 {
+		cfg.AdvertisePort = c.ClusterPort
+		cfg.BindPort = c.ClusterPort
 	}
 
-	if m.ClusterAddress != "" {
-		cfg.BindAddr = m.ClusterAddress
-		cfg.AdvertiseAddr = m.ClusterAddress
+	if c.ClusterAddress != "" {
+		cfg.BindAddr = c.ClusterAddress
+		cfg.AdvertiseAddr = c.ClusterAddress
 	}
 
 	cfg.Name = fmt.Sprintf("%s:%d", cfg.Name, cfg.BindPort)
 	cfg.Logger = log.New(filteringLogger{}, "", 0)
 
-	m.memberlist, err = memberlist.Create(cfg)
+	c.memberlist, err = memberlist.Create(cfg)
 	if err != nil {
 		return err
 	}
 
-	err = m.SeedProvider.SetAddress(m.memberlist.LocalNode().FullAddress().Addr, m.APIListenAddress)
+	err = c.SeedProvider.SetAddress(c.memberlist.LocalNode().FullAddress().Addr, c.APIListenAddress)
 	if err != nil {
-		if err2 := m.memberlist.Shutdown(); err2 != nil {
+		if err2 := c.memberlist.Shutdown(); err2 != nil {
 			logger.Printf("Error during memberlist shutdown: %v", err)
 		}
 
 		return err
 	}
 
-	err = m.join()
+	err = c.join()
 	if err != nil {
-		if err2 := m.memberlist.Shutdown(); err2 != nil {
+		if err2 := c.memberlist.Shutdown(); err2 != nil {
 			logger.Printf("Error during memberlist shutdown: %v", err)
 		}
 
@@ -310,10 +310,10 @@ func (m *Memberlist) init() (err error) {
 	return nil
 }
 
-func (m *Memberlist) join() error {
-	inCluster := m.memberlist.NumMembers() > 1
+func (c *Cluster) join() error {
+	inCluster := c.memberlist.NumMembers() > 1
 
-	seeds, err := m.SeedProvider.Seeds()
+	seeds, err := c.SeedProvider.Seeds()
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (m *Memberlist) join() error {
 			end = len(seeds)
 		}
 
-		_, err := m.memberlist.Join(seeds[start:end])
+		_, err := c.memberlist.Join(seeds[start:end])
 		if err == nil {
 			break
 		}
@@ -336,11 +336,11 @@ func (m *Memberlist) join() error {
 		start = end
 	}
 
-	num := m.memberlist.NumMembers()
+	num := c.memberlist.NumMembers()
 	numberNodes.Set(float64(num))
 
 	if num > 1 && !inCluster {
-		members := m.memberlist.Members()
+		members := c.memberlist.Members()
 		memberStrings := make([]string, len(members))
 
 		for i, n := range members {
@@ -353,15 +353,15 @@ func (m *Memberlist) join() error {
 	return nil
 }
 
-func (m *Memberlist) processNotify() {
-	defer m.wg.Done()
+func (c *Cluster) processNotify() {
+	defer c.wg.Done()
 
-	for msg := range m.notifyChan {
-		m.processPacket(msg)
+	for msg := range c.notifyChan {
+		c.processPacket(msg)
 	}
 }
 
-func (m *Memberlist) processPacket(msg []byte) {
+func (c *Cluster) processPacket(msg []byte) {
 	start := time.Now()
 
 	defer func() {
@@ -377,9 +377,9 @@ func (m *Memberlist) processPacket(msg []byte) {
 	}
 
 	if packet.PacketType == msgReply || packet.PacketType == msgError {
-		m.mutex.Lock()
-		rpc := m.sentRPC[packet.RequestID]
-		m.mutex.Unlock()
+		c.mutex.Lock()
+		rpc := c.sentRPC[packet.RequestID]
+		c.mutex.Unlock()
 
 		if rpc.replyChan == nil || rpc.replyError == nil {
 			logger.Printf("Unknown RPC reply to id %d. Did I just restarted or the remote node is lagging ?", packet.RequestID)
@@ -406,39 +406,39 @@ func (m *Memberlist) processPacket(msg []byte) {
 			}
 		}
 	} else {
-		m.mutex.Lock()
-		closing := m.closing
-		m.mutex.Unlock()
+		c.mutex.Lock()
+		closing := c.closing
+		c.mutex.Unlock()
 
 		if closing {
 			messageAfterShutdown.Inc()
 			return
 		}
 
-		<-m.requestToken
-		go m.processRequest(packet)
+		<-c.requestToken
+		go c.processRequest(packet)
 	}
 }
 
-func (m *Memberlist) processRequest(packet rpcPacket) {
+func (c *Cluster) processRequest(packet rpcPacket) {
 	start := time.Now()
 
 	defer func() {
-		m.requestToken <- nil
+		c.requestToken <- nil
 
 		requestsSecondsProcessReq.Observe(time.Since(start).Seconds())
 	}()
 
-	m.mutex.Lock()
-	callback := m.requestHandler
-	m.mutex.Unlock()
+	c.mutex.Lock()
+	callback := c.requestHandler
+	c.mutex.Unlock()
 
 	var (
 		askingNode  *memberlist.Node
 		replyPacket rpcPacket
 	)
 
-	nodes := m.memberlist.Members()
+	nodes := c.memberlist.Members()
 	for _, n := range nodes {
 		if n.FullAddress().Addr == packet.ReplyToAddress {
 			askingNode = n
@@ -478,7 +478,7 @@ func (m *Memberlist) processRequest(packet rpcPacket) {
 		}
 	}
 
-	err := m.memberlist.SendReliable(askingNode, replyPacket.Encode())
+	err := c.memberlist.SendReliable(askingNode, replyPacket.Encode())
 	if err != nil {
 		logger.Printf("Failed to send reply: %v", err)
 		sentReplyFailed.Inc()

@@ -1,4 +1,4 @@
-package memberlist
+package cluster
 
 import (
 	"bytes"

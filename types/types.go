@@ -21,7 +21,7 @@ func (f TaskFun) Run(ctx context.Context, readiness chan error) {
 	f(ctx, readiness)
 }
 
-type Memberlist interface {
+type Cluster interface {
 	// Addresses return a list of addresse to reach API of SquirrelDB that are in our cluster.
 	// It also return which index in the list is self.
 	// This list (once memberlist has converged) will be the same on everyone, including the order.

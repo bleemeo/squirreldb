@@ -52,7 +52,7 @@ type FlushableStore interface {
 // to the "wrong" owner (e.g. memberlist is not consistent or another transient
 // situation), the cluster will eventually heal.
 type Distributor struct {
-	Memberlist   types.Memberlist
+	Cluster      types.Cluster
 	StoreFactory func(shard int) FlushableStore
 	ShardCount   int
 	mutex        sync.Mutex
@@ -71,7 +71,7 @@ func (d *Distributor) Run(ctx context.Context, readiness chan error) {
 	d.activeStore = make(map[int]*runningStore)
 	readiness <- nil
 
-	d.Memberlist.SetRequestHandler(d.clusterRequest)
+	d.Cluster.SetRequestHandler(d.clusterRequest)
 
 	<-ctx.Done()
 
@@ -133,12 +133,12 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 		requestsSecondsWrite.Observe(time.Since(start).Seconds())
 	}()
 
-	if d.Memberlist == nil {
+	if d.Cluster == nil {
 		return d.writeToSelf(0, metrics)
 	}
 
 	metricsByShard := splitWriteByShards(metrics, d.ShardCount)
-	members := d.Memberlist.Nodes()
+	members := d.Cluster.Nodes()
 
 	if len(members) == 0 {
 		return ErrEmptyCluster
@@ -185,7 +185,7 @@ func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet
 		requestsSecondsRead.Observe(time.Since(start).Seconds())
 	}()
 
-	if d.Memberlist == nil {
+	if d.Cluster == nil {
 		d.mutex.Lock()
 		if len(d.activeStore) == 0 {
 			if err := d.startStore(0); err != nil {
@@ -205,7 +205,7 @@ func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet
 		return iter, err
 	}
 
-	members := d.Memberlist.Nodes()
+	members := d.Cluster.Nodes()
 	requestByShard := splitReadByShards(request, d.ShardCount)
 
 	if len(members) == 0 {
@@ -325,11 +325,11 @@ func (d *Distributor) writeShardPart(members []types.Node, shardID int, metrics 
 		if targetNode != nil && targetNode.IsSelf() {
 			err = d.writeToSelf(shardID, metrics)
 		} else if targetNode != nil {
-			_, err = d.Memberlist.Send(targetNode, requestTypeWrite, buffer.Bytes())
+			_, err = d.Cluster.Send(targetNode, requestTypeWrite, buffer.Bytes())
 		}
 
 		if err != nil {
-			members = d.Memberlist.Nodes()
+			members = d.Cluster.Nodes()
 		}
 
 		return err
@@ -372,7 +372,7 @@ func (d *Distributor) readShardPart(members []types.Node, shardID int, request t
 		if targetNode != nil && targetNode.IsSelf() {
 			metricsIter, err = d.readFromSelf(shardID, request)
 		} else if targetNode != nil {
-			reply, err = d.Memberlist.Send(targetNode, requestTypeRead, buffer.Bytes())
+			reply, err = d.Cluster.Send(targetNode, requestTypeRead, buffer.Bytes())
 
 			if err == nil {
 				decoder := gob.NewDecoder(bytes.NewReader(reply))
@@ -381,7 +381,7 @@ func (d *Distributor) readShardPart(members []types.Node, shardID int, request t
 		}
 
 		if err != nil {
-			members = d.Memberlist.Nodes()
+			members = d.Cluster.Nodes()
 		}
 
 		return err
@@ -474,7 +474,7 @@ func (d *Distributor) readFromCluster(data []byte) ([]byte, error) {
 
 	// We assume all IDs belong to the same shard
 	shardID := int(int64(request.IDs[0]) % int64(d.ShardCount))
-	members := d.Memberlist.Nodes()
+	members := d.Cluster.Nodes()
 
 	if len(members) == 0 {
 		return nil, ErrEmptyCluster
@@ -538,7 +538,7 @@ func (d *Distributor) writeFromCluster(data []byte) ([]byte, error) {
 
 	// We assume all metrics belong to the same shard
 	shardID := int(int64(metrics[0].ID) % int64(d.ShardCount))
-	members := d.Memberlist.Nodes()
+	members := d.Cluster.Nodes()
 
 	if len(members) == 0 {
 		return nil, ErrEmptyCluster

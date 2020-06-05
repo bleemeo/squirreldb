@@ -82,7 +82,7 @@ func (c *Cassandra) SetAddress(clusterAddress string, apiAddress string) error {
 //
 // It do NOT return self in the list.
 func (c *Cassandra) Seeds() ([]string, error) {
-	iter := c.Session.Query("SELECT cluster_address, created_at FROM memberlist_seed").Iter()
+	iter := c.Session.Query("SELECT cluster_address, created_at FROM cluster_seed").Iter()
 
 	type entry struct {
 		address   string
@@ -129,7 +129,7 @@ func (c *Cassandra) init() error {
 
 	c.createdAt = time.Now()
 
-	query := `CREATE TABLE IF NOT EXISTS memberlist_seed (
+	query := `CREATE TABLE IF NOT EXISTS cluster_seed (
 			cluster_address ascii,
 			api_address ascii,
 			created_at timestamp,
@@ -153,7 +153,7 @@ func (c *Cassandra) update() error {
 	}
 
 	err := c.Session.Query(
-		"INSERT INTO memberlist_seed (cluster_address, api_address, created_at, last_update) VALUES (?, ?, ?, ?) USING TTL ?",
+		"INSERT INTO cluster_seed (cluster_address, api_address, created_at, last_update) VALUES (?, ?, ?, ?) USING TTL ?",
 		c.clusterAddress,
 		c.apiAddress,
 		c.createdAt,
@@ -175,7 +175,7 @@ func (c *Cassandra) remove() {
 	}
 
 	err := c.Session.Query(
-		"DELETE FROM memberlist_seed WHERE cluster_address = ?",
+		"DELETE FROM cluster_seed WHERE cluster_address = ?",
 		c.clusterAddress,
 	).Exec()
 
