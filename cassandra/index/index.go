@@ -882,7 +882,6 @@ func (c *CassandraIndex) expire(now time.Time) {
 
 func (c *CassandraIndex) applyExpirationUpdateRequests() {
 	c.lookupIDMutex.Lock()
-	defer c.lookupIDMutex.Unlock()
 
 	start := time.Now()
 
@@ -896,6 +895,10 @@ func (c *CassandraIndex) applyExpirationUpdateRequests() {
 		v.Day = day
 		expireUpdates = append(expireUpdates, v)
 	}
+
+	c.expirationUpdateRequests = make(map[time.Time]expirationUpdateRequest)
+
+	c.lookupIDMutex.Unlock()
 
 	c.newMetricLock.Lock()
 
@@ -918,8 +921,17 @@ func (c *CassandraIndex) applyExpirationUpdateRequests() {
 
 	if err != nil {
 		logger.Printf("Warning: update of expiration date failed: %v", err)
-	} else {
-		c.expirationUpdateRequests = make(map[time.Time]expirationUpdateRequest)
+
+		c.lookupIDMutex.Lock()
+
+		for _, v := range expireUpdates {
+			v2 := c.expirationUpdateRequests[v.Day]
+			v2.AddIDs = append(v2.AddIDs, v.AddIDs...)
+			v2.RemoveIDs = append(v2.RemoveIDs, v.RemoveIDs...)
+			c.expirationUpdateRequests[v.Day] = v2
+		}
+
+		c.lookupIDMutex.Unlock()
 	}
 }
 
