@@ -167,7 +167,8 @@ func (l *Lock) Lock() {
 			return
 		}
 
-		time.Sleep(10 * time.Second)
+		jitter := (10 * time.Second).Seconds() * rand.Float64()
+		time.Sleep(time.Duration(3+jitter) * time.Second)
 	}
 }
 
