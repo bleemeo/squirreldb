@@ -20,6 +20,15 @@ var (
 		Help:        "Total points send to another SquirrelDB",
 		ConstLabels: prometheus.Labels{"operation": "write"},
 	})
+	pointsByShard = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "squirreldb",
+			Subsystem: "distributor",
+			Name:      "points_total",
+			Help:      "Total points processed by this instance and by shard",
+		},
+		[]string{"operation", "shard"},
+	)
 	requestsSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:   "squirreldb",
 		Subsystem:   "distributor",

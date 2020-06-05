@@ -9,6 +9,7 @@ import (
 	"os"
 	"squirreldb/retry"
 	"squirreldb/types"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -260,6 +261,14 @@ func (d *Distributor) writeToSelf(shardID int, metrics []types.MetricData) error
 	st := d.activeStore[shardID]
 	atomic.AddInt32(&st.pendingRequest, 1)
 	d.mutex.Unlock()
+
+	count := 0
+
+	for _, m := range metrics {
+		count += len(m.Points)
+	}
+
+	pointsByShard.WithLabelValues("write", strconv.FormatInt(int64(shardID), 10)).Add(float64(count))
 
 	err := st.Store.Write(metrics)
 	atomic.AddInt32(&st.pendingRequest, -1)
