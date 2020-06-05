@@ -78,6 +78,10 @@ func (w *WalBatcher) Run(ctx context.Context, readiness chan error) {
 			w.writeLock.L.Lock()
 			avgTS := int64(w.pendingSumTS / float64(w.pendingPoints))
 
+			if w.pendingPoints == 0 {
+				avgTS = w.lastAvgAtFlush
+			}
+
 			if w.lastAvgAtFlush == 0 && avgTS != 0 {
 				w.lastAvgAtFlush = avgTS
 			}
@@ -128,7 +132,14 @@ func (w *WalBatcher) initFromWal() {
 
 	w.writeLock.L.Lock()
 
-	w.dirty, w.pendingSumTS, w.pendingPoints = merge(w.dirty, data)
+	var (
+		sumTS       float64
+		countPoints int
+	)
+
+	w.dirty, sumTS, countPoints = merge(w.dirty, data)
+	w.pendingSumTS += sumTS
+	w.pendingPoints += countPoints
 
 	if oldestTS != 0 {
 		age := time.Since(time.Unix(oldestTS/1000, 0))
