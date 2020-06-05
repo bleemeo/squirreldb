@@ -103,15 +103,11 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 func (l *Lock) TryLock() bool {
 	start := time.Now()
 
-	defer func() {
-		locksTryLockSeconds.Observe(time.Since(start).Seconds())
-	}()
-
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
 	if l.acquired {
-		locksAlreadyAcquireSeconds.Inc()
+		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
 		debug.Print(debug.Level1, logger, "lock %s is already acquired by local instance", l.name)
 
 		return false
@@ -125,11 +121,13 @@ func (l *Lock) TryLock() bool {
 
 	if err != nil {
 		logger.Printf("Unable to acquire lock: %v", err)
+		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
+
 		return false
 	}
 
 	if !acquired {
-		locksAlreadyAcquireSeconds.Inc()
+		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
 		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s", l.name, holder)
 
 		return false
@@ -147,6 +145,8 @@ func (l *Lock) TryLock() bool {
 		l.updateLock(ctx)
 	}()
 
+	locksTryLockSeconds.WithLabelValues("true").Observe(time.Since(start).Seconds())
+
 	return true
 }
 
@@ -158,9 +158,12 @@ func (l *Lock) Lock() {
 		locksLockSeconds.Observe(time.Since(start).Seconds())
 	}()
 
+	pendingLock.Inc()
+
 	for {
 		ok := l.TryLock()
 		if ok {
+			pendingLock.Dec()
 			return
 		}
 

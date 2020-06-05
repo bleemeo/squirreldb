@@ -7,18 +7,15 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	locksAlreadyAcquireSeconds = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "squirreldb",
-		Subsystem: "locks",
-		Name:      "lock_already_acquire_total",
-		Help:      "Total TryLock() on a already acquired lock",
-	})
-	locksTryLockSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "squirreldb",
-		Subsystem: "locks",
-		Name:      "try_lock_seconds",
-		Help:      "Total time to try acquire a lock (successful or failed) in seconds",
-	})
+	locksTryLockSeconds = promauto.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace: "squirreldb",
+			Subsystem: "locks",
+			Name:      "try_lock_seconds",
+			Help:      "Total time to try acquire a lock (successful or failed) in seconds",
+		},
+		[]string{"acquired"},
+	)
 	locksLockSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "locks",
@@ -36,5 +33,11 @@ var (
 		Subsystem: "locks",
 		Name:      "refresh_seconds",
 		Help:      "Total time to refresh a lock in seconds",
+	})
+	pendingLock = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "squirreldb",
+		Subsystem: "locks",
+		Name:      "lock_pending",
+		Help:      "Number of gorouting trying to acquire a lock",
 	})
 )
