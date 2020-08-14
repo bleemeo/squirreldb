@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -68,7 +69,6 @@ type PromQL struct {
 
 	logger      log.Logger
 	queryEngine *promql.Engine
-	queryable   storage.Queryable
 }
 
 type apiFunc func(r *http.Request) apiFuncResult
@@ -125,8 +125,34 @@ func (p *PromQL) init() {
 		LookbackDelta:      5 * time.Minute,
 	}
 	p.queryEngine = promql.NewEngine(opts)
-	p.queryable = Store{
-		Index:  p.Index,
+}
+
+func (p *PromQL) queryable(r *http.Request) storage.Queryable {
+	value := r.Header.Get("X-PromQL-Forced-Matcher")
+	if value == "" {
+		return Store{
+			Index:  p.Index,
+			Reader: p.Reader,
+		}
+	}
+
+	part := strings.SplitN(value, "=", 2)
+	if len(part) != 2 {
+		return Store{
+			Index:  emptyIndex{},
+			Reader: nil,
+		}
+	}
+
+	return Store{
+		Index: filteringIndex{
+			index: p.Index,
+			matcher: labels.Matcher{
+				Type:  labels.MatchEqual,
+				Name:  part[0],
+				Value: part[1],
+			},
+		},
 		Reader: p.Reader,
 	}
 }
@@ -263,7 +289,7 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	qry, err := p.queryEngine.NewRangeQuery(p.queryable, r.FormValue("query"), start, end, step)
+	qry, err := p.queryEngine.NewRangeQuery(p.queryable(r), r.FormValue("query"), start, end, step)
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
@@ -317,7 +343,7 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	qry, err := p.queryEngine.NewInstantQuery(p.queryable, r.FormValue("query"), ts)
+	qry, err := p.queryEngine.NewInstantQuery(p.queryable(r), r.FormValue("query"), ts)
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'query': %w", err)
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
@@ -381,7 +407,7 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 		matcherSets = append(matcherSets, matchers)
 	}
 
-	q, err := p.queryable.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}

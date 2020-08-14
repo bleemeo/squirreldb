@@ -36,6 +36,10 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		return nil, nil, err
 	}
 
+	if len(ids) == 0 {
+		return &seriesIter{}, nil, nil
+	}
+
 	var id2Labels map[types.MetricID][]labels.Label
 
 	if sortSeries {

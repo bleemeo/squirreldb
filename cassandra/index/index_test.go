@@ -152,7 +152,7 @@ func (s *mockStore) Init() error {
 	return nil
 }
 
-func (s mockStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, error) {
+func (s *mockStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

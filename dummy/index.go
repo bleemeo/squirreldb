@@ -1,7 +1,6 @@
 package dummy
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -87,9 +86,23 @@ func (idx *Index) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int
 	return ids, ttls, nil
 }
 
-// Search is not implemented at all.
+// Search only works when StoreMetricIDInMemory is enabled.
 func (idx *Index) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
-	return nil, errors.New("not implemented")
+	ids := make([]types.MetricID, 0)
+
+outer:
+	for id, lbs := range idx.idToLabels {
+		for _, m := range matchers {
+			l := lbs.Get(m.Name)
+			if !m.Matches(l) {
+				continue outer
+			}
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids, nil
 }
 
 // copied from cassandra/index.

@@ -17,6 +17,10 @@ type seriesIter struct {
 }
 
 func (i *seriesIter) Next() bool {
+	if i.list == nil {
+		return false
+	}
+
 	if !i.list.Next() {
 		return false
 	}
@@ -54,6 +58,10 @@ func (i *seriesIter) At() storage.Series {
 func (i *seriesIter) Err() error {
 	if i.err != nil {
 		return i.err
+	}
+
+	if i.list == nil {
+		return nil
 	}
 
 	return i.list.Err()

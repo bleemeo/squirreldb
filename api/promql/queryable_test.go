@@ -24,6 +24,10 @@ var (
 			Name:  "mountpath",
 			Value: "/home",
 		},
+		{
+			Name:  "__account_id",
+			Value: "1234",
+		},
 	}
 	labelsMetric2 = []labels.Label{
 		{
@@ -33,6 +37,10 @@ var (
 		{
 			Name:  "mountpath",
 			Value: "/srv",
+		},
+		{
+			Name:  "__account_id",
+			Value: "5678",
 		},
 	}
 )
