@@ -688,6 +688,12 @@ func (i *readIter) Next() bool {
 					break
 				}
 			}
+
+			err = persistentMetrics.Err()
+			if err != nil {
+				i.err = err
+				return false
+			}
 		}
 
 		if len(data.Points) > 0 {
