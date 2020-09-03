@@ -1622,7 +1622,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	}
 
 	// If there's nothing to subtract from, add in everything and remove the notIts later.
-	if len(its) == 0 && len(notIts) != 0 && false {
+	if len(its) == 0 && len(notIts) != 0 {
 		allPostings, err := c.postings(allPostingLabelName, allPostingLabelValue)
 
 		if err != nil {
