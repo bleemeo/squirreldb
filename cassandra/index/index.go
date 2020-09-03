@@ -709,12 +709,12 @@ func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabe
 		idData.id = id
 		idData.cassandraEntryExpiration, err = c.store.SelectID2LabelsExpiration(idData.id)
 
-		if err != gocql.ErrNotFound {
-			*found = true
-		}
-
 		if err != nil && err != gocql.ErrNotFound {
 			return nil, err
+		}
+
+		if err != gocql.ErrNotFound {
+			*found = true
 		}
 	} else if err != gocql.ErrNotFound {
 		return nil, err
