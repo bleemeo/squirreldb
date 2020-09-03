@@ -317,6 +317,7 @@ func (s *SquirrelDB) indexTask(ctx context.Context, readiness chan error) {
 		}
 
 		s.index = index
+		s.api.IndexVerifyCallback = index.Verify
 
 		readiness <- nil
 

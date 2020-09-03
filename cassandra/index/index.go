@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -202,6 +203,248 @@ func (c *CassandraIndex) RunOnce(ctx context.Context) {
 	c.expire(time.Now())
 	c.applyExpirationUpdateRequests()
 	c.cassandraExpire(time.Now())
+}
+
+func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
+	if len(deleteIDs) > 0 {
+		c.lookupIDMutex.Lock()
+		c.searchMutex.Lock()
+
+		// Since we don't force sorting labels on input, we don't known the key used
+		// for c.labelsToID (it's likely to be keyFromLabels(sortedLabels))
+		deleteIDsMap := make(map[types.MetricID]bool, len(deleteIDs))
+
+		for _, id := range deleteIDs {
+			deleteIDsMap[types.MetricID(id)] = true
+
+			delete(c.idsToLabels, types.MetricID(id))
+		}
+
+		c.searchMutex.Unlock()
+
+		for key, idsData := range c.labelsToID {
+			for _, v := range idsData {
+				if deleteIDsMap[v.id] {
+					// This may delete too many entry, but:
+					// 1) normally only 1 entry match the hash
+					// 2) it's a cache, we don't loss data
+					delete(c.labelsToID, key)
+					break
+				}
+			}
+		}
+		c.lookupIDMutex.Unlock()
+	}
+}
+
+// Verify perform some verification of the indexes health.
+func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error { // nolint: gocognit,gocyclo
+	bulkDeleter := newBulkDeleter(c)
+
+	if doFix && !acquireLock {
+		return errors.New("doFix require acquire lock")
+	}
+
+	if acquireLock {
+		c.newMetricLock.Lock()
+		defer c.newMetricLock.Unlock()
+	}
+
+	allGoodIds := roaring.NewBTreeBitmap()
+
+	allPosting, err := c.postings(allPostingLabelName, allPostingLabelValue)
+	if err != nil {
+		return err
+	}
+
+	count := 0
+	countOk := 0
+	it := allPosting.Iterator()
+
+	labelNames := make(map[string]interface{})
+
+	for ctx.Err() == nil {
+		id, eof := it.Next()
+		if eof {
+			break
+		}
+
+		metricID := types.MetricID(id)
+
+		count++
+
+		_, _ = allGoodIds.AddN(id)
+
+		lbls, err := c.store.SelectID2Labels(metricID)
+		if err == gocql.ErrNotFound {
+			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", metricID)
+
+			if doFix {
+				bulkDeleter.PrepareDelete(metricID, nil, false)
+			}
+
+			continue
+		}
+
+		if err != nil {
+			return err
+		}
+
+		for _, l := range lbls {
+			labelNames[l.Name] = nil
+		}
+
+		expiration, err := c.store.SelectID2LabelsExpiration(metricID)
+		if err == gocql.ErrNotFound {
+			return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID, lbls.String())
+		}
+
+		if err != nil {
+			return err
+		}
+
+		metricID2, err := c.store.SelectLabels2ID(lbls.String())
+		if err == gocql.ErrNotFound {
+			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", metricID, lbls.String())
+
+			if doFix {
+				bulkDeleter.PrepareDelete(metricID, lbls, false)
+			}
+
+			continue
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if metricID != metricID2 {
+			lbls2, err := c.store.SelectID2Labels(metricID2)
+			if err != nil && err != gocql.ErrNotFound {
+				return err
+			}
+
+			if err != nil {
+				lbls2 = nil
+			}
+
+			expiration2, err := c.store.SelectID2LabelsExpiration(metricID2)
+			if err != nil && err != gocql.ErrNotFound {
+				return err
+			}
+
+			if err == gocql.ErrNotFound && lbls2 != nil {
+				return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID2, lbls2.String())
+			}
+
+			switch {
+			case lbls2 == nil:
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
+					metricID,
+					lbls.String(),
+					metricID2,
+				)
+
+				if doFix {
+					// well, the only solution is to delete *both* ID.
+					bulkDeleter.PrepareDelete(metricID2, lbls, false)
+					bulkDeleter.PrepareDelete(metricID, lbls, false)
+				}
+			case !allPosting.Contains(uint64(metricID2)):
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
+					metricID,
+					lbls.String(),
+					metricID2,
+				)
+
+				if doFix {
+					// well, the only solution is to delete *both* ID.
+					bulkDeleter.PrepareDelete(metricID2, lbls2, false)
+					bulkDeleter.PrepareDelete(metricID, lbls, false)
+				}
+			default:
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
+					metricID,
+					lbls.String(),
+					metricID2,
+					lbls2.String(),
+					expiration,
+					expiration2,
+				)
+				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
+				if doFix {
+					bulkDeleter.PrepareDelete(metricID, lbls, true)
+				}
+			}
+
+			continue
+		}
+
+		if time.Now().Add(24 * time.Hour).After(expiration) {
+			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", metricID, lbls.String(), expiration)
+
+			if doFix {
+				bulkDeleter.PrepareDelete(metricID, lbls, false)
+			}
+
+			continue
+		}
+
+		countOk++
+	}
+
+	fmt.Fprintf(w, "Index contains %d metrics and %d ok. There is %d label names\n", count, countOk, len(labelNames))
+
+	if doFix {
+		fmt.Fprintf(w, "Applying fix...")
+
+		if err := bulkDeleter.Delete(); err != nil {
+			return err
+		}
+	}
+
+	for name := range labelNames {
+		if ctx.Err() != nil {
+			break
+		}
+
+		fmt.Fprintf(w, "check postings for %s\n", name)
+
+		iter := c.store.SelectPostingByName(name)
+		for iter.HasNext() {
+			tmp := roaring.NewBTreeBitmap()
+
+			err := tmp.UnmarshalBinary(iter.Next())
+			if err != nil {
+				return err
+			}
+
+			tmp = tmp.Difference(allGoodIds)
+			it := tmp.Iterator()
+
+			for ctx.Err() == nil {
+				id, eof := it.Next()
+				if eof {
+					break
+				}
+
+				fmt.Fprintf(
+					w,
+					"Posting for name %s has ID %d which is not in all posting!\n",
+					name,
+					id,
+				)
+			}
+		}
+	}
+
+	return ctx.Err()
 }
 
 // AllIDs returns all ids stored in the index.
@@ -608,7 +851,8 @@ type createMetricRequest struct {
 // createMetrics creates a new metric IDs associated with provided request
 // Some care should be taken to avoid assigned the same ID from two SquirrelDB instance, so:
 //
-// * A lock is taken (lock is stored in Cassandra). This is optional as not required to single SquirrelDB
+// * A lock is taken (lock is stored in Cassandra). On single SquirrelDB this lock could be a normal in-memory lock (but currently its a Cassandra lock)
+// * To avoid race-condition, redo a check that metrics is not yet registered now that lock is acquired
 // * Read the all-metric postings. From there we find a free ID
 // * Update Cassandra tables to store this new metrics. The insertion is done in the following order:
 //   * First an entry is added to the expiration table. This ensure that in case of crash in this process, the ID will eventually be freed.
@@ -1076,17 +1320,13 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 // and we want to hold this lock only a very short time.
 //
 // This purge will also remove entry from the in-memory cache.
-func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error { //nolint: gocognit,gocyclo
-	// nolint: prealloc
+func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error {
 	var (
-		deleteIDs      []uint64
-		deleteLabels   []string
-		postingUpdates []postingUpdateRequest
-		expireUpdates  []expirationUpdateRequest
+		expireUpdates []expirationUpdateRequest
 	)
 
-	labelToPostingUpdates := make(map[string]map[string]int)
 	dayToExpireUpdates := make(map[time.Time]int)
+	bulkDelete := newBulkDeleter(c)
 
 	for _, intID := range ids {
 		id := types.MetricID(intID)
@@ -1097,7 +1337,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 			// Cleanup this metric from all posting if ever it's present in this list.
 			expireGhostMetric.Inc()
 
-			deleteIDs = append(deleteIDs, intID)
+			bulkDelete.PrepareDelete(id, nil, false)
 
 			continue
 		} else if err != nil {
@@ -1126,28 +1366,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 			return err
 		}
 
-		sortedLabelsString := sortedLabels.String()
-		deleteLabels = append(deleteLabels, sortedLabelsString)
-		deleteIDs = append(deleteIDs, intID)
-
-		for _, label := range sortedLabels {
-			m, ok := labelToPostingUpdates[label.Name]
-			if !ok {
-				m = make(map[string]int)
-				labelToPostingUpdates[label.Name] = m
-			}
-
-			idx, ok := m[label.Value]
-			if !ok {
-				idx = len(postingUpdates)
-				postingUpdates = append(postingUpdates, postingUpdateRequest{
-					Label: label,
-				})
-				m[label.Value] = idx
-			}
-
-			postingUpdates[idx].RemoveIDs = append(postingUpdates[idx].RemoveIDs, intID)
-		}
+		bulkDelete.PrepareDelete(id, sortedLabels, false)
 	}
 
 	c.newMetricLock.Lock()
@@ -1155,64 +1374,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 
 	start := time.Now()
 
-	err := c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
-		for _, sortedLabelsString := range deleteLabels {
-			sortedLabelsString := sortedLabelsString
-			task := func() error {
-				return c.store.DeleteLabels2ID(sortedLabelsString)
-			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	err = c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range postingUpdates {
-			req := req
-			task := func() error {
-				return c.postingUpdate(req)
-			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	err = c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
-		for _, id := range deleteIDs {
-			id := types.MetricID(id)
-			task := func() error {
-				return c.store.DeleteID2Labels(id)
-			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	err = c.postingUpdate(postingUpdateRequest{
-		Label:     labels.Label{Name: allPostingLabelName, Value: allPostingLabelValue},
-		RemoveIDs: deleteIDs,
-	})
+	err := bulkDelete.Delete()
 	if err != nil {
 		return err
 	}
@@ -1235,41 +1397,9 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 		return err
 	}
 
-	// Release Cassandra lock before taking ltuMutex to avoid dead-lock (metric creating took
-	// ltuMutex then the Cassandra lock).
 	expireLockSeconds.Observe(time.Since(start).Seconds())
 
-	if len(deleteIDs) > 0 {
-		c.lookupIDMutex.Lock()
-		c.searchMutex.Lock()
-
-		// Since we don't force sorting labels on input, we don't known the key used
-		// for c.labelsToID (it's likely to be keyFromLabels(sortedLabels))
-		deleteIDsMap := make(map[types.MetricID]bool, len(deleteIDs))
-
-		for _, id := range deleteIDs {
-			deleteIDsMap[types.MetricID(id)] = true
-
-			delete(c.idsToLabels, types.MetricID(id))
-		}
-
-		c.searchMutex.Unlock()
-
-		for key, idsData := range c.labelsToID {
-			for _, v := range idsData {
-				if deleteIDsMap[v.id] {
-					// This may delete too many entry, but:
-					// 1) normally only 1 entry match the hash
-					// 2) it's a cache, we don't loss data
-					delete(c.labelsToID, key)
-					break
-				}
-			}
-		}
-		c.lookupIDMutex.Unlock()
-	}
-
-	expireMetricDelete.Add(float64(len(deleteIDs)))
+	expireMetricDelete.Add(float64(len(bulkDelete.deleteIDs)))
 	expireMetric.Add(float64(len(ids)))
 
 	return nil

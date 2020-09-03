@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ type API struct {
 	Writer               types.MetricWriter
 	FlushCallback        func() error
 	PreAggregateCallback func(from, to time.Time) error
+	IndexVerifyCallback  func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error
 
 	ready  int32
 	logger log.Logger
@@ -43,6 +45,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
 	router.Get("/flush", a.flushHandler)
+	router.Get("/debug/index_verify", a.indexVerifyHandler)
 
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 
@@ -128,6 +131,24 @@ func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Flush points (of this SquirrelDB instance) from temporary store to TSDB done in %v\n", time.Since(start))
+}
+
+func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
+	ctx := req.Context()
+
+	if a.IndexVerifyCallback != nil {
+		doFix := req.FormValue("fix") != ""
+		acquireLock := req.FormValue("lock") != ""
+
+		err := a.IndexVerifyCallback(ctx, w, doFix, acquireLock)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
 func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
