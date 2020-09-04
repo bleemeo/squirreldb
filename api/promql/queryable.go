@@ -84,6 +84,9 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 	if hints != nil {
 		req.Function = hints.Func
 		req.StepMs = hints.Step
+		// We don't use hints.Start/End, because PromQL engine will anyway
+		// set q.mint/q.maxt to good value. Actually hints.Start/End will make
+		// the first point incomplet when using range (like "rate(metric[5m])")
 	}
 
 	result, err := q.reader.ReadIter(req)
