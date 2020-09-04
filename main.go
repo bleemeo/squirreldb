@@ -176,6 +176,8 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
+	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
+	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
 
 	s.api.Run(ctx, readiness)
 }

@@ -32,22 +32,3 @@ func (idx filteringIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, 
 
 	return idx.index.Search(filterMatcher)
 }
-
-type emptyIndex struct {
-}
-
-func (idx emptyIndex) AllIDs() ([]types.MetricID, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (idx emptyIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (idx emptyIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
-	return nil, nil, errors.New("not implemented")
-}
-
-func (idx emptyIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
-	return nil, nil
-}

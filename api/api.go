@@ -25,13 +25,15 @@ const (
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
-	ListenAddress        string
-	Index                types.Index
-	Reader               types.MetricReader
-	Writer               types.MetricWriter
-	FlushCallback        func() error
-	PreAggregateCallback func(from, to time.Time) error
-	IndexVerifyCallback  func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error
+	ListenAddress            string
+	Index                    types.Index
+	Reader                   types.MetricReader
+	Writer                   types.MetricWriter
+	FlushCallback            func() error
+	PreAggregateCallback     func(from, to time.Time) error
+	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error
+	PromQLMaxEvaluatedPoints uint64
+	PromQLMaxEvaluatedSeries uint32
 
 	ready  int32
 	logger log.Logger
@@ -50,8 +52,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 
 	promql := promql.PromQL{
-		Index:  a.Index,
-		Reader: a.Reader,
+		Index:              a.Index,
+		Reader:             a.Reader,
+		MaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
+		MaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
 	}
 	remote := remotestorage.RemoteStorage{
 		Index:  a.Index,

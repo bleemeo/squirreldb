@@ -43,6 +43,20 @@ var (
 			Value: "5678",
 		},
 	}
+	labelsMetric3 = []labels.Label{
+		{
+			Name:  "__name__",
+			Value: "disk_free",
+		},
+		{
+			Name:  "mountpath",
+			Value: "/srv",
+		},
+		{
+			Name:  "__account_id",
+			Value: "5678",
+		},
+	}
 )
 
 type mockDataSet struct {
@@ -71,6 +85,7 @@ func (d *mockDataSet) Err() error {
 }
 
 type mockStore struct {
+	pointsPerSeries int
 }
 
 func (s mockStore) ReadIter(req types.MetricRequest) (types.MetricDataSet, error) {
@@ -79,6 +94,12 @@ func (s mockStore) ReadIter(req types.MetricRequest) (types.MetricDataSet, error
 
 	for i, id := range req.IDs {
 		fakeData[i].ID = id
+		fakeData[i].TimeToLive = 42
+		fakeData[i].Points = make([]types.MetricPoint, s.pointsPerSeries)
+		for j := range fakeData[i].Points {
+			fakeData[i].Points[j].Timestamp = int64(i * j)
+			fakeData[i].Points[j].Value = float64(i * j)
+		}
 	}
 
 	m := &mockDataSet{

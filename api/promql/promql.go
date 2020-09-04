@@ -63,9 +63,11 @@ const (
 )
 
 type PromQL struct {
-	CORSOrigin *regexp.Regexp
-	Index      types.Index
-	Reader     types.MetricReader
+	CORSOrigin         *regexp.Regexp
+	Index              types.Index
+	Reader             types.MetricReader
+	MaxEvaluatedSeries uint32
+	MaxEvaluatedPoints uint64
 
 	logger      log.Logger
 	queryEngine *promql.Engine
@@ -128,33 +130,76 @@ func (p *PromQL) init() {
 }
 
 func (p *PromQL) queryable(r *http.Request) storage.Queryable {
+	st := Store{
+		Index:  p.Index,
+		Reader: p.Reader,
+	}
+
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
-	if value == "" {
-		return Store{
-			Index:  p.Index,
-			Reader: p.Reader,
+	if value != "" {
+		part := strings.SplitN(value, "=", 2)
+		if len(part) != 2 {
+			st.Err = fmt.Errorf("Invalid matcher \"%s\", require labelName=labelValue", value)
+			return st
 		}
-	}
 
-	part := strings.SplitN(value, "=", 2)
-	if len(part) != 2 {
-		return Store{
-			Index:  emptyIndex{},
-			Reader: nil,
-		}
-	}
-
-	return Store{
-		Index: filteringIndex{
-			index: p.Index,
+		st.Index = filteringIndex{
+			index: st.Index,
 			matcher: labels.Matcher{
 				Type:  labels.MatchEqual,
 				Name:  part[0],
 				Value: part[1],
 			},
-		},
-		Reader: p.Reader,
+		}
 	}
+
+	maxEvaluatedSeries := p.MaxEvaluatedSeries
+
+	maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series")
+	if maxEvaluatedSeriesText != "" {
+		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
+
+		if err != nil {
+			st.Err = err
+			return st
+		}
+
+		if tmp > 0 && (uint32(tmp) < maxEvaluatedSeries || maxEvaluatedSeries == 0) {
+			maxEvaluatedSeries = uint32(tmp)
+		}
+	}
+
+	if maxEvaluatedSeries > 0 {
+		st.Index = &limitingIndex{
+			index:          st.Index,
+			maxTotalSeries: maxEvaluatedSeries,
+		}
+	}
+
+	maxEvaluatedPoints := p.MaxEvaluatedPoints
+
+	maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points")
+	if maxEvaluatedPointsText != "" {
+		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
+
+		if err != nil {
+			st.Err = err
+			return st
+		}
+
+		if tmp > 0 && (tmp < maxEvaluatedPoints || maxEvaluatedPoints == 0) {
+			maxEvaluatedPoints = tmp
+		}
+	}
+
+	if maxEvaluatedPoints > 0 {
+		st.Reader = &limitingReader{
+			reader:         st.Reader,
+			maxTotalPoints: maxEvaluatedPoints,
+		}
+	}
+
+	return st
 }
 
 type apiFuncResult struct {
