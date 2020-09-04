@@ -39,6 +39,9 @@ type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
 
+	l                 sync.Mutex
+	fullyAggregatedAt time.Time
+
 	index       types.Index
 	lockFactory lockFactory
 	state       types.State

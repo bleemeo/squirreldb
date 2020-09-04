@@ -16,18 +16,33 @@ import (
 )
 
 type readIter struct {
-	c       *CassandraTSDB
-	request types.MetricRequest
-	err     error
-	current types.MetricData
-	offset  int
+	c                     *CassandraTSDB
+	request               types.MetricRequest
+	aggregatedToTimestamp int64
+	err                   error
+	current               types.MetricData
+	offset                int
 }
 
 // ReadIter returns metrics according to the request made.
 func (c *CassandraTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+	c.l.Lock()
+
+	aggregatedToTimestamp := c.fullyAggregatedAt.UnixNano() / 1e6
+
+	c.l.Unlock()
+
+	if aggregatedToTimestamp == 0 {
+		// 1 AggregateSize cover the (maximal) normal delta before aggregation
+		// the 2nd is a safe-guard that assume we lag of one aggregation.
+		// Anyway normally c.fullyAggregatedAt is filled rather quickly.
+		aggregatedToTimestamp = time.Now().Add(-2*c.options.AggregateSize).UnixNano() / 1e6
+	}
+
 	return &readIter{
-		c:       c,
-		request: request,
+		c:                     c,
+		request:               request,
+		aggregatedToTimestamp: aggregatedToTimestamp,
 	}, nil
 }
 
@@ -67,6 +82,10 @@ func (i *readIter) Next() bool {
 		if len(data.Points) != 0 {
 			lastPoint := data.Points[len(data.Points)-1]
 			fromTimestamp = lastPoint.Timestamp + i.c.options.AggregateResolution.Milliseconds()
+		}
+
+		if fromTimestamp <= i.aggregatedToTimestamp {
+			fromTimestamp = i.aggregatedToTimestamp
 		}
 	}
 

@@ -79,6 +79,10 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 			if minTime.After(lastNotifiedAggretedUntil) {
 				logger.Printf("All shard are aggregated until %s", minTime)
 				lastNotifiedAggretedUntil = minTime
+
+				c.l.Lock()
+				c.fullyAggregatedAt = minTime
+				c.l.Unlock()
 			}
 		}
 
