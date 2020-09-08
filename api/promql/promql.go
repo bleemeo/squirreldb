@@ -145,11 +145,11 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 
 		st.Index = filteringIndex{
 			index: st.Index,
-			matcher: labels.Matcher{
-				Type:  labels.MatchEqual,
-				Name:  part[0],
-				Value: part[1],
-			},
+			matcher: labels.MustNewMatcher(
+				labels.MatchEqual,
+				part[0],
+				part[1],
+			),
 		}
 	}
 

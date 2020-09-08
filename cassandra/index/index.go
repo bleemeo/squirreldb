@@ -17,7 +17,6 @@ import (
 	"context"
 	"log"
 	"os"
-	"regexp"
 	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
@@ -1483,58 +1482,13 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 	return c.store.InsertExpiration(job.Day, buffer.Bytes())
 }
 
-func matchValues(matcher *labels.Matcher, re *regexp.Regexp, value string) bool {
-	var match bool
-
-	if re != nil {
-		match = re.MatchString(value)
-	} else {
-		match = (value == matcher.Value)
-	}
-
-	if matcher.Type == labels.MatchNotEqual || matcher.Type == labels.MatchNotRegexp {
-		return !match
-	}
-
-	return match
-}
-
-func inverseMatcher(m *labels.Matcher) *labels.Matcher {
-	mInv := labels.Matcher{
-		Name:  m.Name,
-		Value: m.Value,
-	}
-
-	switch m.Type {
-	case labels.MatchEqual:
-		mInv.Type = labels.MatchNotEqual
-	case labels.MatchNotEqual:
-		mInv.Type = labels.MatchEqual
-	case labels.MatchRegexp:
-		mInv.Type = labels.MatchNotRegexp
-	case labels.MatchNotRegexp:
-		mInv.Type = labels.MatchRegexp
-	}
-
-	return &mInv
-}
-
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is taken from Prometheus PostingsForMatchers (in querier.go).
 func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit
-	re := make([]*regexp.Regexp, len(matchers))
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
-	for i, m := range matchers {
-		if m.Type == labels.MatchRegexp || m.Type == labels.MatchNotRegexp {
-			re[i], err = regexp.Compile("^(?:" + m.Value + ")$")
-
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		if !matchValues(m, re[i], "") {
+	for _, m := range matchers {
+		if !m.Matches("") {
 			labelMustBeSet[m.Name] = true
 		}
 	}
@@ -1545,17 +1499,20 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	// adding into its and notIts then building results).
 	// We do this in two loops, one which fill its (the one which could add IDs - the "its" of Prometheus)
 	// then one which remove ids (the "notIts" of Prometheus).
-	for i, m := range matchers {
+	for _, m := range matchers {
 		if labelMustBeSet[m.Name] {
-			matchesEmpty := matchValues(m, re[i], "")
+			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 
 			if isNot && !matchesEmpty { // l!=""
 				// If the label can't be empty and is a Not, but the inner matcher can
 				// be empty we need to use inversePostingsForMatcher.
-				inverse := inverseMatcher(m)
+				inverse, err := m.Inverse()
+				if err != nil {
+					return nil, err
+				}
 
-				it, err := c.inversePostingsForMatcher(inverse, re[i])
+				it, err := c.inversePostingsForMatcher(inverse)
 				if err != nil {
 					return nil, err
 				}
@@ -1567,7 +1524,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 				}
 			} else if !isNot { // l="a"
 				// Non-Not matcher, use normal postingsForMatcher.
-				it, err := c.postingsForMatcher(m, re[i])
+				it, err := c.postingsForMatcher(m)
 
 				if err != nil {
 					return nil, err
@@ -1582,17 +1539,21 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 		}
 	}
 
-	for i, m := range matchers {
+	for _, m := range matchers {
 		if labelMustBeSet[m.Name] {
-			matchesEmpty := matchValues(m, re[i], "")
+			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 
 			// nolint: gocritic
 			if isNot && matchesEmpty { // l!="foo"
 				// If the label can't be empty and is a Not and the inner matcher
 				// doesn't match empty, then subtract it out at the end.
-				inverse := inverseMatcher(m)
-				it, err := c.postingsForMatcher(inverse, re[i])
+				inverse, err := m.Inverse()
+				if err != nil {
+					return nil, err
+				}
+
+				it, err := c.postingsForMatcher(inverse)
 
 				if err != nil {
 					return nil, err
@@ -1613,7 +1574,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 			// the series which don't have the label name set too. See:
 			// https://github.com/prometheus/prometheus/issues/3575 and
 			// https://github.com/prometheus/prometheus/pull/3578#issuecomment-351653555
-			it, err := c.inversePostingsForMatcher(m, re[i])
+			it, err := c.inversePostingsForMatcher(m)
 
 			if err != nil {
 				return nil, err
@@ -1640,7 +1601,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 
 // postingsForMatcher return id that match one matcher.
 // This method will not return postings for missing labels.
-func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher) (*roaring.Bitmap, error) {
 	if m.Type == labels.MatchEqual {
 		return c.postings(m.Name, m.Value)
 	}
@@ -1654,7 +1615,7 @@ func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp
 	var buffers [][]byte
 
 	for i, val := range values {
-		if matchValues(m, re, val) {
+		if m.Matches(val) {
 			buffers = append(buffers, allBuffers[i])
 		}
 	}
@@ -1685,10 +1646,14 @@ func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp
 	return it, nil
 }
 
-func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher) (*roaring.Bitmap, error) {
 	if m.Type == labels.MatchNotEqual && m.Value != "" {
-		inverse := inverseMatcher(m)
-		return c.postingsForMatcher(inverse, re)
+		inverse, err := m.Inverse()
+		if err != nil {
+			return nil, err
+		}
+
+		return c.postingsForMatcher(inverse)
 	}
 
 	values, allBuffers, err := c.store.SelectValueForName(m.Name)
@@ -1700,7 +1665,7 @@ func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp
 	var buffers [][]byte
 
 	for i, val := range values {
-		if !matchValues(m, re, val) {
+		if !m.Matches(val) {
 			buffers = append(buffers, allBuffers[i])
 		}
 	}

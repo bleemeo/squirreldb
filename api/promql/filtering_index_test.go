@@ -27,7 +27,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 
 	type fields struct {
 		index   types.Index
-		matcher labels.Matcher
+		matcher *labels.Matcher
 	}
 	type args struct {
 		matchers []*labels.Matcher
@@ -43,11 +43,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 			name: "filter-account-id-1",
 			fields: fields{
 				index: &idx,
-				matcher: labels.Matcher{
-					Type:  labels.MatchEqual,
-					Name:  "__account_id",
-					Value: "1234",
-				},
+				matcher: labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__account_id",
+					"1234",
+				),
 			},
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
@@ -58,11 +58,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 			name: "filter-account-id-2",
 			fields: fields{
 				index: &idx,
-				matcher: labels.Matcher{
-					Type:  labels.MatchEqual,
-					Name:  "__account_id",
-					Value: "5678",
-				},
+				matcher: labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__account_id",
+					"5678",
+				),
 			},
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
@@ -73,11 +73,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 			name: "filter-account-id-absent",
 			fields: fields{
 				index: &idx,
-				matcher: labels.Matcher{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "",
-				},
+				matcher: labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"",
+				),
 			},
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
@@ -88,11 +88,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 			name: "filter-name",
 			fields: fields{
 				index: &idx,
-				matcher: labels.Matcher{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "disk_used",
-				},
+				matcher: labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"disk_used",
+				),
 			},
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "mountpath", "/srv"),

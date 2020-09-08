@@ -9,7 +9,7 @@ import (
 
 type filteringIndex struct {
 	index   types.Index
-	matcher labels.Matcher
+	matcher *labels.Matcher
 }
 
 func (idx filteringIndex) AllIDs() ([]types.MetricID, error) {
@@ -27,7 +27,7 @@ func (idx filteringIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricI
 
 func (idx filteringIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
 	filterMatcher := make([]*labels.Matcher, 0, len(matchers)+1)
-	filterMatcher = append(filterMatcher, &idx.matcher)
+	filterMatcher = append(filterMatcher, idx.matcher)
 	filterMatcher = append(filterMatcher, matchers...)
 
 	return idx.index.Search(filterMatcher)

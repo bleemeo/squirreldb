@@ -94,240 +94,120 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		{
 			Name: "eq",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "up",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "up"),
 			},
 			MatchingMetrics: []int{1, 2, 3},
 		},
 		{
 			Name: "eq-eq",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_cpu_seconds_total",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "mode",
-					Value: "user",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_cpu_seconds_total"),
+				labels.MustNewMatcher(labels.MatchEqual, "mode", "user"),
 			},
 			MatchingMetrics: []int{5, 6},
 		},
 		{
 			Name: "eq-neq",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_cpu_seconds_total",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "mode",
-					Value: "user",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_cpu_seconds_total"),
+				labels.MustNewMatcher(labels.MatchNotEqual, "mode", "user"),
 			},
 			MatchingMetrics: []int{4},
 		},
 		{
 			Name: "eq-nolabel",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, "environment", ""),
 			},
 			MatchingMetrics: []int{7},
 		},
 		{
 			Name: "eq-label",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchNotEqual, "environment", ""),
 			},
 			MatchingMetrics: []int{8, 9, 10},
 		},
 		{
 			Name: "re",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "u.",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "u."),
 			},
 			MatchingMetrics: []int{1, 2, 3},
 		},
 		{
 			Name: "re-re",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_cpu_.*",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "mode",
-					Value: "^u.*",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_cpu_.*"),
+				labels.MustNewMatcher(labels.MatchRegexp, "mode", "^u.*"),
 			},
 			MatchingMetrics: []int{5, 6},
 		},
 		{
 			Name: "re-nre",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_(cpu|disk)_seconds_total",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "mode",
-					Value: "u\\wer",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_(cpu|disk)_seconds_total"),
+				labels.MustNewMatcher(labels.MatchNotRegexp, "mode", "u\\wer"),
 			},
 			MatchingMetrics: []int{4},
 		},
 		{
 			Name: "re-re_nolabel",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchRegexp, "environment", "^$"),
 			},
 			MatchingMetrics: []int{7},
 		},
 		{
 			Name: "re-re_label",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "^$"),
 			},
 			MatchingMetrics: []int{8, 9, 10},
 		},
 		{
 			Name: "re-re*",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "environment",
-					Value: ".*",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchRegexp, "environment", ".*"),
 			},
 			MatchingMetrics: []int{7, 8, 9, 10},
 		},
 		{
 			Name: "re-nre*",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: ".*",
-				},
+				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", ".*"),
 			},
 			MatchingMetrics: []int{},
 		},
 		{
 			Name: "eq-nre_empty_and_devel",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "(|devel)",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "(|devel)"),
 			},
 			MatchingMetrics: []int{9, 10},
 		},
 		{
 			Name: "eq-nre-eq same label",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "devel",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "^$"),
+				labels.MustNewMatcher(labels.MatchEqual, "environment", "devel"),
 			},
 			MatchingMetrics: []int{8},
 		},
 		{
 			Name: "eq-eq-no_label",
 			Matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "production",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "userID",
-					Value: "",
-				},
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, "environment", "production"),
+				labels.MustNewMatcher(labels.MatchEqual, "userID", ""),
 			},
 			MatchingMetrics: []int{9},
 		},
@@ -405,8 +285,8 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		}
 
 		ids, err = cassandraIndex.Search([]*labels.Matcher{
-			{Type: labels.MatchEqual, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
-			{Type: labels.MatchEqual, Name: "ignored", Value: "only_id_is_used"},
+			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[1]), 10)),
+			labels.MustNewMatcher(labels.MatchEqual, "ignored", "only_id_is_used"),
 		})
 		if err != nil {
 			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
@@ -417,8 +297,8 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		}
 
 		ids, err = cassandraIndex.Search([]*labels.Matcher{
-			{Type: labels.MatchEqual, Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[2]), 10)},
-			{Type: labels.MatchNotEqual, Name: "__name__", Value: "up"},
+			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[2]), 10)),
+			labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "up"),
 		})
 		if err != nil {
 			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)

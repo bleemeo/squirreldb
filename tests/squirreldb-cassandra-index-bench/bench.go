@@ -163,7 +163,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
 				}
 			},
 		},
@@ -171,8 +171,8 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N name=X",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
 				}
 			},
 		},
@@ -180,8 +180,8 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "name=X shard=N",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
 				}
 			},
 		},
@@ -189,8 +189,8 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N name!=X",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: labels.MatchNotEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(labels.MatchNotEqual, "__name__", names[rnd.Intn(len(names))]),
 				}
 			},
 		},
@@ -198,8 +198,8 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N name=~X",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: labels.MatchRegexp, Name: "__name__", Value: names[rnd.Intn(len(names))][:6] + ".*"},
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(labels.MatchRegexp, "__name__", names[rnd.Intn(len(names))][:6]+".*"),
 				}
 			},
 		},
@@ -207,9 +207,9 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N name=node_.* name!=node_netstat_Udp_InErrors",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: labels.MatchRegexp, Name: "__name__", Value: "node_.*"},
-					{Type: labels.MatchNotEqual, Name: "__name__", Value: "node_netstat_Udp_InErrors"},
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_.*"),
+					labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "node_netstat_Udp_InErrors"),
 				}
 			},
 		},
@@ -217,9 +217,9 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			Name: "shard=N name=X randomID=\"\"",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
-					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
-					{Type: labels.MatchEqual, Name: "randomID", Value: ""},
+					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(labels.MatchEqual, "randomID", ""),
 				}
 			},
 		},

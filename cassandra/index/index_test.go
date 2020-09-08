@@ -730,14 +730,16 @@ func Test_getMatchersValue(t *testing.T) {
 			name: "contains",
 			args: args{
 				matchers: []*labels.Matcher{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						"__name__",
+						"up",
+					),
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						"monitor",
+						"codelab",
+					),
 				},
 				name: "monitor",
 			},
@@ -748,14 +750,16 @@ func Test_getMatchersValue(t *testing.T) {
 			name: "contains_empty_value",
 			args: args{
 				matchers: []*labels.Matcher{
-					{
-						Name:  "__name__",
-						Value: "down",
-					},
-					{
-						Name:  "job",
-						Value: "",
-					},
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						"__name__",
+						"down",
+					),
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						"job",
+						"",
+					),
 				},
 				name: "job",
 			},
@@ -766,10 +770,11 @@ func Test_getMatchersValue(t *testing.T) {
 			name: "no_contains",
 			args: args{
 				matchers: []*labels.Matcher{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						"__name__",
+						"up",
+					),
 				},
 				name: "monitor",
 			},
@@ -1182,11 +1187,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "up",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest1,
@@ -1198,16 +1203,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-eq",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_cpu_seconds_total",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "mode",
-					Value: "user",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"mode",
+					"user",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest5,
@@ -1218,16 +1223,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-neq",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_cpu_seconds_total",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "mode",
-					Value: "user",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"mode",
+					"user",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest4,
@@ -1237,16 +1242,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-nolabel",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest7,
@@ -1256,16 +1261,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-label",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest8,
@@ -1277,11 +1282,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "u.",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"u.",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest1,
@@ -1293,16 +1298,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-re",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_cpu_.*",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "mode",
-					Value: "^u.*",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_cpu_.*",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mode",
+					"^u.*",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest5,
@@ -1313,16 +1318,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-nre",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_(cpu|disk)_seconds_total",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "mode",
-					Value: "u\\wer",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_(cpu|disk)_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"mode",
+					"u\\wer",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest4,
@@ -1332,16 +1337,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-re_nolabel",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					"^$",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest7,
@@ -1351,16 +1356,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-re_label",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest8,
@@ -1372,16 +1377,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-re*",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "environment",
-					Value: ".*",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					".*",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest7,
@@ -1394,16 +1399,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "re-nre*",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes$",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: ".*",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					".*",
+				),
 			},
 			want: []types.MetricID{},
 		},
@@ -1411,16 +1416,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-nre_empty_and_devel",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "(|devel)",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"(|devel)",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest9,
@@ -1431,21 +1436,21 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-nre-eq same label",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "environment",
-					Value: "^$",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "devel",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"devel",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest8,
@@ -1455,21 +1460,21 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-eq-no_label",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "production",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "userID",
-					Value: "",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"userID",
+					"",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest9,
@@ -1479,21 +1484,21 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-eq-eq_empty",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "production",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
 			},
 			want: []types.MetricID{},
 		},
@@ -1501,21 +1506,21 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq-eq-re_empty",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "node_filesystem_avail_bytes",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "production",
-				},
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "environment",
-					Value: ".*",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					".*",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest9,
@@ -1526,11 +1531,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "eq_empty",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "environment",
-					Value: "",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest1,
@@ -1546,11 +1551,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "neq_empty",
 			index: index1,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "environment",
-					Value: "production",
-				},
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"production",
+				),
 			},
 			want: []types.MetricID{
 				MetricIDTest1,
@@ -1567,11 +1572,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "generated_042",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
 			},
 			wantLen: 100,
 			want: []types.MetricID{
@@ -1585,16 +1590,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-eq-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "__name__",
-					Value: "generated_042",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
 			},
 			wantLen: 50,
 			want: []types.MetricID{
@@ -1608,16 +1613,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-eq-neq",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "multiple_2",
-					Value: "false",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"false",
+				),
 			},
 			wantLen: 5000,
 			want: []types.MetricID{
@@ -1631,16 +1636,16 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-eq-neq-2",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"true",
+				),
 			},
 			wantLen: 0,
 			want:    []types.MetricID{},
@@ -1649,26 +1654,26 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-re-neq-eq-neq",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "generated_04.",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "__name__",
-					Value: "generated_042",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "multiple_5",
-					Value: "false",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"__name__",
+					"generated_042",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
 			},
 			wantLen: 90,
 			want: []types.MetricID{
@@ -1682,26 +1687,26 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index2-re-nre-eq-neq",
 			index: index2,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchRegexp,
-					Name:  "__name__",
-					Value: "generated_04.",
-				},
-				{
-					Type:  labels.MatchNotRegexp,
-					Name:  "__name__",
-					Value: "(generated_04(0|2)|)",
-				},
-				{
-					Type:  labels.MatchEqual,
-					Name:  "multiple_2",
-					Value: "true",
-				},
-				{
-					Type:  labels.MatchNotEqual,
-					Name:  "multiple_5",
-					Value: "false",
-				},
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"__name__",
+					"(generated_04(0|2)|)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
 			},
 			wantLen: 80,
 			want: []types.MetricID{
@@ -1715,11 +1720,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index3-exact-32-bits",
 			index: index3,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "value",
-					Value: "exactly-32bits",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"value",
+					"exactly-32bits",
+				),
 			},
 			want: []types.MetricID{
 				types.MetricID(math.MaxUint32),
@@ -1729,11 +1734,11 @@ func Test_postingsForMatchers(t *testing.T) {
 			name:  "index3-max-id",
 			index: index3,
 			matchers: []*labels.Matcher{
-				{
-					Type:  labels.MatchEqual,
-					Name:  "value",
-					Value: "largest-id",
-				},
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"value",
+					"largest-id",
+				),
 			},
 			want: []types.MetricID{
 				types.MetricID(math.MaxInt64),
