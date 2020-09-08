@@ -1494,12 +1494,23 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	}
 
 	var results *roaring.Bitmap
+	checkMatches := false
 
 	// Unlike Prometheus querier.go, we merge/update directly into results (instead of
 	// adding into its and notIts then building results).
 	// We do this in two loops, one which fill its (the one which could add IDs - the "its" of Prometheus)
 	// then one which remove ids (the "notIts" of Prometheus).
 	for _, m := range matchers {
+		// If there is only few results, prefer doing an explicit matching on labels
+		// for each IDs left. This may spare few Cassandra query.
+		// With postings filtering, we do one Cassandra query per matchers.
+		// With explicit matching on labels, we do one Cassandra query per IDs BUT this query will be done anyway if the
+		// series would be kept.
+		if results != nil && results.Count() <= 3 {
+			checkMatches = true
+			break
+		}
+
 		if labelMustBeSet[m.Name] {
 			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
@@ -1540,6 +1551,11 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	}
 
 	for _, m := range matchers {
+		if results != nil && results.Count() <= 3 {
+			checkMatches = true
+			break
+		}
+
 		if labelMustBeSet[m.Name] {
 			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
@@ -1596,7 +1612,25 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 		return nil, nil
 	}
 
-	return bitsetToIDs(results), nil
+	ids = bitsetToIDs(results)
+	if checkMatches {
+		now := time.Now()
+		newIds := make([]types.MetricID, 0, len(ids))
+		for _, id := range ids {
+			lbls, err := c.lookupLabels(id, false, now)
+			if err != nil {
+				return nil, err
+			}
+
+			if matcherMatches(matchers, lbls) {
+				newIds = append(newIds, id)
+			}
+		}
+
+		ids = newIds
+	}
+
+	return ids, nil
 }
 
 // postingsForMatcher return id that match one matcher.
@@ -2112,4 +2146,15 @@ func (s cassandraStore) SelectValueForName(name string) ([]string, [][]byte, err
 	err := iter.Close()
 
 	return values, buffers, err
+}
+
+func matcherMatches(matchers []*labels.Matcher, lbls labels.Labels) bool {
+	for _, m := range matchers {
+		value := lbls.Get(m.Name)
+		if !m.Matches(value) {
+			return false
+		}
+	}
+
+	return true
 }
