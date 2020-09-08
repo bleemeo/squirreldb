@@ -1523,6 +1523,47 @@ func Test_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
+			name:  "eq_empty",
+			index: index1,
+			matchers: []*labels.Matcher{
+				{
+					Type:  labels.MatchEqual,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+				MetricIDTest7,
+			},
+		},
+		{
+			name:  "neq_empty",
+			index: index1,
+			matchers: []*labels.Matcher{
+				{
+					Type:  labels.MatchNotEqual,
+					Name:  "environment",
+					Value: "production",
+				},
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+				MetricIDTest7,
+				MetricIDTest8,
+			},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
@@ -1719,144 +1760,29 @@ func Test_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
+		t.Run(tt.name+" reverse", func(t *testing.T) {
 
-func Test_substractResult(t *testing.T) {
-	tests := []struct {
-		name  string
-		main  []types.MetricID
-		lists [][]types.MetricID
-		want  []types.MetricID
-	}{
-		{
-			name: "same-list",
-			main: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-				MetricIDTest3,
-				MetricIDTest4,
-			},
-			lists: [][]types.MetricID{
-				{
-					MetricIDTest1,
-					MetricIDTest2,
-					MetricIDTest3,
-					MetricIDTest4,
-				},
-			},
-			want: []types.MetricID{},
-		},
-		{
-			name: "two-list",
-			main: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-				MetricIDTest3,
-				MetricIDTest4,
-			},
-			lists: [][]types.MetricID{
-				{
-					MetricIDTest3,
-					MetricIDTest4,
-				},
-			},
-			want: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-			},
-		},
-		{
-			name: "two-list-2",
-			main: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-				MetricIDTest3,
-				MetricIDTest4,
-			},
-			lists: [][]types.MetricID{
-				{
-					MetricIDTest1,
-					MetricIDTest2,
-				},
-			},
-			want: []types.MetricID{
-				MetricIDTest3,
-				MetricIDTest4,
-			},
-		},
-		{
-			name: "two-list-3",
-			main: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-				MetricIDTest4,
-				MetricIDTest6,
-				MetricIDTest8,
-				MetricIDTest10,
-				MetricIDTest12,
-			},
-			lists: [][]types.MetricID{
-				{
-					MetricIDTest1,
-					MetricIDTest3,
-					MetricIDTest6,
-					MetricIDTest12,
-				},
-			},
-			want: []types.MetricID{
-				MetricIDTest2,
-				MetricIDTest4,
-				MetricIDTest8,
-				MetricIDTest10,
-			},
-		},
-		{
-			name: "three-list",
-			main: []types.MetricID{
-				MetricIDTest1,
-				MetricIDTest2,
-				MetricIDTest4,
-				MetricIDTest6,
-				MetricIDTest8,
-				MetricIDTest10,
-				MetricIDTest12,
-				MetricIDTest14,
-			},
-			lists: [][]types.MetricID{
-				{
-					MetricIDTest1,
-					MetricIDTest3,
-					MetricIDTest6,
-					MetricIDTest12,
-					MetricIDTest15,
-				},
-				{
-					MetricIDTest1,
-					MetricIDTest5,
-					MetricIDTest10,
-					MetricIDTest15,
-				},
-			},
-			want: []types.MetricID{
-				MetricIDTest2,
-				MetricIDTest4,
-				MetricIDTest8,
-				MetricIDTest14,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			lists := make([]*roaring.Bitmap, len(tt.lists))
-
-			for i, l := range tt.lists {
-				lists[i] = idsToBitset(l)
+			matchersReverse := make([]*labels.Matcher, len(tt.matchers))
+			for i := range matchersReverse {
+				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got := substractResult(idsToBitset(tt.main), lists...)
-			if eq, err := got.BitwiseEqual(idsToBitset(tt.want)); err != nil || !eq {
-				t.Errorf("substractResult() = %v, want %v", got, tt.want)
+			got, err := tt.index.postingsForMatchers(matchersReverse)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
 	}

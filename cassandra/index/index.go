@@ -1539,7 +1539,48 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 		}
 	}
 
-	var its, notIts []*roaring.Bitmap
+	var results *roaring.Bitmap
+
+	// Unlike Prometheus querier.go, we merge/update directly into results (instead of
+	// adding into its and notIts then building results).
+	// We do this in two loops, one which fill its (the one which could add IDs - the "its" of Prometheus)
+	// then one which remove ids (the "notIts" of Prometheus).
+	for i, m := range matchers {
+		if labelMustBeSet[m.Name] {
+			matchesEmpty := matchValues(m, re[i], "")
+			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
+
+			if isNot && !matchesEmpty { // l!=""
+				// If the label can't be empty and is a Not, but the inner matcher can
+				// be empty we need to use inversePostingsForMatcher.
+				inverse := inverseMatcher(m)
+
+				it, err := c.inversePostingsForMatcher(inverse, re[i])
+				if err != nil {
+					return nil, err
+				}
+
+				if results == nil {
+					results = it
+				} else {
+					results = results.Intersect(it)
+				}
+			} else if !isNot { // l="a"
+				// Non-Not matcher, use normal postingsForMatcher.
+				it, err := c.postingsForMatcher(m, re[i])
+
+				if err != nil {
+					return nil, err
+				}
+
+				if results == nil {
+					results = it
+				} else {
+					results = results.Intersect(it)
+				}
+			}
+		}
+	}
 
 	for i, m := range matchers {
 		if labelMustBeSet[m.Name] {
@@ -1557,26 +1598,15 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 					return nil, err
 				}
 
-				notIts = append(notIts, it)
-			} else if isNot && !matchesEmpty { // l!=""
-				// If the label can't be empty and is a Not, but the inner matcher can
-				// be empty we need to use inversePostingsForMatcher.
-				inverse := inverseMatcher(m)
-
-				it, err := c.inversePostingsForMatcher(inverse, re[i])
-				if err != nil {
-					return nil, err
-				}
-				its = append(its, it)
-			} else { // l="a"
-				// Non-Not matcher, use normal postingsForMatcher.
-				it, err := c.postingsForMatcher(m, re[i])
-
-				if err != nil {
-					return nil, err
+				if results == nil {
+					// If there's nothing to subtract from, add in everything and remove the notIts later.
+					results, err = c.postings(allPostingLabelName, allPostingLabelValue)
+					if err != nil {
+						return nil, err
+					}
 				}
 
-				its = append(its, it)
+				results = results.Difference(it)
 			}
 		} else { // l=""
 			// If the matchers for a labelname selects an empty value, it selects all
@@ -1589,34 +1619,23 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 				return nil, err
 			}
 
-			notIts = append(notIts, it)
+			if results == nil {
+				// If there's nothing to subtract from, add in everything and remove the notIts later.
+				results, err = c.postings(allPostingLabelName, allPostingLabelValue)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			results = results.Difference(it)
 		}
 	}
 
-	// If there's nothing to subtract from, add in everything and remove the notIts later.
-	if len(its) == 0 && len(notIts) != 0 {
-		allPostings, err := c.postings(allPostingLabelName, allPostingLabelValue)
-
-		if err != nil {
-			return nil, err
-		}
-
-		its = append(its, allPostings)
-	}
-
-	if len(its) == 0 {
+	if results == nil {
 		return nil, nil
 	}
 
-	it := its[0]
-
-	for _, other := range its[1:] {
-		it = it.Intersect(other)
-	}
-
-	it = substractResult(it, notIts...)
-
-	return bitsetToIDs(it), nil
+	return bitsetToIDs(results), nil
 }
 
 // postingsForMatcher return id that match one matcher.
@@ -1709,21 +1728,6 @@ func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp
 	}
 
 	return it, nil
-}
-
-// substractResult remove from main all ID found in on lists.
-func substractResult(main *roaring.Bitmap, lists ...*roaring.Bitmap) *roaring.Bitmap {
-	if len(lists) == 0 {
-		return main
-	}
-
-	l := lists[0]
-
-	for _, other := range lists[1:] {
-		l.UnionInPlace(other)
-	}
-
-	return main.Difference(l)
 }
 
 func (c *CassandraIndex) cassandraGetExpirationList(day time.Time) (*roaring.Bitmap, error) {
