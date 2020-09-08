@@ -1686,6 +1686,11 @@ func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp
 }
 
 func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
+	if m.Type == labels.MatchNotEqual && m.Value != "" {
+		inverse := inverseMatcher(m)
+		return c.postingsForMatcher(inverse, re)
+	}
+
 	values, allBuffers, err := c.store.SelectValueForName(m.Name)
 
 	if err != nil {
