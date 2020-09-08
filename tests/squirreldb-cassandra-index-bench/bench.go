@@ -213,6 +213,16 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 				}
 			},
 		},
+		{
+			Name: "shard=N name=X randomID=\"\"",
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					{Type: labels.MatchEqual, Name: "shardID", Value: fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)},
+					{Type: labels.MatchEqual, Name: "__name__", Value: names[rnd.Intn(len(names))]},
+					{Type: labels.MatchEqual, Name: "randomID", Value: ""},
+				}
+			},
+		},
 	}
 	for _, q := range queries {
 		if *onlyQuery != "" && q.Name != *onlyQuery {
