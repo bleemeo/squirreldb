@@ -1860,6 +1860,12 @@ func (s cassandraStore) Init() error {
 	s.schemaLock.Lock()
 	defer s.schemaLock.Unlock()
 
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS index_labels2id (
 			labels text,
@@ -1895,6 +1901,12 @@ func (s cassandraStore) Init() error {
 }
 
 func (s cassandraStore) InsertPostings(name string, value string, bitset []byte) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"INSERT INTO index_postings (name, value, bitset) VALUES (?, ?, ?)",
 		name, value, bitset,
@@ -1902,12 +1914,24 @@ func (s cassandraStore) InsertPostings(name string, value string, bitset []byte)
 }
 
 func (s cassandraStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"INSERT INTO index_id2labels (id, labels, expiration_date) VALUES (?, ?, ?)",
 		id, sortedLabels, expiration,
 	).Exec()
 }
 func (s cassandraStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"INSERT INTO index_labels2id (labels, id) VALUES (?, ?)",
 		sortedLabelsString, id,
@@ -1915,6 +1939,12 @@ func (s cassandraStore) InsertLabels2ID(sortedLabelsString string, id types.Metr
 }
 
 func (s cassandraStore) DeleteLabels2ID(sortedLabelsString string) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"DELETE FROM index_labels2id WHERE labels = ?",
 		sortedLabelsString,
@@ -1922,6 +1952,12 @@ func (s cassandraStore) DeleteLabels2ID(sortedLabelsString string) error {
 }
 
 func (s cassandraStore) DeleteID2Labels(id types.MetricID) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"DELETE FROM index_id2labels WHERE id = ?",
 		id,
@@ -1929,6 +1965,12 @@ func (s cassandraStore) DeleteID2Labels(id types.MetricID) error {
 }
 
 func (s cassandraStore) DeleteExpiration(day time.Time) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"DELETE FROM index_expiration WHERE day = ?",
 		day,
@@ -1936,6 +1978,12 @@ func (s cassandraStore) DeleteExpiration(day time.Time) error {
 }
 
 func (s cassandraStore) DeletePostings(name string, value string) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"DELETE FROM index_postings WHERE name = ? AND value = ?",
 		name, value,
@@ -1943,6 +1991,12 @@ func (s cassandraStore) DeletePostings(name string, value string) error {
 }
 
 func (s cassandraStore) InsertExpiration(day time.Time, bitset []byte) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	return s.session.Query(
 		"INSERT INTO index_expiration (day, bitset) VALUES (?, ?)",
 		day, bitset,
@@ -1950,6 +2004,12 @@ func (s cassandraStore) InsertExpiration(day time.Time, bitset []byte) error {
 }
 
 func (s cassandraStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"SELECT id FROM index_labels2id WHERE labels = ?",
 		sortedLabelsString,
@@ -1963,6 +2023,12 @@ func (s cassandraStore) SelectLabels2ID(sortedLabelsString string) (types.Metric
 }
 
 func (s cassandraStore) SelectID2Labels(id types.MetricID) (labelList labels.Labels, err error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"SELECT labels FROM index_id2labels WHERE id = ?",
 		int64(id),
@@ -1974,6 +2040,12 @@ func (s cassandraStore) SelectID2Labels(id types.MetricID) (labelList labels.Lab
 }
 
 func (s cassandraStore) SelectID2LabelsExpiration(id types.MetricID) (time.Time, error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"SELECT expiration_date FROM index_id2labels WHERE id = ?",
 		int64(id),
@@ -1987,6 +2059,12 @@ func (s cassandraStore) SelectID2LabelsExpiration(id types.MetricID) (time.Time,
 }
 
 func (s cassandraStore) SelectExpiration(day time.Time) ([]byte, error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"SELECT bitset FROM index_expiration WHERE day = ?",
 		day,
@@ -1999,6 +2077,12 @@ func (s cassandraStore) SelectExpiration(day time.Time) ([]byte, error) {
 }
 
 func (s cassandraStore) UpdateID2LabelsExpiration(id types.MetricID, expiration time.Time) error {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"UPDATE index_id2labels SET expiration_date = ? WHERE id = ?",
 		expiration,
@@ -2009,6 +2093,12 @@ func (s cassandraStore) UpdateID2LabelsExpiration(id types.MetricID, expiration 
 }
 
 func (s cassandraStore) SelectPostingByName(name string) bytesIter {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	iter := s.session.Query(
 		"SELECT bitset FROM index_postings WHERE name = ?",
 		name,
@@ -2020,6 +2110,12 @@ func (s cassandraStore) SelectPostingByName(name string) bytesIter {
 }
 
 func (s cassandraStore) SelectPostingByNameValue(name string, value string) (buffer []byte, err error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	query := s.session.Query(
 		"SELECT bitset FROM index_postings WHERE name = ? AND value = ?",
 		name, value,
@@ -2031,6 +2127,12 @@ func (s cassandraStore) SelectPostingByNameValue(name string, value string) (buf
 }
 
 func (s cassandraStore) SelectValueForName(name string) ([]string, error) {
+	start := time.Now()
+
+	defer func() {
+		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+	}()
+
 	iter := s.session.Query(
 		"SELECT value FROM index_postings WHERE name = ?",
 		name,

@@ -103,4 +103,18 @@ var (
 		Name:      "expire_lock_seconds",
 		Help:      "Total processing time with the new-metric lock hold by the task in seconds",
 	})
+	cassandraQueriesSecondsRead = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "index",
+		Name:        "cassandra_queries_seconds",
+		Help:        "Total processing time spent in Cassandra in seconds",
+		ConstLabels: prometheus.Labels{"operation": "read"},
+	})
+	cassandraQueriesSecondsWrite = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace:   "squirreldb",
+		Subsystem:   "index",
+		Name:        "cassandra_queries_seconds",
+		Help:        "Total processing time spent in Cassandra in seconds",
+		ConstLabels: prometheus.Labels{"operation": "write"},
+	})
 )
