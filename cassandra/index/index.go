@@ -134,7 +134,7 @@ type storeImpl interface {
 	SelectID2LabelsExpiration(id types.MetricID) (time.Time, error)
 	SelectPostingByName(name string) bytesIter
 	SelectPostingByNameValue(name string, value string) ([]byte, error)
-	SelectValueForName(name string) ([]string, error)
+	SelectValueForName(name string) ([]string, [][]byte, error)
 	InsertPostings(name string, value string, bitset []byte) error
 	InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error
 	InsertLabels2ID(sortedLabelsString string, id types.MetricID) error
@@ -456,11 +456,6 @@ func (c *CassandraIndex) AllIDs() ([]types.MetricID, error) {
 	}
 
 	return bitsetToIDs(bitmap), nil
-}
-
-// labelValues return values for given label name.
-func (c *CassandraIndex) labelValues(name string) ([]string, error) {
-	return c.store.SelectValueForName(name)
 }
 
 // postings return ids matching give Label name & value
@@ -1631,27 +1626,31 @@ func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp
 		return c.postings(m.Name, m.Value)
 	}
 
-	values, err := c.labelValues(m.Name)
+	values, allBuffers, err := c.store.SelectValueForName(m.Name)
 
 	if err != nil {
 		return nil, err
 	}
 
-	var res []string
+	var buffers [][]byte
 
-	for _, val := range values {
+	for i, val := range values {
 		if matchValues(m, re, val) {
-			res = append(res, val)
+			buffers = append(buffers, allBuffers[i])
 		}
 	}
 
-	workSets := make([]*roaring.Bitmap, len(res))
-	for i, v := range res {
-		workSets[i], err = c.postings(m.Name, v)
+	workSets := make([]*roaring.Bitmap, len(buffers))
 
+	for i, v := range buffers {
+		bitset := roaring.NewBTreeBitmap()
+
+		err = bitset.UnmarshalBinary(v)
 		if err != nil {
 			return nil, err
 		}
+
+		workSets[i] = bitset
 	}
 
 	if len(workSets) == 0 {
@@ -1668,28 +1667,35 @@ func (c *CassandraIndex) postingsForMatcher(m *labels.Matcher, re *regexp.Regexp
 }
 
 func (c *CassandraIndex) inversePostingsForMatcher(m *labels.Matcher, re *regexp.Regexp) (*roaring.Bitmap, error) {
-	values, err := c.labelValues(m.Name)
+	values, allBuffers, err := c.store.SelectValueForName(m.Name)
 
 	if err != nil {
 		return nil, err
 	}
 
-	var res []string
+	var buffers [][]byte
 
-	for _, val := range values {
+	for i, val := range values {
 		if !matchValues(m, re, val) {
-			res = append(res, val)
+			buffers = append(buffers, allBuffers[i])
 		}
 	}
 
-	workSets := make([]*roaring.Bitmap, len(res))
+	workSets := make([]*roaring.Bitmap, len(buffers))
 
-	for i, v := range res {
-		workSets[i], err = c.postings(m.Name, v)
+	for i, v := range buffers {
+		bitset := roaring.NewBTreeBitmap()
+
+		err = bitset.UnmarshalBinary(v)
+		if err != nil {
+			return nil, err
+		}
 
 		if err != nil {
 			return nil, err
 		}
+
+		workSets[i] = bitset
 	}
 
 	if len(workSets) == 0 {
@@ -2103,7 +2109,7 @@ func (s cassandraStore) SelectPostingByNameValue(name string, value string) (buf
 	return
 }
 
-func (s cassandraStore) SelectValueForName(name string) ([]string, error) {
+func (s cassandraStore) SelectValueForName(name string) ([]string, [][]byte, error) {
 	start := time.Now()
 
 	defer func() {
@@ -2111,20 +2117,25 @@ func (s cassandraStore) SelectValueForName(name string) ([]string, error) {
 	}()
 
 	iter := s.session.Query(
-		"SELECT value FROM index_postings WHERE name = ?",
+		"SELECT value, bitset FROM index_postings WHERE name = ?",
 		name,
 	).Iter()
 
 	var (
-		values []string
-		value  string
+		values  []string
+		buffers [][]byte
+		value   string
+		buffer  []byte
 	)
 
-	for iter.Scan(&value) {
+	for iter.Scan(&value, &buffer) {
 		values = append(values, value)
+		buffers = append(buffers, buffer)
+		// This is required or gocql will reuse (overwrite) the buffer
+		buffer = nil
 	}
 
 	err := iter.Close()
 
-	return values, err
+	return values, buffers, err
 }

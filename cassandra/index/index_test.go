@@ -276,22 +276,24 @@ func (s *mockStore) SelectPostingByNameValue(name string, value string) ([]byte,
 	return result, nil
 }
 
-func (s *mockStore) SelectValueForName(name string) ([]string, error) {
+func (s *mockStore) SelectValueForName(name string) ([]string, [][]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	m, ok := s.postings[name]
 	if !ok {
-		return nil, gocql.ErrNotFound
+		return nil, nil, gocql.ErrNotFound
 	}
 
-	results := make([]string, 0, len(m))
+	values := make([]string, 0, len(m))
+	buffers := make([][]byte, 0, len(m))
 
-	for k := range m {
-		results = append(results, k)
+	for k, v := range m {
+		values = append(values, k)
+		buffers = append(buffers, v)
 	}
 
-	return results, nil
+	return values, buffers, nil
 }
 
 func (s *mockStore) InsertPostings(name string, value string, bitset []byte) error {
