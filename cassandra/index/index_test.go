@@ -1474,6 +1474,53 @@ func Test_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
+			name:  "eq-eq-eq_empty",
+			index: index1,
+			matchers: []*labels.Matcher{
+				{
+					Type:  labels.MatchEqual,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  labels.MatchEqual,
+					Name:  "environment",
+					Value: "production",
+				},
+				{
+					Type:  labels.MatchEqual,
+					Name:  "environment",
+					Value: "",
+				},
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:  "eq-eq-re_empty",
+			index: index1,
+			matchers: []*labels.Matcher{
+				{
+					Type:  labels.MatchEqual,
+					Name:  "__name__",
+					Value: "node_filesystem_avail_bytes",
+				},
+				{
+					Type:  labels.MatchEqual,
+					Name:  "environment",
+					Value: "production",
+				},
+				{
+					Type:  labels.MatchRegexp,
+					Name:  "environment",
+					Value: ".*",
+				},
+			},
+			want: []types.MetricID{
+				MetricIDTest9,
+				MetricIDTest10,
+			},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{

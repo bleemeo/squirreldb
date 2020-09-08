@@ -472,29 +472,6 @@ func (c *CassandraIndex) postings(name string, value string) (*roaring.Bitmap, e
 
 	result := roaring.NewBTreeBitmap()
 
-	if name != allPostingLabelName && value == "" {
-		iter := c.store.SelectPostingByName(name)
-
-		for iter.HasNext() {
-			tmp := roaring.NewBTreeBitmap()
-
-			err := tmp.UnmarshalBinary(iter.Next())
-			if err != nil {
-				return nil, err
-			}
-
-			result.UnionInPlace(tmp)
-		}
-
-		err := iter.Err()
-
-		if err == gocql.ErrNotFound {
-			err = nil
-		}
-
-		return result, err
-	}
-
 	buffer, err := c.store.SelectPostingByNameValue(name, value)
 
 	if err == gocql.ErrNotFound {
