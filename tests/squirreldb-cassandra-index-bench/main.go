@@ -31,6 +31,9 @@ var (
 	seed                      = flag.Int64("bench.seed", 42, "Seed used in random generator")
 	sortInsert                = flag.Bool("bench.insert-sorted", false, "Keep label sorted at insertion time (Prometheus do it)")
 	queryCount                = flag.Int("bench.query", 1000, "Number of query to run")
+	skipWrite                 = flag.Bool("bench.skip-write", false, "Do not insert into index for benchmark. Useful with -no-drop and a previous run that filled index")
+	skipValid                 = flag.Bool("skip-validation", false, "Do not run the validation and only run benchmark")
+	onlyQuery                 = flag.String("bench.only-query", "", "Only run the query that exactly match the name")
 	queryMaxTime              = flag.Duration("bench.max-time", 5*time.Second, "Maxium time for one query time")
 	shardSize                 = flag.Int("bench.shard-size", 1000, "How many metrics to add in one shard (a shard is a label with the same value. Think tenant)")
 	shardStart                = flag.Int("bench.shard-start", 1, "Start at shard number N")
@@ -112,14 +115,16 @@ func main() {
 
 	rand.Seed(*seed)
 
-	cassandraIndex := makeIndex()
+	if !*skipValid {
+		cassandraIndex := makeIndex()
 
-	log.Printf("Start validating test")
-	test(cassandraIndex)
-	log.Printf("Re-run validating test")
-	test(cassandraIndex)
-	log.Printf("Re-run validating test on fresh index")
-	test(makeIndex())
+		log.Printf("Start validating test")
+		test(cassandraIndex)
+		log.Printf("Re-run validating test")
+		test(cassandraIndex)
+		log.Printf("Re-run validating test on fresh index")
+		test(makeIndex())
+	}
 
 	rnd := rand.New(rand.NewSource(*seed))
 	bench(makeIndex, rnd)

@@ -91,59 +91,62 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 	}
 
 	metricsBefore := len(ids)
-
-	var wg sync.WaitGroup
-
 	shardCount := *shardEnd - *shardStart + 1
-	workChannel := make(chan []labels.Labels)
-	resultChan := make(chan int, (*workerProcesses)*(*workerThreads))
-	channels := make([]chan []labels.Labels, *workerProcesses)
 
-	if *fairLB {
-		for n := 0; n < len(channels); n++ {
-			channels[n] = make(chan []labels.Labels)
+	if !*skipWrite {
+
+		var wg sync.WaitGroup
+
+		workChannel := make(chan []labels.Labels)
+		resultChan := make(chan int, (*workerProcesses)*(*workerThreads))
+		channels := make([]chan []labels.Labels, *workerProcesses)
+
+		if *fairLB {
+			for n := 0; n < len(channels); n++ {
+				channels[n] = make(chan []labels.Labels)
+			}
+
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				loadBalancer(workChannel, channels)
+			}()
 		}
 
-		wg.Add(1)
+		for p := 0; p < *workerProcesses; p++ {
+			p := p
+			localIndex := cassandraIndexFactory()
 
-		go func() {
-			defer wg.Done()
-			loadBalancer(workChannel, channels)
-		}()
-	}
+			wg.Add(1)
 
-	for p := 0; p < *workerProcesses; p++ {
-		p := p
-		localIndex := cassandraIndexFactory()
+			go func() {
+				defer wg.Done()
 
-		wg.Add(1)
+				if *fairLB {
+					worker(localIndex, channels[p], resultChan)
+				} else {
+					worker(localIndex, workChannel, resultChan)
+				}
+			}()
+		}
 
-		go func() {
-			defer wg.Done()
+		start := time.Now()
 
-			if *fairLB {
-				worker(localIndex, channels[p], resultChan)
-			} else {
-				worker(localIndex, workChannel, resultChan)
-			}
-		}()
+		if rss := sentInsertRequest(rnd, proc, workChannel, resultChan); rss > maxRSS {
+			maxRSS = rss
+		}
+
+		close(workChannel)
+		wg.Wait()
+		close(resultChan)
+
+		if *shardSize > 0 && shardCount > 0 {
+			log.Printf("Average insert for %d shards took %v/query", shardCount, (time.Since(start) / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
+		}
 	}
 
 	start := time.Now()
-
-	if rss := sentInsertRequest(rnd, proc, workChannel, resultChan); rss > maxRSS {
-		maxRSS = rss
-	}
-
-	close(workChannel)
-	wg.Wait()
-	close(resultChan)
-
-	if *shardSize > 0 && shardCount > 0 {
-		log.Printf("Average insert for %d shards took %v/query", shardCount, (time.Since(start) / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
-	}
-
-	start = time.Now()
 	ids, err = cassandraIndex.AllIDs()
 
 	if err != nil {
@@ -212,6 +215,10 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 		},
 	}
 	for _, q := range queries {
+		if *onlyQuery != "" && q.Name != *onlyQuery {
+			continue
+		}
+
 		if stat, err := proc.Stat(); err == nil && maxRSS < stat.ResidentMemory() {
 			maxRSS = stat.ResidentMemory()
 		}
