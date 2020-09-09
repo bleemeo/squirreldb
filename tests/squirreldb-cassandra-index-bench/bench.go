@@ -94,7 +94,6 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 	shardCount := *shardEnd - *shardStart + 1
 
 	if !*skipWrite {
-
 		var wg sync.WaitGroup
 
 		workChannel := make(chan []labels.Labels)

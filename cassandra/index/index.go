@@ -1484,7 +1484,7 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is taken from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit
+func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit,gocyclo
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for _, m := range matchers {
@@ -1494,6 +1494,7 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	}
 
 	var results *roaring.Bitmap
+
 	checkMatches := false
 
 	// Unlike Prometheus querier.go, we merge/update directly into results (instead of
@@ -1560,7 +1561,6 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 
-			// nolint: gocritic
 			if isNot && matchesEmpty { // l!="foo"
 				// If the label can't be empty and is a Not and the inner matcher
 				// doesn't match empty, then subtract it out at the end.
@@ -1613,9 +1613,11 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 	}
 
 	ids = bitsetToIDs(results)
+
 	if checkMatches {
 		now := time.Now()
 		newIds := make([]types.MetricID, 0, len(ids))
+
 		for _, id := range ids {
 			lbls, err := c.lookupLabels(id, false, now)
 			if err != nil {
