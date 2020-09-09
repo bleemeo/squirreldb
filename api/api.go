@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	_ "net/http/pprof" //nolint: gosec
 	"os"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
@@ -65,6 +66,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 	promql.Register(router.WithPrefix("/api/v1"))
 	remote.Register(router)
+	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	server := &http.Server{
 		Addr:    a.ListenAddress,
