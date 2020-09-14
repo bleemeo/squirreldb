@@ -1220,6 +1220,8 @@ func TestBatch_write(t *testing.T) {
 	// When write1 is not nil, sent it to batch1. Then after does the same with
 	// write2 and batch2.
 	// If the want* is nil, it means don't test.
+	// Write are done at nowWriteN timestamp.
+	// If nowCheck is not nil, do the check call (not flush owned metrics)
 	tests := []struct {
 		name string
 
@@ -1640,6 +1642,205 @@ func TestBatch_write(t *testing.T) {
 					),
 				},
 			},
+		},
+		{
+			name:        "cleanup",
+			nowCheck1:   time.Unix(1900, 0),
+			nowCheck2:   time.Unix(1900, 0),
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{},
+			wantState1:  map[types.MetricID]stateData{},
+			wantState2:  map[types.MetricID]stateData{},
+		},
+		{
+			name:      "fill-2-bis",
+			nowWrite1: time.Unix(2000, 42),
+			nowWrite2: time.Unix(2000, 42),
+			write1: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+			},
+			write2: []types.MetricData{
+				{
+					ID:         MetricIDTest2,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+			},
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{},
+			wantMemoryStore: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+				{
+					ID:         MetricIDTest2,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+			},
+			wantState1: map[types.MetricID]stateData{
+				MetricIDTest1: {
+					flushDeadline: flushTimestamp(
+						MetricIDTest1,
+						time.Unix(2000, 0),
+						batchSize,
+					),
+				},
+			},
+			wantState2: map[types.MetricID]stateData{
+				MetricIDTest2: {
+					flushDeadline: flushTimestamp(
+						MetricIDTest2,
+						time.Unix(2000, 0),
+						batchSize,
+					),
+				},
+			},
+		},
+		{
+			name:      "non-owner-write-deadline-excess",
+			nowWrite2: time.Unix(2100, 42),
+			nowCheck2: time.Unix(2100, 42),
+			write2: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2001000},
+					},
+				},
+			},
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{
+				{
+					ID:         MetricIDTest2,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+			},
+			wantMemoryStore: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+						{Timestamp: 2001000},
+					},
+				},
+				{
+					ID:         MetricIDTest2,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+					},
+				},
+			},
+			wantState1: map[types.MetricID]stateData{
+				MetricIDTest1: {
+					flushDeadline: flushTimestamp(
+						MetricIDTest1,
+						time.Unix(2000, 0),
+						batchSize,
+					),
+				},
+			},
+			wantState2: map[types.MetricID]stateData{
+				MetricIDTest2: {
+					flushDeadline: flushTimestamp(
+						MetricIDTest2,
+						time.Unix(2100, 0),
+						batchSize,
+					),
+				},
+			},
+		},
+		{
+			name:      "non-owner-write-deadline-excess2",
+			nowWrite2: time.Unix(2300, 42),
+			nowCheck2: time.Unix(2300, 42),
+			write2: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2002000},
+					},
+				},
+			},
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{},
+			wantMemoryStore: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points: []types.MetricPoint{
+						{Timestamp: 2000000},
+						{Timestamp: 2001000},
+						{Timestamp: 2002000},
+					},
+				},
+			},
+			wantState2: map[types.MetricID]stateData{},
+		},
+		{
+			name:      "non-owner-write-deadline-excess-150-points",
+			nowWrite2: time.Unix(2350, 42),
+			nowCheck2: time.Unix(2350, 42),
+			write2: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points:     generatePoint(2003, 2149, 1),
+				},
+			},
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{},
+			wantMemoryStore: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points:     generatePoint(2000, 2149, 1),
+				},
+			},
+			wantState2: map[types.MetricID]stateData{},
+		},
+		{
+			name:      "non-owner-write-deadline-excess-201-points",
+			nowWrite2: time.Unix(2360, 42),
+			nowCheck2: time.Unix(2360, 42),
+			write2: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points:     generatePoint(2150, 2200, 1),
+				},
+			},
+			wantWriter1: []types.MetricData{},
+			wantWriter2: []types.MetricData{
+				{
+					ID:         MetricIDTest1,
+					TimeToLive: 42,
+					Points:     generatePoint(2000, 2200, 1),
+				},
+			},
+			wantMemoryStore: []types.MetricData{},
+			wantState2:      map[types.MetricID]stateData{},
 		},
 	}
 	ctx := context.Background()

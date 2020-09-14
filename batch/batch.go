@@ -805,9 +805,9 @@ func (b *Batch) write(metrics []types.MetricData, now time.Time) error {
 
 			if isOwner {
 				metricToFlush[metrics[i].ID] = nil
-			} else if n > 1 && count < n*int(b.batchSize.Seconds()) {
+			} else if n > 1 && previousCount < n*int(b.batchSize.Seconds()) {
 				// If the number of points crossed a multiple of our b.batchSize
-				// (that is count < N*b.batchSize and count >= N*b.batchSize)
+				// (that is count > b.batchSize and previousCount < N*b.batchSize)
 				// and it's not the first threshold, then always flush.
 				//
 				// This will catch case where the current owner is dead, but give him
