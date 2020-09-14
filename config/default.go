@@ -2,7 +2,7 @@ package config
 
 //nolint: gochecknoglobals
 var defaults = map[string]interface{}{
-	"cluster.enabled":                       true,
+	"cluster.enabled":                       false,
 	"cluster.shard":                         4,
 	"cluster.bind_address":                  "",
 	"cluster.bind_port":                     0,

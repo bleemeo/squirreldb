@@ -418,8 +418,6 @@ func (s *SquirrelDB) clusterTask(ctx context.Context, readiness chan error) {
 		cancel()
 		wg.Wait()
 	} else {
-		logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
-
 		s.cluster = nil
 		readiness <- nil
 		<-ctx.Done()
@@ -596,6 +594,10 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		if err != nil {
 			readiness <- err
 			return
+		}
+
+		if s.cluster == nil {
+			logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
 		}
 
 		store := &distributor.Distributor{
