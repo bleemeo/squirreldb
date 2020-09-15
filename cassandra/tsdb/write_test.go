@@ -207,7 +207,7 @@ func Test_gorillaEncode2(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buffer := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
-			got, err := gorillaDecode(buffer, tt.args.baseTimestamp)
+			got, err := gorillaDecode(buffer, tt.args.baseTimestamp, nil)
 			if err != nil {
 				t.Errorf("gorillaDecode() failed: %v", err)
 			}
@@ -276,6 +276,79 @@ func Benchmark_gorillaEncode(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				_ = gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
+			}
+		})
+	}
+}
+
+func Benchmark_gorillaDecode(b *testing.B) {
+	type args struct {
+		points        []types.MetricPoint
+		t0            int64
+		baseTimestamp int64
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "5_min",
+			args: args{
+				baseTimestamp: 1568678400000,
+				t0:            1568706164000, // First timestamp of MakePointsForTest
+				points:        types.MakePointsForTest(300 / 10),
+			},
+		},
+		{
+			name: "50_min",
+			args: args{
+				baseTimestamp: 1568678400000,
+				t0:            1568706164000, // First timestamp of MakePointsForTest
+				points:        types.MakePointsForTest(10 * 300 / 10),
+			},
+		},
+		{
+			name: "multiple-point-ms",
+			args: args{
+				baseTimestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2020, 3, 4, 8, 6, 40, 42e6, time.UTC).UnixNano() / 1000000,
+				points: []types.MetricPoint{
+					{Timestamp: time.Date(2020, 3, 4, 8, 6, 40, 42e6, time.UTC).UnixNano() / 1000000, Value: 0},
+					{Timestamp: time.Date(2020, 3, 4, 8, 6, 40, 43e6, time.UTC).UnixNano() / 1000000, Value: 1},
+					{Timestamp: time.Date(2020, 3, 4, 8, 6, 50, 150e6, time.UTC).UnixNano() / 1000000, Value: 2},
+					{Timestamp: time.Date(2020, 3, 4, 8, 6, 59, 999e6, time.UTC).UnixNano() / 1000000, Value: 3},
+				},
+			},
+		},
+		{
+			name: "large-delta",
+			args: args{
+				baseTimestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2020, 3, 4, 8, 6, 0, 0, time.UTC).UnixNano() / 1000000,
+				points: []types.MetricPoint{
+					{Timestamp: time.Date(2020, 3, 4, 8, 6, 0, 0, time.UTC).UnixNano() / 1000000, Value: 0},
+					{Timestamp: time.Date(2020, 3, 5, 8, 6, 0, 0, time.UTC).UnixNano() / 1000000, Value: 1},
+					{Timestamp: time.Date(2020, 3, 6, 8, 6, 0, 0, time.UTC).UnixNano() / 1000000, Value: 2},
+					{Timestamp: time.Date(2020, 4, 6, 8, 6, 0, 0, time.UTC).UnixNano() / 1000000, Value: 3},
+					{Timestamp: time.Date(2020, 4, 6, 8, 6, 0, 1e6, time.UTC).UnixNano() / 1000000, Value: 4},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			data := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				_, _ = gorillaDecode(data, tt.args.baseTimestamp, nil)
+			}
+		})
+		b.Run(tt.name+"-reuse", func(b *testing.B) {
+			data := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
+			var tmp []types.MetricPoint
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				tmp, _ = gorillaDecode(data, tt.args.baseTimestamp, tmp)
 			}
 		})
 	}
@@ -375,7 +448,7 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 
 			for _, function := range testedFun {
 				want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
-				got, err := gorillaDecodeAggregate(buffer, tt.args.baseTimestamp, function)
+				got, err := gorillaDecodeAggregate(buffer, tt.args.baseTimestamp, function, nil)
 				for i, p := range tt.args.aggregatedPoints {
 					want[i].Timestamp = p.Timestamp
 					switch function {

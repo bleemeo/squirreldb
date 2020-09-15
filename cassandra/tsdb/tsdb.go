@@ -42,9 +42,10 @@ type CassandraTSDB struct {
 	l                 sync.Mutex
 	fullyAggregatedAt time.Time
 
-	index       types.Index
-	lockFactory lockFactory
-	state       types.State
+	index            types.Index
+	lockFactory      lockFactory
+	state            types.State
+	pointsBufferPool sync.Pool
 }
 
 // New created a new CassandraTSDB object.
@@ -72,9 +73,27 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 		index:       index,
 		lockFactory: lockFactory,
 		state:       state,
+		pointsBufferPool: sync.Pool{
+			New: func() interface{} {
+				return make([]types.MetricPoint, 15)
+			},
+		},
 	}
 
 	return tsdb, nil
+}
+
+func (c *CassandraTSDB) getPointsBuffer() []types.MetricPoint {
+	return c.pointsBufferPool.Get().([]types.MetricPoint)[:0]
+}
+
+func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
+	// Don't kept too large buffer in the pool
+	if len(v) > 10000 {
+		return
+	}
+
+	c.pointsBufferPool.Put(v) // nolint: staticcheck
 }
 
 // Returns data table create Query.
