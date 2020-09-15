@@ -291,6 +291,7 @@ func (b *Batch) takeoverMetrics(metrics map[types.MetricID]time.Time, now time.T
 			flushDeadline: deadline,
 		}
 		ids[i] = id
+		i++
 	}
 	b.mutex.Unlock()
 
