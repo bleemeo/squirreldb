@@ -36,6 +36,9 @@ type Redis struct {
 	lastReload    time.Time
 	singleClient  *goredis.Client
 	clusterClient *goredis.ClusterClient
+
+	bufferPool           sync.Pool
+	serializedPointsPool sync.Pool
 }
 
 type serializedPoints struct {
@@ -56,6 +59,7 @@ func New(options Options) *Redis {
 	redis := &Redis{
 		clusterClient: clusterClient,
 	}
+	redis.initPool()
 
 	if len(options.Addresses) == 1 {
 		client := goredis.NewClient(&goredis.Options{
@@ -65,6 +69,31 @@ func New(options Options) *Redis {
 	}
 
 	return redis
+}
+
+func (r *Redis) initPool() {
+	r.bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
+	r.serializedPointsPool = sync.Pool{
+		New: func() interface{} {
+			return make([]serializedPoints, 1024)
+		},
+	}
+}
+
+func (r *Redis) getBuffer() *bytes.Buffer {
+	result := r.bufferPool.Get().(*bytes.Buffer)
+	result.Reset()
+
+	return result
+}
+
+func (r *Redis) getSerializedPoints() []serializedPoints {
+	result := r.serializedPointsPool.Get().([]serializedPoints)
+	return result
 }
 
 func (r *Redis) fixClient() error {
@@ -212,9 +241,15 @@ func (r *Redis) Append(points []types.MetricData) ([]int, error) {
 
 	var addedPoints int
 
+	buffer := r.getBuffer()
+	tmp := r.getSerializedPoints()
+
+	defer r.bufferPool.Put(buffer)
+	defer r.serializedPointsPool.Put(tmp) // nolint: staticcheck
+
 	for i, data := range points {
 		addedPoints += len(data.Points)
-		values, err := valuesFromData(data)
+		values, err := valuesFromData(data, buffer, tmp)
 
 		if err != nil {
 			return nil, err
@@ -278,9 +313,15 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 
 	var writtenPointsCount int
 
+	buffer := r.getBuffer()
+	tmp := r.getSerializedPoints()
+
+	defer r.bufferPool.Put(buffer)
+	defer r.serializedPointsPool.Put(tmp) // nolint: staticcheck
+
 	for i, data := range points {
 		writtenPointsCount += len(data.Points)
-		values, err := valuesFromData(data)
+		values, err := valuesFromData(data, buffer, tmp)
 
 		if err != nil {
 			return nil, err
@@ -309,6 +350,9 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 		}
 	}
 
+	workBuffer := r.getSerializedPoints()
+	defer r.serializedPointsPool.Put(workBuffer) // nolint: staticcheck
+
 	for i, data := range points {
 		tmp, err := commands[i].Bytes()
 		if err != nil && err != goredis.Nil {
@@ -316,7 +360,7 @@ func (r *Redis) GetSetPointsAndOffset(points []types.MetricData, offsets []int) 
 		}
 
 		if err != goredis.Nil {
-			results[i], err = dataFromValues(data.ID, tmp)
+			results[i], err = dataFromValues(data.ID, tmp, workBuffer)
 			if err != nil {
 				return nil, err
 			}
@@ -370,6 +414,10 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 		}
 	}
 
+	tmp := r.getSerializedPoints()
+
+	defer r.serializedPointsPool.Put(tmp) // nolint: staticcheck
+
 	for i, id := range ids {
 		values, err := metricCommands[i].Bytes()
 
@@ -378,7 +426,7 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 		}
 
 		if err != goredis.Nil {
-			metrics[i], err = dataFromValues(id, values)
+			metrics[i], err = dataFromValues(id, values, tmp)
 
 			if err != nil {
 				return nil, nil, err
@@ -622,11 +670,16 @@ func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, er
 }
 
 // Return data from bytes values.
-func dataFromValues(id types.MetricID, values []byte) (types.MetricData, error) {
+func dataFromValues(id types.MetricID, values []byte, dataSerialized []serializedPoints) (types.MetricData, error) {
 	data := types.MetricData{}
 	buffer := bytes.NewReader(values)
+	pointCount := len(values) / 24
 
-	dataSerialized := make([]serializedPoints, len(values)/24)
+	if cap(dataSerialized) < pointCount {
+		dataSerialized = make([]serializedPoints, pointCount)
+	} else {
+		dataSerialized = dataSerialized[:pointCount]
+	}
 
 	err := binary.Read(buffer, binary.BigEndian, &dataSerialized)
 	if err != nil {
@@ -647,11 +700,21 @@ func dataFromValues(id types.MetricID, values []byte) (types.MetricData, error) 
 }
 
 // Return bytes values from data.
-func valuesFromData(data types.MetricData) ([]byte, error) {
-	buffer := new(bytes.Buffer)
+func valuesFromData(data types.MetricData, buffer *bytes.Buffer, dataSerialized []serializedPoints) ([]byte, error) {
+	if buffer == nil || len(data.Points) > 1024 {
+		buffer = new(bytes.Buffer)
+	} else {
+		buffer.Reset()
+	}
+
 	buffer.Grow(len(data.Points) * 24)
 
-	dataSerialized := make([]serializedPoints, len(data.Points))
+	if cap(dataSerialized) < len(data.Points) {
+		dataSerialized = make([]serializedPoints, len(data.Points))
+	} else {
+		dataSerialized = dataSerialized[:len(data.Points)]
+	}
+
 	for i, point := range data.Points {
 		dataSerialized[i] = serializedPoints{
 			Timestamp:  point.Timestamp,
