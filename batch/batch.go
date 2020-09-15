@@ -178,7 +178,7 @@ func (b *Batch) Flush() error {
 func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown bool) {
 	start := time.Now()
 
-	for {
+	for !shutdown {
 		metrics, err := b.memoryStore.GetTransfert(transferredOwnershipLimit)
 		if err != nil {
 			logger.Printf("Unable to query memory store for metrics transfer: %v", err)
