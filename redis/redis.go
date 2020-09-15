@@ -141,6 +141,22 @@ func (r *Redis) sAdd(key string, members ...interface{}) error {
 	return err
 }
 
+func (r *Redis) sRem(key string, members ...interface{}) error {
+	if err := r.fixClient(); err != nil {
+		return err
+	}
+
+	if r.clusterClient != nil {
+		_, err := r.clusterClient.SRem(key, members...).Result()
+
+		return err
+	}
+
+	_, err := r.singleClient.SRem(key, members...).Result()
+
+	return err
+}
+
 func (r *Redis) sPopN(key string, count int64) ([]string, error) {
 	if err := r.fixClient(); err != nil {
 		return nil, err
@@ -369,6 +385,10 @@ func (r *Redis) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 			}
 
 			readPointsCount += len(values) / serializedSize
+		} else {
+			metrics[i] = types.MetricData{
+				ID: id,
+			}
 		}
 
 		writeOffsets[i], err = offsetCommands[i].Int()
@@ -415,8 +435,6 @@ func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 		pipe.Expire(deadlineKey, ttl)
 	}
 
-	pipe.SRem(knownMetricsKey, idsStr)
-
 	if _, err := pipe.Exec(); err != nil && err != goredis.Nil {
 		if r.clusterClient != nil && r.shouldRetry() {
 			_, err = pipe.Exec()
@@ -425,6 +443,10 @@ func (r *Redis) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
 		if err != nil && err != goredis.Nil {
 			return err
 		}
+	}
+
+	if err := r.sRem(knownMetricsKey, idsStr); err != nil {
+		return err
 	}
 
 	return nil
@@ -569,22 +591,30 @@ func (r *Redis) getFlushDeadline(ids []string) (map[types.MetricID]time.Time, er
 	}
 
 	for i, idStr := range ids {
+		id, err := string2MetricID(idStr)
+		if err != nil {
+			return nil, err
+		}
+
 		tmp, err := commands[i].Result()
 		if err != nil && err != goredis.Nil {
 			return nil, err
 		}
 
 		if err != goredis.Nil {
-			id, err := string2MetricID(idStr)
-			if err != nil {
-				return nil, err
-			}
-
 			results[id], err = time.Parse(time.RFC3339, tmp)
 
 			if err != nil {
 				return nil, err
 			}
+		} else {
+			// The metric is known but don't have any deadline key ?
+			// This could happen as race-condition on Redis cluster. On
+			// this setup, the update of differrent key are not longer
+			// atomic (because keys could be on different server).
+
+			// Assume this key is expired, this will recover its situtation
+			results[id] = time.Time{}
 		}
 	}
 
