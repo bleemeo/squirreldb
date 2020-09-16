@@ -6,6 +6,10 @@ services:
     restart: unless-stopped
     cap_add:
     - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+    environment:
+    # Limit memory usage of Cassandra. On developper machine Cassandra don't need lots of RAM.
+    - MAX_HEAP_SIZE=128M
+    - HEAP_NEWSIZE=24M
     labels:
         # Glouton is the monitoring agent made by Bleemeo.
         # On real setup of SquirrelDB, you probably want to monitor component, but
