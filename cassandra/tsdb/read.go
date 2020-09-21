@@ -1,6 +1,7 @@
 package tsdb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ type readIter struct {
 }
 
 // ReadIter returns metrics according to the request made.
-func (c *CassandraTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	c.l.Lock()
 
 	aggregatedToTimestamp := c.fullyAggregatedAt.UnixNano() / 1e6

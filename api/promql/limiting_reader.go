@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"context"
 	"errors"
 	"squirreldb/types"
 	"sync/atomic"
@@ -12,8 +13,8 @@ type limitingReader struct {
 	returnedPoints uint64
 }
 
-func (rdr *limitingReader) ReadIter(req types.MetricRequest) (types.MetricDataSet, error) {
-	r, err := rdr.reader.ReadIter(req)
+func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+	r, err := rdr.reader.ReadIter(ctx, req)
 	if err != nil {
 		return nil, err
 	}

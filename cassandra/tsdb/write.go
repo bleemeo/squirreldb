@@ -1,6 +1,8 @@
 package tsdb
 
 import (
+	"context"
+
 	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
 
@@ -15,7 +17,7 @@ const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics
 // metrics points should be sorted and deduplicated.
-func (c *CassandraTSDB) Write(metrics []types.MetricData) error {
+func (c *CassandraTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	if len(metrics) == 0 {
 		return nil
 	}

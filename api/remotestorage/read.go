@@ -17,6 +17,7 @@ type readMetrics struct {
 // ServeHTTP handles read requests.
 func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
+	ctx := request.Context()
 
 	defer func() {
 		requestsSecondsRead.Observe(time.Since(start).Seconds())
@@ -48,7 +49,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	promQueryResults := make([]*prompb.QueryResult, 0, len(requests))
 
 	for i, request := range requests {
-		metricIter, err := r.reader.ReadIter(request)
+		metricIter, err := r.reader.ReadIter(ctx, request)
 		if err != nil {
 			logger.Printf("Error: Can't retrieve metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)

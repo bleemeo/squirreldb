@@ -18,6 +18,7 @@ type Store struct {
 }
 
 type querier struct {
+	ctx        context.Context
 	index      types.Index
 	reader     types.MetricReader
 	mint, maxt int64
@@ -29,20 +30,20 @@ func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 		return nil, s.Err
 	}
 
-	return querier{index: s.Index, reader: s.Reader, mint: mint, maxt: maxt}, nil
+	return querier{ctx: ctx, index: s.Index, reader: s.Reader, mint: mint, maxt: maxt}, nil
 }
 
 // Select returns a set of series that matches the given label matchers.
 // Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
 // It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
-func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) (storage.SeriesSet, storage.Warnings, error) {
+func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
 	ids, err := q.index.Search(matchers)
 	if err != nil {
-		return nil, nil, err
+		return &seriesIter{err: err}
 	}
 
 	if len(ids) == 0 {
-		return &seriesIter{}, nil, nil
+		return &seriesIter{}
 	}
 
 	var id2Labels map[types.MetricID][]labels.Label
@@ -53,7 +54,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		for _, id := range ids {
 			tmp, err := q.index.LookupLabels(id)
 			if err != nil {
-				return nil, nil, err
+				return &seriesIter{err: err}
 			}
 
 			l := make([]labels.Label, len(tmp))
@@ -89,13 +90,14 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		req.StepMs = hints.Step
 	}
 
-	result, err := q.reader.ReadIter(req)
+	result, err := q.reader.ReadIter(q.ctx, req)
 
 	return &seriesIter{
 		list:      result,
 		index:     q.index,
 		id2Labels: id2Labels,
-	}, nil, err
+		err:       err,
+	}
 }
 
 // LabelValues returns all potential values for a label name.

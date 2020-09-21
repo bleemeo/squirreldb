@@ -211,7 +211,7 @@ func (w *WalBatcher) Flush() {
 	w.writeLock.L.Unlock()
 
 	retry.Print(func() error {
-		return w.PersitentStore.Write(dataList)
+		return w.PersitentStore.Write(context.Background(), dataList)
 	},
 		retry.NewExponentialBackOff(30*time.Second),
 		logger,
@@ -231,14 +231,15 @@ func (w *WalBatcher) Flush() {
 	w.flushToken <- nil
 }
 
-func (w *WalBatcher) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (w *WalBatcher) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	return &walReadIter{
 		w:       w,
+		ctx:     ctx,
 		request: request,
 	}, nil
 }
 
-func (w *WalBatcher) Write(metrics []types.MetricData) error {
+func (w *WalBatcher) Write(ctx context.Context, metrics []types.MetricData) error {
 	start := time.Now()
 
 	defer func() {

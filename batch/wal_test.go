@@ -269,9 +269,10 @@ func TestWalBatcher(t *testing.T) {
 			}
 
 			for _, w := range tt.writes {
-				err := batch.Write(w)
+				err := batch.Write(ctx, w)
 				if err != nil {
 					t.Errorf("batch.Write() failed: %v", err)
+					cancel()
 					return
 				}
 			}

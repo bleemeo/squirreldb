@@ -44,7 +44,7 @@ func New() *Store {
 }
 
 // Append implement batch.TemporaryStore interface.
-func (s *Store) Append(points []types.MetricData) ([]int, error) {
+func (s *Store) Append(ctx context.Context, points []types.MetricData) ([]int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -73,7 +73,7 @@ func (s *Store) Append(points []types.MetricData) ([]int, error) {
 }
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
-func (s *Store) GetSetPointsAndOffset(points []types.MetricData, offsets []int) ([]types.MetricData, error) {
+func (s *Store) GetSetPointsAndOffset(ctx context.Context, points []types.MetricData, offsets []int) ([]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -113,7 +113,7 @@ func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, 
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (s *Store) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, []int, error) {
+func (s *Store) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -137,7 +137,7 @@ func (s *Store) ReadPointsAndOffset(ids []types.MetricID) ([]types.MetricData, [
 }
 
 // MarkToExpire implement batch.TemporaryStore interface.
-func (s *Store) MarkToExpire(ids []types.MetricID, ttl time.Duration) error {
+func (s *Store) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time.Duration) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -158,7 +158,7 @@ func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.T
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
-func (s *Store) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
+func (s *Store) GetSetFlushDeadline(ctx context.Context, deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -175,7 +175,7 @@ func (s *Store) GetSetFlushDeadline(deadlines map[types.MetricID]time.Time) (map
 }
 
 // AddToTransfert implement batch.TemporaryStore interface.
-func (s *Store) AddToTransfert(ids []types.MetricID) error {
+func (s *Store) AddToTransfert(ctx context.Context, ids []types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -185,7 +185,7 @@ func (s *Store) AddToTransfert(ids []types.MetricID) error {
 }
 
 // GetTransfert implement batch.TemporaryStore interface.
-func (s *Store) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
+func (s *Store) GetTransfert(ctx context.Context, count int) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -208,7 +208,7 @@ func (s *Store) GetTransfert(count int) (map[types.MetricID]time.Time, error) {
 }
 
 // GetAllKnownMetrics implement batch.TemporaryStore interface.
-func (s *Store) GetAllKnownMetrics() (map[types.MetricID]time.Time, error) {
+func (s *Store) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

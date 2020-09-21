@@ -18,13 +18,13 @@ const (
 
 func newMemoryStore(initialData []types.MetricData) *memorystore.Store {
 	store := memorystore.New()
-	store.Append(initialData)
+	store.Append(context.Background(), initialData)
 	return store
 }
 
 func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *memorystore.Store {
 	store := memorystore.New()
-	store.GetSetPointsAndOffset(initialData, offsets)
+	store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
 	return store
 }
 
@@ -39,7 +39,7 @@ func generatePoint(fromTS int, toTS int, step int) []types.MetricPoint {
 }
 
 func dumpMemoryStore(store TemporaryStore) []types.MetricData {
-	idsMap, _ := store.GetAllKnownMetrics()
+	idsMap, _ := store.GetAllKnownMetrics(context.TODO())
 
 	ids := make([]types.MetricID, 0, len(idsMap))
 
@@ -47,7 +47,7 @@ func dumpMemoryStore(store TemporaryStore) []types.MetricData {
 		ids = append(ids, id)
 	}
 
-	results, _, _ := store.ReadPointsAndOffset(ids)
+	results, _, _ := store.ReadPointsAndOffset(context.Background(), ids)
 	return results
 }
 
@@ -90,7 +90,7 @@ type mockMetricWriter struct {
 	writeCount int
 }
 
-func (m *mockMetricReader) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (m *mockMetricReader) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	metrics := make([]types.MetricData, 0)
 
 	for _, id := range request.IDs {
@@ -129,7 +129,7 @@ func (i *mockIter) Err() error {
 	return nil
 }
 
-func (m *mockMetricWriter) Write(metrics []types.MetricData) error {
+func (m *mockMetricWriter) Write(ctx context.Context, metrics []types.MetricData) error {
 	m.writeCount++
 
 	m.metrics = metrics
@@ -683,7 +683,7 @@ func TestBatch_read(t *testing.T) {
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
 			}
-			got, err := b.ReadIter(tt.args.request)
+			got, err := b.ReadIter(context.Background(), tt.args.request)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -826,7 +826,7 @@ func TestBatch_readTemporary(t *testing.T) {
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
 			}
-			got, err := b.readTemporary(tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
+			got, err := b.readTemporary(context.Background(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readTemporary() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1181,7 +1181,7 @@ func TestBatch_flush(t *testing.T) {
 				memoryStore: tt.fields.memoryStore,
 				writer:      tt.fields.writer,
 			}
-			b.flush(tt.args.ids, tt.args.now, tt.args.shutdown)
+			b.flush(context.Background(), tt.args.ids, tt.args.now, tt.args.shutdown)
 
 			if !dataEqual(true, tt.fields.writer.metrics, tt.wantWriter) {
 				t.Errorf("writer = %v, want = %v", tt.fields.writer.metrics, tt.wantWriter)
@@ -1847,14 +1847,14 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		ok := t.Run(tt.name, func(t *testing.T) {
 			if tt.write1 != nil {
-				if err := batch1.write(tt.write1, tt.nowWrite1); err != nil {
+				if err := batch1.write(context.Background(), tt.write1, tt.nowWrite1); err != nil {
 					t.Errorf("batch1.write: %v", err)
 					return
 				}
 			}
 
 			if tt.write2 != nil {
-				if err := batch2.write(tt.write2, tt.nowWrite2); err != nil {
+				if err := batch2.write(context.Background(), tt.write2, tt.nowWrite2); err != nil {
 					t.Errorf("batch2.write: %v", err)
 					return
 				}
@@ -1944,6 +1944,7 @@ func Test_takeover(t *testing.T) {
 	ctx := context.Background()
 
 	batch1.write(
+		context.Background(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest1,
@@ -1956,6 +1957,7 @@ func Test_takeover(t *testing.T) {
 		time.Unix(10, 0),
 	)
 	batch2.write(
+		context.Background(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest2,
@@ -1968,6 +1970,7 @@ func Test_takeover(t *testing.T) {
 		time.Unix(12, 0),
 	)
 	batch1.write(
+		context.Background(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest1,

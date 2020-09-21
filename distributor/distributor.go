@@ -127,7 +127,7 @@ func (d *Distributor) stopStore(st *runningStore) {
 	}
 }
 
-func (d *Distributor) Write(metrics []types.MetricData) error {
+func (d *Distributor) Write(ctx context.Context, metrics []types.MetricData) error {
 	start := time.Now()
 
 	defer func() {
@@ -135,7 +135,7 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 	}()
 
 	if d.Cluster == nil {
-		return d.writeToSelf(0, metrics)
+		return d.writeToSelf(ctx, 0, metrics)
 	}
 
 	metricsByShard := splitWriteByShards(metrics, d.ShardCount)
@@ -163,7 +163,7 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 		go func() {
 			defer wg.Done()
 
-			err2 := d.writeShardPart(members, i, metricsByShard[i])
+			err2 := d.writeShardPart(ctx, members, i, metricsByShard[i])
 			if err2 != nil {
 				l.Lock()
 				if err == nil {
@@ -179,7 +179,7 @@ func (d *Distributor) Write(metrics []types.MetricData) error {
 	return err
 }
 
-func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (d *Distributor) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	start := time.Now()
 
 	defer func() {
@@ -199,7 +199,7 @@ func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet
 		atomic.AddInt32(&st.pendingRequest, 1)
 		d.mutex.Unlock()
 
-		iter, err := st.Store.ReadIter(request)
+		iter, err := st.Store.ReadIter(ctx, request)
 
 		atomic.AddInt32(&st.pendingRequest, -1)
 
@@ -215,6 +215,7 @@ func (d *Distributor) ReadIter(request types.MetricRequest) (types.MetricDataSet
 
 	return &readIter{
 		d:              d,
+		ctx:            ctx,
 		members:        members,
 		requestByShard: requestByShard,
 	}, nil
@@ -249,7 +250,7 @@ func (d *Distributor) startStore(shardID int) error {
 	return nil
 }
 
-func (d *Distributor) writeToSelf(shardID int, metrics []types.MetricData) error {
+func (d *Distributor) writeToSelf(ctx context.Context, shardID int, metrics []types.MetricData) error {
 	d.mutex.Lock()
 	if d.activeStore[shardID] == nil {
 		if err := d.startStore(shardID); err != nil {
@@ -270,13 +271,13 @@ func (d *Distributor) writeToSelf(shardID int, metrics []types.MetricData) error
 
 	pointsByShard.WithLabelValues("write", strconv.FormatInt(int64(shardID), 10)).Add(float64(count))
 
-	err := st.Store.Write(metrics)
+	err := st.Store.Write(ctx, metrics)
 	atomic.AddInt32(&st.pendingRequest, -1)
 
 	return err
 }
 
-func (d *Distributor) readFromSelf(shardID int, request types.MetricRequest) (types.MetricDataSet, error) {
+func (d *Distributor) readFromSelf(ctx context.Context, shardID int, request types.MetricRequest) (types.MetricDataSet, error) {
 	d.mutex.Lock()
 	if d.activeStore[shardID] == nil {
 		if err := d.startStore(shardID); err != nil {
@@ -289,16 +290,16 @@ func (d *Distributor) readFromSelf(shardID int, request types.MetricRequest) (ty
 	atomic.AddInt32(&st.pendingRequest, 1)
 	d.mutex.Unlock()
 
-	metrics, err := st.Store.ReadIter(request)
+	metrics, err := st.Store.ReadIter(ctx, request)
 	atomic.AddInt32(&st.pendingRequest, -1)
 
 	return metrics, err
 }
 
-func (d *Distributor) writeShardPart(members []types.Node, shardID int, metrics []types.MetricData) error {
+func (d *Distributor) writeShardPart(ctx context.Context, members []types.Node, shardID int, metrics []types.MetricData) error {
 	targetNode := members[shardID%len(members)]
 	if targetNode.IsSelf() {
-		return d.writeToSelf(shardID, metrics)
+		return d.writeToSelf(ctx, shardID, metrics)
 	}
 
 	pointsCount := 0
@@ -332,7 +333,7 @@ func (d *Distributor) writeShardPart(members []types.Node, shardID int, metrics 
 		}
 
 		if targetNode != nil && targetNode.IsSelf() {
-			err = d.writeToSelf(shardID, metrics)
+			err = d.writeToSelf(ctx, shardID, metrics)
 		} else if targetNode != nil {
 			_, err = d.Cluster.Send(targetNode, requestTypeWrite, buffer.Bytes())
 		}
@@ -347,10 +348,10 @@ func (d *Distributor) writeShardPart(members []types.Node, shardID int, metrics 
 	return err
 }
 
-func (d *Distributor) readShardPart(members []types.Node, shardID int, request types.MetricRequest) (types.MetricDataSet, error) {
+func (d *Distributor) readShardPart(ctx context.Context, members []types.Node, shardID int, request types.MetricRequest) (types.MetricDataSet, error) {
 	targetNode := members[shardID%len(members)]
 	if targetNode.IsSelf() {
-		return d.readFromSelf(shardID, request)
+		return d.readFromSelf(ctx, shardID, request)
 	}
 
 	var (
@@ -379,7 +380,7 @@ func (d *Distributor) readShardPart(members []types.Node, shardID int, request t
 		}
 
 		if targetNode != nil && targetNode.IsSelf() {
-			metricsIter, err = d.readFromSelf(shardID, request)
+			metricsIter, err = d.readFromSelf(ctx, shardID, request)
 		} else if targetNode != nil {
 			reply, err = d.Cluster.Send(targetNode, requestTypeRead, buffer.Bytes())
 
@@ -449,18 +450,18 @@ func splitReadByShards(requests types.MetricRequest, shardCount int) []types.Met
 	return results
 }
 
-func (d *Distributor) clusterRequest(requestType uint8, data []byte) ([]byte, error) {
+func (d *Distributor) clusterRequest(ctx context.Context, requestType uint8, data []byte) ([]byte, error) {
 	switch requestType {
 	case requestTypeWrite:
-		return d.writeFromCluster(data)
+		return d.writeFromCluster(ctx, data)
 	case requestTypeRead:
-		return d.readFromCluster(data)
+		return d.readFromCluster(ctx, data)
 	default:
 		return nil, errors.New("unknown request type")
 	}
 }
 
-func (d *Distributor) readFromCluster(data []byte) ([]byte, error) {
+func (d *Distributor) readFromCluster(ctx context.Context, data []byte) ([]byte, error) {
 	start := time.Now()
 
 	defer func() {
@@ -494,7 +495,7 @@ func (d *Distributor) readFromCluster(data []byte) ([]byte, error) {
 		return nil, errors.New("read sent to non-owner SquirrelDB")
 	}
 
-	metricsIter, err := d.readFromSelf(shardID, request)
+	metricsIter, err := d.readFromSelf(ctx, shardID, request)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +525,7 @@ func (d *Distributor) readFromCluster(data []byte) ([]byte, error) {
 	return buffer.Bytes(), err
 }
 
-func (d *Distributor) writeFromCluster(data []byte) ([]byte, error) {
+func (d *Distributor) writeFromCluster(ctx context.Context, data []byte) ([]byte, error) {
 	start := time.Now()
 
 	defer func() {
@@ -558,5 +559,5 @@ func (d *Distributor) writeFromCluster(data []byte) ([]byte, error) {
 		return nil, errors.New("write sent to non-owner SquirrelDB")
 	}
 
-	return nil, d.writeToSelf(shardID, metrics)
+	return nil, d.writeToSelf(ctx, shardID, metrics)
 }

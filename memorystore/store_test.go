@@ -1,6 +1,7 @@
 package memorystore
 
 import (
+	"context"
 	"reflect"
 	"squirreldb/types"
 	"testing"
@@ -416,7 +417,7 @@ func TestAppend(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			got, err := s.Append(tt.args.points)
+			got, err := s.Append(context.Background(), tt.args.points)
 			if err != nil {
 				t.Errorf("Append() error = %v", err)
 			}
@@ -643,7 +644,7 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 			s := &Store{
 				metrics: tt.fields.metrics,
 			}
-			got, gotOffset, err := s.ReadPointsAndOffset(tt.args.ids)
+			got, gotOffset, err := s.ReadPointsAndOffset(context.Background(), tt.args.ids)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadPointsAndOffset() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1223,7 +1224,7 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 			s := &Store{
 				metrics: tt.state,
 			}
-			got, err := s.GetSetFlushDeadline(tt.args)
+			got, err := s.GetSetFlushDeadline(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetSetFlushDeadline() error = %v", err)
 				return
@@ -1331,7 +1332,7 @@ func TestStore_GetTransfert(t *testing.T) {
 				metrics:          tt.fields.metrics,
 				transfertMetrics: tt.fields.transfertMetrics,
 			}
-			got, err := s.GetTransfert(tt.args)
+			got, err := s.GetTransfert(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetTransfert() error = %v", err)
 				return
@@ -1366,12 +1367,12 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		MetricIDTest1: time.Time{},
 	}
 
-	got, _ := store.GetAllKnownMetrics()
+	got, _ := store.GetAllKnownMetrics(context.Background())
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
 
-	store.GetSetFlushDeadline(map[types.MetricID]time.Time{
+	store.GetSetFlushDeadline(context.Background(), map[types.MetricID]time.Time{
 		MetricIDTest1: time.Unix(42, 42),
 	})
 
@@ -1379,7 +1380,7 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		MetricIDTest1: time.Unix(42, 42),
 	}
 
-	got, _ = store.GetAllKnownMetrics()
+	got, _ = store.GetAllKnownMetrics(context.Background())
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
@@ -1392,7 +1393,7 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 
 	want = map[types.MetricID]time.Time{}
 
-	got, _ = store.GetAllKnownMetrics()
+	got, _ = store.GetAllKnownMetrics(context.Background())
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}

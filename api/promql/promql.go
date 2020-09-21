@@ -474,13 +474,7 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 	sets := make([]storage.SeriesSet, 0, len(matcherSets))
 
 	for _, mset := range matcherSets {
-		s, wrn, err := q.Select(false, nil, mset...)
-		warnings = append(warnings, wrn...)
-
-		if err != nil {
-			return apiFuncResult{nil, &apiError{errorExec, err}, warnings, closer}
-		}
-
+		s := q.Select(false, nil, mset...)
 		sets = append(sets, s)
 	}
 
@@ -490,6 +484,8 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 	for set.Next() {
 		metrics = append(metrics, set.At().Labels())
 	}
+
+	warnings = append(warnings, set.Warnings()...)
 
 	if set.Err() != nil {
 		return apiFuncResult{nil, &apiError{errorExec, set.Err()}, warnings, closer}

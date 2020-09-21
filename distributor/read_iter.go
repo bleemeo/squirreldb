@@ -1,9 +1,13 @@
 package distributor
 
-import "squirreldb/types"
+import (
+	"context"
+	"squirreldb/types"
+)
 
 type readIter struct {
 	d              *Distributor
+	ctx            context.Context
 	members        []types.Node
 	requestByShard []types.MetricRequest
 
@@ -24,7 +28,7 @@ func (i *readIter) Next() bool {
 				continue
 			}
 
-			tmp, err := i.d.readShardPart(i.members, i.nextShard, i.requestByShard[i.nextShard])
+			tmp, err := i.d.readShardPart(i.ctx, i.members, i.nextShard, i.requestByShard[i.nextShard])
 			if err != nil {
 				i.err = err
 

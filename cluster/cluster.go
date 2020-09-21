@@ -44,7 +44,7 @@ type Cluster struct {
 	closing        bool
 	wg             sync.WaitGroup
 	requestToken   chan interface{}
-	requestHandler func(uint8, []byte) ([]byte, error)
+	requestHandler func(context.Context, uint8, []byte) ([]byte, error)
 }
 
 type rpcRequest struct {
@@ -154,7 +154,7 @@ func (c *Cluster) Send(n types.Node, requestType uint8, data []byte) ([]byte, er
 	return c.sendUsingCluster(n, requestType, data)
 }
 
-func (c *Cluster) SetRequestHandler(f func(requestType uint8, data []byte) ([]byte, error)) {
+func (c *Cluster) SetRequestHandler(f func(ctx context.Context, requestType uint8, data []byte) ([]byte, error)) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -454,7 +454,7 @@ func (c *Cluster) processRequest(packet rpcPacket) {
 		}
 	} else {
 		messageRequest.Inc()
-		payload, err := callback(packet.RequestType, packet.Payload)
+		payload, err := callback(context.Background(), packet.RequestType, packet.Payload)
 		if err != nil {
 			replyPacket = rpcPacket{
 				PacketType: msgError,

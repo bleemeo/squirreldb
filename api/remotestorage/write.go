@@ -38,6 +38,7 @@ func (w *writeMetrics) putRequestContext(reqCtx *requestContext) {
 // ServeHTTP handles writing requests.
 func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	start := time.Now()
+	ctx := request.Context()
 
 	defer func() {
 		requestsSecondsWrite.Observe(time.Since(start).Seconds())
@@ -66,7 +67,7 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	if err := w.writer.Write(metrics); err != nil {
+	if err := w.writer.Write(ctx, metrics); err != nil {
 		logger.Printf("Unable to write metric: %v", err)
 		requestsErrorWrite.Inc()
 

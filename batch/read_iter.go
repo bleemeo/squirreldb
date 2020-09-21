@@ -1,12 +1,14 @@
 package batch
 
 import (
+	"context"
 	"squirreldb/types"
 	"time"
 )
 
 type walReadIter struct {
 	w       *WalBatcher
+	ctx     context.Context
 	request types.MetricRequest
 	offset  int
 	err     error
@@ -80,7 +82,7 @@ func (i *walReadIter) Next() bool {
 func (i *walReadIter) onePersistentMetric(idRequest types.MetricRequest, toTimestamp int64) (types.MetricData, error) {
 	idRequest.ToTimestamp = toTimestamp
 
-	persistentMetrics, err := i.w.PersitentStore.ReadIter(idRequest)
+	persistentMetrics, err := i.w.PersitentStore.ReadIter(i.ctx, idRequest)
 	if err != nil {
 		return types.MetricData{}, err
 	}

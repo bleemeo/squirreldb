@@ -27,7 +27,7 @@ type Cluster interface {
 	// This list (once memberlist has converged) will be the same on everyone, including the order.
 	Nodes() []Node
 	Send(n Node, requestType uint8, data []byte) ([]byte, error)
-	SetRequestHandler(func(requestType uint8, data []byte) ([]byte, error))
+	SetRequestHandler(func(ctx context.Context, requestType uint8, data []byte) ([]byte, error))
 }
 
 type Node interface {
@@ -50,11 +50,11 @@ type MetricDataSet interface {
 }
 
 type MetricReader interface {
-	ReadIter(request MetricRequest) (MetricDataSet, error)
+	ReadIter(ctx context.Context, request MetricRequest) (MetricDataSet, error)
 }
 
 type MetricWriter interface {
-	Write(metrics []MetricData) error
+	Write(ctx context.Context, metrics []MetricData) error
 }
 
 type MetricReadWriter interface {

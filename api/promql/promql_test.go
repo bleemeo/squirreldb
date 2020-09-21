@@ -6,6 +6,7 @@ package promql
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -331,8 +332,8 @@ func TestPromQL_queryable(t *testing.T) {
 			}
 
 			for i, query := range tt.searches {
-				got, _, err := queryier.Select(false, nil, query.matchers...)
-				count, err := countSeries(got, err)
+				got := queryier.Select(false, nil, query.matchers...)
+				count, err := countSeries(got)
 
 				if (err != nil) != query.wantErr {
 					t.Errorf("PromQL.queryable.Select(#%d) error = %v, wantErr %v", i, err, query.wantErr)
@@ -345,11 +346,11 @@ func TestPromQL_queryable(t *testing.T) {
 	}
 }
 
-func countSeries(iter storage.SeriesSet, err error) (int, error) {
+func countSeries(iter storage.SeriesSet) (int, error) {
 	count := 0
 
 	if iter == nil {
-		return 0, err
+		return 0, errors.New("nil SeriesSet")
 	}
 
 	for iter.Next() {

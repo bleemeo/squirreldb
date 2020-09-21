@@ -12,12 +12,12 @@ type DiscardTSDB struct{}
 type emptyResult struct{}
 
 // ReadIter return an empty result.
-func (d DiscardTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (d DiscardTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	return emptyResult{}, nil
 }
 
 // Write discard metrics.
-func (d DiscardTSDB) Write(metrics []types.MetricData) error {
+func (d DiscardTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	return nil
 }
 
@@ -56,7 +56,7 @@ type readIter struct {
 }
 
 // ReadIter return an empty result.
-func (db *MemoryTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet, error) {
+func (db *MemoryTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	return &readIter{
 		request: request,
 		db:      db,
@@ -64,7 +64,7 @@ func (db *MemoryTSDB) ReadIter(request types.MetricRequest) (types.MetricDataSet
 }
 
 // Write store in memory.
-func (db *MemoryTSDB) Write(metrics []types.MetricData) error {
+func (db *MemoryTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 

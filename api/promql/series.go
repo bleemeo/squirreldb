@@ -21,6 +21,10 @@ func (i *seriesIter) Next() bool {
 		return false
 	}
 
+	if i.err != nil {
+		return false
+	}
+
 	if !i.list.Next() {
 		return false
 	}
@@ -65,6 +69,10 @@ func (i *seriesIter) Err() error {
 	}
 
 	return i.list.Err()
+}
+
+func (i *seriesIter) Warnings() storage.Warnings {
+	return nil
 }
 
 type series struct {

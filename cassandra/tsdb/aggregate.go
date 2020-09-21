@@ -239,7 +239,7 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 		FromTimestamp: fromTimestamp,
 		ToTimestamp:   toTimestamp,
 	}
-	metrics, err := c.ReadIter(request)
+	metrics, err := c.ReadIter(context.Background(), request)
 
 	if err != nil {
 		return err

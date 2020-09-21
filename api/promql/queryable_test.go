@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"context"
 	"errors"
 	"squirreldb/types"
 	"testing"
@@ -88,7 +89,7 @@ type mockStore struct {
 	pointsPerSeries int
 }
 
-func (s mockStore) ReadIter(req types.MetricRequest) (types.MetricDataSet, error) {
+func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
 
 	fakeData := make([]types.MetricData, len(req.IDs))
 
@@ -168,6 +169,10 @@ func (s *mockSeries) Err() error {
 	return nil
 }
 
+func (s *mockSeries) Warnings() storage.Warnings {
+	return nil
+}
+
 func Test_querier_Select(t *testing.T) {
 	type fields struct {
 		index  types.Index
@@ -181,11 +186,10 @@ func Test_querier_Select(t *testing.T) {
 		matchers   []*labels.Matcher
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    storage.SeriesSet
-		wantErr bool
+		name   string
+		fields fields
+		args   args
+		want   storage.SeriesSet
 	}{
 		{
 			name: "no-sort",
@@ -248,11 +252,7 @@ func Test_querier_Select(t *testing.T) {
 				mint:   tt.fields.mint,
 				maxt:   tt.fields.maxt,
 			}
-			got, _, err := q.Select(tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("querier.Select() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+			got := q.Select(tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(got, tt.want, t) {
 				return
 			}
@@ -283,6 +283,14 @@ func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
 			t.Errorf("at index %d: aLabels = %v != %v = bLabels", n, aSerie.Labels(), bSerie.Labels())
 			return false
 		}
+	}
+
+	if err := a.Err(); err != nil {
+		t.Error(err)
+	}
+
+	if err := b.Err(); err != nil {
+		t.Error(err)
 	}
 
 	return true
