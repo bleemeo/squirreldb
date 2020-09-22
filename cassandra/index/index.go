@@ -617,7 +617,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 	}
 
 	if len(requests) > 0 {
-		if ok := c.newMetricLock.TryLock(ctx, 10*time.Second); !ok {
+		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}

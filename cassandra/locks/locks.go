@@ -148,7 +148,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 }
 
 // TryLock will try to acquire the lock until ctx expire.
-// If retryDelay is non-zero, retry acquire the lock after the delay (which is randomized by a jitter).
+// If retryDelay is non-zero, retry acquire the lock after a delay which is capped by retryDelay.
 func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 	start := time.Now()
 
@@ -159,6 +159,8 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 		locksLockSeconds.Observe(time.Since(start).Seconds())
 	}()
 
+	currentDelay := retryDelay / 100
+
 	for {
 		ok := l.tryLock(ctx)
 		if ok {
@@ -166,22 +168,27 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 			return true
 		}
 
-		if retryDelay == 0 {
+		if currentDelay == 0 {
 			return false
 		}
 
-		jitter := retryDelay.Seconds() * (1 + rand.Float64()/2)
+		jitter := currentDelay.Seconds() * (1 + rand.Float64()/5)
 		select {
 		case <-time.After(time.Duration(jitter) * time.Second):
 		case <-ctx.Done():
 			return false
+		}
+
+		currentDelay *= 2
+		if currentDelay > retryDelay {
+			currentDelay = retryDelay
 		}
 	}
 }
 
 // Lock will call LockCtx with context.Background().
 func (l *Lock) Lock() {
-	l.TryLock(context.Background(), 10*time.Second)
+	l.TryLock(context.Background(), 30*time.Second)
 }
 
 // Unlock free a Lock.
