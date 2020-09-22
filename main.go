@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/gocql/gocql"
 
 	"context"
@@ -241,7 +240,7 @@ func (s *SquirrelDB) Run(ctx context.Context, readiness chan error) {
 			}
 
 			return err
-		}, backoff.WithContext(retry.NewExponentialBackOff(30*time.Second), ctx),
+		}, retry.NewExponentialBackOff(ctx, 30*time.Second),
 			logger,
 			fmt.Sprintf("Starting %s", task.Name),
 		)

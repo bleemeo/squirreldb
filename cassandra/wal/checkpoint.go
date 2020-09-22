@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"context"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"time"
@@ -36,7 +37,7 @@ func (chk *Checkpoint) Purge() {
 				allIDs,
 			).Exec()
 		},
-			retry.NewExponentialBackOff(30*time.Second),
+			retry.NewExponentialBackOff(context.Background(), 30*time.Second),
 			logger,
 			"purge blob",
 		)

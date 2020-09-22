@@ -61,8 +61,8 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 	writeRequest := reqCtx.pb.(*prompb.WriteRequest)
 
-	metrics, err := metricsFromTimeseries(writeRequest.Timeseries, w.index)
-	if err != nil {
+	metrics, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
+	if err != nil && ctx.Err() == nil {
 		logger.Printf("Unable to convert to internal metric: %v", err)
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorWrite.Inc()
@@ -70,7 +70,11 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	if err := w.writer.Write(ctx, metrics); err != nil {
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := w.writer.Write(ctx, metrics); err != nil && ctx.Err() == nil {
 		logger.Printf("Unable to write metric: %v", err)
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorWrite.Inc()
@@ -96,7 +100,7 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a metric list generated from a TimeSeries list.
-func metricsFromTimeseries(promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
+func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
 	if len(promTimeseries) == 0 {
 		return nil, nil
 	}
@@ -112,7 +116,7 @@ func metricsFromTimeseries(promTimeseries []prompb.TimeSeries, index types.Index
 		labelsList[i] = labelProtosToLabels(promSeries.Labels)
 	}
 
-	ids, ttls, err := index.LookupIDs(labelsList)
+	ids, ttls, err := index.LookupIDs(ctx, labelsList)
 
 	if err != nil {
 		return nil, fmt.Errorf("metric ID lookup failed: %v", err)

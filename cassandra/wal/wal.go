@@ -151,7 +151,7 @@ func (c *Cassandra) flush(buffer []byte) {
 			u,
 			data,
 		).Exec()
-	}, retry.NewExponentialBackOff(30*time.Second),
+	}, retry.NewExponentialBackOff(context.Background(), 30*time.Second),
 		logger,
 		"write WAL in Cassandra",
 	)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"reflect"
 	"squirreldb/types"
@@ -221,7 +222,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			continue
 		}
 
-		ids, ttls, err := cassandraIndex.LookupIDs([]labels.Labels{labels.FromMap(labelsMap)})
+		ids, ttls, err := cassandraIndex.LookupIDs(context.Background(), []labels.Labels{labels.FromMap(labelsMap)})
 		if err != nil {
 			log.Fatalf("LookupIDs(%v) failed: %v", labelsMap, err)
 		}
@@ -259,7 +260,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 	}
 
 	if *includeID {
-		ids, _, err := cassandraIndex.LookupIDs([]labels.Labels{
+		ids, _, err := cassandraIndex.LookupIDs(context.Background(), []labels.Labels{
 			{
 				{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
 				{Name: "ignored", Value: "__metric_id__ win"},
@@ -274,7 +275,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupIDs(__metric_id__ valid) = %v, want %v", ids[0], metricsIDs[1])
 		}
 
-		_, _, err = cassandraIndex.LookupIDs([]labels.Labels{
+		_, _, err = cassandraIndex.LookupIDs(context.Background(), []labels.Labels{
 			{
 				{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
 				{Name: "ignored", Value: "__metric_id__ win"},

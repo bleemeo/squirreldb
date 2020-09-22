@@ -99,15 +99,12 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 	}
 }
 
-// TryLock try to acquire the Lock and return true if acquire.
-func (l *Lock) TryLock() bool {
-	start := time.Now()
-
+// tryLock try to acquire the Lock and return true if acquire.
+func (l *Lock) tryLock(ctx context.Context) bool {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
 	if l.acquired {
-		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
 		debug.Print(debug.Level1, logger, "lock %s is already acquired by local instance", l.name)
 
 		return false
@@ -115,19 +112,21 @@ func (l *Lock) TryLock() bool {
 
 	var holder string
 
-	locksTableInsertLockQuery := l.locksTableInsertLockQuery()
+	start := time.Now()
+
+	locksTableInsertLockQuery := l.locksTableInsertLockQuery().WithContext(ctx)
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
 	acquired, err := locksTableInsertLockQuery.ScanCAS(nil, &holder, nil)
 
+	cassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
+
 	if err != nil {
 		logger.Printf("Unable to acquire lock: %v", err)
-		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
 
 		return false
 	}
 
 	if !acquired {
-		locksTryLockSeconds.WithLabelValues("false").Observe(time.Since(start).Seconds())
 		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s", l.name, holder)
 
 		return false
@@ -135,41 +134,54 @@ func (l *Lock) TryLock() bool {
 
 	l.acquired = true
 
-	ctx, cancel := context.WithCancel(context.Background())
+	subCtx, cancel := context.WithCancel(context.Background())
 
 	l.cancel = cancel
 
 	l.wg.Add(1)
 	go func() { // nolint: wsl
 		defer l.wg.Done()
-		l.updateLock(ctx)
+		l.updateLock(subCtx)
 	}()
-
-	locksTryLockSeconds.WithLabelValues("true").Observe(time.Since(start).Seconds())
 
 	return true
 }
 
-// Lock will call TryLock every 10 seconds until is successed.
-func (l *Lock) Lock() {
+// TryLock will try to acquire the lock until ctx expire.
+// If retryDelay is non-zero, retry acquire the lock after the delay (which is randomized by a jitter).
+func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 	start := time.Now()
 
+	pendingLock.Inc()
+
+	defer pendingLock.Dec()
 	defer func() {
 		locksLockSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	pendingLock.Inc()
-
 	for {
-		ok := l.TryLock()
+		ok := l.tryLock(ctx)
 		if ok {
-			pendingLock.Dec()
-			return
+			locksLockSuccess.Inc()
+			return true
 		}
 
-		jitter := (10 * time.Second).Seconds() * rand.Float64()
-		time.Sleep(time.Duration(3+jitter) * time.Second)
+		if retryDelay == 0 {
+			return false
+		}
+
+		jitter := retryDelay.Seconds() * (1 + rand.Float64()/2)
+		select {
+		case <-time.After(time.Duration(jitter) * time.Second):
+		case <-ctx.Done():
+			return false
+		}
 	}
+}
+
+// Lock will call LockCtx with context.Background().
+func (l *Lock) Lock() {
+	l.TryLock(context.Background(), 10*time.Second)
 }
 
 // Unlock free a Lock.
@@ -190,14 +202,18 @@ func (l *Lock) Unlock() {
 
 	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
 	retry.Print(func() error {
+		cassStart := time.Now()
+
 		applied, err := locksTableDeleteLockQuery.ScanCAS(nil)
 		if err == nil && !applied {
 			logger.Printf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
 		}
 
+		cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
+
 		return err
 	},
-		retry.NewExponentialBackOff(retryMaxDelay), logger, "free lock")
+		retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger, "free lock")
 
 	locksUnlockSeconds.Observe(time.Since(start).Seconds())
 
@@ -222,10 +238,10 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 				err := locksTableUpdateLockQuery.Exec()
 
-				locksRefreshSeconds.Observe(time.Since(start).Seconds())
+				cassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
 				return err
-			}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+			}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 				"refresh lock "+l.name,
 			)
 		case <-ctx.Done():

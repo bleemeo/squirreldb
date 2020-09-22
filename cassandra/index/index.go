@@ -536,11 +536,11 @@ func (c *CassandraIndex) lookupLabels(id types.MetricID, addID bool, now time.Ti
 // LookupIDs returns a IDs corresponding to the specified labels.Label lists
 // It also return the metric TTLs
 // The result list will be the same length as input lists and using the same order.
-func (c *CassandraIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
-	return c.lookupIDs(labelsList, time.Now())
+func (c *CassandraIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+	return c.lookupIDs(ctx, labelsList, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labels, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -617,7 +617,13 @@ func (c *CassandraIndex) lookupIDs(labelsList []labels.Labels, now time.Time) ([
 	}
 
 	if len(requests) > 0 {
-		c.newMetricLock.Lock()
+		if ok := c.newMetricLock.TryLock(ctx, 10*time.Second); !ok {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+
+			return nil, nil, errors.New("newMetricLock is not acquired")
+		}
 
 		newIDs, err := c.createMetrics(requests)
 
@@ -1154,7 +1160,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests() {
 // This should only be used in test & benchmark.
 func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(); !acquired {
+	if acquired := lock.TryLock(context.Background(), 0); !acquired {
 		return errors.New("lock held, please retry")
 	}
 
@@ -1166,7 +1172,7 @@ func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(now time.Time) {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(); !acquired {
+	if acquired := lock.TryLock(context.Background(), 0); !acquired {
 		return
 	}
 	defer lock.Unlock()

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -97,14 +98,7 @@ type mockLock struct {
 }
 
 func (l *mockLock) Lock() {
-	for {
-		ok := l.TryLock()
-		if ok {
-			return
-		}
-
-		time.Sleep(10 * time.Second)
-	}
+	l.TryLock(context.Background(), 10*time.Second)
 }
 
 func (l *mockLock) Unlock() {
@@ -118,7 +112,7 @@ func (l *mockLock) Unlock() {
 	l.acquired = false
 }
 
-func (l *mockLock) TryLock() bool {
+func (l *mockLock) tryLock() bool {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
@@ -128,6 +122,25 @@ func (l *mockLock) TryLock() bool {
 
 	l.acquired = true
 	return true
+}
+
+func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
+	for {
+		ok := l.tryLock()
+		if ok {
+			return true
+		}
+
+		if retryDelay == 0 {
+			return false
+		}
+
+		select {
+		case <-time.After(retryDelay):
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 type mockStore struct {
@@ -2055,7 +2068,7 @@ func Test_expiration(t *testing.T) {
 		labelsList[i] = labelsMapToList(m, false)
 	}
 
-	metricsID, ttls, err = index.lookupIDs(labelsList, t0)
+	metricsID, ttls, err = index.lookupIDs(context.Background(), labelsList, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2096,7 +2109,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
-	ids, ttls, err := index.lookupIDs(labelsList[3:4], t1)
+	ids, ttls, err := index.lookupIDs(context.Background(), labelsList[3:4], t1)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock may be hold
@@ -2144,7 +2157,7 @@ func Test_expiration(t *testing.T) {
 
 	metrics[0]["__ttl__"] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
-	ids, ttls, err = index.lookupIDs(labelsList[0:1], t2)
+	ids, ttls, err = index.lookupIDs(context.Background(), labelsList[0:1], t2)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock make be hold
@@ -2202,7 +2215,7 @@ func Test_expiration(t *testing.T) {
 		labelsList[n] = labelsMapToList(labels, false)
 	}
 
-	_, _, err = index.lookupIDs(labelsList, t3)
+	_, _, err = index.lookupIDs(context.Background(), labelsList, t3)
 	if err != nil {
 		t.Error(err)
 	}

@@ -114,7 +114,7 @@ func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error 
 		ids, err = c.index.AllIDs()
 
 		return err
-	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 		"get IDs from the index",
 	)
 
@@ -126,7 +126,7 @@ func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error 
 
 		retry.Print(func() error {
 			return c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
 		)
 		logger.Printf("Forced pre-aggregation from %v to %v completed", currentFrom, currentTo)
@@ -142,7 +142,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
-	if acquired := lock.TryLock(); !acquired {
+	if acquired := lock.TryLock(context.Background(), 0); !acquired {
 		return false, time.Time{}
 	}
 	defer lock.Unlock()
@@ -154,7 +154,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 		retry.Print(func() error {
 			_, err := c.state.Read(name, &fromTimeStr)
 			return err
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"get state for shard "+name,
 		)
 
@@ -171,7 +171,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 
 		retry.Print(func() error {
 			return c.state.Write(name, fromTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	}
@@ -195,7 +195,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 		ids, err = c.index.AllIDs()
 
 		return err
-	}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 		"get IDs from the index",
 	)
 
@@ -217,7 +217,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	} else {

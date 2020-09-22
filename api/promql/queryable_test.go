@@ -140,7 +140,7 @@ func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	return nil, errors.New("not found")
 }
 
-func (i mockIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 

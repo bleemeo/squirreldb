@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"context"
 	"errors"
 	"squirreldb/types"
 
@@ -21,7 +22,7 @@ func (idx filteringIndex) LookupLabels(id types.MetricID) (labels.Labels, error)
 	return idx.index.LookupLabels(id)
 }
 
-func (idx filteringIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx filteringIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 

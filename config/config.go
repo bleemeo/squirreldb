@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
@@ -207,7 +209,7 @@ func (c *Config) ValidateRemote(state types.State) bool {
 		retry.Print(func() error {
 			exists, err = state.Read(name, &remoteStr) // nolint: scopelint
 			return err
-		}, retry.NewExponentialBackOff(30*time.Second), logger,
+		}, retry.NewExponentialBackOff(context.Background(), 30*time.Second), logger,
 			"read config state "+name,
 		)
 
@@ -249,7 +251,7 @@ func (c *Config) ValidateRemote(state types.State) bool {
 func (c *Config) writeRemote(state types.State, name string, value string) {
 	retry.Print(func() error {
 		return state.Write(name, value)
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(context.Background(), 30*time.Second), logger,
 		"write config state "+name,
 	)
 }

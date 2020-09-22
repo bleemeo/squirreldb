@@ -391,7 +391,7 @@ func worker(localIndex *index.CassandraIndex, workChanel chan []labels.Labels, r
 		<-token
 
 		go func() {
-			_, _, err := localIndex.LookupIDs(work)
+			_, _, err := localIndex.LookupIDs(context.Background(), work)
 			if err != nil {
 				log.Fatalf("LookupIDs() failed: %v", err)
 			}

@@ -205,7 +205,7 @@ func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int
 		if *tryLockDelay > 0 {
 			for ctx.Err() == nil {
 				start := time.Now()
-				acquired = lock.TryLock()
+				acquired = lock.TryLock(context.Background(), 0)
 
 				duration := time.Since(start)
 

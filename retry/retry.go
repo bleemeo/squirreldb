@@ -1,6 +1,8 @@
 package retry
 
 import (
+	"context"
+
 	"github.com/cenkalti/backoff/v4"
 
 	"log"
@@ -8,12 +10,12 @@ import (
 )
 
 // NewExponentialBackOff creates a new ExponentialBackOff object.
-func NewExponentialBackOff(maxInterval time.Duration) backoff.BackOff {
+func NewExponentialBackOff(ctx context.Context, maxInterval time.Duration) backoff.BackOff {
 	exponentialBackOff := backoff.NewExponentialBackOff()
 
 	exponentialBackOff.MaxInterval = maxInterval
 
-	return exponentialBackOff
+	return backoff.WithContext(exponentialBackOff, ctx)
 }
 
 // Print displays if an error message has occurred, the time before the next attempt and a resolution message.

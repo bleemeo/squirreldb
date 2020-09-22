@@ -343,7 +343,7 @@ func (d *Distributor) writeShardPart(ctx context.Context, members []types.Node, 
 		}
 
 		return err
-	}, backoff.WithContext(retry.NewExponentialBackOff(5*time.Second), ctx))
+	}, retry.NewExponentialBackOff(ctx, 5*time.Second))
 
 	return err
 }
@@ -395,7 +395,7 @@ func (d *Distributor) readShardPart(ctx context.Context, members []types.Node, s
 		}
 
 		return err
-	}, backoff.WithContext(retry.NewExponentialBackOff(5*time.Second), ctx))
+	}, retry.NewExponentialBackOff(ctx, 5*time.Second))
 
 	if metricsIter == nil && metrics != nil {
 		metricsIter = types.MetricIterFromList(metrics)

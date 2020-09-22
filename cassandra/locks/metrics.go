@@ -7,15 +7,21 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	locksTryLockSeconds = promauto.NewSummaryVec(
+	cassandraQueriesSeconds = promauto.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: "squirreldb",
 			Subsystem: "locks",
-			Name:      "try_lock_seconds",
-			Help:      "Total time to try acquire a lock (successful or failed) in seconds",
+			Name:      "cassandra_queries_seconds",
+			Help:      "Total processing time spent in Cassandra in seconds",
 		},
-		[]string{"acquired"},
+		[]string{"operation"},
 	)
+	locksLockSuccess = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "locks",
+		Name:      "lock_success_total",
+		Help:      "Total number of successful (acquired) locks",
+	})
 	locksLockSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "locks",
@@ -27,12 +33,6 @@ var (
 		Subsystem: "locks",
 		Name:      "unlock_seconds",
 		Help:      "Total time to release a lock in seconds",
-	})
-	locksRefreshSeconds = promauto.NewSummary(prometheus.SummaryOpts{
-		Namespace: "squirreldb",
-		Subsystem: "locks",
-		Name:      "refresh_seconds",
-		Help:      "Total time to refresh a lock in seconds",
 	})
 	pendingLock = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "squirreldb",

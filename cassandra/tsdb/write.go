@@ -63,7 +63,7 @@ func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData) {
 	for _, data := range metrics {
 		retry.Print(func() error {
 			return c.writeRawData(data) // nolint: scopelint
-		}, retry.NewExponentialBackOff(retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"write points to Cassandra",
 		)
 	}

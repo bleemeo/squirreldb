@@ -1,6 +1,7 @@
 package dummy
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -34,7 +35,7 @@ func (idx *Index) LookupLabels(id types.MetricID) (labels.Labels, error) {
 }
 
 // LookupIDs may have collision. If StoreMetricIDInMemory collision are checked (but not across restart).
-func (idx *Index) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx *Index) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	ids := make([]types.MetricID, len(labelsList))
 	ttls := make([]int64, len(labelsList))
 

@@ -1,6 +1,8 @@
 package dummy
 
 import (
+	"context"
+	"math/rand"
 	"squirreldb/types"
 	"sync"
 	"time"
@@ -38,7 +40,7 @@ func (l *Locks) CreateLock(name string, timeToLive time.Duration) types.TryLocke
 	return locker
 }
 
-func (l *tryLocker) TryLock() bool {
+func (l *tryLocker) tryLock() bool {
 	l.l.Lock()
 	defer l.l.Unlock()
 
@@ -48,6 +50,26 @@ func (l *tryLocker) TryLock() bool {
 	}
 
 	return false
+}
+
+func (l *tryLocker) TryLock(ctx context.Context, retryDelay time.Duration) bool {
+	for {
+		ok := l.tryLock()
+		if ok {
+			return true
+		}
+
+		if retryDelay == 0 {
+			return false
+		}
+
+		jitter := retryDelay.Seconds() * (1 + rand.Float64()/2)
+		select {
+		case <-time.After(time.Duration(jitter) * time.Second):
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 func (l *tryLocker) Unlock() {
@@ -62,12 +84,5 @@ func (l *tryLocker) Unlock() {
 }
 
 func (l *tryLocker) Lock() {
-	for {
-		ok := l.TryLock()
-		if ok {
-			return
-		}
-
-		time.Sleep(time.Second)
-	}
+	l.TryLock(context.Background(), 10*time.Second)
 }

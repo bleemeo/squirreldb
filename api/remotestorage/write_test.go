@@ -2,6 +2,7 @@ package remotestorage
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/ioutil"
 	"reflect"
@@ -27,7 +28,7 @@ func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
 	return i.fixedLabels, nil
 }
 
-func (i mockIndex) LookupIDs(labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	if len(labelsList) != 1 {
 		return nil, nil, errors.New("not implemented for more than one metrics")
 
@@ -63,7 +64,7 @@ func Benchmark_metricsFromPromSeries(b *testing.B) {
 			reader := bytes.NewReader(data)
 			decodeRequest(reader, &reqCtx)
 			for n := 0; n < b.N; n++ {
-				metricsFromTimeseries(wr.Timeseries, dummyIndex)
+				metricsFromTimeseries(context.Background(), wr.Timeseries, dummyIndex)
 			}
 		})
 	}
@@ -176,7 +177,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := metricsFromTimeseries(tt.args.promTimeseries, tt.args.index)
+			got, err := metricsFromTimeseries(context.Background(), tt.args.promTimeseries, tt.args.index)
 			if err != nil {
 				t.Errorf("metricsFromTimeseries() failed: %v", err)
 			}

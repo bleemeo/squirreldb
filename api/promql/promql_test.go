@@ -21,6 +21,7 @@ func TestPromQL_queryable(t *testing.T) {
 		StoreMetricIDInMemory: true,
 	}
 	_, _, err := idx.LookupIDs(
+		context.Background(),
 		[]labels.Labels{
 			labelsMetric1,
 			labelsMetric2,

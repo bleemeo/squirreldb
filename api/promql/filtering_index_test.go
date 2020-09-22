@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"context"
 	"reflect"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -15,6 +16,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 		StoreMetricIDInMemory: true,
 	}
 	ids, _, err := idx.LookupIDs(
+		context.Background(),
 		[]labels.Labels{
 			labelsMetric1,
 			labelsMetric2,

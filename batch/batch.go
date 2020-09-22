@@ -152,14 +152,21 @@ func (b *Batch) Run(ctx context.Context) {
 	defer tickerBackground.Stop()
 	defer tickerTakeover.Stop()
 
-	for ctx.Err() == nil {
+	for {
 		select {
 		case <-tickerBackground.C:
-			b.check(ctx, time.Now(), false, false)
+			err := b.check(ctx, time.Now(), false, false)
+			if err != nil {
+				logger.Printf("Batch service background check failed: %v", err)
+			}
 		case <-tickerTakeover.C:
 			b.checkTakeover(ctx, time.Now())
 		case <-ctx.Done():
-			b.check(context.Background(), time.Now(), true, true)
+			err := b.check(context.Background(), time.Now(), true, true)
+			if err != nil {
+				logger.Printf("Unable to shutdown batch service: %v", err)
+			}
+
 			debug.Print(2, logger, "Batch service stopped")
 
 			return
@@ -169,16 +176,18 @@ func (b *Batch) Run(ctx context.Context) {
 
 // Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB.
 func (b *Batch) Flush() error {
-	b.check(context.Background(), time.Now(), true, false)
-
-	return nil
+	return b.check(context.Background(), time.Now(), true, false)
 }
 
 // Checks the current states and flush those whose flush date has expired.
 //
 // If force is true, each state is flushed.
-func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown bool) {
+func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown bool) error {
 	start := time.Now()
+
+	defer func() {
+		backgroundSeconds.Observe(time.Since(start).Seconds())
+	}()
 
 	for !shutdown {
 		metrics, err := b.memoryStore.GetTransfert(ctx, transferredOwnershipLimit)
@@ -207,7 +216,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-time.After(randomDuration(transferredOwnershipSleepDelay)):
 		}
 	}
@@ -228,10 +237,13 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 			endIndex = len(ids)
 		}
 
-		b.flush(ctx, ids[startIndex:endIndex], now, shutdown)
+		err := b.flush(ctx, ids[startIndex:endIndex], now, shutdown)
+		if err != nil {
+			return err
+		}
 	}
 
-	backgroundSeconds.Observe(time.Since(start).Seconds())
+	return nil
 }
 
 // randomDuration return a delay with a +/- 20% jitter.
@@ -266,7 +278,11 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 			break
 		}
 
-		b.takeoverMetrics(ctx, overdue, now)
+		err = b.takeoverMetrics(ctx, overdue, now)
+		if err != nil {
+			logger.Printf("Unable to takeover metrics: %v", err)
+			return
+		}
 
 		if len(overdue) < takeoverLimit {
 			break
@@ -282,7 +298,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 	}
 }
 
-func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]time.Time, now time.Time) {
+func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]time.Time, now time.Time) error {
 	ids := make([]types.MetricID, len(metrics))
 	i := 0
 
@@ -297,8 +313,11 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 	}
 	b.mutex.Unlock()
 
-	b.flush(ctx, ids, now, false)
+	err := b.flush(ctx, ids, now, false)
+
 	takeoverInTotal.Add(float64(len(metrics)))
+
+	return err
 }
 
 // setPoints update the list of points and offsets for given metrics
@@ -309,20 +328,23 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
-func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) []bool { // nolint: gocognit
+func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) ([]bool, error) { // nolint: gocognit
 	var currentMetrics []types.MetricData
 
-	retry.Print(func() error {
+	err := retry.Print(func() error {
 		var err error
 
 		currentMetrics, err = b.memoryStore.GetSetPointsAndOffset(ctx, setMetrics, offsets)
 
 		return err
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"write points in temporary store",
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	results := make([]bool, len(setMetrics))
 
@@ -403,20 +425,27 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 	}
 
 	if len(appendPoints) > 0 {
-		retry.Print(func() error {
+		err := retry.Print(func() error {
 			_, err := b.memoryStore.Append(ctx, appendPoints)
 
 			return err
 		},
-			retry.NewExponentialBackOff(30*time.Second),
+			retry.NewExponentialBackOff(ctx, 30*time.Second),
 			logger,
 			"append points in temporary store",
 		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if len(reSetMetrics) > 0 {
 		countNeedReSet += len(reSetMetrics)
-		tmp := b.setPointsAndOffset(ctx, rePreviousMetrics, reSetMetrics, reOffsets, deep+1)
+
+		tmp, err := b.setPointsAndOffset(ctx, rePreviousMetrics, reSetMetrics, reOffsets, deep+1)
+		if err != nil {
+			return nil, err
+		}
 
 		for i, v := range tmp {
 			results[reToCurrentIndex[i]] = v
@@ -426,7 +455,7 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 	conflictFlushTotal.Add(float64(countNeedReSet))
 	newPointsDuringFlushTotal.Add(float64(countNewPoint))
 
-	return results
+	return results, nil
 }
 
 // Flushes the points corresponding to the specified metrics state list
@@ -436,7 +465,7 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 // * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore).
-func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, shutdown bool) {
+func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, shutdown bool) error {
 	states := make([]stateData, len(ids))
 
 	b.mutex.Lock()
@@ -456,14 +485,17 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		offsets []int
 	)
 
-	retry.Print(func() error {
+	err := retry.Print(func() error {
 		var err error
 		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ctx, ids)
 
 		return err
-	}, retry.NewExponentialBackOff(30*time.Second), logger,
+	}, retry.NewExponentialBackOff(ctx, 30*time.Second), logger,
 		"get points from the memory store",
 	)
+	if err != nil {
+		return err
+	}
 
 	metricsToWrite := make([]types.MetricData, 0, len(metrics))
 
@@ -485,13 +517,16 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 
 	duplicatedPointsTotal.Add(float64(sortMetrics(metricsToWrite)))
 
-	retry.Print(func() error {
+	err = retry.Print(func() error {
 		return b.writer.Write(ctx, metricsToWrite)
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"write points in persistent store",
 	)
+	if err != nil {
+		return err
+	}
 
 	keptMetrics := make([]types.MetricData, len(metrics))
 	offsets = make([]int, len(metrics))
@@ -519,7 +554,10 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 	flushPointsTotalRead.Add(float64(readPointsCount))
 	flushPointsTotalSet.Add(float64(setPointsCount))
 
-	results := b.setPointsAndOffset(ctx, metrics, keptMetrics, offsets, 0)
+	results, err := b.setPointsAndOffset(ctx, metrics, keptMetrics, offsets, 0)
+	if err != nil {
+		return err
+	}
 
 	var (
 		idToExpire         []types.MetricID
@@ -544,15 +582,18 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 	}
 	b.mutex.Unlock()
 
-	retry.Print(func() error {
+	err = retry.Print(func() error {
 		return b.memoryStore.AddToTransfert(ctx, transfertOwnership)
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"transfert ownership using memory store",
 	)
+	if err != nil {
+		return err
+	}
 
-	retry.Print(func() error {
+	err = retry.Print(func() error {
 		// The TTL should be long enough to allow another SquirrelDB to detect
 		// that this metrics has no ownership.
 		// maximum deadline is now + b.batchSize
@@ -560,24 +601,30 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		ttl := 2*takeoverInterval + overdueThreshold + b.batchSize
 		return b.memoryStore.MarkToExpire(ctx, idToExpire, ttl)
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"mark metrics to expire in memory store",
 	)
+	if err != nil {
+		return err
+	}
 
 	var storeDeadlines map[types.MetricID]time.Time
 
-	retry.Print(func() error {
+	err = retry.Print(func() error {
 		var err error
 
 		storeDeadlines, err = b.memoryStore.GetSetFlushDeadline(ctx, newDeadlines)
 
 		return err
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"set deadline in memory store",
 	)
+	if err != nil {
+		return err
+	}
 
 	b.mutex.Lock()
 
@@ -593,6 +640,8 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		}
 	}
 	b.mutex.Unlock()
+
+	return nil
 }
 
 // sortMetrics sorts and deduplicate points only if needed.
@@ -758,9 +807,9 @@ func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTim
 }
 
 // Writes metrics in the temporary storage
-// Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached
+// Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached.
 // If this is the case, the state is added to the list of states to flush.
-func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.Time) error {
+func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.Time) error { // nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -830,7 +879,10 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 	if len(ownerShipInitialPoints) > 0 {
 		offsets := make([]int, len(ownerShipInitialPoints))
 
-		b.setPointsAndOffset(ctx, ownerShipInitialPoints, ownerShipInitialPoints, offsets, 0)
+		_, err := b.setPointsAndOffset(ctx, ownerShipInitialPoints, ownerShipInitialPoints, offsets, 0)
+		if err != nil {
+			return err
+		}
 
 		deadlines := make(map[types.MetricID]time.Time, len(ownerShipInitialPoints))
 
@@ -865,7 +917,10 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 				endIndex = len(tmp)
 			}
 
-			b.flush(ctx, tmp[startIndex:endIndex], now, false)
+			err = b.flush(ctx, tmp[startIndex:endIndex], now, false)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

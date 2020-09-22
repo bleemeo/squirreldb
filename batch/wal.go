@@ -113,7 +113,7 @@ func (w *WalBatcher) initFromWal() {
 	retry.Print(func() error {
 		data, err = w.WalStore.ReadWAL()
 		return err
-	}, retry.NewExponentialBackOff(30*time.Second),
+	}, retry.NewExponentialBackOff(context.Background(), 30*time.Second),
 		logger,
 		"read WAL",
 	)
@@ -190,7 +190,7 @@ func (w *WalBatcher) Flush() {
 		tmp, err = checkpoint.ReadOther()
 		return err
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(context.Background(), 30*time.Second),
 		logger,
 		"Read WAL from Cassandra",
 	)
@@ -213,7 +213,7 @@ func (w *WalBatcher) Flush() {
 	retry.Print(func() error {
 		return w.PersitentStore.Write(context.Background(), dataList)
 	},
-		retry.NewExponentialBackOff(30*time.Second),
+		retry.NewExponentialBackOff(context.Background(), 30*time.Second),
 		logger,
 		"write to persistent store",
 	)
