@@ -69,6 +69,7 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 	if err := w.writer.Write(ctx, metrics); err != nil {
 		logger.Printf("Unable to write metric: %v", err)
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorWrite.Inc()
 
 		return
