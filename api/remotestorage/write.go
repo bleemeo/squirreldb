@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -17,22 +18,17 @@ type writeMetrics struct {
 	reqCtxCh chan *requestContext
 }
 
-func (w *writeMetrics) getRequestContext() *requestContext {
+func (w *writeMetrics) getRequestContext(ctx context.Context) *requestContext {
 	select {
 	case reqCtx := <-w.reqCtxCh:
 		return reqCtx
-	default:
-		return &requestContext{
-			pb: &prompb.WriteRequest{},
-		}
+	case <-ctx.Done():
+		return nil
 	}
 }
 
 func (w *writeMetrics) putRequestContext(reqCtx *requestContext) {
-	select {
-	case w.reqCtxCh <- reqCtx:
-	default:
-	}
+	w.reqCtxCh <- reqCtx
 }
 
 // ServeHTTP handles writing requests.
@@ -44,10 +40,17 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		requestsSecondsWrite.Observe(time.Since(start).Seconds())
 	}()
 
-	reqCtx := w.getRequestContext()
-	defer w.putRequestContext(reqCtx)
-	err := decodeRequest(request.Body, reqCtx)
+	reqCtx := w.getRequestContext(ctx)
+	if ctx.Err() != nil || reqCtx == nil {
+		http.Error(writer, "Request cancelled", http.StatusBadRequest)
+		requestsErrorWrite.Inc()
 
+		return
+	}
+
+	defer w.putRequestContext(reqCtx)
+
+	err := decodeRequest(request.Body, reqCtx)
 	if err != nil {
 		logger.Printf("Error: Can't decode the write request (%v)", err)
 		http.Error(writer, "Can't decode the write request", http.StatusBadRequest)

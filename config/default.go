@@ -17,6 +17,7 @@ var defaults = map[string]interface{}{
 	"cassandra.aggregate.intended_duration": "1m",
 	"redis.addresses":                       []string{},
 	"remote_storage.listen_address":         "localhost:9201",
+	"remote_storage.max_concurrent_write":   0,
 	"promql.max_evaluated_points":           0,
 	"promql.max_evaluated_series":           0,
 	"batch.size":                            "15m",

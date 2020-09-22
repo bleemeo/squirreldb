@@ -33,6 +33,7 @@ type API struct {
 	FlushCallback            func() error
 	PreAggregateCallback     func(from, to time.Time) error
 	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error
+	MaxConcurrentRemoteWrite int
 	PromQLMaxEvaluatedPoints uint64
 	PromQLMaxEvaluatedSeries uint32
 
@@ -59,9 +60,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		MaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
 	}
 	remote := remotestorage.RemoteStorage{
-		Index:  a.Index,
-		Reader: a.Reader,
-		Writer: a.Writer,
+		Index:                    a.Index,
+		Reader:                   a.Reader,
+		Writer:                   a.Writer,
+		MaxConcurrentRemoteWrite: a.MaxConcurrentRemoteWrite,
 	}
 
 	promql.Register(router.WithPrefix("/api/v1"))
