@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"unsafe"
 
 	goredis "github.com/go-redis/redis/v8"
 
@@ -262,7 +263,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 
 		key := metricKeyPrefix + metricID2String(data.ID)
 
-		commands[i] = pipe.Append(ctx, key, string(values))
+		commands[i] = pipe.Append(ctx, key, bytesToString(values))
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
@@ -336,7 +337,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		metricKey := metricKeyPrefix + idStr
 		offsetKey := offsetKeyPrefix + idStr
 
-		commands[i] = pipe.GetSet(ctx, metricKey, string(values))
+		commands[i] = pipe.GetSet(ctx, metricKey, bytesToString(values))
 		ids[i] = idStr
 
 		pipe.Expire(ctx, metricKey, defaultTTL)
@@ -678,7 +679,7 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 func dataFromValues(id types.MetricID, values []byte, dataSerialized []serializedPoints) (types.MetricData, error) {
 	data := types.MetricData{}
 	buffer := bytes.NewReader(values)
-	pointCount := len(values) / 24
+	pointCount := len(values) / serializedSize
 
 	if cap(dataSerialized) < pointCount {
 		dataSerialized = make([]serializedPoints, pointCount)
@@ -712,7 +713,7 @@ func valuesFromData(data types.MetricData, buffer *bytes.Buffer, dataSerialized 
 		buffer.Reset()
 	}
 
-	buffer.Grow(len(data.Points) * 24)
+	buffer.Grow(len(data.Points) * serializedSize)
 
 	if cap(dataSerialized) < len(data.Points) {
 		dataSerialized = make([]serializedPoints, len(data.Points))
@@ -733,4 +734,9 @@ func valuesFromData(data types.MetricData, buffer *bytes.Buffer, dataSerialized 
 	}
 
 	return buffer.Bytes(), nil
+}
+
+// bytesToString converts byte slice to string.
+func bytesToString(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }
