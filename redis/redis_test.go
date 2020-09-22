@@ -142,6 +142,20 @@ func Test_valuesSerialization(t *testing.T) {
 			},
 		},
 		{
+			name: "big_timestamp",
+			data: types.MetricData{
+				ID: MetricIDTest1,
+				Points: []types.MetricPoint{
+					{Timestamp: 20, Value: 0},
+					{Timestamp: 1600787944491, Value: -0},
+					{Timestamp: 16007879444910, Value: -1e9},
+					{Timestamp: 160078794449100, Value: 1e9},
+					{Timestamp: 1600787944491000, Value: 1e25},
+				},
+				TimeToLive: 86400 * 9000,
+			},
+		},
+		{
 			name: "medium_30",
 			data: types.MetricData{
 				ID:         MetricIDTest1,
