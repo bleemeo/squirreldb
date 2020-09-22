@@ -18,5 +18,13 @@ scrape_configs:
 
 remote_write:
 - url: http://squirreldb:9201/write
+# If you want to stress-test SquirrelDB and send much more metrics, uncomment and
+# copy/paste this additional remote write and just increment the store01 number for each copy.
+#- url: http://squirreldb:9201/write
+#  write_relabel_configs:
+#  - target_label: job
+#    source_labels: ['job']
+#    replacement: "store01-$1"
+
 remote_read:
 - url: http://squirreldb:9201/read
