@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"unsafe"
 
 	goredis "github.com/go-redis/redis/v8"
 
@@ -263,7 +262,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 
 		key := metricKeyPrefix + metricID2String(data.ID)
 
-		commands[i] = pipe.Append(ctx, key, bytesToString(values))
+		commands[i] = pipe.Append(ctx, key, string(values))
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
@@ -337,7 +336,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		metricKey := metricKeyPrefix + idStr
 		offsetKey := offsetKeyPrefix + idStr
 
-		commands[i] = pipe.GetSet(ctx, metricKey, bytesToString(values))
+		commands[i] = pipe.GetSet(ctx, metricKey, string(values))
 		ids[i] = idStr
 
 		pipe.Expire(ctx, metricKey, defaultTTL)
@@ -734,9 +733,4 @@ func valuesFromData(data types.MetricData, buffer *bytes.Buffer, dataSerialized 
 	}
 
 	return buffer.Bytes(), nil
-}
-
-// bytesToString converts byte slice to string.
-func bytesToString(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
 }
