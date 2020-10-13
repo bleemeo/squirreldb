@@ -105,6 +105,7 @@ func statesTableCreateQuery(session *gocql.Session) *gocql.Query {
 			value text,
 			PRIMARY KEY (name)
 		)
+		WITH memtable_flush_period_in_ms = 300000
 	`)
 
 	return query

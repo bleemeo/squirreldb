@@ -301,6 +301,7 @@ func locksTableCreateQuery(session *gocql.Session) *gocql.Query {
 			timestamp timestamp,
 			PRIMARY KEY (name)
 		)
+		WITH memtable_flush_period_in_ms = 60000
 	`)
 
 	return query
