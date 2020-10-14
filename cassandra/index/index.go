@@ -127,10 +127,10 @@ func (c *CassandraIndex) setIDData(key uint64, value idData) {
 
 type storeImpl interface {
 	Init() error
-	SelectLabels2ID(sortedLabelsString string) (types.MetricID, error)
-	SelectID2Labels(id types.MetricID) (labels.Labels, error)
+	SelectLabelsList2ID(sortedLabelsListString []string) (map[string]types.MetricID, error)
+	SelectIDS2Labels(id []types.MetricID) (map[types.MetricID]labels.Labels, error)
 	SelectExpiration(day time.Time) ([]byte, error)
-	SelectID2LabelsExpiration(id types.MetricID) (time.Time, error)
+	SelectIDS2LabelsExpiration(id []types.MetricID) (map[types.MetricID]time.Time, error)
 	SelectPostingByName(name string) bytesIter
 	SelectPostingByNameValue(name string, value string) ([]byte, error)
 	SelectValueForName(name string) ([]string, [][]byte, error)
@@ -237,7 +237,7 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 }
 
 // Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit,gocyclo
+func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -261,153 +261,42 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 	it := allPosting.Iterator()
 
 	labelNames := make(map[string]interface{})
+	pendingIds := make([]types.MetricID, 0, 10000)
 
 	for ctx.Err() == nil {
-		id, eof := it.Next()
-		if eof {
+		pendingIds = pendingIds[:0]
+
+		for ctx.Err() == nil {
+			id, eof := it.Next()
+			if eof {
+				break
+			}
+
+			metricID := types.MetricID(id)
+
+			count++
+
+			_, _ = allGoodIds.AddN(id)
+
+			pendingIds = append(pendingIds, metricID)
+
+			if len(pendingIds) > 10000 {
+				break
+			}
+		}
+
+		if len(pendingIds) == 0 {
 			break
 		}
 
-		metricID := types.MetricID(id)
-
-		count++
-
-		_, _ = allGoodIds.AddN(id)
-
-		lbls, err := c.store.SelectID2Labels(metricID)
-		if err == gocql.ErrNotFound {
-			hadIssue = true
-
-			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", metricID)
-
-			if doFix {
-				bulkDeleter.PrepareDelete(metricID, nil, false)
-			}
-
-			continue
-		}
-
-		if err != nil {
-			return hadIssue, err
-		}
-
-		for _, l := range lbls {
-			labelNames[l.Name] = nil
-		}
-
-		expiration, err := c.store.SelectID2LabelsExpiration(metricID)
-		if err == gocql.ErrNotFound {
-			hadIssue = true
-
-			return hadIssue, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID, lbls.String())
-		}
-
-		if err != nil {
-			return hadIssue, err
-		}
-
-		metricID2, err := c.store.SelectLabels2ID(lbls.String())
-		if err == gocql.ErrNotFound {
-			hadIssue = true
-
-			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", metricID, lbls.String())
-
-			if doFix {
-				bulkDeleter.PrepareDelete(metricID, lbls, false)
-			}
-
-			continue
-		}
-
-		if metricID != metricID2 {
-			lbls2, err := c.store.SelectID2Labels(metricID2)
-			if err != nil && err != gocql.ErrNotFound {
-				return hadIssue, err
-			}
-
+		if len(pendingIds) > 0 {
+			newOk, err := c.verifyBulk(ctx, w, doFix, pendingIds, bulkDeleter, labelNames, allPosting)
 			if err != nil {
-				lbls2 = nil
-			}
-
-			expiration2, err := c.store.SelectID2LabelsExpiration(metricID2)
-			if err != nil && err != gocql.ErrNotFound {
 				return hadIssue, err
 			}
 
-			if err == gocql.ErrNotFound && lbls2 != nil {
-				hadIssue = true
-
-				return hadIssue, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID2, lbls2.String())
-			}
-
-			switch {
-			case lbls2 == nil:
-				hadIssue = true
-
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
-					metricID,
-					lbls.String(),
-					metricID2,
-				)
-
-				if doFix {
-					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(metricID2, lbls, false)
-					bulkDeleter.PrepareDelete(metricID, lbls, false)
-				}
-			case !allPosting.Contains(uint64(metricID2)):
-				hadIssue = true
-
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
-					metricID,
-					lbls.String(),
-					metricID2,
-				)
-
-				if doFix {
-					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(metricID2, lbls2, false)
-					bulkDeleter.PrepareDelete(metricID, lbls, false)
-				}
-			default:
-				hadIssue = true
-
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
-					metricID,
-					lbls.String(),
-					metricID2,
-					lbls2.String(),
-					expiration,
-					expiration2,
-				)
-				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
-				if doFix {
-					bulkDeleter.PrepareDelete(metricID, lbls, true)
-				}
-			}
-
-			continue
+			countOk += newOk
 		}
-
-		if time.Now().Add(24 * time.Hour).After(expiration) {
-			hadIssue = true
-
-			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", metricID, lbls.String(), expiration)
-
-			if doFix {
-				bulkDeleter.PrepareDelete(metricID, lbls, false)
-			}
-
-			continue
-		}
-
-		countOk++
 	}
 
 	fmt.Fprintf(w, "Index contains %d metrics and %d ok. There is %d label names\n", count, countOk, len(labelNames))
@@ -458,6 +347,163 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 	return hadIssue, ctx.Err()
 }
 
+func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, labelNames map[string]interface{}, allPosting *roaring.Bitmap) (newOk int, err error) { // nolint: gocognit
+	id2Labels, err := c.store.SelectIDS2Labels(ids)
+	if err != nil {
+		return 0, err
+	}
+
+	id2expiration, err := c.store.SelectIDS2LabelsExpiration(ids)
+	if err != nil {
+		return 0, err
+	}
+
+	allLabelsString := make([]string, 0, len(ids))
+
+	for _, id := range ids {
+		lbls, ok := id2Labels[id]
+		if !ok {
+			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
+
+			if doFix {
+				bulkDeleter.PrepareDelete(id, nil, false)
+			}
+
+			continue
+		}
+
+		for _, l := range lbls {
+			labelNames[l.Name] = nil
+		}
+
+		allLabelsString = append(allLabelsString, lbls.String())
+
+		_, ok = id2expiration[id]
+		if !ok {
+			return 0, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id, lbls.String())
+		}
+	}
+
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
+
+	labels2ID, err := c.store.SelectLabelsList2ID(allLabelsString)
+	if err != nil {
+		return 0, err
+	}
+
+	countOk := 0
+
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+
+		lbls, ok := id2Labels[id]
+		if !ok {
+			continue
+		}
+
+		expiration, ok := id2expiration[id]
+		if !ok {
+			continue
+		}
+
+		id2, ok := labels2ID[lbls.String()]
+		if !ok {
+			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
+
+			if doFix {
+				bulkDeleter.PrepareDelete(id, lbls, false)
+			}
+
+			continue
+		}
+
+		if id != id2 {
+			tmp, err := c.store.SelectIDS2Labels([]types.MetricID{id2})
+			if err != nil {
+				return 0, err
+			}
+
+			lbls2 := tmp[id2]
+
+			tmp2, err := c.store.SelectIDS2LabelsExpiration([]types.MetricID{id2})
+			if err != nil {
+				return 0, err
+			}
+
+			expiration2, ok := tmp2[id2]
+			if !ok && lbls2 != nil {
+				return 0, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id2, lbls2.String())
+			}
+
+			switch {
+			case lbls2 == nil:
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
+					id,
+					lbls.String(),
+					id2,
+				)
+
+				if doFix {
+					// well, the only solution is to delete *both* ID.
+					bulkDeleter.PrepareDelete(id2, lbls, false)
+					bulkDeleter.PrepareDelete(id, lbls, false)
+				}
+			case !allPosting.Contains(uint64(id2)):
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
+					id,
+					lbls.String(),
+					id2,
+				)
+
+				if doFix {
+					// well, the only solution is to delete *both* ID.
+					bulkDeleter.PrepareDelete(id2, lbls2, false)
+					bulkDeleter.PrepareDelete(id, lbls, false)
+				}
+			default:
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
+					id,
+					lbls.String(),
+					id2,
+					lbls2.String(),
+					expiration,
+					expiration2,
+				)
+				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
+				if doFix {
+					bulkDeleter.PrepareDelete(id, lbls, true)
+				}
+			}
+
+			continue
+		}
+
+		if time.Now().Add(24 * time.Hour).After(expiration) {
+			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
+
+			if doFix {
+				bulkDeleter.PrepareDelete(id, lbls, false)
+			}
+
+			continue
+		}
+
+		countOk++
+	}
+
+	return countOk, nil
+}
+
 // AllIDs returns all ids stored in the index.
 func (c *CassandraIndex) AllIDs() ([]types.MetricID, error) {
 	bitmap, err := c.postings(allPostingLabelName, allPostingLabelName)
@@ -489,55 +535,69 @@ func (c *CassandraIndex) postings(name string, value string) (*roaring.Bitmap, e
 	return result, err
 }
 
-// LookupLabels returns a Label list corresponding to the specified ID.
-func (c *CassandraIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
-	return c.lookupLabels(id, c.options.IncludeID, time.Now())
+// LookupLabels returns a Label list for each specified ID.
+func (c *CassandraIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
+	return c.lookupLabels(ids, c.options.IncludeID, time.Now())
 }
 
-func (c *CassandraIndex) lookupLabels(id types.MetricID, addID bool, now time.Time) (labels.Labels, error) {
+func (c *CassandraIndex) lookupLabels(ids []types.MetricID, addID bool, now time.Time) ([]labels.Labels, error) {
 	start := time.Now()
+
+	founds := make([]bool, len(ids))
+	labelsDataList := make([]labelsData, len(ids))
+	idToQuery := make([]types.MetricID, 0)
 
 	c.searchMutex.Lock()
 
-	labelsData, found := c.idsToLabels[id]
+	for i, id := range ids {
+		labelsDataList[i], founds[i] = c.idsToLabels[id]
+		if !founds[i] {
+			idToQuery = append(idToQuery, id)
+		}
+	}
 
 	c.searchMutex.Unlock()
 
-	if !found {
-		var err error
-
-		labelsData.labels, err = c.store.SelectID2Labels(id)
-
-		if err != nil && err != gocql.ErrNotFound {
+	if len(idToQuery) > 0 {
+		idToLabels, err := c.store.SelectIDS2Labels(idToQuery)
+		if err != nil {
 			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 			return nil, err
 		}
-	}
 
-	labelsData.expirationTime = now.Add(cacheExpirationDelay)
+		for i, id := range ids {
+			if !founds[i] {
+				var ok bool
+
+				labelsDataList[i].labels, ok = idToLabels[id]
+				if !ok {
+					return nil, fmt.Errorf("labels for metric ID %d not found", id)
+				}
+			}
+
+			labelsDataList[i].expirationTime = now.Add(cacheExpirationDelay)
+		}
+	}
 
 	c.searchMutex.Lock()
 
-	c.idsToLabels[id] = labelsData
+	for i, id := range ids {
+		c.idsToLabels[id] = labelsDataList[i]
+	}
 
 	c.searchMutex.Unlock()
 
-	labelList := make(labels.Labels, len(labelsData.labels))
-	for i, v := range labelsData.labels {
-		labelList[i] = labels.Label{
-			Name:  v.Name,
-			Value: v.Value,
+	labelList := make([]labels.Labels, len(ids))
+	for i, id := range ids {
+		labelList[i] = labelsDataList[i].labels
+		if addID {
+			labelList[i] = labelsDataList[i].labels.Copy()
+			labelList[i] = append(labelList[i], labels.Label{
+				Name:  idLabelName,
+				Value: strconv.FormatInt(int64(id), 10),
+			})
 		}
-	}
-
-	if addID {
-		label := labels.Label{
-			Name:  idLabelName,
-			Value: strconv.FormatInt(int64(id), 10),
-		}
-
-		labelList = append(labelList, label)
 	}
 
 	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
@@ -552,7 +612,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, labelsList []labels.Labe
 	return c.lookupIDs(ctx, labelsList, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labels, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labels, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit,gocyclo
 	start := time.Now()
 
 	defer func() {
@@ -562,8 +622,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 	LookupIDs.Add(float64(len(labelsList)))
 
 	idsData := make([]idData, len(labelsList))
-	founds := make([]bool, len(labelsList))
-	foundCount := 0
+	requests := make([]lookupMetricRequest, 0)
 	ttls := make([]int64, len(labelsList))
 	labelsKeys := make([]uint64, len(labelsList))
 
@@ -576,59 +635,106 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 		if ttls[i] == 0 {
 			ttls[i] = int64(c.options.DefaultTimeToLive.Seconds())
 		}
+
+		labelsKeys[i] = labels.Hash()
 	}
+
+	labelsToRequestIndex := make(map[string]int)
 
 	c.lookupIDMutex.Lock()
 	for i, labels := range labelsList {
-		labelsKeys[i] = labels.Hash()
-		idsData[i], founds[i] = c.getIDData(labelsKeys[i], labels)
+		var found bool
 
-		if founds[i] {
-			foundCount++
+		idData, found := c.getIDData(labelsKeys[i], labels)
+
+		if found {
+			idsData[i] = idData
+		} else {
+			sortedLabels := sortLabels(labels)
+			sortedLabelsString := sortedLabels.String()
+			if j, ok := labelsToRequestIndex[sortedLabelsString]; ok {
+				requests[j].labelsIndices = append(requests[j].labelsIndices, i)
+			} else {
+				wantedEntryExpiration := now.Add(time.Duration(ttls[i]) * time.Second)
+				cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
+				cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
+
+				requests = append(requests, lookupMetricRequest{
+					sortedLabels:        sortedLabels,
+					sortedLabelsString:  sortedLabelsString,
+					labelsIndices:       []int{i},
+					cassandraExpiration: cassandraExpiration,
+				})
+			}
 		}
 	}
 	c.lookupIDMutex.Unlock()
 
-	LookupIDMisses.Add(float64(len(labelsList) - foundCount))
+	LookupIDMisses.Add(float64(len(requests)))
 
 	if c.options.IncludeID {
-		if err := c.lookupIDsFromLabels(labelsList, idsData, founds); err != nil {
+		if err := c.lookupIDsFromLabels(labelsList, requests); err != nil {
 			return nil, nil, fmt.Errorf("lookup with %s failed: %v", idLabelName, err)
 		}
 	}
 
-	var (
-		requests []createMetricRequest
-		err      error
-	)
+	labelsToQuery := make([]string, 0, len(requests))
 
-	duplicatedMetric := make(map[string][]int)
-
-	for i, labels := range labelsList {
-		if founds[i] {
+	for i, req := range requests {
+		if req.found {
 			continue
 		}
 
-		sortedLabels := sortLabels(labels)
-		sortedLabelsString := sortedLabels.String()
+		labelsToQuery = append(labelsToQuery, requests[i].sortedLabelsString)
+	}
 
-		duplicatedMetric[sortedLabelsString] = append(duplicatedMetric[sortedLabelsString], i)
+	if len(labelsToQuery) > 0 {
+		labels2ID, err := c.store.SelectLabelsList2ID(labelsToQuery)
+		if err != nil {
+			return nil, nil, fmt.Errorf("searching metric failed: %v", err)
+		}
 
-		if len(duplicatedMetric[sortedLabelsString]) == 1 {
-			requests, err = c.searchMetric(requests, sortedLabelsString, sortedLabels, &idsData[i], &founds[i], ttls[i], now)
-			if err != nil {
-				return nil, nil, fmt.Errorf("searching metric failed: %v", err)
+		idsToQuery := make([]types.MetricID, 0, len(labelsToQuery))
+
+		for i, req := range requests {
+			if req.found {
+				continue
 			}
-		} else {
-			iFirst := duplicatedMetric[sortedLabelsString][0]
-			if founds[iFirst] {
-				idsData[i] = idsData[iFirst]
-				founds[i] = true
+
+			if id, ok := labels2ID[req.sortedLabelsString]; ok {
+				idsToQuery = append(idsToQuery, id)
+				requests[i].newID = id
+			}
+		}
+
+		ids2Expiration, err := c.store.SelectIDS2LabelsExpiration(idsToQuery)
+		if err != nil {
+			return nil, nil, fmt.Errorf("searching metric failed: %v", err)
+		}
+
+		for i, req := range requests {
+			if req.found {
+				continue
+			}
+
+			if expiration, ok := ids2Expiration[req.newID]; ok {
+				requests[i].cassandraExpiration = expiration
+				requests[i].found = true
 			}
 		}
 	}
 
-	if len(requests) > 0 {
+	notFoundCount := 0
+
+	for _, req := range requests {
+		if !req.found {
+			notFoundCount++
+		}
+	}
+
+	LookupIDNew.Add(float64(notFoundCount))
+
+	if notFoundCount > 0 {
 		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
@@ -637,24 +743,25 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 			return nil, nil, errors.New("newMetricLock is not acquired")
 		}
 
-		newIDs, err := c.createMetrics(requests)
+		err := c.createMetrics(requests)
 
 		c.newMetricLock.Unlock()
 
 		if err != nil {
 			return nil, nil, err
 		}
+	}
 
-		for j, id := range newIDs {
-			req := requests[j]
+	for _, req := range requests {
+		if !req.found {
+			return nil, nil, errors.New("unexpected error in lookup ID: the metric is not found even after creation")
+		}
 
-			for _, i := range duplicatedMetric[req.sortedLabelsString] {
-				wantedEntryExpiration := now.Add(time.Duration(ttls[i]) * time.Second)
-				cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-				cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
-				idsData[i].id = id
-				idsData[i].cassandraEntryExpiration = cassandraExpiration
-				founds[i] = true
+		for _, i := range req.labelsIndices {
+			idsData[i] = idData{
+				id:                       req.newID,
+				cassandraEntryExpiration: req.cassandraExpiration,
+				unsortedLabels:           labelsList[i],
 			}
 		}
 	}
@@ -665,8 +772,8 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 	ids := make([]types.MetricID, len(labelsList))
 
 	for i, idData := range idsData {
-		if !founds[i] {
-			return nil, nil, errors.New("unexpected error in lookup ID: the metric is not found even after creation")
+		if idData.id == 0 {
+			return nil, nil, errors.New("unexpected error in lookup ID: metric with ID = 0 was assigned")
 		}
 
 		ids[i] = idData.id
@@ -690,40 +797,6 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, labelsList []labels.Labe
 	}
 
 	return ids, ttls, nil
-}
-
-// search metric ID by labels in Cassadran. Update and return requests to create metric if not found.
-func (c *CassandraIndex) searchMetric(requests []createMetricRequest, sortedLabelsString string, sortedLabels labels.Labels, idData *idData, found *bool, ttl int64, now time.Time) ([]createMetricRequest, error) {
-	if id, err := c.store.SelectLabels2ID(sortedLabelsString); err == nil {
-		idData.id = id
-		idData.cassandraEntryExpiration, err = c.store.SelectID2LabelsExpiration(idData.id)
-
-		if err != nil && err != gocql.ErrNotFound {
-			return nil, err
-		}
-
-		if err != gocql.ErrNotFound {
-			*found = true
-		}
-	} else if err != gocql.ErrNotFound {
-		return nil, err
-	}
-
-	if !*found {
-		LookupIDNew.Inc()
-
-		wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
-		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
-
-		requests = append(requests, createMetricRequest{
-			sortedLabelsString:  sortedLabelsString,
-			sortedLabels:        sortedLabels,
-			cassandraExpiration: cassandraExpiration,
-		})
-	}
-
-	return requests, nil
 }
 
 func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time.Time, newExpiration time.Time) error {
@@ -757,30 +830,33 @@ func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time
 }
 
 // lookupIDsFromLabels will idData for metrics which as the idLabelName label.
-func (c *CassandraIndex) lookupIDsFromLabels(labelsList []labels.Labels, idsData []idData, founds []bool) error {
+func (c *CassandraIndex) lookupIDsFromLabels(labelsList []labels.Labels, requests []lookupMetricRequest) error {
 	for i, labels := range labelsList {
-		if founds[i] {
+		if requests[i].found {
 			continue
 		}
 
 		idStr := labels.Get(idLabelName)
 		if idStr != "" {
-			id, err := strconv.ParseInt(idStr, 10, 0)
+			id, err := strconv.ParseUint(idStr, 10, 0)
 			if err != nil {
 				return err
 			}
 
-			founds[i] = true
-			idsData[i].id = types.MetricID(id)
-			idsData[i].cassandraEntryExpiration, err = c.store.SelectID2LabelsExpiration(idsData[i].id)
+			requests[i].found = true
+			requests[i].newID = types.MetricID(id)
 
-			if err == gocql.ErrNotFound {
+			tmp, err := c.store.SelectIDS2LabelsExpiration([]types.MetricID{types.MetricID(id)})
+			if err != nil {
+				return err
+			}
+
+			expiration, ok := tmp[types.MetricID(id)]
+			if !ok {
 				return fmt.Errorf("label %s (value is %s) is provided but the metric does not exists", idLabelName, idStr)
 			}
 
-			if err != nil {
-				return err
-			}
+			requests[i].cassandraExpiration = expiration
 		}
 	}
 
@@ -830,11 +906,13 @@ func freeFreeID(bitmap *roaring.Bitmap) uint64 {
 	return results[0]
 }
 
-type createMetricRequest struct {
+type lookupMetricRequest struct {
+	labelsIndices       []int
 	sortedLabelsString  string
 	sortedLabels        labels.Labels
 	cassandraExpiration time.Time
-	newID               uint64
+	newID               types.MetricID
+	found               bool
 }
 
 // createMetrics creates a new metric IDs associated with provided request
@@ -867,9 +945,8 @@ type createMetricRequest struct {
 // * If expired, delete entry for this metric from the index (the opposite of creation)
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.MetricID, error) { // nolint: gocognit
+func (c *CassandraIndex) createMetrics(requests []lookupMetricRequest) error { // nolint: gocognit
 	start := time.Now()
-	results := make([]types.MetricID, len(requests))
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 	postingUpdates := make([]postingUpdateRequest, 0)
 	labelToPostingUpdates := make(map[string]map[string]int)
@@ -880,40 +957,49 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 
 	allPosting, err := c.postings(allPostingLabelName, allPostingLabelValue)
 	if err != nil {
-		return nil, err
+		return err
+	}
+
+	labelsToQuery := make([]string, 0, len(requests))
+
+	for _, req := range requests {
+		if req.newID == 0 {
+			labelsToQuery = append(labelsToQuery, req.sortedLabelsString)
+		}
+	}
+
+	labels2ID, err := c.store.SelectLabelsList2ID(labelsToQuery)
+	if err != nil {
+		return err
 	}
 
 	for i, req := range requests {
 		if req.newID == 0 {
 			// Be sure no-one registered the metric before we took the lock.
-			if id, err := c.store.SelectLabels2ID(req.sortedLabelsString); err == nil {
-				requests[i].newID = uint64(id)
+			if id, ok := labels2ID[req.sortedLabelsString]; ok {
+				requests[i].newID = id
 
 				LookupIDConcurrentNew.Inc()
-			} else if err != gocql.ErrNotFound {
-				return nil, err
-			}
-
-			if requests[i].newID == 0 {
-				requests[i].newID = freeFreeID(allPosting)
+			} else {
+				requests[i].newID = types.MetricID(freeFreeID(allPosting))
 			}
 		}
 
 		if requests[i].newID == 0 {
-			return nil, errors.New("too many metrics registered, unable to find a free ID")
+			return errors.New("too many metrics registered, unable to find a free ID")
 		}
 
-		_, err = allPosting.Add(requests[i].newID)
+		_, err = allPosting.Add(uint64(requests[i].newID))
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		results[i] = types.MetricID(requests[i].newID)
+		requests[i].found = true
 
 		day := req.cassandraExpiration.Truncate(24 * time.Hour)
 		expReq := expirationUpdateRequests[day]
 
-		expReq.AddIDs = append(expReq.AddIDs, requests[i].newID)
+		expReq.AddIDs = append(expReq.AddIDs, uint64(requests[i].newID))
 
 		expirationUpdateRequests[day] = expReq
 
@@ -933,7 +1019,7 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 				m[label.Value] = idx
 			}
 
-			postingUpdates[idx].AddIDs = append(postingUpdates[idx].AddIDs, requests[i].newID)
+			postingUpdates[idx].AddIDs = append(postingUpdates[idx].AddIDs, uint64(requests[i].newID))
 		}
 	}
 
@@ -942,7 +1028,7 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 
 		err = c.expirationUpdate(req)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -951,19 +1037,19 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 	_, err = allPosting.WriteTo(&buffer)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.store.InsertPostings(allPostingLabelName, allPostingLabelValue, buffer.Bytes())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range requests {
 			req := req
 			task := func() error {
-				return c.store.InsertID2Labels(types.MetricID(req.newID), req.sortedLabels, req.cassandraExpiration)
+				return c.store.InsertID2Labels(req.newID, req.sortedLabels, req.cassandraExpiration)
 			}
 			select {
 			case work <- task:
@@ -974,7 +1060,7 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
@@ -992,14 +1078,14 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range requests {
 			req := req
 			task := func() error {
-				return c.store.InsertLabels2ID(req.sortedLabelsString, types.MetricID(req.newID))
+				return c.store.InsertLabels2ID(req.sortedLabelsString, req.newID)
 			}
 			select {
 			case work <- task:
@@ -1010,10 +1096,10 @@ func (c *CassandraIndex) createMetrics(requests []createMetricRequest) ([]types.
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return results, nil
+	return nil
 }
 
 // Search returns a list of IDs corresponding to the specified MetricLabelMatcher list
@@ -1322,12 +1408,21 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 
 	dayToExpireUpdates := make(map[time.Time]int)
 	bulkDelete := newBulkDeleter(c)
+	idToDeleteWithLabels := make([]types.MetricID, 0)
 
-	for _, intID := range ids {
-		id := types.MetricID(intID)
+	metricIDs := make([]types.MetricID, len(ids))
+	for i, intID := range ids {
+		metricIDs[i] = types.MetricID(intID)
+	}
 
-		expire, err := c.store.SelectID2LabelsExpiration(id)
-		if err == gocql.ErrNotFound {
+	expires, err := c.store.SelectIDS2LabelsExpiration(metricIDs)
+	if err != nil {
+		return err
+	}
+
+	for _, id := range metricIDs {
+		expire, ok := expires[id]
+		if !ok {
 			// This shouldn't happen. It means that metric were partially created.
 			// Cleanup this metric from all posting if ever it's present in this list.
 			expireGhostMetric.Inc()
@@ -1335,11 +1430,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 			bulkDelete.PrepareDelete(id, nil, false)
 
 			continue
-		} else if err != nil {
-			return err
-		}
-
-		if expire.After(now) {
+		} else if expire.After(now) {
 			expireDay := expire.Truncate(24 * time.Hour)
 
 			idx, ok := dayToExpireUpdates[expireDay]
@@ -1351,17 +1442,23 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 				dayToExpireUpdates[expireDay] = idx
 			}
 
-			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, intID)
+			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id))
 
 			continue
 		}
 
-		sortedLabels, err := c.lookupLabels(id, false, now)
+		idToDeleteWithLabels = append(idToDeleteWithLabels, id)
+	}
+
+	if len(idToDeleteWithLabels) > 0 {
+		labelLists, err := c.lookupLabels(idToDeleteWithLabels, false, now)
 		if err != nil {
 			return err
 		}
 
-		bulkDelete.PrepareDelete(id, sortedLabels, false)
+		for i, id := range idToDeleteWithLabels {
+			bulkDelete.PrepareDelete(id, labelLists[i], false)
+		}
 	}
 
 	c.newMetricLock.Lock()
@@ -1369,7 +1466,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ids []uint64, now time.Time) error
 
 	start := time.Now()
 
-	err := bulkDelete.Delete()
+	err = bulkDelete.Delete()
 	if err != nil {
 		return err
 	}
@@ -1642,11 +1739,13 @@ func (c *CassandraIndex) postingsForMatchers(matchers []*labels.Matcher) (ids []
 		now := time.Now()
 		newIds := make([]types.MetricID, 0, len(ids))
 
-		for _, id := range ids {
-			lbls, err := c.lookupLabels(id, false, now)
-			if err != nil {
-				return nil, err
-			}
+		idToLabels, err := c.lookupLabels(ids, false, now)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, id := range ids {
+			lbls := idToLabels[i]
 
 			if matcherMatches(matchers, lbls) {
 				newIds = append(newIds, id)
@@ -2020,59 +2119,88 @@ func (s cassandraStore) InsertExpiration(day time.Time, bitset []byte) error {
 	).Exec()
 }
 
-func (s cassandraStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, error) {
+func (s cassandraStore) SelectLabelsList2ID(sortedLabelsListString []string) (map[string]types.MetricID, error) {
 	start := time.Now()
 
 	defer func() {
 		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
-		"SELECT id FROM index_labels2id WHERE labels = ?",
-		sortedLabelsString,
+	iter := s.session.Query(
+		"SELECT labels, id FROM index_labels2id WHERE labels in ?",
+		sortedLabelsListString,
+	).Iter()
+
+	var (
+		cqlID  int64
+		labels string
 	)
 
-	var cqlID int64
+	result := make(map[string]types.MetricID)
 
-	err := query.Scan(&cqlID)
+	for iter.Scan(&labels, &cqlID) {
+		result[labels] = types.MetricID(cqlID)
+	}
 
-	return types.MetricID(cqlID), err
+	err := iter.Close()
+
+	return result, err
 }
 
-func (s cassandraStore) SelectID2Labels(id types.MetricID) (labelList labels.Labels, err error) {
+func (s cassandraStore) SelectIDS2Labels(ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
 	start := time.Now()
 
 	defer func() {
 		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
-		"SELECT labels FROM index_id2labels WHERE id = ?",
-		int64(id),
+	iter := s.session.Query(
+		"SELECT id, labels FROM index_id2labels WHERE id IN ?",
+		ids,
+	).Iter()
+
+	var (
+		lbls labels.Labels
+		id   int64
 	)
 
-	err = query.Scan(&labelList)
+	results := make(map[types.MetricID]labels.Labels, len(ids))
 
-	return
+	for iter.Scan(&id, &lbls) {
+		results[types.MetricID(id)] = lbls
+	}
+
+	err := iter.Close()
+
+	return results, err
 }
 
-func (s cassandraStore) SelectID2LabelsExpiration(id types.MetricID) (time.Time, error) {
+func (s cassandraStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {
 		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
-		"SELECT expiration_date FROM index_id2labels WHERE id = ?",
-		int64(id),
+	iter := s.session.Query(
+		"SELECT id, expiration_date FROM index_id2labels WHERE id in ?",
+		ids,
+	).Iter()
+
+	var (
+		expiration time.Time
+		id         int64
 	)
 
-	var expiration time.Time
+	results := make(map[types.MetricID]time.Time, len(ids))
 
-	err := query.Scan(&expiration)
+	for iter.Scan(&id, &expiration) {
+		results[types.MetricID(id)] = expiration
+	}
 
-	return expiration, err
+	err := iter.Close()
+
+	return results, err
 }
 
 func (s cassandraStore) SelectExpiration(day time.Time) ([]byte, error) {

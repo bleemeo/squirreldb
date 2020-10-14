@@ -46,32 +46,21 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		return &seriesIter{}
 	}
 
-	var id2Labels map[types.MetricID][]labels.Label
+	labelsList, err := q.index.LookupLabels(ids)
+	if err != nil {
+		return &seriesIter{err: err}
+	}
+
+	id2Labels := make(map[types.MetricID]labels.Labels, len(labelsList))
+
+	for i, labels := range labelsList {
+		id2Labels[ids[i]] = labels
+	}
 
 	if sortSeries {
-		id2Labels = make(map[types.MetricID][]labels.Label, len(ids))
-
-		for _, id := range ids {
-			tmp, err := q.index.LookupLabels(id)
-			if err != nil {
-				return &seriesIter{err: err}
-			}
-
-			l := make([]labels.Label, len(tmp))
-
-			for i, x := range tmp {
-				l[i] = labels.Label{
-					Name:  x.Name,
-					Value: x.Value,
-				}
-			}
-
-			id2Labels[id] = l
-		}
-
 		sort.Slice(ids, func(i, j int) bool {
-			aLabels := id2Labels[ids[i]]
-			bLabels := id2Labels[ids[j]]
+			aLabels := labelsList[i]
+			bLabels := labelsList[j]
 			return labels.Compare(aLabels, bLabels) < 0
 		})
 	}

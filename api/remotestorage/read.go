@@ -167,7 +167,7 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 
 // Returns a pointer of a TimeSeries generated from a ID and a MetricData.
 func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
-	labels, err := index.LookupLabels(id)
+	labelsList, err := index.LookupLabels([]types.MetricID{id})
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.
 	promSample := promSamplesFromPoints(data.Points)
 
 	promQueryResult := &prompb.TimeSeries{
-		Labels:  labelsToLabelsProto(labels, nil),
+		Labels:  labelsToLabelsProto(labelsList[0], nil),
 		Samples: promSample,
 	}
 

@@ -310,21 +310,18 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		}
 	}
 
-	for i, id := range metricsIDs {
-		if i == 0 {
-			continue
-		}
+	labelsList, err := cassandraIndex.LookupLabels(metricsIDs[1:])
+	if err != nil {
+		log.Fatalf("LookupLabels() failed: %v", err)
+	}
 
-		labels, err := cassandraIndex.LookupLabels(id)
-
-		if err != nil {
-			log.Fatalf("LookupLabels(%d) failed: %v", i, err)
-		}
+	for i, id := range metricsIDs[1:] {
+		labels := labelsList[i]
 
 		got := labels.Map()
 
-		if !reflect.DeepEqual(got, metrics[i]) {
-			log.Fatalf("LookupLabels(%d) = %v, want %v", i, got, metrics[i])
+		if !reflect.DeepEqual(got, metrics[i+1]) {
+			log.Fatalf("LookupLabels(%v) = %v, want %v", id, got, metrics[i+1])
 		}
 	}
 

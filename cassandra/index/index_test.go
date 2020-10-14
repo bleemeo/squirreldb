@@ -165,28 +165,39 @@ func (s *mockStore) Init() error {
 	return nil
 }
 
-func (s *mockStore) SelectLabels2ID(sortedLabelsString string) (types.MetricID, error) {
+func (s *mockStore) SelectLabelsList2ID(input []string) (map[string]types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	result, ok := s.labels2id[sortedLabelsString]
-	if !ok {
-		return 0, gocql.ErrNotFound
+	results := make(map[string]types.MetricID, len(input))
+
+	for _, sortedLabelsString := range input {
+
+		result, ok := s.labels2id[sortedLabelsString]
+		if ok {
+			results[sortedLabelsString] = result
+		}
 	}
 
-	return result, nil
+	return results, nil
 }
 
-func (s *mockStore) SelectID2Labels(id types.MetricID) (labels.Labels, error) {
+func (s *mockStore) SelectIDS2Labels(ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	result, ok := s.id2labels[id]
-	if !ok {
-		return nil, gocql.ErrNotFound
+	results := make(map[types.MetricID]labels.Labels, len(ids))
+
+	for _, id := range ids {
+		var ok bool
+
+		results[id], ok = s.id2labels[id]
+		if !ok {
+			return nil, gocql.ErrNotFound
+		}
 	}
 
-	return result, nil
+	return results, nil
 }
 
 func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
@@ -201,16 +212,20 @@ func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
 	return result, nil
 }
 
-func (s *mockStore) SelectID2LabelsExpiration(id types.MetricID) (time.Time, error) {
+func (s *mockStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	result, ok := s.id2expiration[id]
-	if !ok {
-		return time.Time{}, gocql.ErrNotFound
+	results := make(map[types.MetricID]time.Time, len(ids))
+
+	for _, id := range ids {
+		result, ok := s.id2expiration[id]
+		if ok {
+			results[id] = result
+		}
 	}
 
-	return result, nil
+	return results, nil
 }
 
 type mockByteIter struct {
@@ -455,21 +470,22 @@ func mockIndexFromMetrics(metrics map[types.MetricID]map[string]string) *Cassand
 	for id, labels := range metrics {
 		sortedLabels := labelsMapToList(labels, true)
 		sortedLabelsString := sortedLabels.String()
-		savedIDs, err := index.createMetrics([]createMetricRequest{
+		requests := []lookupMetricRequest{
 			{
-				newID:               uint64(id),
+				newID:               id,
 				sortedLabelsString:  sortedLabelsString,
 				sortedLabels:        sortedLabels,
 				cassandraExpiration: time.Now().Add(time.Hour),
 			},
-		})
+		}
 
+		err := index.createMetrics(requests)
 		if err != nil {
 			panic(err)
 		}
 
-		if savedIDs[0] != id {
-			panic(fmt.Sprintf("savedIDs=%v didn't match requested id=%v", savedIDs, id))
+		if requests[0].newID != id {
+			panic(fmt.Sprintf("savedIDs=%v didn't match requested id=%v", requests[0].newID, id))
 		}
 	}
 

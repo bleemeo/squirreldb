@@ -19,9 +19,9 @@ func (idx *limitingIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
+func (idx *limitingIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	// LookupLabels is used on result from Search.
-	return idx.index.LookupLabels(id)
+	return idx.index.LookupLabels(ids)
 }
 
 func (idx *limitingIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {

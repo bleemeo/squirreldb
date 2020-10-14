@@ -39,7 +39,7 @@ type Node interface {
 
 type Index interface {
 	AllIDs() ([]MetricID, error)
-	LookupLabels(id MetricID) (labels.Labels, error)
+	LookupLabels(ids []MetricID) ([]labels.Labels, error)
 	LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]MetricID, []int64, error)
 	Search(matchers []*labels.Matcher) ([]MetricID, error)
 }

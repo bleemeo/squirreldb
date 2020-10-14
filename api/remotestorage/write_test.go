@@ -24,8 +24,13 @@ type mockIndex struct {
 func (i mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
-func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
-	return i.fixedLabels, nil
+
+func (i mockIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
+	if len(ids) != 1 {
+		panic("mockIndex want 1 ID")
+	}
+
+	return []labels.Labels{i.fixedLabels}, nil
 }
 
 func (i mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {

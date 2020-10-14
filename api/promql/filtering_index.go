@@ -17,9 +17,9 @@ func (idx filteringIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx filteringIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
+func (idx filteringIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	// LookupLabels is used on result from Search.
-	return idx.index.LookupLabels(id)
+	return idx.index.LookupLabels(ids)
 }
 
 func (idx filteringIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {

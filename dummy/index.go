@@ -27,11 +27,22 @@ func (idx *Index) AllIDs() ([]types.MetricID, error) {
 }
 
 // LookupLabels required StoreMetricIDInMemory (so not persistent after restart).
-func (idx *Index) LookupLabels(id types.MetricID) (labels.Labels, error) {
+func (idx *Index) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
 
-	return idx.idToLabels[id], nil
+	results := make([]labels.Labels, len(ids))
+
+	for i, id := range ids {
+		var ok bool
+
+		results[i], ok = idx.idToLabels[id]
+		if !ok {
+			return nil, fmt.Errorf("labels for metric ID %d not found", id)
+		}
+	}
+
+	return results, nil
 }
 
 // LookupIDs may have collision. If StoreMetricIDInMemory collision are checked (but not across restart).

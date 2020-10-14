@@ -1,6 +1,7 @@
 package promql
 
 import (
+	"fmt"
 	"squirreldb/types"
 
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -11,7 +12,7 @@ import (
 type seriesIter struct {
 	list      types.MetricDataSet
 	index     types.Index
-	id2Labels map[types.MetricID][]labels.Label
+	id2Labels map[types.MetricID]labels.Labels
 	current   series
 	err       error
 }
@@ -36,20 +37,8 @@ func (i *seriesIter) Next() bool {
 	var ok bool
 
 	if i.current.labels, ok = i.id2Labels[i.current.data.ID]; !ok {
-		dataLabels, err := i.index.LookupLabels(i.current.data.ID)
-		if err != nil {
-			i.err = err
-			return false
-		}
-
-		i.current.labels = make([]labels.Label, len(dataLabels))
-
-		for j, l := range dataLabels {
-			i.current.labels[j] = labels.Label{
-				Name:  l.Name,
-				Value: l.Value,
-			}
-		}
+		i.err = fmt.Errorf("metric ID %d don't have labels", i.current.data.ID)
+		return false
 	}
 
 	return true

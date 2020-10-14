@@ -111,36 +111,33 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 
 type mockIndex struct {
 	searchReplay []types.MetricID
-	lookupMap    map[types.MetricID][]labels.Label
+	lookupMap    map[types.MetricID]labels.Labels
 }
 
-func (i mockIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
-	return i.searchReplay, nil
+func (idx mockIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
+	return idx.searchReplay, nil
 }
 
-func (i mockIndex) AllIDs() ([]types.MetricID, error) {
+func (idx mockIndex) AllIDs() ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (i mockIndex) LookupLabels(id types.MetricID) (labels.Labels, error) {
-	l, ok := i.lookupMap[id]
-	if ok {
+func (idx mockIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
+	results := make([]labels.Labels, len(ids))
 
-		l2 := make(labels.Labels, len(l))
-
-		for i, x := range l {
-			l2[i] = labels.Label{
-				Name:  x.Name,
-				Value: x.Value,
-			}
+	for i, id := range ids {
+		l, ok := idx.lookupMap[id]
+		if ok {
+			results[i] = l.Copy()
+		} else {
+			return nil, errors.New("not found")
 		}
-
-		return l2, nil
 	}
-	return nil, errors.New("not found")
+
+	return results, nil
 }
 
-func (i mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -197,7 +194,7 @@ func Test_querier_Select(t *testing.T) {
 				reader: mockStore{},
 				index: mockIndex{
 					searchReplay: []types.MetricID{metricID2, metricID1},
-					lookupMap: map[types.MetricID][]labels.Label{
+					lookupMap: map[types.MetricID]labels.Labels{
 						metricID1: labelsMetric1,
 						metricID2: labelsMetric2,
 					},
@@ -223,7 +220,7 @@ func Test_querier_Select(t *testing.T) {
 				reader: mockStore{},
 				index: mockIndex{
 					searchReplay: []types.MetricID{metricID2, metricID1},
-					lookupMap: map[types.MetricID][]labels.Label{
+					lookupMap: map[types.MetricID]labels.Labels{
 						metricID1: labelsMetric1,
 						metricID2: labelsMetric2,
 					},
@@ -262,6 +259,8 @@ func Test_querier_Select(t *testing.T) {
 
 func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
 	n := 0
+	good := true
+
 	for {
 		n++
 		aNext := a.Next()
@@ -269,7 +268,10 @@ func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
 
 		if aNext != bNext {
 			t.Errorf("at index %d: aNext = %v != %v = bNext", n, aNext, bNext)
-			return false
+
+			good = false
+
+			break
 		}
 
 		if !aNext {
@@ -281,7 +283,10 @@ func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
 
 		if labels.Compare(aSerie.Labels(), bSerie.Labels()) != 0 {
 			t.Errorf("at index %d: aLabels = %v != %v = bLabels", n, aSerie.Labels(), bSerie.Labels())
-			return false
+
+			good = false
+
+			break
 		}
 	}
 
@@ -293,5 +298,5 @@ func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
 		t.Error(err)
 	}
 
-	return true
+	return good
 }
