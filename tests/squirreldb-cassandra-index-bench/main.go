@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"math/rand"
@@ -45,6 +46,7 @@ var (
 	workerProcesses           = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
 	workerClients             = flag.Int("bench.worker-client", 1, "Number of concurrent client inserting data")
 	fairLB                    = flag.Bool("force-fair-lb", false, "Force fair load-balancing even if worker is busy")
+	verify                    = flag.Bool("verify", false, "Run the index verification process")
 	cpuprofile                = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
@@ -105,6 +107,12 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
+	if !*runExpiration && *verify {
+		log.Println("Force running expiration because index verify is enabled")
+
+		*runExpiration = true
+	}
+
 	debug.Level = 1
 
 	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
@@ -145,9 +153,26 @@ func main() {
 	rnd := rand.New(rand.NewSource(*seed))
 	bench(makeIndex, rnd)
 
+	verifyHadIssue := false
+
+	if *verify {
+		var err error
+
+		cassandraIndex := makeIndex()
+		verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	result, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range result {
 		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
+	}
+
+	if verifyHadIssue {
+		log.Fatal("Index verify had issue, see above")
 	}
 }
 

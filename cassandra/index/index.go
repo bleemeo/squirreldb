@@ -237,11 +237,11 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 }
 
 // Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error { // nolint: gocognit,gocyclo
+func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit,gocyclo
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
-		return errors.New("doFix require acquire lock")
+		return hadIssue, errors.New("doFix require acquire lock")
 	}
 
 	if acquireLock {
@@ -253,7 +253,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 
 	allPosting, err := c.postings(allPostingLabelName, allPostingLabelValue)
 	if err != nil {
-		return err
+		return hadIssue, err
 	}
 
 	count := 0
@@ -276,6 +276,8 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 
 		lbls, err := c.store.SelectID2Labels(metricID)
 		if err == gocql.ErrNotFound {
+			hadIssue = true
+
 			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", metricID)
 
 			if doFix {
@@ -286,7 +288,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		}
 
 		if err != nil {
-			return err
+			return hadIssue, err
 		}
 
 		for _, l := range lbls {
@@ -295,15 +297,19 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 
 		expiration, err := c.store.SelectID2LabelsExpiration(metricID)
 		if err == gocql.ErrNotFound {
-			return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID, lbls.String())
+			hadIssue = true
+
+			return hadIssue, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID, lbls.String())
 		}
 
 		if err != nil {
-			return err
+			return hadIssue, err
 		}
 
 		metricID2, err := c.store.SelectLabels2ID(lbls.String())
 		if err == gocql.ErrNotFound {
+			hadIssue = true
+
 			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", metricID, lbls.String())
 
 			if doFix {
@@ -313,14 +319,10 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 			continue
 		}
 
-		if err != nil {
-			return err
-		}
-
 		if metricID != metricID2 {
 			lbls2, err := c.store.SelectID2Labels(metricID2)
 			if err != nil && err != gocql.ErrNotFound {
-				return err
+				return hadIssue, err
 			}
 
 			if err != nil {
@@ -329,15 +331,19 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 
 			expiration2, err := c.store.SelectID2LabelsExpiration(metricID2)
 			if err != nil && err != gocql.ErrNotFound {
-				return err
+				return hadIssue, err
 			}
 
 			if err == gocql.ErrNotFound && lbls2 != nil {
-				return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID2, lbls2.String())
+				hadIssue = true
+
+				return hadIssue, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", metricID2, lbls2.String())
 			}
 
 			switch {
 			case lbls2 == nil:
+				hadIssue = true
+
 				fmt.Fprintf(
 					w,
 					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
@@ -352,6 +358,8 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 					bulkDeleter.PrepareDelete(metricID, lbls, false)
 				}
 			case !allPosting.Contains(uint64(metricID2)):
+				hadIssue = true
+
 				fmt.Fprintf(
 					w,
 					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
@@ -366,6 +374,8 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 					bulkDeleter.PrepareDelete(metricID, lbls, false)
 				}
 			default:
+				hadIssue = true
+
 				fmt.Fprintf(
 					w,
 					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
@@ -386,6 +396,8 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		}
 
 		if time.Now().Add(24 * time.Hour).After(expiration) {
+			hadIssue = true
+
 			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", metricID, lbls.String(), expiration)
 
 			if doFix {
@@ -404,7 +416,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		fmt.Fprintf(w, "Applying fix...")
 
 		if err := bulkDeleter.Delete(); err != nil {
-			return err
+			return hadIssue, err
 		}
 	}
 
@@ -413,15 +425,13 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 			break
 		}
 
-		fmt.Fprintf(w, "check postings for %s\n", name)
-
 		iter := c.store.SelectPostingByName(name)
 		for iter.HasNext() {
 			tmp := roaring.NewBTreeBitmap()
 
 			err := tmp.UnmarshalBinary(iter.Next())
 			if err != nil {
-				return err
+				return hadIssue, err
 			}
 
 			tmp = tmp.Difference(allGoodIds)
@@ -433,6 +443,8 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 					break
 				}
 
+				hadIssue = true
+
 				fmt.Fprintf(
 					w,
 					"Posting for name %s has ID %d which is not in all posting!\n",
@@ -443,7 +455,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		}
 	}
 
-	return ctx.Err()
+	return hadIssue, ctx.Err()
 }
 
 // AllIDs returns all ids stored in the index.
@@ -1154,6 +1166,12 @@ func (c *CassandraIndex) applyExpirationUpdateRequests() {
 
 		c.lookupIDMutex.Unlock()
 	}
+}
+
+// InternalMaxTTLUpdateDelay return the highest delay between TTL update.
+// This should only be used in test & benchmark.
+func InternalMaxTTLUpdateDelay() time.Duration {
+	return cassandraTTLUpdateDelay + cassandraTTLUpdateJitter
 }
 
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration

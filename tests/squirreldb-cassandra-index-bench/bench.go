@@ -420,9 +420,9 @@ func worker(localIndex *index.CassandraIndex, workChanel chan []labels.Labels, r
 func makeInsertRequests(shardID string, rnd *rand.Rand) []labels.Labels {
 	metrics := make([]labels.Labels, *shardSize)
 
-	// We remove 1 days (and 1 hour) so the expiration of the metrics is yesterday
-	// (the 1 hour is because of index cassandraTTLUpdateDelay)
-	negativeTTL := strconv.FormatInt(-86400-3600, 10)
+	// We remove 1 days (and max ttl update delay) so the expiration of the
+	// metrics is yesterday
+	negativeTTL := strconv.FormatInt(-86400-int64(index.InternalMaxTTLUpdateDelay().Seconds()), 10)
 
 	for n := 0; n < *shardSize; n++ {
 		userID := strconv.FormatInt(rnd.Int63n(100000), 10)

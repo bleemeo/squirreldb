@@ -32,7 +32,7 @@ type API struct {
 	Writer                   types.MetricWriter
 	FlushCallback            func() error
 	PreAggregateCallback     func(from, to time.Time) error
-	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) error
+	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (bool, error)
 	MaxConcurrentRemoteWrite int
 	PromQLMaxEvaluatedPoints uint64
 	PromQLMaxEvaluatedSeries uint32
@@ -149,7 +149,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
 
-		err := a.IndexVerifyCallback(ctx, w, doFix, acquireLock)
+		_, err := a.IndexVerifyCallback(ctx, w, doFix, acquireLock)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
 			return
