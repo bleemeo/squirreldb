@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime/pprof"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
 	"squirreldb/cassandra/session"
@@ -44,6 +45,7 @@ var (
 	workerProcesses           = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
 	workerClients             = flag.Int("bench.worker-client", 1, "Number of concurrent client inserting data")
 	fairLB                    = flag.Bool("force-fair-lb", false, "Force fair load-balancing even if worker is busy")
+	cpuprofile                = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
 func makeSession() (*gocql.Session, bool) {
@@ -88,6 +90,20 @@ func makeIndex() *index.CassandraIndex {
 
 func main() {
 	flag.Parse()
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = pprof.StartCPUProfile(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer pprof.StopCPUProfile()
+	}
 
 	debug.Level = 1
 
