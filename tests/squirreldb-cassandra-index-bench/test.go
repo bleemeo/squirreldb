@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"squirreldb/types"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -216,13 +217,23 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 
 	metricsIDs := make([]types.MetricID, len(metrics))
 	ID2metrics := make(map[types.MetricID]int, len(metrics))
+	now := time.Now()
 
 	for i, labelsMap := range metrics {
 		if i == 0 {
 			continue
 		}
 
-		ids, ttls, err := cassandraIndex.LookupIDs(context.Background(), []labels.Labels{labels.FromMap(labelsMap)})
+		ids, ttls, err := cassandraIndex.LookupIDs(
+			context.Background(),
+			[]types.LookupRequest{
+				{
+					Labels: labels.FromMap(labelsMap),
+					Start:  now,
+					End:    now,
+				},
+			},
+		)
 		if err != nil {
 			log.Fatalf("LookupIDs(%v) failed: %v", labelsMap, err)
 		}
@@ -242,16 +253,16 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			wantIDToIndex[metricsIDs[m]] = m
 		}
 
-		ids, err := cassandraIndex.Search(tt.Matchers)
+		metrics, err := cassandraIndex.Search(now, now, tt.Matchers)
 
 		if err != nil {
 			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
 
-		gotIDToIndex := make(map[types.MetricID]int, len(ids))
+		gotIDToIndex := make(map[types.MetricID]int, len(metrics))
 
-		for _, id := range ids {
-			gotIDToIndex[id] = ID2metrics[id]
+		for _, m := range metrics {
+			gotIDToIndex[m.ID] = ID2metrics[m.ID]
 		}
 
 		if !reflect.DeepEqual(wantIDToIndex, gotIDToIndex) {
@@ -260,10 +271,14 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 	}
 
 	if *includeID {
-		ids, _, err := cassandraIndex.LookupIDs(context.Background(), []labels.Labels{
+		ids, _, err := cassandraIndex.LookupIDs(context.Background(), []types.LookupRequest{
 			{
-				{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
-				{Name: "ignored", Value: "__metric_id__ win"},
+				Start: now,
+				End:   now,
+				Labels: labels.Labels{
+					{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
+					{Name: "ignored", Value: "__metric_id__ win"},
+				},
 			},
 		})
 
@@ -275,17 +290,21 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupIDs(__metric_id__ valid) = %v, want %v", ids[0], metricsIDs[1])
 		}
 
-		_, _, err = cassandraIndex.LookupIDs(context.Background(), []labels.Labels{
+		_, _, err = cassandraIndex.LookupIDs(context.Background(), []types.LookupRequest{
 			{
-				{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
-				{Name: "ignored", Value: "__metric_id__ win"},
+				Start: now,
+				End:   now,
+				Labels: labels.Labels{
+					{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
+					{Name: "ignored", Value: "__metric_id__ win"},
+				},
 			},
 		})
 		if err == nil {
 			log.Fatalf("LookupIDs(__metric_id__ invalid) succeeded. It must fail")
 		}
 
-		ids, err = cassandraIndex.Search([]*labels.Matcher{
+		results, err := cassandraIndex.Search(now, now, []*labels.Matcher{
 			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[1]), 10)),
 			labels.MustNewMatcher(labels.MatchEqual, "ignored", "only_id_is_used"),
 		})
@@ -293,11 +312,16 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
 		}
 
-		if len(ids) != 1 || ids[0] != metricsIDs[1] {
-			log.Fatalf("Search(__metric_id__ valid) = %v, want [%v]", ids, metricsIDs[1])
+		if len(results) != 1 || results[0].ID != metricsIDs[1] {
+			log.Fatalf("Search(__metric_id__ valid) = %v, want [%v]", results, metricsIDs[1])
 		}
 
-		ids, err = cassandraIndex.Search([]*labels.Matcher{
+		got := results[0].Labels.Map()
+		if !reflect.DeepEqual(got, metrics[1]) {
+			log.Fatalf("Search(__metric_id__ valid) = %v, want %v", got, metrics[1])
+		}
+
+		results, err = cassandraIndex.Search(now, now, []*labels.Matcher{
 			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[2]), 10)),
 			labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "up"),
 		})
@@ -305,28 +329,18 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)
 		}
 
-		if len(ids) != 1 || ids[0] != metricsIDs[2] {
-			log.Fatalf("Search(__metric_id__ valid 2) = %v, want [%v]", ids, metricsIDs[2])
+		if len(results) != 1 || results[0].ID != metricsIDs[2] {
+			log.Fatalf("Search(__metric_id__ valid 2) = %v, want [%v]", results, metricsIDs[2])
 		}
-	}
 
-	labelsList, err := cassandraIndex.LookupLabels(metricsIDs[1:])
-	if err != nil {
-		log.Fatalf("LookupLabels() failed: %v", err)
-	}
-
-	for i, id := range metricsIDs[1:] {
-		labels := labelsList[i]
-
-		got := labels.Map()
-
-		if !reflect.DeepEqual(got, metrics[i+1]) {
-			log.Fatalf("LookupLabels(%v) = %v, want %v", id, got, metrics[i+1])
+		got = results[0].Labels.Map()
+		if !reflect.DeepEqual(got, metrics[2]) {
+			log.Fatalf("Search(__metric_id__ valid 2) = %v, want %v", got, metrics[2])
 		}
 	}
 
 	if !*noDropTables {
-		got, err := cassandraIndex.AllIDs()
+		got, err := cassandraIndex.AllIDs(now, now)
 		if err != nil {
 			log.Fatalf("AllIDs() failed: %v", err)
 		}

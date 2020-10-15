@@ -13,6 +13,12 @@ var (
 		Name:      "create_seconds",
 		Help:      "Total metric creation time in seconds (excluding time to took lock)",
 	})
+	updatePostingSeconds = promauto.NewSummary(prometheus.SummaryOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "update_postings_seconds",
+		Help:      "Total postings updates time in seconds (including time to took lock)",
+	})
 	lookupLabelsSeconds = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",

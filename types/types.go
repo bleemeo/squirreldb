@@ -37,11 +37,16 @@ type Node interface {
 	IsSelf() bool
 }
 
+type LookupRequest struct {
+	Labels labels.Labels
+	Start  time.Time
+	End    time.Time
+}
+
 type Index interface {
-	AllIDs() ([]MetricID, error)
-	LookupLabels(ids []MetricID) ([]labels.Labels, error)
-	LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]MetricID, []int64, error)
-	Search(matchers []*labels.Matcher) ([]MetricID, error)
+	AllIDs(start time.Time, end time.Time) ([]MetricID, error)
+	LookupIDs(ctx context.Context, requests []LookupRequest) ([]MetricID, []int64, error)
+	Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]MetricLabel, error)
 }
 
 type MetricDataSet interface {

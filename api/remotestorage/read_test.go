@@ -98,7 +98,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := requestFromPromQuery(tt.args.promQuery, tt.args.index)
+			_, got, err := requestFromPromQuery(tt.args.promQuery, tt.args.index, nil)
 			if err != nil {
 				t.Errorf("requestFromPromQuery() failed: %v", err)
 			}
@@ -194,7 +194,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := requestsFromPromReadRequest(tt.args.promReadRequest, tt.args.index)
+			got, _, err := requestsFromPromReadRequest(tt.args.promReadRequest, tt.args.index)
 			if err != nil {
 				t.Errorf("requestsFromPromReadRequest() failed: %v", err)
 			}
@@ -296,9 +296,9 @@ func Test_promSamplesFromPoints(t *testing.T) {
 
 func Test_promSeriesFromMetric(t *testing.T) {
 	type args struct {
-		id    types.MetricID
-		data  types.MetricData
-		index types.Index
+		id        types.MetricID
+		data      types.MetricData
+		id2labels map[types.MetricID]labels.Labels
 	}
 	tests := []struct {
 		name string
@@ -337,8 +337,8 @@ func Test_promSeriesFromMetric(t *testing.T) {
 						},
 					},
 				},
-				index: mockIndex{
-					fixedLabels: labels.Labels{
+				id2labels: map[types.MetricID]labels.Labels{
+					MetricIDTest1: labels.Labels{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -392,7 +392,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := promSeriesFromMetric(tt.args.id, tt.args.data, tt.args.index)
+			got, err := promSeriesFromMetric(tt.args.id, tt.args.data, tt.args.id2labels)
 			if err != nil {
 				t.Errorf("promSeriesFromMetric() failed: %v", err)
 			}
@@ -405,8 +405,8 @@ func Test_promSeriesFromMetric(t *testing.T) {
 
 func Test_promTimeseriesFromMetrics(t *testing.T) {
 	type args struct {
-		metrics []types.MetricData
-		index   types.Index
+		metrics   []types.MetricData
+		id2labels map[types.MetricID]labels.Labels
 	}
 	tests := []struct {
 		name string
@@ -447,8 +447,8 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 						},
 					},
 				},
-				index: mockIndex{
-					fixedLabels: labels.Labels{
+				id2labels: map[types.MetricID]labels.Labels{
+					MetricIDTest1: labels.Labels{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -504,23 +504,23 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		{
 			name: "metrics_empty",
 			args: args{
-				metrics: make([]types.MetricData, 0),
-				index:   nil,
+				metrics:   make([]types.MetricData, 0),
+				id2labels: nil,
 			},
 			want: []*prompb.TimeSeries{},
 		},
 		{
 			name: "metrics_nil",
 			args: args{
-				metrics: nil,
-				index:   nil,
+				metrics:   nil,
+				id2labels: nil,
 			},
 			want: []*prompb.TimeSeries{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := promTimeseriesFromMetrics(&mockIter{all: tt.args.metrics}, tt.args.index, 0)
+			got, err := promTimeseriesFromMetrics(&mockIter{all: tt.args.metrics}, tt.args.id2labels, 0)
 			if err != nil {
 				t.Errorf("promTimeseriesFromMetrics() failed: %v", err)
 			}

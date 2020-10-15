@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
@@ -37,32 +38,32 @@ func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 // Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
 // It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
 func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
-	ids, err := q.index.Search(matchers)
+	minT := time.Unix(q.mint/1000, q.mint%1000)
+	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+
+	metrics, err := q.index.Search(minT, maxT, matchers)
 	if err != nil {
 		return &seriesIter{err: err}
 	}
 
-	if len(ids) == 0 {
+	if len(metrics) == 0 {
 		return &seriesIter{}
 	}
 
-	labelsList, err := q.index.LookupLabels(ids)
-	if err != nil {
-		return &seriesIter{err: err}
-	}
-
-	id2Labels := make(map[types.MetricID]labels.Labels, len(labelsList))
-
-	for i, labels := range labelsList {
-		id2Labels[ids[i]] = labels
-	}
-
 	if sortSeries {
-		sort.Slice(ids, func(i, j int) bool {
-			aLabels := labelsList[i]
-			bLabels := labelsList[j]
+		sort.Slice(metrics, func(i, j int) bool {
+			aLabels := metrics[i].Labels
+			bLabels := metrics[j].Labels
 			return labels.Compare(aLabels, bLabels) < 0
 		})
+	}
+
+	id2Labels := make(map[types.MetricID]labels.Labels, len(metrics))
+	ids := make([]types.MetricID, len(metrics))
+
+	for i, m := range metrics {
+		id2Labels[m.ID] = m.Labels
+		ids[i] = m.ID
 	}
 
 	req := types.MetricRequest{

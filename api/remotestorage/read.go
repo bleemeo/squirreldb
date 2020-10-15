@@ -1,6 +1,9 @@
 package remotestorage
 
 import (
+	"fmt"
+
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
 
@@ -38,7 +41,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	requests, err := requestsFromPromReadRequest(&readRequest, r.index)
+	requests, id2labels, err := requestsFromPromReadRequest(&readRequest, r.index)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorRead.Inc()
@@ -58,7 +61,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			return
 		}
 
-		timeseries, err := promTimeseriesFromMetrics(metricIter, r.index, len(request.IDs))
+		timeseries, err := promTimeseriesFromMetrics(metricIter, id2labels, len(request.IDs))
 		if err != nil {
 			logger.Printf("Error: Can't format metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
@@ -99,16 +102,30 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 }
 
 // Returns a MetricRequest generated from a Query.
-func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.MetricRequest, error) {
+func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
 	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
 	if err != nil {
-		return types.MetricRequest{}, err
+		return nil, types.MetricRequest{}, err
 	}
 
-	ids, err := index.Search(matchers)
+	start := time.Unix(promQuery.StartTimestampMs/1000, promQuery.StartTimestampMs%1000)
+	end := time.Unix(promQuery.EndTimestampMs/1000, promQuery.EndTimestampMs%1000)
+
+	metrics, err := index.Search(start, end, matchers)
 
 	if err != nil {
-		return types.MetricRequest{}, err
+		return nil, types.MetricRequest{}, err
+	}
+
+	ids := make([]types.MetricID, len(metrics))
+
+	if len(id2labels) == 0 {
+		id2labels = make(map[types.MetricID]labels.Labels, len(metrics))
+	}
+
+	for i, m := range metrics {
+		ids[i] = m.ID
+		id2labels[m.ID] = m.Labels
 	}
 
 	request := types.MetricRequest{
@@ -122,27 +139,33 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index) (types.Met
 		request.Function = promQuery.Hints.Func
 	}
 
-	return request, nil
+	return id2labels, request, nil
 }
 
 // Returns a MetricRequest list generated from a ReadRequest.
-func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, error) {
+func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, map[types.MetricID]labels.Labels, error) {
 	if len(promReadRequest.Queries) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
+	id2labels := make(map[types.MetricID]labels.Labels)
 	requests := make([]types.MetricRequest, 0, len(promReadRequest.Queries))
 
 	for _, query := range promReadRequest.Queries {
-		request, err := requestFromPromQuery(query, index)
+		var (
+			request types.MetricRequest
+			err     error
+		)
+
+		id2labels, request, err = requestFromPromQuery(query, index, id2labels)
 		if err != nil {
-			return requests, err
+			return requests, id2labels, err
 		}
 
 		requests = append(requests, request)
 	}
 
-	return requests, nil
+	return requests, id2labels, nil
 }
 
 // Returns a Sample list generated from a MetricPoint list.
@@ -166,16 +189,16 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 }
 
 // Returns a pointer of a TimeSeries generated from a ID and a MetricData.
-func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.Index) (*prompb.TimeSeries, error) {
-	labelsList, err := index.LookupLabels([]types.MetricID{id})
-	if err != nil {
-		return nil, err
+func promSeriesFromMetric(id types.MetricID, data types.MetricData, id2labels map[types.MetricID]labels.Labels) (*prompb.TimeSeries, error) {
+	labels, ok := id2labels[id]
+	if !ok {
+		return nil, fmt.Errorf("metric with ID %d not found", id)
 	}
 
 	promSample := promSamplesFromPoints(data.Points)
 
 	promQueryResult := &prompb.TimeSeries{
-		Labels:  labelsToLabelsProto(labelsList[0], nil),
+		Labels:  labelsToLabelsProto(labels, nil),
 		Samples: promSample,
 	}
 
@@ -183,7 +206,7 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, index types.
 }
 
 // Returns a TimeSeries pointer list generated from a metric list.
-func promTimeseriesFromMetrics(metrics types.MetricDataSet, index types.Index, sizeHint int) ([]*prompb.TimeSeries, error) {
+func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.MetricID]labels.Labels, sizeHint int) ([]*prompb.TimeSeries, error) {
 	totalPoints := 0
 
 	promTimeseries := make([]*prompb.TimeSeries, 0, sizeHint)
@@ -191,7 +214,7 @@ func promTimeseriesFromMetrics(metrics types.MetricDataSet, index types.Index, s
 	for metrics.Next() {
 		data := metrics.At()
 
-		promSeries, err := promSeriesFromMetric(data.ID, data, index)
+		promSeries, err := promSeriesFromMetric(data.ID, data, id2labels)
 		if err != nil {
 			return nil, err
 		}

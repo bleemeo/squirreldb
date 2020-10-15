@@ -3,29 +3,40 @@ package promql
 import (
 	"context"
 	"reflect"
+	"sort"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 func Test_filteringIndex_Search(t *testing.T) {
-
+	now := time.Now()
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
 	ids, _, err := idx.LookupIDs(
 		context.Background(),
-		[]labels.Labels{
-			labelsMetric1,
-			labelsMetric2,
+		[]types.LookupRequest{
+			{Labels: labelsMetric1.Copy(), Start: now, End: now},
+			{Labels: labelsMetric2.Copy(), Start: now, End: now},
+			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
 
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	sortedLabels1 := labelsMetric1.Copy()
+	sortedLabels2 := labelsMetric2.Copy()
+	sortedLabels3 := labelsMetric3.Copy()
+
+	sort.Sort(sortedLabels1)
+	sort.Sort(sortedLabels2)
+	sort.Sort(sortedLabels3)
 
 	type fields struct {
 		index   types.Index
@@ -38,7 +49,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    []types.MetricID
+		want    []types.MetricLabel
 		wantErr bool
 	}{
 		{
@@ -54,7 +65,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricID{ids[0]},
+			want: []types.MetricLabel{{ID: ids[0], Labels: sortedLabels1}},
 		},
 		{
 			name: "filter-account-id-2",
@@ -69,7 +80,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricID{ids[1]},
+			want: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
 		},
 		{
 			name: "filter-account-id-absent",
@@ -84,7 +95,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricID{},
+			want: []types.MetricLabel{},
 		},
 		{
 			name: "filter-name",
@@ -99,7 +110,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "mountpath", "/srv"),
 			}},
-			want: []types.MetricID{ids[1]},
+			want: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
 		},
 	}
 	for _, tt := range tests {
@@ -108,7 +119,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				index:   tt.fields.index,
 				matcher: tt.fields.matcher,
 			}
-			got, err := idx.Search(tt.args.matchers)
+			got, err := idx.Search(now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.Search() error = %v, wantErr %v", err, tt.wantErr)
 				return

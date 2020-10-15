@@ -5,20 +5,22 @@ import (
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 func Test_limitingIndex_Search(t *testing.T) {
+	now := time.Now()
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
 	_, _, err := idx.LookupIDs(
 		context.Background(),
-		[]labels.Labels{
-			labelsMetric1,
-			labelsMetric2,
-			labelsMetric3,
+		[]types.LookupRequest{
+			{Labels: labelsMetric1.Copy(), Start: now, End: now},
+			{Labels: labelsMetric2.Copy(), Start: now, End: now},
+			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
 
@@ -162,7 +164,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 				maxTotalSeries: tt.fields.maxTotalSeries,
 			}
 			for i, query := range tt.searches {
-				got, err := idx.Search(query.matchers)
+				got, err := idx.Search(now, now, query.matchers)
 				if (err != nil) != query.wantErr {
 					t.Errorf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
 					return

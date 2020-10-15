@@ -31,12 +31,17 @@ var (
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb", "Cassandra keyspace")
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
 	defaultTimeToLive         = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
+	startText                 = flag.String("start", time.Now().Add(-365*24*time.Hour).Format(time.RFC3339), "Beginning of time to export/import")
+	endText                   = flag.String("end", time.Now().Format(time.RFC3339), "End of time to export/import")
 	doExport                  = flag.Bool("export", false, "Do index export to stdout")
 	doImport                  = flag.Bool("import", false, "Do index import from stdin")
 	verify                    = flag.Bool("verify", false, "Run the index verification process")
 	fix                       = flag.Bool("fix", false, "During the index verification, fix issues")
 	dropTables                = flag.Bool("drop-tables", false, "Drop table of index before processing")
 	expirationText            = flag.String("expiration", time.Now().Add(365*24*time.Hour).Format(time.RFC3339), "Expiration of imported metrics")
+
+	start time.Time
+	end   time.Time
 )
 
 func makeSession() (*gocql.Session, bool) {
@@ -80,6 +85,18 @@ func makeIndex() *index.CassandraIndex {
 
 func main() {
 	flag.Parse()
+
+	var err error
+
+	start, err = time.Parse(time.RFC3339, *startText)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	end, err = time.Parse(time.RFC3339, *endText)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	debug.Level = 1
 
@@ -191,7 +208,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 			break
 		}
 
-		err := cassandraIndex.InternalCreateMetric(metrics, ids, expirations)
+		err := cassandraIndex.InternalCreateMetric(start, end, metrics, ids, expirations)
 		if err != nil {
 			return err
 		}
@@ -203,7 +220,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 func runExport(cassandraIndex *index.CassandraIndex) error {
 	writer := csv.NewWriter(os.Stdout)
 
-	ids, err := cassandraIndex.AllIDs()
+	ids, err := cassandraIndex.AllIDs(start, end)
 	if err != nil {
 		return err
 	}

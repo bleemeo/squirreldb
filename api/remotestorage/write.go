@@ -3,8 +3,8 @@ package remotestorage
 import (
 	"context"
 	"fmt"
+	"math"
 
-	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 
 	"net/http"
@@ -110,13 +110,34 @@ func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeri
 	totalPoints := 0
 	metrics := make([]types.MetricData, 0, len(promTimeseries))
 
-	labelsList := make([]labels.Labels, len(promTimeseries))
+	requests := make([]types.LookupRequest, 0, len(promTimeseries))
 
-	for i, promSeries := range promTimeseries {
-		labelsList[i] = labelProtosToLabels(promSeries.Labels)
+	for _, promSeries := range promTimeseries {
+		if len(promSeries.Samples) == 0 {
+			continue
+		}
+
+		min := int64(math.MaxInt64)
+		max := int64(math.MinInt64)
+
+		for _, s := range promSeries.Samples {
+			if min > s.Timestamp {
+				min = s.Timestamp
+			}
+
+			if max < s.Timestamp {
+				max = s.Timestamp
+			}
+		}
+
+		requests = append(requests, types.LookupRequest{
+			Labels: labelProtosToLabels(promSeries.Labels),
+			End:    time.Unix(max/1000, max%1000),
+			Start:  time.Unix(min/1000, min%1000),
+		})
 	}
 
-	ids, ttls, err := index.LookupIDs(ctx, labelsList)
+	ids, ttls, err := index.LookupIDs(ctx, requests)
 
 	if err != nil {
 		return nil, fmt.Errorf("metric ID lookup failed: %v", err)

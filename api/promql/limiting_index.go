@@ -5,6 +5,7 @@ import (
 	"errors"
 	"squirreldb/types"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -15,21 +16,16 @@ type limitingIndex struct {
 	returnedSeries uint32
 }
 
-func (idx *limitingIndex) AllIDs() ([]types.MetricID, error) {
+func (idx *limitingIndex) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
-	// LookupLabels is used on result from Search.
-	return idx.index.LookupLabels(ids)
-}
-
-func (idx *limitingIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx *limitingIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
-	r, err := idx.index.Search(matchers)
+func (idx *limitingIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
+	r, err := idx.index.Search(start, end, matchers)
 	if err != nil {
 		return r, err
 	}

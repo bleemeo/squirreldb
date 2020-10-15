@@ -8,6 +8,7 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -22,12 +23,12 @@ type Index struct {
 }
 
 // AllIDs does not store IDs in any persistent store. So this is lost after every restart. It may even not store them at all!
-func (idx *Index) AllIDs() ([]types.MetricID, error) {
+func (idx *Index) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, nil
 }
 
 // LookupLabels required StoreMetricIDInMemory (so not persistent after restart).
-func (idx *Index) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
+func (idx *Index) lookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
 
@@ -46,9 +47,9 @@ func (idx *Index) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 }
 
 // LookupIDs may have collision. If StoreMetricIDInMemory collision are checked (but not across restart).
-func (idx *Index) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
-	ids := make([]types.MetricID, len(labelsList))
-	ttls := make([]int64, len(labelsList))
+func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
+	ids := make([]types.MetricID, len(requests))
+	ttls := make([]int64, len(requests))
 
 	if idx.FixedValue != 0 {
 		for i := range ids {
@@ -58,15 +59,13 @@ func (idx *Index) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]
 		return ids, ttls, nil
 	}
 
-	for i, l := range labelsList {
-		l := l
-
-		ttls[i] = timeToLiveFromLabels(&l)
+	for i, req := range requests {
+		ttls[i] = timeToLiveFromLabels(&req.Labels)
 		if ttls[i] == 0 {
 			ttls[i] = int64(86400)
 		}
 
-		ids[i] = types.MetricID(l.Hash())
+		ids[i] = types.MetricID(req.Labels.Hash())
 	}
 
 	if !idx.StoreMetricIDInMemory {
@@ -82,7 +81,7 @@ func (idx *Index) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]
 	}
 
 	for i, id := range ids {
-		current := labelsList[i]
+		current := requests[i].Labels
 		previous, ok := idx.idToLabels[id]
 
 		sort.Sort(current)
@@ -99,7 +98,7 @@ func (idx *Index) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]
 }
 
 // Search only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
+func (idx *Index) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
 	ids := make([]types.MetricID, 0)
 
 outer:
@@ -114,7 +113,21 @@ outer:
 		ids = append(ids, id)
 	}
 
-	return ids, nil
+	labelsList, err := idx.lookupLabels(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]types.MetricLabel, len(ids))
+
+	for i, id := range ids {
+		results[i] = types.MetricLabel{
+			ID:     id,
+			Labels: labelsList[i],
+		}
+	}
+
+	return results, nil
 }
 
 // copied from cassandra/index.

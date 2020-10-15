@@ -5,6 +5,7 @@ import (
 	"errors"
 	"squirreldb/types"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
@@ -16,7 +17,11 @@ const (
 )
 
 var (
-	labelsMetric1 = []labels.Label{
+	labelsMetric1 = labels.Labels{
+		{
+			Name:  "__account_id",
+			Value: "1234",
+		},
 		{
 			Name:  "__name__",
 			Value: "disk_used",
@@ -25,12 +30,8 @@ var (
 			Name:  "mountpath",
 			Value: "/home",
 		},
-		{
-			Name:  "__account_id",
-			Value: "1234",
-		},
 	}
-	labelsMetric2 = []labels.Label{
+	labelsMetric2 = labels.Labels{
 		{
 			Name:  "__name__",
 			Value: "disk_used",
@@ -44,18 +45,18 @@ var (
 			Value: "5678",
 		},
 	}
-	labelsMetric3 = []labels.Label{
+	labelsMetric3 = labels.Labels{
 		{
 			Name:  "__name__",
 			Value: "disk_free",
 		},
 		{
-			Name:  "mountpath",
-			Value: "/srv",
-		},
-		{
 			Name:  "__account_id",
 			Value: "5678",
+		},
+		{
+			Name:  "mountpath",
+			Value: "/srv",
 		},
 	}
 )
@@ -110,19 +111,19 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 }
 
 type mockIndex struct {
-	searchReplay []types.MetricID
+	searchReplay []types.MetricLabel
 	lookupMap    map[types.MetricID]labels.Labels
 }
 
-func (idx mockIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
+func (idx mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
 	return idx.searchReplay, nil
 }
 
-func (idx mockIndex) AllIDs() ([]types.MetricID, error) {
+func (idx mockIndex) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
+func (idx mockIndex) lookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	results := make([]labels.Labels, len(ids))
 
 	for i, id := range ids {
@@ -137,7 +138,7 @@ func (idx mockIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error)
 	return results, nil
 }
 
-func (idx mockIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx mockIndex) LookupIDs(ctx context.Context, request []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -193,7 +194,10 @@ func Test_querier_Select(t *testing.T) {
 			fields: fields{
 				reader: mockStore{},
 				index: mockIndex{
-					searchReplay: []types.MetricID{metricID2, metricID1},
+					searchReplay: []types.MetricLabel{
+						{ID: metricID2, Labels: labelsMetric2},
+						{ID: metricID1, Labels: labelsMetric1},
+					},
 					lookupMap: map[types.MetricID]labels.Labels{
 						metricID1: labelsMetric1,
 						metricID2: labelsMetric2,
@@ -219,7 +223,10 @@ func Test_querier_Select(t *testing.T) {
 			fields: fields{
 				reader: mockStore{},
 				index: mockIndex{
-					searchReplay: []types.MetricID{metricID2, metricID1},
+					searchReplay: []types.MetricLabel{
+						{ID: metricID2, Labels: labelsMetric2},
+						{ID: metricID1, Labels: labelsMetric1},
+					},
 					lookupMap: map[types.MetricID]labels.Labels{
 						metricID1: labelsMetric1,
 						metricID2: labelsMetric2,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -13,23 +14,18 @@ type filteringIndex struct {
 	matcher *labels.Matcher
 }
 
-func (idx filteringIndex) AllIDs() ([]types.MetricID, error) {
+func (idx filteringIndex) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx filteringIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
-	// LookupLabels is used on result from Search.
-	return idx.index.LookupLabels(ids)
-}
-
-func (idx filteringIndex) LookupIDs(ctx context.Context, labelsList []labels.Labels) ([]types.MetricID, []int64, error) {
+func (idx filteringIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx filteringIndex) Search(matchers []*labels.Matcher) ([]types.MetricID, error) {
+func (idx filteringIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
 	filterMatcher := make([]*labels.Matcher, 0, len(matchers)+1)
 	filterMatcher = append(filterMatcher, idx.matcher)
 	filterMatcher = append(filterMatcher, matchers...)
 
-	return idx.index.Search(filterMatcher)
+	return idx.index.Search(start, end, filterMatcher)
 }

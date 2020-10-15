@@ -3,9 +3,16 @@ package types
 import (
 	"math/rand"
 	"sort"
+
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 type MetricID int64
+
+type MetricLabel struct {
+	ID     MetricID
+	Labels labels.Labels
+}
 
 type MetricPoint struct {
 	Timestamp int64

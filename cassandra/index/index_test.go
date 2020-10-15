@@ -136,7 +136,7 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 		}
 
 		select {
-		case <-time.After(retryDelay):
+		case <-time.After(100 * time.Millisecond):
 		case <-ctx.Done():
 			return false
 		}
@@ -146,8 +146,9 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 type mockStore struct {
 	mutex sync.Mutex
 
+	queryCount    int
 	labels2id     map[string]types.MetricID
-	postings      map[string]map[string][]byte
+	postings      map[int32]map[string]map[string][]byte
 	id2labels     map[types.MetricID]labels.Labels
 	id2expiration map[types.MetricID]time.Time
 	expiration    map[time.Time][]byte
@@ -157,8 +158,12 @@ func (s *mockStore) Init() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	if s.labels2id != nil {
+		return nil
+	}
+
 	s.labels2id = make(map[string]types.MetricID)
-	s.postings = make(map[string]map[string][]byte)
+	s.postings = make(map[int32]map[string]map[string][]byte)
 	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
 	s.expiration = make(map[time.Time][]byte)
@@ -168,6 +173,8 @@ func (s *mockStore) Init() error {
 func (s *mockStore) SelectLabelsList2ID(input []string) (map[string]types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	results := make(map[string]types.MetricID, len(input))
 
@@ -185,6 +192,8 @@ func (s *mockStore) SelectLabelsList2ID(input []string) (map[string]types.Metric
 func (s *mockStore) SelectIDS2Labels(ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	results := make(map[types.MetricID]labels.Labels, len(ids))
 
@@ -204,6 +213,8 @@ func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.queryCount++
+
 	result, ok := s.expiration[day]
 	if !ok {
 		return nil, gocql.ErrNotFound
@@ -215,6 +226,8 @@ func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
 func (s *mockStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	results := make(map[types.MetricID]time.Time, len(ids))
 
@@ -264,11 +277,24 @@ func (i mockByteIter) Err() error {
 	return i.err
 }
 
-func (s *mockStore) SelectPostingByName(name string) bytesIter {
+func (s *mockStore) SelectPostingByName(shard int32, name string) bytesIter {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	m, ok := s.postings[name]
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		return &mockByteIter{
+			err: gocql.ErrNotFound,
+		}
+	}
+
+	m, ok := postings[name]
 	if !ok {
 		return &mockByteIter{
 			err: gocql.ErrNotFound,
@@ -287,11 +313,22 @@ func (s *mockStore) SelectPostingByName(name string) bytesIter {
 	}
 }
 
-func (s *mockStore) SelectPostingByNameValue(name string, value string) ([]byte, error) {
+func (s *mockStore) SelectPostingByNameValue(shard int32, name string, value string) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	m, ok := s.postings[name]
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		return nil, gocql.ErrNotFound
+	}
+
+	m, ok := postings[name]
 	if !ok {
 		return nil, gocql.ErrNotFound
 	}
@@ -304,11 +341,22 @@ func (s *mockStore) SelectPostingByNameValue(name string, value string) ([]byte,
 	return result, nil
 }
 
-func (s *mockStore) SelectValueForName(name string) ([]string, [][]byte, error) {
+func (s *mockStore) SelectValueForName(shard int32, name string) ([]string, [][]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	m, ok := s.postings[name]
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		return nil, nil, gocql.ErrNotFound
+	}
+
+	m, ok := postings[name]
 	if !ok {
 		return nil, nil, gocql.ErrNotFound
 	}
@@ -324,14 +372,26 @@ func (s *mockStore) SelectValueForName(name string) ([]string, [][]byte, error) 
 	return values, buffers, nil
 }
 
-func (s *mockStore) InsertPostings(name string, value string, bitset []byte) error {
+func (s *mockStore) InsertPostings(shard int32, name string, value string, bitset []byte) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	m, ok := s.postings[name]
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		postings = make(map[string]map[string][]byte)
+		s.postings[shard] = postings
+	}
+
+	m, ok := postings[name]
 	if !ok {
 		m = make(map[string][]byte)
-		s.postings[name] = m
+		postings[name] = m
 	}
 
 	m[value] = bitset
@@ -343,6 +403,8 @@ func (s *mockStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Label
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.queryCount++
+
 	s.id2labels[id] = sortedLabels
 	s.id2expiration[id] = expiration
 
@@ -353,6 +415,8 @@ func (s *mockStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.queryCount++
+
 	s.labels2id[sortedLabelsString] = id
 
 	return nil
@@ -361,6 +425,8 @@ func (s *mockStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID
 func (s *mockStore) InsertExpiration(day time.Time, bitset []byte) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	s.expiration[day] = bitset
 
@@ -371,6 +437,8 @@ func (s *mockStore) UpdateID2LabelsExpiration(id types.MetricID, expiration time
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.queryCount++
+
 	s.id2expiration[id] = expiration
 
 	return nil
@@ -379,6 +447,8 @@ func (s *mockStore) UpdateID2LabelsExpiration(id types.MetricID, expiration time
 func (s *mockStore) DeleteLabels2ID(sortedLabelsString string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	_, ok := s.labels2id[sortedLabelsString]
 	if !ok {
@@ -393,6 +463,8 @@ func (s *mockStore) DeleteLabels2ID(sortedLabelsString string) error {
 func (s *mockStore) DeleteID2Labels(id types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	s.queryCount++
 
 	_, ok := s.id2labels[id]
 	_, ok2 := s.id2expiration[id]
@@ -410,6 +482,8 @@ func (s *mockStore) DeleteExpiration(day time.Time) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.queryCount++
+
 	_, ok := s.expiration[day]
 	if !ok {
 		return gocql.ErrNotFound
@@ -420,11 +494,22 @@ func (s *mockStore) DeleteExpiration(day time.Time) error {
 	return nil
 }
 
-func (s *mockStore) DeletePostings(name string, value string) error {
+func (s *mockStore) DeletePostings(shard int32, name string, value string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	m, ok := s.postings[name]
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		return gocql.ErrNotFound
+	}
+
+	m, ok := postings[name]
 	if !ok {
 		return gocql.ErrNotFound
 	}
@@ -435,10 +520,27 @@ func (s *mockStore) DeletePostings(name string, value string) error {
 
 	delete(m, value)
 	if len(m) == 0 {
-		delete(s.postings, name)
+		delete(postings, name)
+		if len(postings) == 0 {
+			delete(s.postings, shard)
+		}
 	}
 
 	return nil
+}
+
+func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest {
+	results := make([]types.LookupRequest, len(list))
+
+	for i, l := range list {
+		results[i] = types.LookupRequest{
+			Labels: l.Copy(),
+			Start:  now,
+			End:    now,
+		}
+	}
+
+	return results
 }
 
 func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
@@ -458,7 +560,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	return results
 }
 
-func mockIndexFromMetrics(metrics map[types.MetricID]map[string]string) *CassandraIndex {
+func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.MetricID]map[string]string) *CassandraIndex {
 	index, err := new(&mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
@@ -467,26 +569,21 @@ func mockIndexFromMetrics(metrics map[types.MetricID]map[string]string) *Cassand
 		panic(err)
 	}
 
-	for id, labels := range metrics {
-		sortedLabels := labelsMapToList(labels, true)
-		sortedLabelsString := sortedLabels.String()
-		requests := []lookupMetricRequest{
-			{
-				newID:               id,
-				sortedLabelsString:  sortedLabelsString,
-				sortedLabels:        sortedLabels,
-				cassandraExpiration: time.Now().Add(time.Hour),
-			},
-		}
+	metricsList := make([]labels.Labels, 0, len(metrics))
+	ids := make([]types.MetricID, 0, len(metrics))
+	expirations := make([]time.Time, 0, len(metrics))
+	now := time.Now()
 
-		err := index.createMetrics(requests)
-		if err != nil {
-			panic(err)
-		}
+	for id, lbls := range metrics {
+		lbls := labels.FromMap(lbls)
+		metricsList = append(metricsList, lbls)
+		ids = append(ids, id)
+		expirations = append(expirations, now.Add(time.Hour))
+	}
 
-		if requests[0].newID != id {
-			panic(fmt.Sprintf("savedIDs=%v didn't match requested id=%v", requests[0].newID, id))
-		}
+	err = index.InternalCreateMetric(start, end, metricsList, ids, expirations)
+	if err != nil {
+		panic(err)
 	}
 
 	return index
@@ -1092,6 +1189,8 @@ func Benchmark_stringFromLabels(b *testing.B) {
 }
 
 func Test_postingsForMatchers(t *testing.T) {
+	now := time.Now()
+	shards := getTimeShards(now, now)
 	metrics1 := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
 			"__name__": "up",
@@ -1166,7 +1265,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			"userID":      "42",
 		},
 	}
-	index1 := mockIndexFromMetrics(metrics1)
+	index1 := mockIndexFromMetrics(now, now, metrics1)
 
 	metrics2 := make(map[types.MetricID]map[string]string)
 
@@ -1187,7 +1286,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			"instance": "localhost:900",
 		},
 	}
-	index3 := mockIndexFromMetrics(metrics3)
+	index3 := mockIndexFromMetrics(now, now, metrics3)
 
 	for x := 1; x < 101; x++ {
 		for y := 0; y < 100; y++ {
@@ -1203,7 +1302,7 @@ func Test_postingsForMatchers(t *testing.T) {
 		}
 	}
 
-	index2 := mockIndexFromMetrics(metrics2)
+	index2 := mockIndexFromMetrics(now, now, metrics2)
 
 	tests := []struct {
 		name     string
@@ -1285,6 +1384,23 @@ func Test_postingsForMatchers(t *testing.T) {
 			want: []types.MetricID{
 				MetricIDTest7,
 			},
+		},
+		{
+			name:  "eq-label-noexists",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"does-not-exists",
+					"",
+				),
+			},
+			want: []types.MetricID{},
 		},
 		{
 			name:  "eq-label",
@@ -1774,9 +1890,10 @@ func Test_postingsForMatchers(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.postingsForMatchers(tt.matchers)
+			got, err := tt.index.postingsForMatchers(shards, tt.matchers)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1787,6 +1904,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
 			}
 			got = got[:len(tt.want)]
 
@@ -1801,7 +1919,7 @@ func Test_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, err := tt.index.postingsForMatchers(matchersReverse)
+			got, err := tt.index.postingsForMatchers(shards, matchersReverse)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1812,6 +1930,1142 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_sharded_postingsForMatchers(t *testing.T) {
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t1 := t0.Add(8 * 24 * time.Hour)
+	t2 := t1.Add(8 * 24 * time.Hour)
+	t3 := t2.Add(8 * 24 * time.Hour)
+	t4 := t3.Add(8 * 24 * time.Hour)
+	t5 := t4.Add(8 * 24 * time.Hour)
+	now := t5.Add(8 * 24 * time.Hour)
+
+	index1, err := new(&mockStore{}, Options{
+		DefaultTimeToLive: 365 * 24 * time.Hour,
+		LockFactory:       &mockLockFactory{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metrics1IDs, _, err := index1.lookupIDs(
+		context.Background(),
+		[]types.LookupRequest{
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "node_exporter",
+					"instance": "localhost:9100",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "node_exporter",
+					"instance": "remotehost:9100",
+				}),
+				Start: t1,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "node_cpu_seconds_total",
+					"job":      "node_exporter",
+					"instance": "remotehost:9100",
+					"cpu":      "0",
+					"mode":     "idle",
+				}),
+				Start: t0,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "node_cpu_seconds_total",
+					"job":      "node_exporter",
+					"instance": "remotehost:9100",
+					"cpu":      "0",
+					"mode":     "user",
+				}),
+				Start: t1,
+				End:   t2,
+			},
+			{ // index = 5
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "node_cpu_seconds_total",
+					"job":      "node_exporter",
+					"instance": "remotehost:9100",
+					"cpu":      "1",
+					"mode":     "user",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "node_filesystem_avail_bytes",
+					"job":        "node_exporter",
+					"instance":   "localhost:9100",
+					"device":     "/dev/mapper/vg0-root",
+					"fstype":     "ext4",
+					"mountpoint": "/",
+				}),
+				Start: t1,
+				End:   t5,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":    "node_filesystem_avail_bytes",
+					"job":         "node_exporter",
+					"instance":    "localhost:9100",
+					"device":      "/dev/mapper/vg0-data",
+					"fstype":      "ext4",
+					"mountpoint":  "/srv/data",
+					"environment": "devel",
+				}),
+				Start: t0,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":    "node_filesystem_avail_bytes",
+					"job":         "node_exporter",
+					"instance":    "remote:9100",
+					"device":      "/dev/mapper/vg0-data",
+					"fstype":      "ext4",
+					"mountpoint":  "/srv/data",
+					"environment": "production",
+				}),
+				Start: t0,
+				End:   t5,
+			},
+			{ // index == 9
+				Labels: labels.FromMap(map[string]string{
+					"__name__":    "node_filesystem_avail_bytes",
+					"job":         "node_exporter",
+					"instance":    "remote:9100",
+					"device":      "/dev/mapper/vg0-data",
+					"fstype":      "ext4",
+					"mountpoint":  "/srv/data",
+					"environment": "production",
+					"userID":      "42",
+				}),
+				Start: t2,
+				End:   t4,
+			},
+		},
+		now,
+	)
+
+	requests := make([]types.LookupRequest, 0)
+
+	for x := 0; x < 100; x++ {
+		var start, end time.Time
+		for y := 0; y < 100; y++ {
+
+			switch x % 5 {
+			case 0:
+				start = t0
+				end = t0
+			case 1:
+				start = t1
+				end = t3
+			case 2:
+				start = t2
+				end = t2
+			case 3:
+				start = t4
+				end = t4
+			case 4:
+				start = t3
+				end = t4
+			}
+
+			requests = append(requests, types.LookupRequest{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   fmt.Sprintf("generated_%03d", x),
+					"label_x":    fmt.Sprintf("%03d", x),
+					"label_y":    fmt.Sprintf("%03d", y),
+					"multiple_2": fmt.Sprintf("%v", y%2 == 0),
+					"multiple_3": fmt.Sprintf("%v", y%3 == 0),
+					"multiple_5": fmt.Sprintf("%v", y%5 == 0),
+				}),
+				Start: start,
+				End:   end,
+			})
+		}
+	}
+
+	index2, err := new(&mockStore{}, Options{
+		DefaultTimeToLive: 365 * 24 * time.Hour,
+		LockFactory:       &mockLockFactory{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metrics2IDs, _, err := index2.lookupIDs(context.Background(), requests, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		index    *CassandraIndex
+		shards   []int32
+		matchers []*labels.Matcher
+		want     []types.MetricID
+		wantLen  int
+	}{
+		{
+			name:   "eq-t0",
+			index:  index1,
+			shards: getTimeShards(t0, t0),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[0],
+				metrics1IDs[1],
+			},
+		},
+		{
+			name:   "eq-t0t1",
+			index:  index1,
+			shards: getTimeShards(t0, t1),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[0],
+				metrics1IDs[1],
+				metrics1IDs[2],
+			},
+		},
+		{
+			name:   "eq-t1t5",
+			index:  index1,
+			shards: getTimeShards(t1, t5),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[2],
+			},
+		},
+		{
+			name:   "eq-t2now",
+			index:  index1,
+			shards: getTimeShards(t2, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:   "eq-eq",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"mode",
+					"user",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[4],
+				metrics1IDs[5],
+			},
+		},
+		{
+			name:   "eq-eq-t2",
+			index:  index1,
+			shards: getTimeShards(t2, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"mode",
+					"user",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[4],
+			},
+		},
+		{
+			name:   "eq-eq-t0+",
+			index:  index1,
+			shards: getTimeShards(t0, t0.Add(time.Hour)),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"mode",
+					"user",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[5],
+			},
+		},
+		{
+			name:   "eq-neq",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"mode",
+					"user",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[3],
+			},
+		},
+		{
+			name:   "eq-nolabel",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[6],
+			},
+		},
+		{
+			name:   "eq-nolabel-t3",
+			index:  index1,
+			shards: getTimeShards(t3, t3),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[6],
+			},
+		},
+		{
+			name:   "eq-nolabel-t0",
+			index:  index1,
+			shards: getTimeShards(t0, t0),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:   "eq-label",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[7],
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "eq-label-t0t1",
+			index:  index1,
+			shards: getTimeShards(t0, t1),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[7],
+				metrics1IDs[8],
+			},
+		},
+		{
+			name:   "eq-label-t1t2",
+			index:  index1,
+			shards: getTimeShards(t1, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[7],
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "eq-label-t2t5",
+			index:  index1,
+			shards: getTimeShards(t2, t5),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "re",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"u.",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[0],
+				metrics1IDs[1],
+				metrics1IDs[2],
+			},
+		},
+		{
+			name:   "re-re",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_cpu_.*",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mode",
+					"^u.*",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[4],
+				metrics1IDs[5],
+			},
+		},
+		{
+			name:   "re-nre",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_(cpu|disk)_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"mode",
+					"u\\wer",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[3],
+			},
+		},
+		{
+			name:   "re-re_nolabel",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					"^$",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[6],
+			},
+		},
+		{
+			name:   "re-re_label",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[7],
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "re-re*",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					".*",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[6],
+				metrics1IDs[7],
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "re-nre*",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_filesystem_avail_bytes$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					".*",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:   "eq-nre_empty_and_devel",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"(|devel)",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "eq-nre-eq same label",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"devel",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[7],
+			},
+		},
+		{
+			name:   "eq-eq-no_label",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"userID",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[8],
+			},
+		},
+		{
+			name:   "eq-eq-eq_empty",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:   "eq-eq-re_empty",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"production",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"environment",
+					".*",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[8],
+				metrics1IDs[9],
+			},
+		},
+		{
+			name:   "eq_empty",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[0],
+				metrics1IDs[1],
+				metrics1IDs[2],
+				metrics1IDs[3],
+				metrics1IDs[4],
+				metrics1IDs[5],
+				metrics1IDs[6],
+			},
+		},
+		{
+			name:   "neq_empty",
+			index:  index1,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"environment",
+					"production",
+				),
+			},
+			want: []types.MetricID{
+				metrics1IDs[0],
+				metrics1IDs[1],
+				metrics1IDs[2],
+				metrics1IDs[3],
+				metrics1IDs[4],
+				metrics1IDs[5],
+				metrics1IDs[6],
+				metrics1IDs[7],
+			},
+		},
+		{
+			name:   "index2-eq",
+			index:  index2,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
+			},
+			wantLen: 100,
+			want: []types.MetricID{
+				metrics2IDs[42*100+0],
+				metrics2IDs[42*100+1],
+				metrics2IDs[42*100+2],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-eq-t2",
+			index:  index2,
+			shards: getTimeShards(t2, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
+			},
+			wantLen: 100,
+			want: []types.MetricID{
+				metrics2IDs[42*100+0],
+				metrics2IDs[42*100+1],
+				metrics2IDs[42*100+2],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-eq-t1",
+			index:  index2,
+			shards: getTimeShards(t1, t1),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
+			},
+			wantLen: 0,
+			want:    []types.MetricID{},
+		},
+		{
+			name:   "index2-eq-eq-t0t2",
+			index:  index2,
+			shards: getTimeShards(t0, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"generated_042",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+			},
+			wantLen: 50,
+			want: []types.MetricID{
+				metrics2IDs[42*100+0],
+				metrics2IDs[42*100+2],
+				metrics2IDs[42*100+4],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-eq-neq-t1t2",
+			index:  index2,
+			shards: getTimeShards(t1, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"false",
+				),
+			},
+			wantLen: 2000,
+			want: []types.MetricID{
+				metrics2IDs[1*100+0],
+				metrics2IDs[1*100+2],
+				metrics2IDs[1*100+4],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-eq-neq-t4t5",
+			index:  index2,
+			shards: getTimeShards(t4, t5),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"false",
+				),
+			},
+			wantLen: 2000,
+			want: []types.MetricID{
+				metrics2IDs[3*100+0],
+				metrics2IDs[3*100+2],
+				metrics2IDs[3*100+4],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-eq-neq-2",
+			index:  index2,
+			shards: getTimeShards(t0, now),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"true",
+				),
+			},
+			wantLen: 0,
+			want:    []types.MetricID{},
+		},
+		{
+			name:   "index2-eq-neq-2-t2",
+			index:  index2,
+			shards: getTimeShards(t2, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_2",
+					"true",
+				),
+			},
+			wantLen: 0,
+			want:    []types.MetricID{},
+		},
+		{
+			name:   "index2-re-neq-eq-neq-t2",
+			index:  index2,
+			shards: getTimeShards(t2, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"__name__",
+					"generated_042",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
+			},
+			wantLen: 30,
+			want: []types.MetricID{
+				metrics2IDs[41*100+0],
+				metrics2IDs[41*100+10],
+				metrics2IDs[41*100+20],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-re-neq-eq-neq-t4",
+			index:  index2,
+			shards: getTimeShards(t4, t4),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"__name__",
+					"generated_042",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
+			},
+			wantLen: 40,
+			want: []types.MetricID{
+				metrics2IDs[43*100+0],
+				metrics2IDs[43*100+10],
+				metrics2IDs[43*100+20],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-re-nre-eq-neq-t0",
+			index:  index2,
+			shards: getTimeShards(t0, t0),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"__name__",
+					"(generated_04(0|2)|)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
+			},
+			wantLen: 10,
+			want: []types.MetricID{
+				metrics2IDs[45*100+0],
+				metrics2IDs[45*100+10],
+				metrics2IDs[45*100+20],
+				// [...]
+			},
+		},
+		{
+			name:   "index2-re-nre-eq-neq-t1t2",
+			index:  index2,
+			shards: getTimeShards(t1, t2),
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"generated_04.",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"__name__",
+					"(generated_04(0|2)|)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"multiple_2",
+					"true",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"multiple_5",
+					"false",
+				),
+			},
+			wantLen: 30,
+			want: []types.MetricID{
+				metrics2IDs[41*100+0],
+				metrics2IDs[41*100+10],
+				metrics2IDs[41*100+20],
+				// [...]
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.index.postingsForMatchers(tt.shards, tt.matchers)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+		t.Run(tt.name+" reverse", func(t *testing.T) {
+
+			matchersReverse := make([]*labels.Matcher, len(tt.matchers))
+			for i := range matchersReverse {
+				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
+			}
+
+			got, err := tt.index.postingsForMatchers(tt.shards, matchersReverse)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
 			}
 			got = got[:len(tt.want)]
 
@@ -1938,7 +3192,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	spare.Remove(44)
 
 	compactLarge := roaring.NewBTreeBitmap()
-	compactLarge = compactLarge.Flip(1, 1e5)
+	compactLarge = compactLarge.Flip(1, 5e5)
 
 	spareLarge := compactLarge.Clone()
 	spareLarge.Remove(65539)
@@ -1948,6 +3202,22 @@ func Benchmark_freeFreeID(b *testing.B) {
 	spareZone := compactLarge.Clone()
 	spareZone = spareZone.Flip(200, 500)
 	spareZone = spareZone.Flip(1e4, 2e4)
+
+	compactSuperLarge := compactLarge.Clone()
+	compactSuperLarge = compactSuperLarge.Flip(5e5+1, 5e6)
+
+	compactLargerest := compactSuperLarge.Clone()
+	compactLargerest = compactLargerest.Flip(5e6+1, 5e7)
+
+	spareSuperLarge := compactSuperLarge.Clone()
+	spareSuperLarge.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13)
+	spareSuperLarge.Flip(1e2, 1e3)
+	spareSuperLarge.Remove(4242, 4299, 4288, 1e9, 2e9)
+
+	spareLargerest := compactLargerest.Clone()
+	spareLargerest.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13)
+	spareLargerest.Flip(1e2, 1e3)
+	spareLargerest.Remove(4242, 4299, 4288, 1e9, 2e9)
 
 	startAndEnd := roaring.NewBTreeBitmap()
 	startAndEnd = startAndEnd.Flip(0, 1e4)
@@ -1979,8 +3249,24 @@ func Benchmark_freeFreeID(b *testing.B) {
 			bitmap: compactLarge,
 		},
 		{
+			name:   "compactSuperLarge",
+			bitmap: compactSuperLarge,
+		},
+		{
+			name:   "compactLargerest",
+			bitmap: compactLargerest,
+		},
+		{
 			name:   "spareLarge",
 			bitmap: spareLarge,
+		},
+		{
+			name:   "spareSuperLarge",
+			bitmap: spareSuperLarge,
+		},
+		{
+			name:   "spareLargerest",
+			bitmap: spareLargerest,
 		},
 		{
 			name:   "spareZone",
@@ -1997,6 +3283,338 @@ func Benchmark_freeFreeID(b *testing.B) {
 				_ = freeFreeID(tt.bitmap)
 			}
 		})
+	}
+}
+
+// Test_cache will run a small scenario on the index to check that in-memory cache works
+func Test_cache(t *testing.T) {
+	defaultTTL := 365 * 24 * time.Hour
+	store := &mockStore{}
+	lock := &mockLockFactory{}
+	states := &mockState{}
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+
+	index1, err := new(store, Options{
+		DefaultTimeToLive: defaultTTL,
+		LockFactory:       lock,
+		States:            states,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	index2, err := new(store, Options{
+		DefaultTimeToLive: defaultTTL,
+		LockFactory:       lock,
+		States:            states,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	labelsList := make([]labels.Labels, 3000)
+	for n := range labelsList {
+		lbls := map[string]string{
+			"__name__": "filler",
+			"id":       strconv.FormatInt(int64(n), 10),
+		}
+
+		if n >= 2000 {
+			lbls[timeToLiveLabelName] = "3600"
+		}
+
+		labelsList[n] = labels.FromMap(lbls)
+	}
+
+	tests := []struct {
+		name       string
+		labelsList []labels.Labels
+		indexes    []*CassandraIndex
+	}{
+		{
+			name:       "simple",
+			labelsList: labelsList[0:1000],
+			indexes:    []*CassandraIndex{index1, index2},
+		},
+		{
+			name:       "simple-index2-first",
+			labelsList: labelsList[1000:2000],
+			indexes:    []*CassandraIndex{index2, index1},
+		},
+		{
+			name:       "with-ttl",
+			labelsList: labelsList[2000:3000],
+			indexes:    []*CassandraIndex{index1, index2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for i, idx := range tt.indexes {
+				countBefore := store.queryCount
+				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				delta := store.queryCount - countBefore
+
+				if delta <= 0 {
+					t.Errorf("First lookup on indexes[%d] caused %d query to store, want > 0", i, delta)
+				}
+
+				countBefore = store.queryCount
+				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				delta = store.queryCount - countBefore
+
+				if delta > 0 {
+					t.Errorf("Second lookup on indexes[%d] caused %d query to store, want == 0", i, delta)
+				}
+			}
+
+			for i, idx := range tt.indexes {
+				countBefore := store.queryCount
+				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				delta := store.queryCount - countBefore
+
+				if delta > 0 {
+					t.Errorf("Third lookup on indexes[%d] caused %d query to store, want == 0", i, delta)
+				}
+			}
+		})
+	}
+}
+
+// Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
+func Test_cluster(t *testing.T) {
+	defaultTTL := 365 * 24 * time.Hour
+	store := &mockStore{}
+	lock := &mockLockFactory{}
+	states := &mockState{}
+
+	index1, err := new(store, Options{
+		DefaultTimeToLive: defaultTTL,
+		LockFactory:       lock,
+		States:            states,
+	})
+	if err != nil {
+		t.Error(err)
+	}
+
+	metrics := []map[string]string{
+		{
+			"__name__":    "up",
+			"instance":    "index1",
+			"description": "Metrics created by index1",
+		},
+		{
+			"__name__":    "up",
+			"instance":    "index2",
+			"description": "Metrics created by index2",
+		},
+		{
+			"__name__":    "up2",
+			"instance":    "index1",
+			"description": "index1, one month later",
+		},
+		{
+			"__name__":    "up2",
+			"instance":    "index2",
+			"description": "index2, two month later",
+		},
+	}
+	metricsID := make([]types.MetricID, len(metrics))
+
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t1 := t0.Add(24 * 30 * time.Hour)
+	t2 := t1.Add(24 * 30 * time.Hour)
+	t3 := t2.Add(24 * 30 * time.Hour)
+	t4 := t3.Add(24 * 30 * time.Hour)
+	t5 := t4.Add(24 * 30 * time.Hour)
+
+	tmp, _, err := index1.lookupIDs(
+		context.Background(),
+		toLookupRequests(
+			[]labels.Labels{
+				labels.FromMap(metrics[0]),
+			},
+			t0,
+		),
+		t0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metricsID[0] = tmp[0]
+
+	index2, err := new(store, Options{
+		DefaultTimeToLive: defaultTTL,
+		LockFactory:       lock,
+		States:            states,
+	})
+	if err != nil {
+		t.Error(err)
+	}
+
+	tmp, _, err = index2.lookupIDs(
+		context.Background(),
+		toLookupRequests(
+			[]labels.Labels{
+				labels.FromMap(metrics[1]),
+				labels.FromMap(metrics[0]),
+			},
+			t0,
+		),
+		t0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metricsID[1] = tmp[0]
+
+	if tmp[1] != metricsID[0] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[0])
+	}
+
+	tmp, _, err = index1.lookupIDs(
+		context.Background(),
+		toLookupRequests(
+			[]labels.Labels{
+				labels.FromMap(metrics[0]),
+				labels.FromMap(metrics[1]),
+			},
+			t0,
+		),
+		t0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tmp[0] != metricsID[0] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
+	}
+	if tmp[1] != metricsID[1] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
+	}
+
+	tmp, _, err = index1.lookupIDs(
+		context.Background(),
+		toLookupRequests(
+			[]labels.Labels{
+				labels.FromMap(metrics[0]),
+				labels.FromMap(metrics[1]),
+				labels.FromMap(metrics[2]),
+			},
+			t1,
+		),
+		t1,
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	metricsID[2] = tmp[2]
+
+	if tmp[0] != metricsID[0] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
+	}
+	if tmp[1] != metricsID[1] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
+	}
+
+	tmp, _, err = index2.lookupIDs(
+		context.Background(),
+		toLookupRequests(
+			[]labels.Labels{
+				labels.FromMap(metrics[3]),
+				labels.FromMap(metrics[2]),
+				labels.FromMap(metrics[1]),
+			},
+			t2,
+		),
+		t2,
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	metricsID[3] = tmp[0]
+
+	if tmp[0] != metricsID[3] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[3])
+	}
+	if tmp[1] != metricsID[2] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[2])
+	}
+	if tmp[2] != metricsID[1] {
+		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[2], metricsID[1])
+	}
+
+	// Do some concurrency tests
+	labelsList := make([]labels.Labels, 10000)
+	for n := range labelsList {
+		lbls := map[string]string{
+			"__name__": "filler",
+			"id":       strconv.FormatInt(int64(n), 10),
+		}
+		labelsList[n] = labels.FromMap(lbls)
+	}
+
+	batchSize := 100
+	workerCount := 4
+
+	for n := 0; n < workerCount; n++ {
+		n := n
+
+		t.Run(fmt.Sprintf("worker-%d", n), func(t *testing.T) {
+			t.Parallel()
+
+			index := index1
+
+			if n%2 == 1 {
+				index = index2
+			}
+
+			start := n * len(labelsList) / workerCount
+			end := (n+1)*len(labelsList)/workerCount - 1
+
+			current := start
+			for current < end {
+				idxEnd := current + batchSize
+				if idxEnd > end {
+					idxEnd = end
+				}
+
+				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				current = idxEnd
+			}
+		})
+	}
+
+	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmp2, _, err := index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(tmp, tmp2) {
+		t.Errorf("Index don't have the same IDs")
 	}
 }
 
@@ -2084,9 +3702,9 @@ func Test_expiration(t *testing.T) {
 		labelsList[i] = labelsMapToList(m, false)
 	}
 
-	metricsID, ttls, err = index.lookupIDs(context.Background(), labelsList, t0)
+	metricsID, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	for i, got := range ttls {
@@ -2116,7 +3734,7 @@ func Test_expiration(t *testing.T) {
 	index.expire(t0)
 	index.cassandraExpire(t0)
 
-	allIds, err := index.AllIDs()
+	allIds, err := index.AllIDs(t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2125,7 +3743,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
-	ids, ttls, err := index.lookupIDs(context.Background(), labelsList[3:4], t1)
+	ids, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[3:4], t1), t1)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock may be hold
@@ -2163,7 +3781,7 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t1)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2173,7 +3791,7 @@ func Test_expiration(t *testing.T) {
 
 	metrics[0]["__ttl__"] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
-	ids, ttls, err = index.lookupIDs(context.Background(), labelsList[0:1], t2)
+	ids, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList[0:1], t2), t2)
 	if err != nil {
 		t.Error(err)
 		return // can't continue, lock make be hold
@@ -2195,7 +3813,7 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t2)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t2)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2213,7 +3831,7 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t3)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2231,12 +3849,12 @@ func Test_expiration(t *testing.T) {
 		labelsList[n] = labelsMapToList(labels, false)
 	}
 
-	_, _, err = index.lookupIDs(context.Background(), labelsList, t3)
+	_, _, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t3)
 	if err != nil {
 		t.Error(err)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2249,7 +3867,7 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t4)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t4)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2262,7 +3880,7 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t5)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t5)
 	if err != nil {
 		t.Error(err)
 	}
@@ -2275,11 +3893,100 @@ func Test_expiration(t *testing.T) {
 		index.cassandraExpire(t6)
 	}
 
-	allIds, err = index.AllIDs()
+	allIds, err = index.AllIDs(t0, t6)
 	if err != nil {
 		t.Error(err)
 	}
 	if len(allIds) != 0 {
 		t.Errorf("allIds = %v, want []", allIds)
+	}
+}
+
+func Test_getTimeShards(t *testing.T) {
+	type args struct {
+		start time.Time
+		end   time.Time
+	}
+
+	shardSize := int32(postingShardSize.Hours())
+
+	if shardSize%2 != 0 {
+		t.Errorf("shardSize is not an even number of hours. This is not supported")
+	}
+
+	now := time.Now()
+	reference := time.Date(2020, 10, 15, 18, 40, 0, 0, time.UTC)
+	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
+	base := time.Unix(int64(baseTS)*3600, 0)
+
+	tests := []struct {
+		name string
+		args args
+		want []int32
+	}{
+		{
+			name: "now",
+			args: args{
+				start: now,
+				end:   now,
+			},
+			want: []int32{int32(now.Unix()/3600) / shardSize * shardSize},
+		},
+		{
+			name: "base",
+			args: args{
+				start: base,
+				end:   base,
+			},
+			want: []int32{baseTS},
+		},
+		{
+			name: "reference",
+			args: args{
+				start: reference,
+				end:   reference,
+			},
+			want: []int32{baseTS},
+		},
+		{
+			// This test assume that reference+9h do NOT change its baseTime
+			name: "reference+2h",
+			args: args{
+				start: reference,
+				end:   reference.Add(2 * time.Hour),
+			},
+			want: []int32{baseTS},
+		},
+		{
+			name: "reference+postingShardSize",
+			args: args{
+				start: reference,
+				end:   reference.Add(postingShardSize),
+			},
+			want: []int32{baseTS, baseTS + shardSize},
+		},
+		{
+			// This test assume postingShardSize is at least > 2h
+			name: "epoc",
+			args: args{
+				start: time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC),
+				end:   time.Date(1970, 1, 1, 1, 59, 0, 0, time.UTC),
+			},
+			want: []int32{0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getTimeShards(tt.args.start, tt.args.end); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getTimeShards() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	got := getTimeShards(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now())
+	for i, shard := range got {
+		if shard == globalShardNumber {
+			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
+		}
 	}
 }

@@ -3,16 +3,19 @@ package index
 import (
 	"context"
 	"squirreldb/types"
+	"sync"
 
+	"github.com/gocql/gocql"
+	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 type deleter struct {
-	c                     *CassandraIndex
-	deleteLabels          []string
-	deleteIDs             []uint64
-	postingUpdates        []postingUpdateRequest
-	labelToPostingUpdates map[string]map[string]int
+	c                       *CassandraIndex
+	deleteLabels            []string
+	deleteIDs               []uint64
+	unshardedPostingUpdates []postingUpdateRequest
+	labelToPostingUpdates   map[string]map[string]int
 }
 
 func newBulkDeleter(c *CassandraIndex) *deleter {
@@ -22,7 +25,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 	}
 }
 
-// PrepareDelete add a metric to be deleted. Not read is performed at this point and no lock is required
+// PrepareDelete add a metric to be deleted. No read is performed at this point and no lock is required
 // sortedLabels may be nil if labels are unknown (so only ID is deleted from all postings).
 // Skipping labels2id is used by index verification & fix. It shouldn't be used in normal condition.
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) { // nolint: interfacer
@@ -42,15 +45,45 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 
 		idx, ok := m[label.Value]
 		if !ok {
-			idx = len(d.postingUpdates)
-			d.postingUpdates = append(d.postingUpdates, postingUpdateRequest{
+			idx = len(d.unshardedPostingUpdates)
+			d.unshardedPostingUpdates = append(d.unshardedPostingUpdates, postingUpdateRequest{
 				Label: label,
 			})
 			m[label.Value] = idx
 		}
 
-		d.postingUpdates[idx].RemoveIDs = append(d.postingUpdates[idx].RemoveIDs, uint64(id))
+		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id))
 	}
+}
+
+func (d *deleter) getMayPresent(shards []uint64) (map[int32]*roaring.Bitmap, error) {
+	results := make(map[int32]*roaring.Bitmap, len(shards))
+	l := &sync.Mutex{}
+
+	return results, d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+		for _, shard := range shards {
+			shard := int32(shard)
+			task := func() error {
+				tmp, err := d.c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
+				if err != nil {
+					return err
+				}
+
+				l.Lock()
+				results[shard] = tmp
+				l.Unlock()
+
+				return nil
+			}
+
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	})
 }
 
 // Delete perform the deletion and REQUIRE the newMetricLockName.
@@ -61,12 +94,12 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 //
 // Deletion is performed in reverse order of the creation of metrics:
 // * First we delete from labels2id (this cause any new write to create a new metrics)
-// * drop id from every postings (TODO: during those deletes, Search() may wrongly return the metric ID in cause of negative search.)
+// * drop id from every sharded postings (TODO: during those deletes, Search() may wrongly return the metric ID in cause of negative search.)
 // * drop the id2labels (at this points, Search() can elimitate wrong metric ID)
 // * the remote the id from all postings, making the ID free
 //
 // Note: it's not this function which clear the expiration table, this is done elsewhere.
-func (d *deleter) Delete() error {
+func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 	if len(d.deleteIDs) == 0 {
 		return nil
 	}
@@ -97,11 +130,121 @@ func (d *deleter) Delete() error {
 		return err
 	}
 
+	shards, err := d.c.postings([]int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+	if err != nil {
+		return err
+	}
+
+	maybePresent, err := d.getMayPresent(shards.Slice())
+	if err != nil {
+		return err
+	}
+
+	shardedUpdates := make([]postingUpdateRequest, 0, len(d.unshardedPostingUpdates)*int(shards.Count()))
+	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
+	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
+
+	for _, shard := range shards.Slice() {
+		shard := int32(shard)
+
+		it := maybePresent[shard]
+		if it == nil || !it.Any() {
+			continue
+		}
+
+		presenceUpdates = append(presenceUpdates, postingUpdateRequest{
+			Shard: shard,
+			Label: labels.Label{
+				Name:  allPostingLabel,
+				Value: allPostingLabel,
+			},
+			RemoveIDs: d.deleteIDs,
+		})
+
+		for _, req := range d.unshardedPostingUpdates {
+			ids := roaring.NewBitmap(req.RemoveIDs...)
+			if ids.IntersectionCount(it) == 0 {
+				continue
+			}
+
+			req.Shard = shard
+			shardedUpdates = append(shardedUpdates, req)
+		}
+
+		maybePresenceUpdates = append(maybePresenceUpdates, postingUpdateRequest{
+			Shard: shard,
+			Label: labels.Label{
+				Name:  maybePostingLabel,
+				Value: maybePostingLabel,
+			},
+			RemoveIDs: d.deleteIDs,
+		})
+	}
+
 	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range d.postingUpdates {
+		for _, req := range presenceUpdates {
 			req := req
 			task := func() error {
-				return d.c.postingUpdate(req)
+				bitmap, err := d.c.postingUpdate(req)
+				if err != nil && err != gocql.ErrNotFound {
+					return err
+				}
+
+				d.c.lookupIDMutex.Lock()
+				if bitmap == nil {
+					delete(d.c.idInShard, req.Shard)
+				} else {
+					d.c.idInShard[req.Shard] = bitmap
+				}
+				d.c.lookupIDMutex.Unlock()
+
+				return nil
+			}
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+		for _, req := range shardedUpdates {
+			req := req
+			task := func() error {
+				_, err := d.c.postingUpdate(req)
+				if err != nil && err != gocql.ErrNotFound {
+					return err
+				}
+
+				return nil
+			}
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+		for _, req := range maybePresenceUpdates {
+			req := req
+			task := func() error {
+				_, err := d.c.postingUpdate(req)
+				if err != nil && err != gocql.ErrNotFound {
+					return err
+				}
+
+				return nil
 			}
 			select {
 			case work <- task:
@@ -133,8 +276,9 @@ func (d *deleter) Delete() error {
 		return err
 	}
 
-	err = d.c.postingUpdate(postingUpdateRequest{
-		Label:     labels.Label{Name: allPostingLabelName, Value: allPostingLabelValue},
+	_, err = d.c.postingUpdate(postingUpdateRequest{
+		Shard:     globalShardNumber,
+		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,
 	})
 	if err != nil {

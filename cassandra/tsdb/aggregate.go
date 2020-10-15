@@ -111,7 +111,7 @@ func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error 
 
 	retry.Print(func() error {
 		var err error
-		ids, err = c.index.AllIDs()
+		ids, err = c.index.AllIDs(from, to)
 
 		return err
 	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
@@ -192,7 +192,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 
 	retry.Print(func() error {
 		var err error
-		ids, err = c.index.AllIDs()
+		ids, err = c.index.AllIDs(fromTime, toTime)
 
 		return err
 	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,

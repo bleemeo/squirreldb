@@ -11,21 +11,23 @@ import (
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
 )
 
 func TestPromQL_queryable(t *testing.T) {
+	now := time.Now()
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
 	_, _, err := idx.LookupIDs(
 		context.Background(),
-		[]labels.Labels{
-			labelsMetric1,
-			labelsMetric2,
-			labelsMetric3,
+		[]types.LookupRequest{
+			{Labels: labelsMetric1.Copy(), Start: now, End: now},
+			{Labels: labelsMetric2.Copy(), Start: now, End: now},
+			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
 
