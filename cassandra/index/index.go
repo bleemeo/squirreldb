@@ -1260,6 +1260,40 @@ func InternalMaxTTLUpdateDelay() time.Duration {
 	return cassandraTTLUpdateDelay + cassandraTTLUpdateJitter
 }
 
+// InternalCreateMetric create metrics in the index with ID value forced.
+// This should only be used in test & benchmark.
+// The following condition on input must be meet:
+// * no duplicated metrics
+// * no conflict in IDs
+// * labels must be sorted
+// * len(metrics) == len(ids) == len(expirations).
+func (c *CassandraIndex) InternalCreateMetric(metrics []labels.Labels, ids []types.MetricID, expirations []time.Time) error {
+	requests := make([]lookupMetricRequest, len(metrics))
+
+	for i, labels := range metrics {
+		sortedLabelsString := labels.String()
+		requests[i] = lookupMetricRequest{
+			newID:               ids[i],
+			sortedLabelsString:  sortedLabelsString,
+			sortedLabels:        labels,
+			cassandraExpiration: expirations[i],
+		}
+	}
+
+	err := c.createMetrics(requests)
+	if err != nil {
+		return err
+	}
+
+	for i, id := range ids {
+		if requests[i].newID != id {
+			return fmt.Errorf("savedIDs=%v didn't match requested id=%v", requests[0].newID, id)
+		}
+	}
+
+	return nil
+}
+
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
 // This should only be used in test & benchmark.
 func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error {
@@ -2009,6 +2043,24 @@ func (s cassandraStore) Init() error {
 
 	for _, query := range queries {
 		if err := s.session.Query(query).Consistency(gocql.All).Exec(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// InternalDropTables drop tables used by the index.
+// This should only be used in test & benchmark.
+func InternalDropTables(session *gocql.Session) error {
+	queries := []string{
+		"DROP TABLE IF EXISTS index_labels2id",
+		"DROP TABLE IF EXISTS index_postings",
+		"DROP TABLE IF EXISTS index_id2labels",
+		"DROP TABLE IF EXISTS index_expiration",
+	}
+	for _, query := range queries {
+		if err := session.Query(query).Exec(); err != nil {
 			return err
 		}
 	}
