@@ -1893,7 +1893,7 @@ func Test_postingsForMatchers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.postingsForMatchers(shards, tt.matchers)
+			got, _, err := tt.index.postingsForMatchers(shards, tt.matchers)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1919,7 +1919,7 @@ func Test_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, err := tt.index.postingsForMatchers(shards, matchersReverse)
+			got, _, err := tt.index.postingsForMatchers(shards, matchersReverse)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3028,7 +3028,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.postingsForMatchers(tt.shards, tt.matchers)
+			got, _, err := tt.index.postingsForMatchers(tt.shards, tt.matchers)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3054,7 +3054,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, err := tt.index.postingsForMatchers(tt.shards, matchersReverse)
+			got, _, err := tt.index.postingsForMatchers(tt.shards, matchersReverse)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return

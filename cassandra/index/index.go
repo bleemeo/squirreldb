@@ -1439,8 +1439,9 @@ func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matche
 	}
 
 	var (
-		ids   []types.MetricID
-		found bool
+		ids        []types.MetricID
+		labelsList []labels.Labels
+		found      bool
 	)
 
 	if c.options.IncludeID {
@@ -1460,7 +1461,7 @@ func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matche
 
 	if !found {
 		var err error
-		ids, err = c.postingsForMatchers(shards, matchers)
+		ids, labelsList, err = c.postingsForMatchers(shards, matchers)
 
 		if err != nil {
 			return nil, err
@@ -1468,11 +1469,6 @@ func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matche
 	}
 
 	searchMetricsTotal.Add(float64(len(ids)))
-
-	labelsList, err := c.lookupLabels(ids, false, start)
-	if err != nil {
-		return nil, err
-	}
 
 	results := make([]types.MetricLabel, len(ids))
 
@@ -2004,7 +2000,7 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is taken from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.Matcher) (ids []types.MetricID, err error) { //nolint: gocognit,gocyclo
+func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.Matcher) (ids []types.MetricID, labelsList []labels.Labels, err error) { //nolint: gocognit,gocyclo
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for _, m := range matchers {
@@ -2041,12 +2037,12 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 				// be empty we need to use inversePostingsForMatcher.
 				inverse, err := m.Inverse()
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				it, err := c.inversePostingsForMatcher(shards, inverse)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				if results == nil {
@@ -2059,7 +2055,7 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 				it, err := c.postingsForMatcher(shards, m)
 
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				if results == nil {
@@ -2086,20 +2082,20 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 				// doesn't match empty, then subtract it out at the end.
 				inverse, err := m.Inverse()
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				it, err := c.postingsForMatcher(shards, inverse)
 
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				if results == nil {
 					// If there's nothing to subtract from, add in everything and remove the notIts later.
 					results, err = c.postings(shards, allPostingLabel, allPostingLabel)
 					if err != nil {
-						return nil, err
+						return nil, nil, err
 					}
 				}
 
@@ -2113,14 +2109,14 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 			it, err := c.inversePostingsForMatcher(shards, m)
 
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			if results == nil {
 				// If there's nothing to subtract from, add in everything and remove the notIts later.
 				results, err = c.postings(shards, allPostingLabel, allPostingLabel)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 
@@ -2129,32 +2125,34 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 	}
 
 	if results == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	ids = bitsetToIDs(results)
 
-	if checkMatches {
-		now := time.Now()
-		newIds := make([]types.MetricID, 0, len(ids))
+	labelsList, err = c.lookupLabels(ids, false, time.Now())
+	if err != nil {
+		return nil, nil, err
+	}
 
-		idToLabels, err := c.lookupLabels(ids, false, now)
-		if err != nil {
-			return nil, err
-		}
+	if checkMatches {
+		newIds := make([]types.MetricID, 0, len(ids))
+		newLabels := make([]labels.Labels, 0, len(ids))
 
 		for i, id := range ids {
-			lbls := idToLabels[i]
+			lbls := labelsList[i]
 
 			if matcherMatches(matchers, lbls) {
 				newIds = append(newIds, id)
+				newLabels = append(newLabels, lbls)
 			}
 		}
 
 		ids = newIds
+		labelsList = newLabels
 	}
 
-	return ids, nil
+	return ids, labelsList, nil
 }
 
 // postingsForMatcher return id that match one matcher.
