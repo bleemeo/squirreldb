@@ -581,11 +581,6 @@ func (c *CassandraIndex) postings(shards []int32, name string, value string) (*r
 	return result, nil
 }
 
-// LookupLabels returns a Label list for each specified ID.
-func (c *CassandraIndex) LookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
-	return c.lookupLabels(ids, c.options.IncludeID, time.Now())
-}
-
 func (c *CassandraIndex) lookupLabels(ids []types.MetricID, addID bool, now time.Time) ([]labels.Labels, error) {
 	start := time.Now()
 

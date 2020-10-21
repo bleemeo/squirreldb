@@ -27,7 +27,7 @@ func (idx *Index) AllIDs(start time.Time, end time.Time) ([]types.MetricID, erro
 	return nil, nil
 }
 
-// LookupLabels required StoreMetricIDInMemory (so not persistent after restart).
+// lookupLabels required StoreMetricIDInMemory (so not persistent after restart).
 func (idx *Index) lookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()

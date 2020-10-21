@@ -220,26 +220,23 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 func runExport(cassandraIndex *index.CassandraIndex) error {
 	writer := csv.NewWriter(os.Stdout)
 
-	ids, err := cassandraIndex.AllIDs(start, end)
+	results, err := cassandraIndex.Search(start, end, []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"),
+	})
 	if err != nil {
 		return err
 	}
 
-	for start := 0; start < len(ids); start += 1000 {
+	for start := 0; start < len(results); start += 1000 {
 		end := start + 1000
-		if end > len(ids) {
-			end = len(ids)
+		if end > len(results) {
+			end = len(results)
 		}
 
-		lbls, err := cassandraIndex.LookupLabels(ids[start:end])
-		if err != nil {
-			return err
-		}
-
-		for i, id := range ids[start:end] {
+		for _, entry := range results[start:end] {
 			err := writer.Write([]string{
-				strconv.FormatInt(int64(id), 10),
-				lbls[i].String(),
+				strconv.FormatInt(int64(entry.ID), 10),
+				entry.Labels.String(),
 			})
 			if err != nil {
 				return err
