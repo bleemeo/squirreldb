@@ -200,7 +200,9 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			c.RunOnce(ctx)
+			for ctx.Err() == nil && c.RunOnce(ctx, time.Now()) {
+				time.Sleep(10 * time.Second)
+			}
 		case <-ctx.Done():
 			debug.Print(2, logger, "Cassandra index service stopped")
 			return
@@ -208,14 +210,16 @@ func (c *CassandraIndex) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce run the tasks scheduled by Run.
+// RunOnce run the tasks scheduled by Run, return true if more work is pending.
 // Prefer using Run() than calling RunOnce multiple time. RunOnce is mostly here
 // for squirreldb-cassandra-index-bench program.
-func (c *CassandraIndex) RunOnce(ctx context.Context) {
-	c.expire(time.Now())
+func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
+	c.expire(now)
 	c.applyExpirationUpdateRequests()
-	c.cassandraExpire(time.Now())
-	c.periodicRefreshIDInShard(time.Now())
+	moreWork := c.cassandraExpire(now)
+	c.periodicRefreshIDInShard(now)
+
+	return moreWork
 }
 
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
@@ -655,7 +659,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocyclo,gocognit
 	start := time.Now()
 
 	defer func() {
@@ -670,7 +674,10 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		}
 	}
 
-	entries, labelsToIndices := c.lookupIDsFromCache(requests)
+	entries, labelsToIndices, err := c.lookupIDsFromCache(now, requests)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	if c.options.IncludeID {
 		/*if err := c.lookupIDsFromLabels(requests, cassandraRequests); err != nil {
@@ -776,7 +783,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		}
 	}
 
-	err := c.updatePostingShards(ctx, founds, false)
+	err = c.updatePostingShards(ctx, founds, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -802,7 +809,9 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		wantedEntryExpiration := now.Add(time.Duration(entry.ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
 		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
-		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration)
+		// The 3*backgroundCheckInterval is to be slightly larger than 2*backgroundCheckInterval used in lookupIDsFromCache.
+		// It ensure that live metrics stay in cache.
+		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration) || entry.idData.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
 
 		if needTTLUpdate {
 			if err := c.refreshExpiration(entry.id, entry.cassandraEntryExpiration, cassandraExpiration); err != nil {
@@ -819,12 +828,12 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 	return ids, ttls, nil
 }
 
-func (c *CassandraIndex) lookupIDsFromCache(requests []types.LookupRequest) (entries []lookupEntry, labelsToIndices map[string][]int) {
+func (c *CassandraIndex) lookupIDsFromCache(now time.Time, requests []types.LookupRequest) (entries []lookupEntry, labelsToIndices map[string][]int, err error) {
 	entries = make([]lookupEntry, len(requests))
 	labelsToIndices = make(map[string][]int)
+	possibleInvalidIDs := make([]uint64, 0)
 
 	c.lookupIDMutex.Lock()
-	defer c.lookupIDMutex.Unlock()
 
 	for i, req := range requests {
 		ttl := timeToLiveFromLabels(&req.Labels)
@@ -834,6 +843,23 @@ func (c *CassandraIndex) lookupIDsFromCache(requests []types.LookupRequest) (ent
 
 		labelsKey := req.Labels.Hash()
 		data, found := c.getIDData(labelsKey, req.Labels)
+
+		if found && data.cassandraEntryExpiration.Before(now.Add(2*backgroundCheckInterval)) {
+			// This entry will expire soon. To reduce risk of using invalid cache (due to race
+			// condition with another SquirrelDB delete metrics), first refresh the expiration,
+			// and then refresh entry from Cassandra (ignore the cache).
+			wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
+			cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
+			cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second)
+
+			if err := c.refreshExpiration(data.id, data.cassandraEntryExpiration, cassandraExpiration); err != nil {
+				c.lookupIDMutex.Unlock()
+				return nil, nil, err
+			}
+
+			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id))
+			found = false
+		}
 
 		if !found {
 			data = idData{
@@ -859,7 +885,13 @@ func (c *CassandraIndex) lookupIDsFromCache(requests []types.LookupRequest) (ent
 		}
 	}
 
-	return entries, labelsToIndices
+	c.lookupIDMutex.Unlock()
+
+	if len(possibleInvalidIDs) > 0 {
+		c.deleteIDsFromCache(possibleInvalidIDs)
+	}
+
+	return entries, labelsToIndices, nil
 }
 
 func (c *CassandraIndex) refreshExpiration(id types.MetricID, oldExpiration time.Time, newExpiration time.Time) error {
@@ -1628,10 +1660,10 @@ func (c *CassandraIndex) periodicRefreshIDInShard(now time.Time) {
 }
 
 // cassandraExpire remove all entry in Cassandra that have expired.
-func (c *CassandraIndex) cassandraExpire(now time.Time) {
+func (c *CassandraIndex) cassandraExpire(now time.Time) bool {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
 	if acquired := lock.TryLock(context.Background(), 0); !acquired {
-		return
+		return false
 	}
 	defer lock.Unlock()
 
@@ -1649,7 +1681,7 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 
 		if err != nil {
 			logger.Printf("Waring: unable to get last processed day for metrics expiration: %v", err)
-			return
+			return false
 		}
 
 		if fromTimeStr != "" {
@@ -1665,14 +1697,14 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 		err := c.options.States.Write(expireMetricStateName, lastProcessedDay.Format(time.RFC3339))
 		if err != nil {
 			logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
-			return
+			return false
 		}
 	}
 
 	candidateDay := lastProcessedDay.Add(24 * time.Hour)
 
 	if candidateDay.After(maxTime) {
-		return
+		return false
 	}
 
 	// We don't need the newMetricLockName lock here, because newly created metrics
@@ -1680,7 +1712,7 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 	bitmap, err := c.cassandraGetExpirationList(candidateDay)
 	if err != nil {
 		logger.Printf("Waring: unable to get list of metrics to check for expiration: %v", err)
-		return
+		return false
 	}
 
 	debug.Print(debug.Level1, logger, "processing expiration for day %v", candidateDay)
@@ -1707,13 +1739,13 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 
 		if err := c.cassandraCheckExpire(results, now); err != nil {
 			logger.Printf("Waring: unable to perform expiration check of metrics: %v", err)
-			return
+			return false
 		}
 
 		_, err = bitmap.Remove(results...)
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
-			return
+			return false
 		}
 
 		if !bitmap.Any() {
@@ -1725,27 +1757,29 @@ func (c *CassandraIndex) cassandraExpire(now time.Time) {
 		_, err = bitmap.WriteTo(&buffer)
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
-			return
+			return false
 		}
 
 		err = c.store.InsertExpiration(candidateDay, buffer.Bytes())
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
-			return
+			return false
 		}
 	}
 
 	err = c.store.DeleteExpiration(candidateDay)
 	if err != nil && err != gocql.ErrNotFound {
 		logger.Printf("Waring: unable to remove processed list of metrics to check for expiration: %v", err)
-		return
+		return false
 	}
 
 	err = c.options.States.Write(expireMetricStateName, candidateDay.Format(time.RFC3339))
 	if err != nil {
 		logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
-		return
+		return false
 	}
+
+	return true
 }
 
 // cassandraCheckExpire actually check for metric expired or not, and perform changes.
@@ -1936,6 +1970,16 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 	_, err = bitmapExpiration.Add(job.AddIDs...)
 	if err != nil {
 		return err
+	}
+
+	idsToRemove := roaring.NewBitmap(job.RemoveIDs...)
+	missingIDs := idsToRemove.Difference(bitmapExpiration)
+
+	if missingIDs.Any() {
+		slice := missingIDs.Slice()
+		expireConflictMetric.Add(float64(len(slice)))
+
+		c.deleteIDsFromCache(slice)
 	}
 
 	_, err = bitmapExpiration.Remove(job.RemoveIDs...)

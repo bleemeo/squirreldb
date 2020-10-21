@@ -91,6 +91,12 @@ var (
 		Name:      "expire_metrics_delete_total",
 		Help:      "Total number of metrics deleted by the expiration task",
 	})
+	expireConflictMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "squirreldb",
+		Subsystem: "index",
+		Name:      "expire_conflict_total",
+		Help:      "Total number of conflict in expiration updates",
+	})
 	expireGhostMetric = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "squirreldb",
 		Subsystem: "index",

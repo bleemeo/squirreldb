@@ -3436,6 +3436,7 @@ func Test_cluster(t *testing.T) {
 	t3 := t2.Add(24 * 30 * time.Hour)
 	t4 := t3.Add(24 * 30 * time.Hour)
 	t5 := t4.Add(24 * 30 * time.Hour)
+	t6 := t5.Add(24 * 30 * time.Hour)
 
 	tmp, _, err := index1.lookupIDs(
 		context.Background(),
@@ -3616,6 +3617,66 @@ func Test_cluster(t *testing.T) {
 	if !reflect.DeepEqual(tmp, tmp2) {
 		t.Errorf("Index don't have the same IDs")
 	}
+
+	for index1.RunOnce(context.Background(), t5) {
+	}
+
+	for index2.RunOnce(context.Background(), t5) {
+	}
+
+	labelsList = []labels.Labels{
+		labels.FromMap(map[string]string{
+			"__name__":          "expiration_conflict",
+			timeToLiveLabelName: "60",
+		}),
+	}
+
+	labelsList2 := []labels.Labels{
+		labels.FromMap(map[string]string{
+			"__name__":          "expiration_conflict2",
+			timeToLiveLabelName: "60",
+		}),
+	}
+
+	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tmp[0] != tmp2[0] {
+		t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
+	}
+
+	for index1.RunOnce(context.Background(), t6) {
+	}
+
+	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index2.RunOnce(context.Background(), t6) {
+	}
+
+	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tmp[0] == tmp2[0] {
+		t.Errorf("lookupIDs() = %d, want != %d", tmp2[0], tmp[0])
+	}
+
 }
 
 // Test_expiration will run a small scenario on the index to check expiration.

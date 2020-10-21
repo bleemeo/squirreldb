@@ -261,7 +261,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 
 		start = time.Now()
 
-		cassandraIndex.RunOnce(context.Background())
+		cassandraIndex.RunOnce(context.Background(), time.Now())
 
 		stop := time.Now()
 
