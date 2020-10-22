@@ -227,24 +227,19 @@ func runExport(cassandraIndex *index.CassandraIndex) error {
 		return err
 	}
 
-	for start := 0; start < len(results); start += 1000 {
-		end := start + 1000
-		if end > len(results) {
-			end = len(results)
-		}
+	for results.Next() {
+		entry := results.At()
 
-		for _, entry := range results[start:end] {
-			err := writer.Write([]string{
-				strconv.FormatInt(int64(entry.ID), 10),
-				entry.Labels.String(),
-			})
-			if err != nil {
-				return err
-			}
+		err := writer.Write([]string{
+			strconv.FormatInt(int64(entry.ID), 10),
+			entry.Labels.String(),
+		})
+		if err != nil {
+			return err
 		}
 	}
 
 	writer.Flush()
 
-	return nil
+	return results.Err()
 }

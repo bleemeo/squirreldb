@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"time"
 
@@ -46,24 +47,40 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		return &seriesIter{err: err}
 	}
 
-	if len(metrics) == 0 {
+	if metrics.Count() == 0 {
 		return &seriesIter{}
 	}
 
 	if sortSeries {
-		sort.Slice(metrics, func(i, j int) bool {
-			aLabels := metrics[i].Labels
-			bLabels := metrics[j].Labels
+		metricsList := make([]types.MetricLabel, 0, metrics.Count())
+		for metrics.Next() {
+			metricsList = append(metricsList, metrics.At())
+		}
+
+		if err := metrics.Err(); err != nil {
+			return &seriesIter{err: err}
+		}
+
+		sort.Slice(metricsList, func(i, j int) bool {
+			aLabels := metricsList[i].Labels
+			bLabels := metricsList[j].Labels
 			return labels.Compare(aLabels, bLabels) < 0
 		})
+
+		metrics = &dummy.MetricsLabel{List: metricsList}
 	}
 
-	id2Labels := make(map[types.MetricID]labels.Labels, len(metrics))
-	ids := make([]types.MetricID, len(metrics))
+	id2Labels := make(map[types.MetricID]labels.Labels, metrics.Count())
+	ids := make([]types.MetricID, 0, metrics.Count())
 
-	for i, m := range metrics {
+	for metrics.Next() {
+		m := metrics.At()
 		id2Labels[m.ID] = m.Labels
-		ids[i] = m.ID
+		ids = append(ids, m.ID)
+	}
+
+	if err := metrics.Err(); err != nil {
+		return &seriesIter{err: err}
 	}
 
 	req := types.MetricRequest{

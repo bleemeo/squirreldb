@@ -3,6 +3,7 @@ package promql
 import (
 	"context"
 	"errors"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -111,12 +112,12 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 }
 
 type mockIndex struct {
-	searchReplay []types.MetricLabel
-	lookupMap    map[types.MetricID]labels.Labels
+	searchReply []types.MetricLabel
+	lookupMap   map[types.MetricID]labels.Labels
 }
 
-func (idx mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
-	return idx.searchReplay, nil
+func (idx mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+	return &dummy.MetricsLabel{List: idx.searchReply}, nil
 }
 
 func (idx mockIndex) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
@@ -194,7 +195,7 @@ func Test_querier_Select(t *testing.T) {
 			fields: fields{
 				reader: mockStore{},
 				index: mockIndex{
-					searchReplay: []types.MetricLabel{
+					searchReply: []types.MetricLabel{
 						{ID: metricID2, Labels: labelsMetric2},
 						{ID: metricID1, Labels: labelsMetric1},
 					},
@@ -223,7 +224,7 @@ func Test_querier_Select(t *testing.T) {
 			fields: fields{
 				reader: mockStore{},
 				index: mockIndex{
-					searchReplay: []types.MetricLabel{
+					searchReply: []types.MetricLabel{
 						{ID: metricID2, Labels: labelsMetric2},
 						{ID: metricID1, Labels: labelsMetric1},
 					},

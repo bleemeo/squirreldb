@@ -3,6 +3,7 @@ package promql
 import (
 	"context"
 	"errors"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"sync/atomic"
 	"time"
@@ -24,15 +25,15 @@ func (idx *limitingIndex) LookupIDs(ctx context.Context, requests []types.Lookup
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
+func (idx *limitingIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	r, err := idx.index.Search(start, end, matchers)
 	if err != nil {
 		return r, err
 	}
 
-	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(len(r)))
+	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(r.Count()))
 	if totalSeries > idx.maxTotalSeries {
-		return nil, errors.New("too many series evaluated by this PromQL")
+		return &dummy.MetricsLabel{}, errors.New("too many series evaluated by this PromQL")
 	}
 
 	return r, err

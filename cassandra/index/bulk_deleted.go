@@ -3,7 +3,6 @@ package index
 import (
 	"context"
 	"squirreldb/types"
-	"sync"
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
@@ -56,36 +55,6 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 	}
 }
 
-func (d *deleter) getMayPresent(shards []uint64) (map[int32]*roaring.Bitmap, error) {
-	results := make(map[int32]*roaring.Bitmap, len(shards))
-	l := &sync.Mutex{}
-
-	return results, d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
-		for _, shard := range shards {
-			shard := int32(shard)
-			task := func() error {
-				tmp, err := d.c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
-				if err != nil {
-					return err
-				}
-
-				l.Lock()
-				results[shard] = tmp
-				l.Unlock()
-
-				return nil
-			}
-
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return nil
-	})
-}
-
 // Delete perform the deletion and REQUIRE the newMetricLockName.
 //
 // The method should be called only once, a new deleter should be created to reuse it.
@@ -135,7 +104,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	maybePresent, err := d.getMayPresent(shards.Slice())
+	maybePresent, err := d.c.getMaybePresent(shards.Slice())
 	if err != nil {
 		return err
 	}

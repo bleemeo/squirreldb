@@ -117,14 +117,15 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels 
 		return nil, types.MetricRequest{}, err
 	}
 
-	ids := make([]types.MetricID, len(metrics))
+	ids := make([]types.MetricID, 0, metrics.Count())
 
 	if len(id2labels) == 0 {
-		id2labels = make(map[types.MetricID]labels.Labels, len(metrics))
+		id2labels = make(map[types.MetricID]labels.Labels, metrics.Count())
 	}
 
-	for i, m := range metrics {
-		ids[i] = m.ID
+	for metrics.Next() {
+		m := metrics.At()
+		ids = append(ids, m.ID)
 		id2labels[m.ID] = m.Labels
 	}
 

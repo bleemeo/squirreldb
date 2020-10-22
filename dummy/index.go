@@ -13,6 +13,59 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
+type MetricsLabel struct {
+	List []types.MetricLabel
+	next int
+}
+
+func (l *MetricsLabel) Next() bool {
+	if l.next >= len(l.List) {
+		return false
+	}
+
+	l.next++
+
+	return true
+}
+
+func (l *MetricsLabel) At() types.MetricLabel {
+	return l.List[l.next-1]
+}
+
+func (l *MetricsLabel) Err() error {
+	return nil
+}
+
+func (l *MetricsLabel) Count() int {
+	return len(l.List)
+}
+
+// MetricsSetEqual tests if two MetricsSet contains the same list in the same order.
+func MetricsSetEqual(a, b types.MetricsSet) bool {
+	if a.Count() != b.Count() {
+		return false
+	}
+
+	for {
+		an := a.Next()
+		bn := b.Next()
+
+		if an != bn {
+			return false
+		}
+
+		if !an {
+			break
+		}
+
+		if a.At().ID != b.At().ID || labels.Compare(a.At().Labels, b.At().Labels) != 0 {
+			return false
+		}
+	}
+
+	return a.Err() == b.Err()
+}
+
 // Index implement a non-working index. It only useful for testing/benchmark. See each function for their limitation.
 type Index struct {
 	StoreMetricIDInMemory bool
@@ -98,7 +151,7 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 }
 
 // Search only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
+func (idx *Index) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	ids := make([]types.MetricID, 0)
 
 outer:
@@ -127,7 +180,7 @@ outer:
 		}
 	}
 
-	return results, nil
+	return &MetricsLabel{List: results}, nil
 }
 
 // copied from cassandra/index.

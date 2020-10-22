@@ -22,7 +22,7 @@ func (idx filteringIndex) LookupIDs(ctx context.Context, requests []types.Lookup
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx filteringIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
+func (idx filteringIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	filterMatcher := make([]*labels.Matcher, 0, len(matchers)+1)
 	filterMatcher = append(filterMatcher, idx.matcher)
 	filterMatcher = append(filterMatcher, matchers...)

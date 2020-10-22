@@ -259,10 +259,15 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
 
-		gotIDToIndex := make(map[types.MetricID]int, len(metrics))
+		gotIDToIndex := make(map[types.MetricID]int, metrics.Count())
 
-		for _, m := range metrics {
+		for metrics.Next() {
+			m := metrics.At()
 			gotIDToIndex[m.ID] = ID2metrics[m.ID]
+		}
+
+		if metrics.Err() != nil {
+			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
 
 		if !reflect.DeepEqual(wantIDToIndex, gotIDToIndex) {
@@ -312,11 +317,15 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
 		}
 
-		if len(results) != 1 || results[0].ID != metricsIDs[1] {
-			log.Fatalf("Search(__metric_id__ valid) = %v, want [%v]", results, metricsIDs[1])
+		if results.Count() != 1 || !results.Next() {
+			log.Fatalf("Search(__metric_id__ valid).Count() = %d, want 1", results.Count())
 		}
 
-		got := results[0].Labels.Map()
+		if results.At().ID != metricsIDs[1] {
+			log.Fatalf("Search(__metric_id__ valid).Count() = %v, want [%v]", results.At(), metricsIDs[1])
+		}
+
+		got := results.At().Labels.Map()
 		if !reflect.DeepEqual(got, metrics[1]) {
 			log.Fatalf("Search(__metric_id__ valid) = %v, want %v", got, metrics[1])
 		}
@@ -329,11 +338,15 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)
 		}
 
-		if len(results) != 1 || results[0].ID != metricsIDs[2] {
-			log.Fatalf("Search(__metric_id__ valid 2) = %v, want [%v]", results, metricsIDs[2])
+		if results.Count() != 1 || !results.Next() {
+			log.Fatalf("Search(__metric_id__ valid).Count() = %d, want 1", results.Count())
 		}
 
-		got = results[0].Labels.Map()
+		if results.At().ID != metricsIDs[2] {
+			log.Fatalf("Search(__metric_id__ valid).Count() = %v, want [%v]", results.At(), metricsIDs[2])
+		}
+
+		got = results.At().Labels.Map()
 		if !reflect.DeepEqual(got, metrics[2]) {
 			log.Fatalf("Search(__metric_id__ valid 2) = %v, want %v", got, metrics[2])
 		}

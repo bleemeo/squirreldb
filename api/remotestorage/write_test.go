@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"reflect"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -35,8 +36,10 @@ func (i mockIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest
 	return []types.MetricID{i.fixedLookupID}, []int64{defaultTTL}, nil
 }
 
-func (i mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
-	return []types.MetricLabel{{ID: i.fixedSearchID, Labels: i.fixedLabels}}, nil
+func (i mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+	return &dummy.MetricsLabel{
+		List: []types.MetricLabel{{ID: i.fixedSearchID, Labels: i.fixedLabels}},
+	}, nil
 }
 
 func Benchmark_metricsFromPromSeries(b *testing.B) {

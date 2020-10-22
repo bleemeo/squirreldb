@@ -2,7 +2,6 @@ package promql
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -49,7 +48,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    []types.MetricLabel
+		want    types.MetricsSet
 		wantErr bool
 	}{
 		{
@@ -65,7 +64,9 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricLabel{{ID: ids[0], Labels: sortedLabels1}},
+			want: &dummy.MetricsLabel{
+				List: []types.MetricLabel{{ID: ids[0], Labels: sortedLabels1}},
+			},
 		},
 		{
 			name: "filter-account-id-2",
@@ -80,7 +81,9 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
+			want: &dummy.MetricsLabel{
+				List: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
+			},
 		},
 		{
 			name: "filter-account-id-absent",
@@ -95,7 +98,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
 			}},
-			want: []types.MetricLabel{},
+			want: &dummy.MetricsLabel{},
 		},
 		{
 			name: "filter-name",
@@ -110,7 +113,9 @@ func Test_filteringIndex_Search(t *testing.T) {
 			args: args{[]*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "mountpath", "/srv"),
 			}},
-			want: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
+			want: &dummy.MetricsLabel{
+				List: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -124,7 +129,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				t.Errorf("filteringIndex.Search() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if !dummy.MetricsSetEqual(got, tt.want) {
 				t.Errorf("filteringIndex.Search() = %v, want %v", got, tt.want)
 			}
 		})

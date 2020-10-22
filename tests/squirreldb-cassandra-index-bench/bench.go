@@ -474,6 +474,10 @@ func runQuery(now time.Time, name string, cassandraIndex *index.CassandraIndex, 
 
 	var n int
 	for n = 0; n < *queryCount; n++ {
+		if time.Since(start) > *queryMaxTime {
+			break
+		}
+
 		matchers := fun(n)
 		ids, err := cassandraIndex.Search(now, now, matchers)
 
@@ -481,11 +485,7 @@ func runQuery(now time.Time, name string, cassandraIndex *index.CassandraIndex, 
 			log.Fatalf("Search() failed: %v", err)
 		}
 
-		count += len(ids)
-
-		if time.Since(start) > *queryMaxTime {
-			break
-		}
+		count += ids.Count()
 	}
 
 	return queryResult{

@@ -166,11 +166,12 @@ func Test_limitingIndex_Search(t *testing.T) {
 			for i, query := range tt.searches {
 				got, err := idx.Search(now, now, query.matchers)
 				if (err != nil) != query.wantErr {
-					t.Errorf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
+					t.Fatalf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
 					return
 				}
-				if len(got) != query.wantCount {
-					t.Errorf("len(limitingIndex.Search(#%d)) = %d, want %d", i, len(got), query.wantCount)
+
+				if got.Count() != query.wantCount {
+					t.Errorf("limitingIndex.Search(#%d).Count() = %d, want %d", i, got.Count(), query.wantCount)
 				}
 			}
 		})

@@ -259,6 +259,36 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 	}
 }
 
+func (c *CassandraIndex) getMaybePresent(shards []uint64) (map[int32]*roaring.Bitmap, error) {
+	results := make(map[int32]*roaring.Bitmap, len(shards))
+	l := &sync.Mutex{}
+
+	return results, c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+		for _, shard := range shards {
+			shard := int32(shard)
+			task := func() error {
+				tmp, err := c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
+				if err != nil {
+					return err
+				}
+
+				l.Lock()
+				results[shard] = tmp
+				l.Unlock()
+
+				return nil
+			}
+
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	})
+}
+
 // Verify perform some verification of the indexes health.
 func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) {
 	bulkDeleter := newBulkDeleter(c)
@@ -1421,7 +1451,7 @@ func (c *CassandraIndex) applyUpdatePostingShards(maybePresent map[int32]posting
 //   currently found metrics are not in the list of metrics having this label.
 //   Note: this means that it must already have found some metrics (and that this filter is applied at the end) but PromQL forbid to only
 //   have label-not-defined matcher, so some other matcher must exists.
-func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) ([]types.MetricLabel, error) {
+func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	start := time.Now()
 	shards := getTimeShards(queryStart, queryEnd)
 
@@ -1465,16 +1495,47 @@ func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matche
 
 	searchMetricsTotal.Add(float64(len(ids)))
 
-	results := make([]types.MetricLabel, len(ids))
+	return &metricsLabels{c: c, ids: ids, labelsList: labelsList}, nil
+}
 
-	for i, id := range ids {
-		results[i] = types.MetricLabel{
-			ID:     id,
-			Labels: labelsList[i],
+type metricsLabels struct {
+	c          *CassandraIndex
+	ids        []types.MetricID
+	labelsList []labels.Labels
+	next       int
+	err        error
+}
+
+func (l *metricsLabels) Next() bool {
+	if l.next >= len(l.ids) {
+		return false
+	}
+
+	if l.labelsList == nil {
+		l.labelsList, l.err = l.c.lookupLabels(l.ids, false, time.Now())
+		if l.err != nil {
+			return false
 		}
 	}
 
-	return results, nil
+	l.next++
+
+	return true
+}
+
+func (l *metricsLabels) At() types.MetricLabel {
+	return types.MetricLabel{
+		ID:     l.ids[l.next-1],
+		Labels: l.labelsList[l.next-1],
+	}
+}
+
+func (l *metricsLabels) Err() error {
+	return l.err
+}
+
+func (l *metricsLabels) Count() int {
+	return len(l.ids)
 }
 
 // Deletes all expired cache entries.
@@ -2125,12 +2186,12 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 
 	ids = bitsetToIDs(results)
 
-	labelsList, err = c.lookupLabels(ids, false, time.Now())
-	if err != nil {
-		return nil, nil, err
-	}
-
 	if checkMatches {
+		labelsList, err = c.lookupLabels(ids, false, time.Now())
+		if err != nil {
+			return nil, nil, err
+		}
+
 		newIds := make([]types.MetricID, 0, len(ids))
 		newLabels := make([]labels.Labels, 0, len(ids))
 
