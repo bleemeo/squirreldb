@@ -290,7 +290,7 @@ func (c *CassandraIndex) getMaybePresent(shards []uint64) (map[int32]*roaring.Bi
 }
 
 // Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) {
+func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -302,6 +302,18 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		defer c.newMetricLock.Unlock()
 	}
 
+	issueCount, shards, err := c.verifyMissingShard(ctx, w, doFix)
+	if err != nil {
+		return hadIssue, err
+	}
+
+	hadIssue = hadIssue || issueCount > 0
+
+	maybePresent, err := c.getMaybePresent(shards.Slice())
+	if err != nil {
+		return hadIssue, err
+	}
+
 	allGoodIds := roaring.NewBTreeBitmap()
 
 	allPosting, err := c.postings([]int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
@@ -310,10 +322,9 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 	}
 
 	count := 0
-	countOk := 0
 	it := allPosting.Iterator()
 
-	labelNames := make(map[string]interface{})
+	labelNamesByShard := make(map[int32]map[string]interface{})
 	pendingIds := make([]types.MetricID, 0, 10000)
 
 	for ctx.Err() == nil {
@@ -329,8 +340,6 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 
 			count++
 
-			_, _ = allGoodIds.AddN(id)
-
 			pendingIds = append(pendingIds, metricID)
 
 			if len(pendingIds) > 1000 {
@@ -343,16 +352,14 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		}
 
 		if len(pendingIds) > 0 {
-			newOk, err := c.verifyBulk(ctx, w, doFix, pendingIds, bulkDeleter, labelNames, allPosting)
+			err := c.verifyBulk(ctx, w, doFix, pendingIds, bulkDeleter, maybePresent, labelNamesByShard, allPosting, allGoodIds)
 			if err != nil {
 				return hadIssue, err
 			}
-
-			countOk += newOk
 		}
 	}
 
-	fmt.Fprintf(w, "Index contains %d metrics and %d ok. There is %d label names\n", count, countOk, len(labelNames))
+	fmt.Fprintf(w, "Index contains %d metrics and %d ok\n", count, allGoodIds.Count())
 
 	if doFix {
 		fmt.Fprintf(w, "Applying fix...")
@@ -361,54 +368,112 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 			return hadIssue, err
 		}
 	}
-	/*
-		for name := range labelNames {
-			if ctx.Err() != nil {
-				break
-			}
 
-			iter := c.store.SelectPostingByName(name)
-			for iter.HasNext() {
-				tmp := roaring.NewBTreeBitmap()
+	for _, shard := range shards.Slice() {
+		shard := int32(shard)
+		fmt.Fprintf(w, "Checking shard %d\n", shard)
 
-				err := tmp.UnmarshalBinary(iter.Next())
-				if err != nil {
-					return hadIssue, err
-				}
-
-				tmp = tmp.Difference(allGoodIds)
-				it := tmp.Iterator()
-
-				for ctx.Err() == nil {
-					id, eof := it.Next()
-					if eof {
-						break
-					}
-
-					hadIssue = true
-
-					fmt.Fprintf(
-						w,
-						"Posting for name %s has ID %d which is not in all posting!\n",
-						name,
-						id,
-					)
-				}
-			}
+		tmp, err := c.verifyShard(ctx, w, doFix, shard, labelNamesByShard[shard], allGoodIds)
+		if err != nil {
+			return hadIssue, err
 		}
-	*/
+
+		hadIssue = hadIssue || tmp
+	}
+
 	return hadIssue, ctx.Err()
 }
 
-func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, labelNames map[string]interface{}, allPosting *roaring.Bitmap) (newOk int, err error) { // nolint: gocognit
+// verifyMissingShard search last 100 shards from now+1month for shard not present in existingShards.
+// It also verify that all shard actually exists.
+func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { // nolint: gocognit
+	shards, err = c.postings([]int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+	if err != nil {
+		return 0, shards, err
+	}
+
+	current := time.Now().Add(3 * postingShardSize)
+
+	for n := 0; n < 100; n++ {
+		if ctx.Err() != nil {
+			return 0, shards, ctx.Err()
+		}
+
+		queryShard := getTimeShards(current, current)
+
+		it, err := c.postings(queryShard, maybePostingLabel, maybePostingLabel)
+		if err != nil {
+			return 0, shards, err
+		}
+
+		if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
+			errorCount++
+
+			fmt.Fprintf(w, "Shard %d for time %v isn't in all shards", queryShard[0], current.String())
+
+			if doFix {
+				_, err = shards.AddN(uint64(queryShard[0]))
+				if err != nil {
+					return 0, shards, err
+				}
+			}
+		}
+	}
+
+	slice := shards.Slice()
+	for _, shard := range slice {
+		if ctx.Err() != nil {
+			return 0, shards, ctx.Err()
+		}
+
+		shard := int32(shard)
+
+		it, err := c.postings([]int32{shard}, maybePostingLabel, maybePostingLabel)
+		if err != nil {
+			return 0, shards, err
+		}
+
+		if it == nil || !it.Any() {
+			errorCount++
+
+			fmt.Fprintf(w, "Shard %d is listed in all shards but don't exists", shard)
+
+			if doFix {
+				_, err = shards.RemoveN(uint64(shard))
+				if err != nil {
+					return 0, shards, err
+				}
+			}
+		}
+	}
+
+	if errorCount > 0 && doFix {
+		var buffer bytes.Buffer
+
+		_, err = shards.WriteTo(&buffer)
+
+		if err != nil {
+			return errorCount, shards, err
+		}
+
+		err = c.store.InsertPostings(globalShardNumber, existingShardsLabel, existingShardsLabel, buffer.Bytes())
+		if err != nil {
+			return errorCount, shards, err
+		}
+	}
+
+	return errorCount, shards, err
+}
+
+func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, maybePresent map[int32]*roaring.Bitmap, labelNamesByShard map[int32]map[string]interface{}, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit,gocyclo
 	id2Labels, err := c.store.SelectIDS2Labels(ids)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	id2expiration, err := c.store.SelectIDS2LabelsExpiration(ids)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	allLabelsString := make([]string, 0, len(ids))
@@ -425,32 +490,43 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool
 			continue
 		}
 
-		for _, l := range lbls {
-			labelNames[l.Name] = nil
+		for shard, it := range maybePresent {
+			if !it.Contains(uint64(id)) {
+				continue
+			}
+
+			m := labelNamesByShard[shard]
+			if m == nil {
+				m = make(map[string]interface{})
+			}
+
+			for _, l := range lbls {
+				m[l.Name] = nil
+			}
+
+			labelNamesByShard[shard] = m
 		}
 
 		allLabelsString = append(allLabelsString, lbls.String())
 
 		_, ok = id2expiration[id]
 		if !ok {
-			return 0, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id, lbls.String())
+			return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id, lbls.String())
 		}
 	}
 
 	if ctx.Err() != nil {
-		return 0, ctx.Err()
+		return ctx.Err()
 	}
 
 	labels2ID, err := c.store.SelectLabelsList2ID(allLabelsString)
 	if err != nil {
-		return 0, err
+		return err
 	}
-
-	countOk := 0
 
 	for _, id := range ids {
 		if ctx.Err() != nil {
-			return 0, ctx.Err()
+			return ctx.Err()
 		}
 
 		lbls, ok := id2Labels[id]
@@ -477,19 +553,19 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool
 		if id != id2 {
 			tmp, err := c.store.SelectIDS2Labels([]types.MetricID{id2})
 			if err != nil {
-				return 0, err
+				return err
 			}
 
 			lbls2 := tmp[id2]
 
 			tmp2, err := c.store.SelectIDS2LabelsExpiration([]types.MetricID{id2})
 			if err != nil {
-				return 0, err
+				return err
 			}
 
 			expiration2, ok := tmp2[id2]
 			if !ok && lbls2 != nil {
-				return 0, fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id2, lbls2.String())
+				return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id2, lbls2.String())
 			}
 
 			switch {
@@ -551,10 +627,99 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool
 			continue
 		}
 
-		countOk++
+		_, err = allGoodIds.AddN(uint64(id))
+		if err != nil {
+			return err
+		}
 	}
 
-	return countOk, nil
+	return nil
+}
+
+func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, labelNames map[string]interface{}, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) {
+	localAll, err := c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
+	if err != nil {
+		return false, err
+	}
+
+	localMaybe, err := c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
+	if err != nil {
+		return false, err
+	}
+
+	if !localAll.Any() {
+		hadIssue = true
+
+		fmt.Fprintf(
+			w,
+			"shard %d is empty (but may need cleanup)!\n",
+			shard,
+		)
+	}
+
+	if !localMaybe.Any() {
+		hadIssue = true
+
+		fmt.Fprintf(
+			w,
+			"shard %d is empty!\n",
+			shard,
+		)
+	}
+
+	references := []struct {
+		name string
+		it   *roaring.Bitmap
+	}{
+		{name: "global all IDs", it: allGoodIds},
+		{name: "shard all IDs", it: localAll},
+		{name: "shard maybe present IDs", it: localMaybe},
+	}
+
+	for name := range labelNames {
+		if ctx.Err() != nil {
+			break
+		}
+
+		iter := c.store.SelectPostingByName(shard, name)
+		for iter.HasNext() {
+			tmp := roaring.NewBTreeBitmap()
+
+			err := tmp.UnmarshalBinary(iter.Next())
+			if err != nil {
+				return hadIssue, err
+			}
+
+			for _, reference := range references {
+				tmp = tmp.Difference(reference.it)
+				it := tmp.Iterator()
+
+				for ctx.Err() == nil {
+					id, eof := it.Next()
+					if eof {
+						break
+					}
+
+					hadIssue = true
+
+					fmt.Fprintf(
+						w,
+						"shard %d: posting for name %s has ID %d which is not in %s!\n",
+						shard,
+						name,
+						id,
+						reference.name,
+					)
+
+					if doFix {
+						return hadIssue, errors.New("can't fix, don't have label value")
+					}
+				}
+			}
+		}
+	}
+
+	return hadIssue, nil
 }
 
 // AllIDs returns all ids stored in the index.
