@@ -25,8 +25,8 @@ const (
 // they won't be aggregated.
 const backlogMargin = time.Hour
 
-// Run starts all CassandraTSDB services.
-func (c *CassandraTSDB) Run(ctx context.Context) {
+// run starts all CassandraTSDB pre-aggregations.
+func (c *CassandraTSDB) run(ctx context.Context) {
 	shard := rand.Intn(shardNumber)
 	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
 	ticker := time.NewTicker(aggregateShardIntended)
@@ -107,32 +107,63 @@ func (c *CassandraTSDB) Run(ctx context.Context) {
 func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error {
 	var ids []types.MetricID
 
+	start := time.Now()
+	rangeCount := 0
+	pointsCount := 0
+
 	logger.Printf("Forced pre-aggregation requested between %v and %v", from, to)
-
-	retry.Print(func() error {
-		var err error
-		ids, err = c.index.AllIDs(from, to)
-
-		return err
-	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
-		"get IDs from the index",
-	)
 
 	currentFrom := from
 	currentFrom = currentFrom.Truncate(c.options.AggregateSize)
 
 	for !to.Before(currentFrom) {
+		var rangePointsCount int
+
+		rangeStart := time.Now()
 		currentTo := currentFrom.Add(c.options.AggregateSize)
 
+		rangeCount++
+
 		retry.Print(func() error {
-			return c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+			var err error
+			ids, err = c.index.AllIDs(currentFrom, currentTo)
+
+			return err
+		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+			"get IDs from the index",
+		)
+
+		retry.Print(func() error {
+			var err error
+
+			rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+			return err
 		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
 		)
-		logger.Printf("Forced pre-aggregation from %v to %v completed", currentFrom, currentTo)
+
+		pointsCount += rangePointsCount
+		delta := time.Since(rangeStart)
+
+		logger.Printf(
+			"Forced pre-aggregation from %v to %v completed in %v (read %.0fk pts/s)",
+			currentFrom,
+			currentTo,
+			delta.Truncate(time.Millisecond),
+			float64(rangePointsCount)/delta.Seconds()/1000,
+		)
 
 		currentFrom = currentFrom.Add(c.options.AggregateSize)
 	}
+
+	delta := time.Since(start)
+	logger.Printf(
+		"Aggregated %d range and %d points in %v (%.2fk points/s)",
+		rangeCount,
+		pointsCount,
+		delta.Truncate(time.Second),
+		float64(pointsCount)/delta.Seconds()/1000,
+	)
 
 	return nil
 }
@@ -211,9 +242,9 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 
 	start := time.Now()
 
-	if err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
-		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] in %v",
-			shard, fromTime, toTime, time.Since(start))
+	if count, err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
+		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] and read %d points in %v",
+			shard, fromTime, toTime, count, time.Since(start))
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
@@ -229,10 +260,12 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 }
 
 // doAggregation perform the aggregation for given parameter.
-func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTimestamp, resolution int64) error {
+func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTimestamp, resolution int64) (int, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
+
+	pointsRead := 0
 
 	request := types.MetricRequest{
 		IDs:           ids,
@@ -242,18 +275,20 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 	metrics, err := c.ReadIter(context.Background(), request)
 
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	for metrics.Next() {
 		metric := metrics.At()
 		aggregatedMetric := aggregate.Aggregate(metric, resolution)
 
+		pointsRead += len(metric.Points)
+
 		err := c.writeAggregateData(aggregatedMetric)
 		if err != nil {
-			return err
+			return pointsRead, err
 		}
 	}
 
-	return metrics.Err()
+	return pointsRead, metrics.Err()
 }

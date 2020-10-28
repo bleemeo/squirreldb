@@ -46,7 +46,7 @@ func (w *WalBatcher) Run(ctx context.Context, readiness chan error) {
 
 	subCtx, cancel := context.WithCancel(context.Background())
 
-	if task, ok := w.WalStore.(types.Task); ok {
+	if task, ok := w.WalStore.(types.OldTask); ok {
 		subReadiness := make(chan error)
 
 		wg.Add(1)

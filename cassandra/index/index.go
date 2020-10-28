@@ -88,6 +88,9 @@ type CassandraIndex struct {
 	store   storeImpl
 	options Options
 
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
+
 	lookupIDMutex            sync.Mutex
 	newMetricLock            types.TryLocker
 	expirationUpdateRequests map[time.Time]expirationUpdateRequest
@@ -191,8 +194,36 @@ func new(store storeImpl, options Options) (*CassandraIndex, error) {
 	return index, nil
 }
 
-// Run starts all Cassandra Index services.
-func (c *CassandraIndex) Run(ctx context.Context) {
+// Start starts all Cassandra Index services.
+func (c *CassandraIndex) Start() error {
+	if c.cancel != nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
+
+	c.wg.Add(1)
+
+	go c.run(ctx)
+
+	return nil
+}
+
+// Stop stop and wait all Cassandra Index services.
+func (c *CassandraIndex) Stop() error {
+	if c.cancel == nil {
+		return errors.New("not started")
+	}
+
+	c.cancel()
+	c.cancel = nil
+	c.wg.Wait()
+
+	return nil
+}
+
+func (c *CassandraIndex) run(ctx context.Context) {
 	ticker := time.NewTicker(backgroundCheckInterval)
 
 	defer ticker.Stop()

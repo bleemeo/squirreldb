@@ -8,11 +8,11 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-// Task is a background worked that will be running until ctx is cancelled.
+// OldTask is a background worked that will be running until ctx is cancelled.
 // If readiness is not nil, when ready the task send one nil.
 // If an error occure, the task will send the error on the channel and return.
 // You are allowed to re-call Run() if an error is returned.
-type Task interface {
+type OldTask interface {
 	Run(ctx context.Context, readiness chan error)
 }
 
@@ -20,6 +20,16 @@ type TaskFun func(ctx context.Context, readiness chan error)
 
 func (f TaskFun) Run(ctx context.Context, readiness chan error) {
 	f(ctx, readiness)
+}
+
+// Task is a background worker that will be running until Stop() is called
+// If Start() fail, the worker isn't running, but Start() could be retried.
+// Start() could after worker is running and will do nothing and return nil.
+// Stop() will shutdown and wait for shutdown before returning.
+// Start() & Stop() could be be called concurrently.
+type Task interface {
+	Start() error
+	Stop() error
 }
 
 type Cluster interface {

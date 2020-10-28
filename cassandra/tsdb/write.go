@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
@@ -195,7 +196,7 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 	start := time.Now()
 
 	if err := tableInsertDataQuery.Exec(); err != nil {
-		return err
+		return fmt.Errorf("unable to write raw for ID=%d, baseTimestamp=%d and offsetMs=%d: %w", data.ID, baseTimestamp, offsetMs, err)
 	}
 
 	cassandraQueriesSecondsWriteRaw.Observe(time.Since(start).Seconds())

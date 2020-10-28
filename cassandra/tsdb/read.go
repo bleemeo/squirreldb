@@ -231,7 +231,7 @@ func (c *CassandraTSDB) readRawData(id types.MetricID, fromTimestamp, toTimestam
 
 // readRawPartitionData add to rawData data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64) error {
-	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.BatchSize.Milliseconds()
+	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.RawPartitionSize.Milliseconds()
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 
 	fromOffsetTimestamp = compare.MaxInt64(fromOffsetTimestamp, 0)

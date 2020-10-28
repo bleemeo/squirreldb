@@ -31,7 +31,7 @@ const (
 
 type FlushableStore interface {
 	types.MetricReadWriter
-	types.Task
+	types.OldTask
 	Flush()
 }
 

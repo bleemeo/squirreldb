@@ -1,6 +1,8 @@
 package tsdb
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -38,6 +40,9 @@ type lockFactory interface {
 type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
+
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
 
 	l                 sync.Mutex
 	fullyAggregatedAt time.Time
@@ -81,6 +86,35 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 	}
 
 	return tsdb, nil
+}
+
+// Start starts all Cassandra Index services.
+func (c *CassandraTSDB) Start() error {
+	if c.cancel != nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
+
+	c.wg.Add(1)
+
+	go c.run(ctx)
+
+	return nil
+}
+
+// Stop stop and wait all Cassandra Index services.
+func (c *CassandraTSDB) Stop() error {
+	if c.cancel == nil {
+		return errors.New("not started")
+	}
+
+	c.cancel()
+	c.cancel = nil
+	c.wg.Wait()
+
+	return nil
 }
 
 func (c *CassandraTSDB) getPointsBuffer() []types.MetricPoint {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	goflag "flag"
 
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -304,6 +305,8 @@ func flagSetFromFlags(flags []flag) *pflag.FlagSet {
 			_ = flagSet.MarkHidden(flag.name)
 		}
 	}
+
+	flagSet.AddGoFlagSet(goflag.CommandLine)
 
 	return flagSet
 }
