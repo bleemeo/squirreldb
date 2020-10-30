@@ -143,10 +143,6 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duratio
 			PRIMARY KEY ((metric_id, base_ts), offset_ms, insert_time)
 		)
 		WITH CLUSTERING ORDER BY (offset_ms DESC)
-		AND COMPRESSION = {
-			'chunk_length_in_kb': '256',
-			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'
-		}
 		AND COMPACTION = {
 			'class': 'TimeWindowCompactionStrategy',
 			'compaction_window_unit': 'DAYS',
@@ -170,10 +166,6 @@ func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive tim
 			PRIMARY KEY ((metric_id, base_ts), offset_second)
 		)
 		WITH CLUSTERING ORDER BY (offset_second DESC)
-		AND COMPRESSION = {
-			'chunk_length_in_kb': '256',
-			'class': 'org.apache.cassandra.io.compress.DeflateCompressor'
-		}
 		AND COMPACTION = {
 			'class': 'TimeWindowCompactionStrategy',
 			'compaction_window_unit': 'DAYS',
