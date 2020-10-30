@@ -1821,6 +1821,26 @@ func InternalMaxTTLUpdateDelay() time.Duration {
 	return cassandraTTLUpdateDelay + cassandraTTLUpdateJitter
 }
 
+// InternalUpdatePostingShards update the time-sharded postings for given metrics.
+// This is useful during test/benchmark when one want to fill index quickly.
+// This assume len(ids) == len(labels) == len(shards).
+// Each element in the list match:
+// * labels[0] is the labels for ids[0].
+// * shards[0] is the list of shards ids[0] is present.
+func (c *CassandraIndex) InternalUpdatePostingShards(ctx context.Context, ids []types.MetricID, labelsList []labels.Labels, shards [][]int32) error {
+	reqs := make([]lookupEntry, len(ids))
+
+	for i, id := range ids {
+		reqs[i] = lookupEntry{
+			idData:       idData{id: id},
+			wantedShards: shards[i],
+			sortedLabels: labelsList[i],
+		}
+	}
+
+	return c.updatePostingShards(ctx, reqs, true)
+}
+
 // InternalCreateMetric create metrics in the index with ID value forced.
 // This should only be used in test & benchmark.
 // The following condition on input must be meet:
@@ -1829,8 +1849,15 @@ func InternalMaxTTLUpdateDelay() time.Duration {
 // * labels must be sorted
 // * len(metrics) == len(ids) == len(expirations).
 //
+// Note: you can also provide "0" for the IDs and have the index allocate an ID for you.
+// But you should only use 0 in such case, because your non-zero ID shouldn't conflict with
+// ID assigned by the index.
+//
+// Finally you can skip posting updates, but in this case you must write at least one
+// points for each shards. This case is mostly useful to pre-create metrics in bulk.
+//
 // The metrics will be added in all shards between start & end.
-func (c *CassandraIndex) InternalCreateMetric(start time.Time, end time.Time, metrics []labels.Labels, ids []types.MetricID, expirations []time.Time) error {
+func (c *CassandraIndex) InternalCreateMetric(ctx context.Context, start time.Time, end time.Time, metrics []labels.Labels, ids []types.MetricID, expirations []time.Time, skipPostings bool) ([]types.MetricID, error) {
 	requests := make([]lookupEntry, len(metrics))
 	shards := getTimeShards(start, end)
 
@@ -1849,8 +1876,8 @@ func (c *CassandraIndex) InternalCreateMetric(start time.Time, end time.Time, me
 		}
 	}
 
-	if ok := c.newMetricLock.TryLock(context.Background(), 15*time.Second); !ok {
-		return errors.New("newMetricLock is not acquired")
+	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		return nil, errors.New("newMetricLock is not acquired")
 	}
 
 	done, err := c.createMetrics(time.Now(), requests, true)
@@ -1858,18 +1885,22 @@ func (c *CassandraIndex) InternalCreateMetric(start time.Time, end time.Time, me
 	c.newMetricLock.Unlock()
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for i, id := range ids {
-		if done[i].id != id {
-			return fmt.Errorf("savedIDs=%v didn't match requested id=%v", done[0].id, id)
+		if done[i].id != id && id != 0 {
+			return ids, fmt.Errorf("savedIDs=%v didn't match requested id=%v", done[0].id, id)
 		}
+
+		ids[i] = done[i].id
 	}
 
-	err = c.updatePostingShards(context.Background(), done, true)
+	if !skipPostings {
+		err = c.updatePostingShards(ctx, done, true)
+	}
 
-	return err
+	return ids, err
 }
 
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
@@ -2513,20 +2544,22 @@ func (c *CassandraIndex) cassandraGetExpirationList(day time.Time) (*roaring.Bit
 	return tmp, err
 }
 
+// ShardForTime return the shard number for give timestamp (second from epoc)
+// The shard number should only be useful for debugging or InternalUpdatePostingShards.
+func ShardForTime(ts int64) int32 {
+	shardSize := int32(postingShardSize.Hours())
+	return (int32(ts/3600) / shardSize) * shardSize
+}
+
 func getTimeShards(start time.Time, end time.Time) []int32 {
 	shardSize := int32(postingShardSize.Hours())
-	startTS := int32(start.Unix() / 3600)
-	startTS = (startTS / shardSize) * shardSize
+	startShard := ShardForTime(start.Unix())
+	endShard := ShardForTime(end.Unix())
 
-	endTS := int32(end.Unix() / 3600)
-	if end.Unix()%3600 != 0 {
-		endTS++
-	}
+	results := make([]int32, 0, (endShard-startShard)/shardSize+1)
+	current := startShard
 
-	results := make([]int32, 0, (endTS-startTS)/shardSize)
-	current := startTS
-
-	for current <= endTS {
+	for current <= endShard {
 		results = append(results, current)
 		current += shardSize
 	}
@@ -2654,11 +2687,6 @@ func (s cassandraStore) Init() error {
 			value text,
 			bitset blob,
 			PRIMARY KEY ((shard, name), value)
-		)`,
-		`CREATE TABLE IF NOT EXISTS index_postings_shard (
-			arbitrary_constant int,
-			shard int,
-			PRIMARY KEY (arbitrary_constant, shard)
 		)`,
 		`CREATE TABLE IF NOT EXISTS index_id2labels (
 			id bigint,

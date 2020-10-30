@@ -208,7 +208,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 			break
 		}
 
-		err := cassandraIndex.InternalCreateMetric(start, end, metrics, ids, expirations)
+		_, err := cassandraIndex.InternalCreateMetric(context.Background(), start, end, metrics, ids, expirations, false)
 		if err != nil {
 			return err
 		}

@@ -104,7 +104,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 // 1) a bug caused the normal pre-aggregation to have anormal result
 // 2) data were inserted with too many delay and normal pre-aggregation already
 //    processed the time range.
-func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error {
+func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, from time.Time, to time.Time) error {
 	var ids []types.MetricID
 
 	start := time.Now()
@@ -117,30 +117,42 @@ func (c *CassandraTSDB) ForcePreAggregation(from time.Time, to time.Time) error 
 	currentFrom = currentFrom.Truncate(c.options.AggregateSize)
 
 	for !to.Before(currentFrom) {
+		if ctx.Err() != nil {
+			break
+		}
+
 		var rangePointsCount int
 
 		rangeStart := time.Now()
 		currentTo := currentFrom.Add(c.options.AggregateSize)
-
-		rangeCount++
 
 		retry.Print(func() error {
 			var err error
 			ids, err = c.index.AllIDs(currentFrom, currentTo)
 
 			return err
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			"get IDs from the index",
 		)
+
+		if ctx.Err() != nil {
+			break
+		}
 
 		retry.Print(func() error {
 			var err error
 
 			rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
 			return err
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
 		)
+
+		if ctx.Err() != nil {
+			break
+		}
+
+		rangeCount++
 
 		pointsCount += rangePointsCount
 		delta := time.Since(rangeStart)

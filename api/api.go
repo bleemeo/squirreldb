@@ -31,7 +31,7 @@ type API struct {
 	Reader                   types.MetricReader
 	Writer                   types.MetricWriter
 	FlushCallback            func() error
-	PreAggregateCallback     func(from, to time.Time) error
+	PreAggregateCallback     func(ctx context.Context, from, to time.Time) error
 	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (bool, error)
 	MaxConcurrentRemoteWrite int
 	PromQLMaxEvaluatedPoints uint64
@@ -162,6 +162,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fromRaw := req.URL.Query().Get("from")
 	toRaw := req.URL.Query().Get("to")
+	ctx := req.Context()
 
 	from, err := time.Parse(time.RFC3339, fromRaw)
 	if err != nil {
@@ -178,7 +179,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 
 	if a.PreAggregateCallback != nil {
-		err := a.PreAggregateCallback(from, to)
+		err := a.PreAggregateCallback(ctx, from, to)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
 			return

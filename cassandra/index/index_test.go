@@ -581,7 +581,7 @@ func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.Metr
 		expirations = append(expirations, now.Add(time.Hour))
 	}
 
-	err = index.InternalCreateMetric(start, end, metricsList, ids, expirations)
+	_, err = index.InternalCreateMetric(context.Background(), start, end, metricsList, ids, expirations, false)
 	if err != nil {
 		panic(err)
 	}
@@ -4025,6 +4025,22 @@ func Test_getTimeShards(t *testing.T) {
 				end:   reference.Add(postingShardSize),
 			},
 			want: []int32{baseTS, baseTS + shardSize},
+		},
+		{
+			name: "base+postingShardSize",
+			args: args{
+				start: base,
+				end:   base.Add(postingShardSize),
+			},
+			want: []int32{baseTS, baseTS + shardSize},
+		},
+		{
+			name: "base+postingShardSize- 1seconds",
+			args: args{
+				start: base,
+				end:   base.Add(postingShardSize).Add(-time.Second),
+			},
+			want: []int32{baseTS},
 		},
 		{
 			// This test assume postingShardSize is at least > 2h
