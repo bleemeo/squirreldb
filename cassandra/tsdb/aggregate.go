@@ -9,6 +9,7 @@ import (
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -104,69 +105,96 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 // 1) a bug caused the normal pre-aggregation to have anormal result
 // 2) data were inserted with too many delay and normal pre-aggregation already
 //    processed the time range.
-func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, from time.Time, to time.Time) error {
-	var ids []types.MetricID
+func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int, from time.Time, to time.Time) error {
+	var (
+		ids        []types.MetricID
+		wg         sync.WaitGroup
+		rangeCount int
+
+		l           sync.Mutex
+		pointsCount int
+	)
 
 	start := time.Now()
-	rangeCount := 0
-	pointsCount := 0
+	workChan := make(chan time.Time)
 
 	logger.Printf("Forced pre-aggregation requested between %v and %v", from, to)
 
 	currentFrom := from
 	currentFrom = currentFrom.Truncate(c.options.AggregateSize)
 
+	wg.Add(threadCount)
+
+	for n := 0; n < threadCount; n++ {
+		go func() {
+			defer wg.Done()
+
+			for currentFrom := range workChan {
+				var rangePointsCount int
+
+				rangeStart := time.Now()
+				currentFrom := currentFrom
+				currentTo := currentFrom.Add(c.options.AggregateSize)
+
+				retry.Print(func() error {
+					var err error
+					ids, err = c.index.AllIDs(currentFrom, currentTo)
+
+					return err
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+					"get IDs from the index",
+				)
+
+				if ctx.Err() != nil {
+					break
+				}
+
+				retry.Print(func() error {
+					var err error
+
+					rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+					return err
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+					fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
+				)
+
+				if ctx.Err() != nil {
+					break
+				}
+
+				rangeCount++
+
+				l.Lock()
+				pointsCount += rangePointsCount
+				l.Unlock()
+
+				delta := time.Since(rangeStart)
+
+				logger.Printf(
+					"Forced pre-aggregation from %v to %v completed in %v (read %d pts, %.0fk pts/s)",
+					currentFrom,
+					currentTo,
+					delta.Truncate(time.Millisecond),
+					rangePointsCount,
+					float64(rangePointsCount)/delta.Seconds()/1000,
+				)
+			}
+		}()
+	}
+
+outter:
 	for !to.Before(currentFrom) {
-		if ctx.Err() != nil {
-			break
+		select {
+		case workChan <- currentFrom:
+		case <-ctx.Done():
+			break outter
 		}
-
-		var rangePointsCount int
-
-		rangeStart := time.Now()
-		currentTo := currentFrom.Add(c.options.AggregateSize)
-
-		retry.Print(func() error {
-			var err error
-			ids, err = c.index.AllIDs(currentFrom, currentTo)
-
-			return err
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
-			"get IDs from the index",
-		)
-
-		if ctx.Err() != nil {
-			break
-		}
-
-		retry.Print(func() error {
-			var err error
-
-			rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
-			return err
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
-			fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
-		)
-
-		if ctx.Err() != nil {
-			break
-		}
-
-		rangeCount++
-
-		pointsCount += rangePointsCount
-		delta := time.Since(rangeStart)
-
-		logger.Printf(
-			"Forced pre-aggregation from %v to %v completed in %v (read %.0fk pts/s)",
-			currentFrom,
-			currentTo,
-			delta.Truncate(time.Millisecond),
-			float64(rangePointsCount)/delta.Seconds()/1000,
-		)
 
 		currentFrom = currentFrom.Add(c.options.AggregateSize)
 	}
+
+	close(workChan)
+	wg.Wait()
 
 	delta := time.Since(start)
 	logger.Printf(

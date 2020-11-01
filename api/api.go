@@ -11,6 +11,7 @@ import (
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
 	"squirreldb/types"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -31,7 +32,7 @@ type API struct {
 	Reader                   types.MetricReader
 	Writer                   types.MetricWriter
 	FlushCallback            func() error
-	PreAggregateCallback     func(ctx context.Context, from, to time.Time) error
+	PreAggregateCallback     func(ctx context.Context, thread int, from, to time.Time) error
 	IndexVerifyCallback      func(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (bool, error)
 	MaxConcurrentRemoteWrite int
 	PromQLMaxEvaluatedPoints uint64
@@ -162,6 +163,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fromRaw := req.URL.Query().Get("from")
 	toRaw := req.URL.Query().Get("to")
+	threadRaw := req.URL.Query().Get("thread")
 	ctx := req.Context()
 
 	from, err := time.Parse(time.RFC3339, fromRaw)
@@ -176,10 +178,22 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	thread := 1
+
+	if threadRaw != "" {
+		tmp, err := strconv.ParseInt(threadRaw, 10, 0)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		thread = int(tmp)
+	}
+
 	start := time.Now()
 
 	if a.PreAggregateCallback != nil {
-		err := a.PreAggregateCallback(ctx, from, to)
+		err := a.PreAggregateCallback(ctx, thread, from, to)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
 			return
