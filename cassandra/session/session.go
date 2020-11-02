@@ -25,7 +25,7 @@ type Options struct {
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
 func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
-	cluster.Timeout = 3 * time.Second
+	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
 	session, err := cluster.CreateSession()
 
