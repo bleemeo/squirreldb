@@ -96,6 +96,50 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 	}
 }
 
+// InternalWriteAggregated writes all specified metrics as aggregated data
+// This method should only by used for benchmark/tests or bulk import.
+// This will replace data for given aggregated row (based on timestamp of first time).
+func (c *CassandraTSDB) InternalWriteAggregated(ctx context.Context, metrics []aggregate.AggregatedData) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(concurrentWriterCount)
+
+	step := len(metrics) / concurrentWriterCount
+
+	for i := 0; i < concurrentWriterCount; i++ {
+		startIndex := i * step
+		endIndex := (i + 1) * step
+
+		if endIndex > len(metrics) || i == concurrentWriterCount-1 {
+			endIndex = len(metrics)
+		}
+
+		go func() {
+			defer wg.Done()
+
+			for _, data := range metrics[startIndex:endIndex] {
+				retry.Print(func() error {
+					return c.writeAggregateData(data) // nolint: scopelint
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+					"write aggregated points to Cassandra",
+				)
+
+				if ctx.Err() != nil {
+					break
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	return nil
+}
+
 // ForcePreAggregation will pre-aggregate all metrics between two given time
 // The forced pre-aggregation will run even if data are already pre-aggregated and
 // will no change the stored position where pre-aggregation think it stopped.
