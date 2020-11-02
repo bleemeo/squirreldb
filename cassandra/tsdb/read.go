@@ -19,6 +19,7 @@ import (
 type readIter struct {
 	c                     *CassandraTSDB
 	request               types.MetricRequest
+	tmp                   []types.MetricPoint
 	aggregatedToTimestamp int64
 	err                   error
 	current               types.MetricData
@@ -40,14 +41,26 @@ func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricReques
 		aggregatedToTimestamp = time.Now().Add(-2*c.options.AggregateSize).UnixNano() / 1e6
 	}
 
+	tmp := c.getPointsBuffer()
+
 	return &readIter{
 		c:                     c,
 		request:               request,
+		tmp:                   tmp,
 		aggregatedToTimestamp: aggregatedToTimestamp,
 	}, nil
 }
 
+func (i *readIter) close() {
+	if i.tmp != nil {
+		i.c.putPointsBuffer(i.tmp)
+		i.tmp = nil
+	}
+}
+
 func (i *readIter) Err() error {
+	i.close()
+
 	return i.err
 }
 
@@ -59,6 +72,7 @@ func (i *readIter) Next() bool {
 	readAggregate := i.request.StepMs >= i.c.options.AggregateResolution.Milliseconds()
 
 	if i.offset >= len(i.request.IDs) {
+		i.close()
 		return false
 	}
 
@@ -71,14 +85,18 @@ func (i *readIter) Next() bool {
 	fromTimestamp := i.request.FromTimestamp
 
 	if readAggregate {
-		aggregateData, err := i.c.readAggregateData(id, fromTimestamp, i.request.ToTimestamp, i.request.Function)
+		newData, newTmp, err := i.c.readAggregateData(id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function)
+
+		i.tmp = newTmp
+		data = newData
 
 		if err != nil {
 			i.err = fmt.Errorf("readAggragateData: %w", err)
+
+			i.close()
+
 			return false
 		}
-
-		data = aggregateData
 
 		if len(data.Points) != 0 {
 			lastPoint := data.Points[len(data.Points)-1]
@@ -91,54 +109,54 @@ func (i *readIter) Next() bool {
 	}
 
 	if fromTimestamp <= i.request.ToTimestamp {
-		rawData, err := i.c.readRawData(id, fromTimestamp, i.request.ToTimestamp)
+		newData, newTmp, err := i.c.readRawData(id, data, fromTimestamp, i.request.ToTimestamp, i.tmp)
+
+		i.tmp = newTmp
+		data = newData
 
 		if err != nil {
 			i.err = fmt.Errorf("readRawData: %w", err)
+
+			i.close()
+
 			return false
 		}
-
-		data.Points = append(data.Points, rawData.Points...)
-		data.TimeToLive = compare.MaxInt64(data.TimeToLive, rawData.TimeToLive)
 	}
+
+	reversePoints(data.Points)
 
 	i.current = data
 
 	return true
 }
 
-// Returns aggregated data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readAggregateData(id types.MetricID, fromTimestamp, toTimestamp int64, function string) (types.MetricData, error) {
+// Returns aggregated data between the specified timestamps of the requested metric. Return points in descending order.
+func (c *CassandraTSDB) readAggregateData(id types.MetricID, buffer types.MetricData, fromTimestamp, toTimestamp int64, tmp []types.MetricPoint, function string) (aggrData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.AggregatePartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.AggregatePartitionSize.Milliseconds())
-	aggregateData := types.MetricData{
-		ID: id,
-	}
+	buffer.ID = id
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.AggregatePartitionSize.Milliseconds() {
-		err := c.readAggregatePartitionData(&aggregateData, fromTimestamp, toTimestamp, baseTimestamp, function)
+	for baseTimestamp := toBaseTimestamp; baseTimestamp >= fromBaseTimestamp; baseTimestamp -= c.options.AggregatePartitionSize.Milliseconds() {
+		tmp, err = c.readAggregatePartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp, function)
 
 		if err != nil {
 			requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
-			requestsPointsTotalReadAggregated.Add(float64(len(aggregateData.Points)))
+			requestsPointsTotalReadAggregated.Add(float64(len(buffer.Points)))
 
-			return types.MetricData{}, err
+			return buffer, tmp, err
 		}
 	}
 
-	requestsPointsTotalReadAggregated.Add(float64(len(aggregateData.Points)))
-
-	aggregateData.Points = types.DeduplicatePoints(aggregateData.Points)
-
+	requestsPointsTotalReadAggregated.Add(float64(len(buffer.Points)))
 	requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
 
-	return aggregateData, nil
+	return buffer, tmp, nil
 }
 
 // Returns aggregated partition data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, function string) error {
+func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, tmp []types.MetricPoint, function string) (newTmp []types.MetricPoint, err error) {
 	fromOffset := fromTimestamp - baseTimestamp - c.options.AggregateSize.Milliseconds()
 	toOffset := toTimestamp - baseTimestamp
 
@@ -162,16 +180,6 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 
 	start = time.Now()
 
-	var (
-		err error
-	)
-
-	tmp := c.getPointsBuffer()
-
-	defer func() {
-		c.putPointsBuffer(tmp)
-	}()
-
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 		offsetMs := offsetSecond * 1000
@@ -181,10 +189,10 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
-			return fmt.Errorf("gorillaDecodeAggregate: %w", err)
+			return tmp, fmt.Errorf("gorillaDecodeAggregate: %w", err)
 		}
 
-		aggregateData.Points = append(aggregateData.Points, tmp...)
+		aggregateData.Points = mergePoints(aggregateData.Points, tmp)
 		aggregateData.TimeToLive = compare.MaxInt64(aggregateData.TimeToLive, timeToLive)
 
 		start = time.Now()
@@ -193,44 +201,39 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 	cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
-		return err
+		return tmp, err
 	}
 
-	return nil
+	return tmp, nil
 }
 
-// Returns raw data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readRawData(id types.MetricID, fromTimestamp, toTimestamp int64) (types.MetricData, error) {
+// Returns raw data between the specified timestamps of the requested metric. Return points in descending order.
+func (c *CassandraTSDB) readRawData(id types.MetricID, buffer types.MetricData, fromTimestamp, toTimestamp int64, tmp []types.MetricPoint) (rawData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % c.options.RawPartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % c.options.RawPartitionSize.Milliseconds())
-	rawData := types.MetricData{
-		ID: id,
-	}
+	buffer.ID = id
 
-	for baseTimestamp := fromBaseTimestamp; baseTimestamp <= toBaseTimestamp; baseTimestamp += c.options.RawPartitionSize.Milliseconds() {
-		err := c.readRawPartitionData(&rawData, fromTimestamp, toTimestamp, baseTimestamp)
+	for baseTimestamp := toBaseTimestamp; baseTimestamp >= fromBaseTimestamp; baseTimestamp -= c.options.RawPartitionSize.Milliseconds() {
+		tmp, err = c.readRawPartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp)
 
 		if err != nil {
 			requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
-			requestsPointsTotalReadRaw.Add(float64(len(rawData.Points)))
+			requestsPointsTotalReadRaw.Add(float64(len(buffer.Points)))
 
-			return types.MetricData{}, err
+			return buffer, tmp, err
 		}
 	}
 
-	requestsPointsTotalReadRaw.Add(float64(len(rawData.Points)))
-
-	rawData.Points = types.DeduplicatePoints(rawData.Points)
-
+	requestsPointsTotalReadRaw.Add(float64(len(buffer.Points)))
 	requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
 
-	return rawData, nil
+	return buffer, tmp, nil
 }
 
 // readRawPartitionData add to rawData data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64) error {
+func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, tmp []types.MetricPoint) (newTmp []types.MetricPoint, err error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - c.options.RawPartitionSize.Milliseconds()
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 
@@ -254,16 +257,6 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 
 	start = time.Now()
 
-	var (
-		err error
-	)
-
-	tmp := c.getPointsBuffer()
-
-	defer func() {
-		c.putPointsBuffer(tmp)
-	}()
-
 	for tableSelectDataIter.Scan(&offsetMs, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
@@ -272,13 +265,13 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 		if err != nil {
 			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
-			return fmt.Errorf("gorillaDecode: %w", err)
+			return tmp, fmt.Errorf("gorillaDecode: %w", err)
 		}
 
 		points := filterPoints(tmp, fromTimestamp, toTimestamp)
 
 		if len(points) > 0 {
-			rawData.Points = append(rawData.Points, points...)
+			rawData.Points = mergePoints(rawData.Points, points)
 			rawData.TimeToLive = compare.MaxInt64(rawData.TimeToLive, timeToLive)
 		}
 
@@ -288,10 +281,10 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 	cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
-		return err
+		return tmp, err
 	}
 
-	return nil
+	return tmp, nil
 }
 
 // Returns table select data Query.
@@ -403,4 +396,58 @@ func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp i
 	}
 
 	return points[minIndex:maxIndex]
+}
+
+func reversePoints(points []types.MetricPoint) {
+	for i := len(points)/2 - 1; i >= 0; i-- {
+		opp := len(points) - 1 - i
+		points[i], points[opp] = points[opp], points[i]
+	}
+}
+
+// MergeSortedPoints merge two sorted list of points in-place.
+// src must be sorted ascending
+// dst must be sorted (and de-duplicated) in descending order.
+// The result is sorted in descending order and de-duplicated.
+func mergePoints(dst, src []types.MetricPoint) []types.MetricPoint {
+	dstIndex := len(dst)
+	srcIndex := len(src) - 1
+
+	for srcIndex >= 0 {
+		pts := src[srcIndex]
+
+		switch {
+		case dstIndex == 0 || dst[dstIndex-1].Timestamp > pts.Timestamp:
+			dst = append(dst, pts)
+
+			dstIndex++
+			srcIndex--
+		case dst[dstIndex-1].Timestamp == pts.Timestamp:
+			// duplicated point, overwrite the existing one. The new one may be more recent
+			srcIndex--
+		default:
+			// pts might need to be inserted in the "past". Search the insertion point
+			for n := dstIndex - 1; n >= -1; n-- {
+				if n == -1 || dst[n].Timestamp > pts.Timestamp {
+					// pts must be inserted at buffer[n+1]
+					dst = append(dst, types.MetricPoint{})
+
+					copy(dst[n+2:dstIndex+1], dst[n+1:dstIndex])
+
+					dst[n+1] = pts
+					dstIndex++
+					srcIndex--
+
+					break
+				} else if dst[n].Timestamp == pts.Timestamp {
+					// duplicated point, overwrite the existing one. The new one may be more recent
+					srcIndex--
+
+					break
+				}
+			}
+		}
+	}
+
+	return dst
 }

@@ -107,7 +107,6 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 //    processed the time range.
 func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int, from time.Time, to time.Time) error {
 	var (
-		ids        []types.MetricID
 		wg         sync.WaitGroup
 		rangeCount int
 
@@ -128,6 +127,8 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 	for n := 0; n < threadCount; n++ {
 		go func() {
 			defer wg.Done()
+
+			var ids []types.MetricID
 
 			for currentFrom := range workChan {
 				var rangePointsCount int
@@ -307,19 +308,29 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 
 	pointsRead := 0
 
-	request := types.MetricRequest{
-		IDs:           ids,
-		FromTimestamp: fromTimestamp,
-		ToTimestamp:   toTimestamp,
-	}
-	metrics, err := c.ReadIter(context.Background(), request)
+	var (
+		metric types.MetricData
+		err    error
+	)
 
-	if err != nil {
-		return 0, err
-	}
+	tmp := c.getPointsBuffer()
 
-	for metrics.Next() {
-		metric := metrics.At()
+	defer func() {
+		c.putPointsBuffer(tmp)
+	}()
+
+	for _, id := range ids {
+		metric.ID = id
+		metric.TimeToLive = 0
+		metric.Points = metric.Points[:0]
+
+		metric, tmp, err = c.readRawData(id, metric, fromTimestamp, toTimestamp, tmp)
+		if err != nil {
+			return pointsRead, err
+		}
+
+		reversePoints(metric.Points)
+
 		aggregatedMetric := aggregate.Aggregate(metric, resolution)
 
 		pointsRead += len(metric.Points)
@@ -330,5 +341,5 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 		}
 	}
 
-	return pointsRead, metrics.Err()
+	return pointsRead, nil
 }
