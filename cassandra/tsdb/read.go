@@ -157,7 +157,7 @@ func (c *CassandraTSDB) readAggregateData(id types.MetricID, buffer types.Metric
 
 // Returns aggregated partition data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, tmp []types.MetricPoint, function string) (newTmp []types.MetricPoint, err error) {
-	fromOffset := fromTimestamp - baseTimestamp - c.options.AggregateSize.Milliseconds()
+	fromOffset := fromTimestamp - baseTimestamp - c.options.AggregatePartitionSize.Milliseconds()
 	toOffset := toTimestamp - baseTimestamp
 
 	fromOffset = compare.MaxInt64(fromOffset, 0)
