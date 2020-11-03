@@ -166,13 +166,13 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	threadRaw := req.URL.Query().Get("thread")
 	ctx := req.Context()
 
-	from, err := time.Parse(time.RFC3339, fromRaw)
+	from, err := time.Parse("2006-01-02", fromRaw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	to, err := time.Parse(time.RFC3339, toRaw)
+	to, err := time.Parse("2006-01-02", toRaw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

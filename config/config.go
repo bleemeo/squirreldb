@@ -169,13 +169,6 @@ func (c *Config) Validate() bool {
 		logger.Printf("Error: cassandra.rawPartitionSize' (current value %v) must be less than 24 days", rawPartitionSize)
 	}
 
-	// This is due to Gorilla TSZ storing the timestamp as millisecond in a uint32 (and we use millisecond)
-	if aggregateSize > 49*24*time.Hour {
-		valid = false
-
-		logger.Printf("Error: cassandra.aggregate.size' (current value %v) must be less than 49 days", rawPartitionSize)
-	}
-
 	if aggregateSize < aggregateResolution {
 		valid = false
 

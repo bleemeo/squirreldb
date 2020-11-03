@@ -182,9 +182,8 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
-		offsetMs := offsetSecond * 1000
 
-		tmp, err = gorillaDecodeAggregate(values, offsetMs+baseTimestamp-1, function, tmp)
+		tmp, err = gorillaDecodeAggregate(values, baseTimestamp, function, tmp, c.options.AggregateResolution.Milliseconds())
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
@@ -259,7 +258,7 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 	for tableSelectDataIter.Scan(&offsetMs, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		tmp, err = gorillaDecode(values, baseTimestamp-1, tmp)
+		tmp, err = gorillaDecode(values, baseTimestamp-1, tmp, 1)
 
 		if err != nil {
 			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
@@ -307,7 +306,7 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, f
 	return iter
 }
 
-func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
 	i, err := tsz.NewIterator(values)
 	if err != nil {
 		return nil, err
@@ -319,7 +318,7 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 		t, v := i.Values()
 
 		result = append(result, types.MetricPoint{
-			Timestamp: int64(t) + baseTimestamp,
+			Timestamp: int64(t)*scale + baseTimestamp,
 			Value:     v,
 		})
 	}
@@ -327,7 +326,7 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 	return result, i.Err()
 }
 
-func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
 	var (
 		streamNumber int
 	)
@@ -371,7 +370,7 @@ func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string,
 		return nil, errors.New("corrupted values, stored length larged than actual length")
 	}
 
-	return gorillaDecode(values[int(startIndex):endIndex], baseTimestamp, result)
+	return gorillaDecode(values[int(startIndex):endIndex], baseTimestamp, result, scale)
 }
 
 func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp int64) []types.MetricPoint {

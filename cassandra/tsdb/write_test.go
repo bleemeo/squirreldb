@@ -207,7 +207,7 @@ func Test_gorillaEncode2(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buffer := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
-			got, err := gorillaDecode(buffer, tt.args.baseTimestamp, nil)
+			got, err := gorillaDecode(buffer, tt.args.baseTimestamp, nil, 1)
 			if err != nil {
 				t.Errorf("gorillaDecode() failed: %v", err)
 			}
@@ -340,7 +340,7 @@ func Benchmark_gorillaDecode(b *testing.B) {
 			data := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				_, _ = gorillaDecode(data, tt.args.baseTimestamp, nil)
+				_, _ = gorillaDecode(data, tt.args.baseTimestamp, nil, 1)
 			}
 		})
 		b.Run(tt.name+"-reuse", func(b *testing.B) {
@@ -348,20 +348,21 @@ func Benchmark_gorillaDecode(b *testing.B) {
 			var tmp []types.MetricPoint
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				tmp, _ = gorillaDecode(data, tt.args.baseTimestamp, tmp)
+				tmp, _ = gorillaDecode(data, tt.args.baseTimestamp, tmp, 1)
 			}
 		})
 	}
 }
 
 func Test_gorillaEncodeAggregate(t *testing.T) {
+	const resolution = 300000
 
 	metricHunderdHours := types.MetricData{
 		ID:         types.MetricID(100),
 		TimeToLive: 42,
 		Points:     types.MakePointsForTest(100 * 3600 / 10),
 	}
-	aggregatedMetricHunderdHours := aggregate.Aggregate(metricHunderdHours, 300000)
+	aggregatedMetricHunderdHours := aggregate.Aggregate(metricHunderdHours, resolution)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -375,25 +376,25 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp: time.Date(2019, 9, 17, 9, 42, 43, 999e6, time.UTC).UnixNano() / 1000000,
-				t0:            time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+				baseTimestamp: time.Date(2019, 9, 17, 9, 35, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 47, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 45, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 52, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 50, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -405,25 +406,55 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 		{
 			name: "large_delta",
 			args: args{
-				baseTimestamp: time.Date(2019, 9, 16, 23, 59, 59, 999e6, time.UTC).UnixNano() / 1000000,
-				t0:            time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+				baseTimestamp: time.Date(2019, 9, 16, 23, 50, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 20, 9, 47, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 20, 9, 45, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 25, 9, 52, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 25, 9, 50, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       1337,
+						Max:       64,
+						Average:   42,
+						Count:     1337,
+					},
+				},
+			},
+		},
+		{
+			name: "very_large_delta",
+			args: args{
+				baseTimestamp: time.Date(1980, 9, 16, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+				aggregatedPoints: []aggregate.AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       42,
+						Max:       42,
+						Average:   42,
+						Count:     42,
+					},
+					{
+						Timestamp: time.Date(2019, 9, 20, 9, 45, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       42,
+						Max:       1337,
+						Average:   42,
+						Count:     64,
+					},
+					{
+						Timestamp: time.Date(2019, 9, 25, 9, 50, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -444,11 +475,11 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testedFun := []string{"min", "max", "avg", "count"}
-			buffer := gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp)
+			buffer := gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp, resolution)
 
 			for _, function := range testedFun {
 				want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
-				got, err := gorillaDecodeAggregate(buffer, tt.args.baseTimestamp, function, nil)
+				got, err := gorillaDecodeAggregate(buffer, tt.args.baseTimestamp, function, nil, resolution)
 				for i, p := range tt.args.aggregatedPoints {
 					want[i].Timestamp = p.Timestamp
 					switch function {
@@ -474,6 +505,7 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 }
 
 func Benchmark_gorillaEncodeAggregate(b *testing.B) {
+	const resolution = 300000
 
 	metricOneHour := types.MetricData{
 		ID:         types.MetricID(1),
@@ -490,9 +522,9 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 		TimeToLive: 42,
 		Points:     types.MakePointsForTest(100 * 3600 / 10),
 	}
-	aggregatedMetricOneHour := aggregate.Aggregate(metricOneHour, 300000)
-	aggregatedMetricOneDay := aggregate.Aggregate(metricOneDay, 300000)
-	aggregatedMetricHundredHours := aggregate.Aggregate(metricHundredHours, 300000)
+	aggregatedMetricOneHour := aggregate.Aggregate(metricOneHour, resolution)
+	aggregatedMetricOneDay := aggregate.Aggregate(metricOneDay, resolution)
+	aggregatedMetricHundredHours := aggregate.Aggregate(metricHundredHours, resolution)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -506,25 +538,25 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 		{
 			name: "offset_0",
 			args: args{
-				baseTimestamp: time.Date(2019, 9, 17, 9, 42, 43, 999e6, time.UTC).UnixNano() / 1000000,
-				t0:            time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+				baseTimestamp: time.Date(2019, 9, 17, 9, 35, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 				aggregatedPoints: []aggregate.AggregatedPoint{
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       42,
 						Average:   42,
 						Count:     42,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 47, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 45, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       42,
 						Max:       1337,
 						Average:   42,
 						Count:     64,
 					},
 					{
-						Timestamp: time.Date(2019, 9, 17, 9, 52, 44, 0, time.UTC).UnixNano() / 1000000,
+						Timestamp: time.Date(2019, 9, 17, 9, 50, 0, 0, time.UTC).UnixNano() / 1000000,
 						Min:       1337,
 						Max:       64,
 						Average:   42,
@@ -561,7 +593,7 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_ = gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp)
+				_ = gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp, resolution)
 			}
 		})
 	}

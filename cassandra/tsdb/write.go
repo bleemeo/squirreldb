@@ -115,7 +115,7 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 
 	firstPoint := aggregatedData.Points[0]
 	offsetMs := firstPoint.Timestamp - baseTimestamp
-	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, offsetMs+baseTimestamp-1)
+	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp, c.options.AggregateResolution.Milliseconds())
 
 	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive, aggregateValues)
 
@@ -259,9 +259,11 @@ func gorillaEncode(points []types.MetricPoint, t0 int64, baseTimestamp int64) []
 }
 
 // gorillaEncodeAggregate encode aggregated points
-// It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened
-// It also means that same constraint as gorillaEncode apply.
-func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTimestamp int64) []byte {
+// It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened, but with all timestamp
+// encoded as multiple of scale.
+// It also means that same constraint as gorillaEncode apply (but any maximum time delta are scaled), for it may not
+// store only ~49 days but 49 * scale days (with default of 300000 - 5 minute in milliseconds - that is ~40 000 year).
+func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTimestamp int64, scale int64) []byte {
 	var (
 		buffer        []byte
 		uvarIntBuffer [binary.MaxVarintLen32]byte
@@ -270,11 +272,11 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 	workPoint := make([]types.MetricPoint, len(points))
 
 	for i, p := range points {
-		workPoint[i].Timestamp = p.Timestamp
+		workPoint[i].Timestamp = p.Timestamp / scale
 		workPoint[i].Value = p.Min
 	}
 
-	tmp := gorillaEncode(workPoint, t0, baseTimestamp)
+	tmp := gorillaEncode(workPoint, t0/scale, baseTimestamp/scale)
 	n := binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
 	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
@@ -283,7 +285,7 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 		workPoint[i].Value = p.Max
 	}
 
-	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	tmp = gorillaEncode(workPoint, t0/scale, baseTimestamp/scale)
 	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
 	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
@@ -292,7 +294,7 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 		workPoint[i].Value = p.Average
 	}
 
-	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	tmp = gorillaEncode(workPoint, t0/scale, baseTimestamp/scale)
 	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
 	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
@@ -301,7 +303,7 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 		workPoint[i].Value = p.Count
 	}
 
-	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
+	tmp = gorillaEncode(workPoint, t0/scale, baseTimestamp/scale)
 	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
 	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
