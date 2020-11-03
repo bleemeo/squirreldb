@@ -185,7 +185,6 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 		offsetMs := offsetSecond * 1000
 
 		tmp, err = gorillaDecodeAggregate(values, offsetMs+baseTimestamp-1, function, tmp)
-
 		if err != nil {
 			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
@@ -330,7 +329,6 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 
 func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
 	var (
-		length       uint16
 		streamNumber int
 	)
 
@@ -350,7 +348,7 @@ func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string,
 	}
 
 	for i := 0; i < streamNumber; i++ {
-		err := binary.Read(reader, binary.BigEndian, &length)
+		length, err := binary.ReadUvarint(reader)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +359,7 @@ func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string,
 		}
 	}
 
-	err := binary.Read(reader, binary.BigEndian, &length)
+	length, err := binary.ReadUvarint(reader)
 	if err != nil {
 		return nil, err
 	}

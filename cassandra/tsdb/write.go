@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/dgryski/go-tsz"
@@ -261,10 +262,10 @@ func gorillaEncode(points []types.MetricPoint, t0 int64, baseTimestamp int64) []
 // It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened
 // It also means that same constraint as gorillaEncode apply.
 func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTimestamp int64) []byte {
-	// Gorilla encoding worst case is ~14 bytes per points. So on 64k we could store ~4000 points,
-	// since it's aggregated points, with 5 minutes resolution it's ~13 days.
-	// It will always fit in 64k, so we will use uint16 to mark the length of gorillaEncode() result
-	var buffer []byte
+	var (
+		buffer        []byte
+		uvarIntBuffer [binary.MaxVarintLen32]byte
+	)
 
 	workPoint := make([]types.MetricPoint, len(points))
 
@@ -274,7 +275,8 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 	}
 
 	tmp := gorillaEncode(workPoint, t0, baseTimestamp)
-	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	n := binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
+	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
 
 	for i, p := range points {
@@ -282,7 +284,8 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 	}
 
 	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
-	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
+	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
 
 	for i, p := range points {
@@ -290,7 +293,8 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 	}
 
 	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
-	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
+	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
 
 	for i, p := range points {
@@ -298,7 +302,8 @@ func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, t0 int64, baseTi
 	}
 
 	tmp = gorillaEncode(workPoint, t0, baseTimestamp)
-	buffer = append(buffer, byte(len(tmp)/256), byte(len(tmp)%256))
+	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
+	buffer = append(buffer, uvarIntBuffer[:n]...)
 	buffer = append(buffer, tmp...)
 
 	return buffer
