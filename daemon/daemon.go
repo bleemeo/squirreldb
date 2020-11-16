@@ -230,7 +230,7 @@ func New() (squirreldb *SquirrelDB, err error) {
 }
 
 // SchemaLock return a lock to modify the Cassandra schema.
-func (s *SquirrelDB) schemaLock() (types.TryLocker, error) {
+func (s *SquirrelDB) SchemaLock() (types.TryLocker, error) {
 	lockFactory, err := s.LockFactory()
 	if err != nil {
 		return nil, err
@@ -297,7 +297,7 @@ func (s *SquirrelDB) States() (types.State, error) {
 				return nil, err
 			}
 
-			lock, err := s.schemaLock()
+			lock, err := s.SchemaLock()
 			if err != nil {
 				return nil, err
 			}
@@ -424,7 +424,7 @@ func (s *SquirrelDB) Index(started bool) (types.Index, error) {
 				return nil, err
 			}
 
-			schemaLock, err := s.schemaLock()
+			schemaLock, err := s.SchemaLock()
 			if err != nil {
 				return nil, err
 			}
@@ -476,7 +476,7 @@ func (s *SquirrelDB) TSDB(preAggregationStarted bool) (MetricReadWriter, error) 
 				return nil, err
 			}
 
-			schemaLock, err := s.schemaLock()
+			schemaLock, err := s.SchemaLock()
 			if err != nil {
 				return nil, err
 			}
@@ -541,7 +541,7 @@ func (s *SquirrelDB) clusterTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		schemaLock, err := s.schemaLock()
+		schemaLock, err := s.SchemaLock()
 		if err != nil {
 			readiness <- err
 			return
@@ -667,7 +667,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		schemaLock, err := s.schemaLock()
+		schemaLock, err := s.SchemaLock()
 		if err != nil {
 			readiness <- err
 			return
@@ -697,7 +697,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
 		}
 
-		schemaLock, err := s.schemaLock()
+		schemaLock, err := s.SchemaLock()
 		if err != nil {
 			readiness <- err
 			return
