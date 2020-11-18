@@ -4,3 +4,4 @@ dist
 /.idea
 .vscode
 *.*.swp
+.build-cache

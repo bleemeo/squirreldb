@@ -9,6 +9,8 @@ SquirrelDB use goreleaser and Docker to build its release, to build the release 
 and Docker images run:
 
 ```
+# Optional, to speed-up subsequent build
+mkdir -p .build-cache
 ./build.sh
 ```
 
@@ -31,43 +33,29 @@ Then, go to http://localhost:3000 (default credentials are admin/admin) and:
 
 ## Test and Develop
 
-SquirrelDB require Golang 1.13. If your system does not provide it, you may run all Go command using Docker.
-For example to run test:
-
-```
-GOCMD="docker run --net host --rm -ti -v $(pwd):/srv/workspace -w /srv/workspace -u $UID -e HOME=/tmp/home golang go"
-
-$GOCMD test ./...
-```
-
-The following will assume "go" is golang 1.13 or more, if not replace it with $GOCMD or use an alias:
-```
-alias go=$GOCMD
-```
-
-
-SquirrelDB use golangci-lint as linter. You may run it with:
-
-```
-mkdir -p /tmp/golangci-lint-cache; docker run --rm -v $(pwd):/app -u $UID -v /tmp/golangci-lint-cache:/go/pkg -e HOME=/go/pkg -w /app golangci/golangci-lint:v1.27 golangci-lint run
-```
-
-SquirrelDB use Go tests, you may run them with:
-
-```
-go test ./... || echo "TEST FAILED"
-```
-
 SquirrelDB need a Cassandra database, you may run one with:
 
 ```
 docker run -d --name squirreldb-cassandra -p 127.0.0.1:9042:9042 -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
 ```
 
-Then run SquirrelDB from source:
+To build binary you can use build.sh script. For example to just
+compile Go binary (skip building Docker image and Windows installer):
+```
+mkdir -p .build-cache
+./build.sh go
+```
+
+Then run SquirrelDB:
 
 ```
-go run squirreldb
+./squirreldb
+```
+
+SquirrelDB use golangci-lint as linter. You may run it with:
+```
+mkdir -p .build-cache  # enable cache and speed-up build/lint run
+./lint.sh
 ```
 
 ## HA setup
