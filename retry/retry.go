@@ -2,11 +2,10 @@ package retry
 
 import (
 	"context"
-
-	"github.com/cenkalti/backoff/v4"
-
 	"log"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 )
 
 // NewExponentialBackOff creates a new ExponentialBackOff object.
@@ -34,5 +33,5 @@ func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action st
 		logger.Printf("Resolved %s", action)
 	}
 
-	return err
+	return err // nolint: wrapcheck
 }

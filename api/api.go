@@ -2,11 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	_ "net/http/pprof" //nolint: gosec
+	_ "net/http/pprof" //nolint: gosec, gci
 	"os"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
@@ -82,6 +83,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	ln, err := net.Listen("tcp", a.ListenAddress)
 	if err != nil {
 		readiness <- err
+
 		return
 	}
 
@@ -106,7 +108,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	case err = <-serverStopped:
 	}
 
-	if err != nil && err != http.ErrServerClosed {
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		_ = a.logger.Log("msg", "HTTP server failed", "err", err)
 	}
 
@@ -122,6 +124,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	v := atomic.LoadInt32(&a.ready)
 	if v > 0 {
 		a.router.ServeHTTP(w, req)
+
 		return
 	}
 
@@ -135,6 +138,7 @@ func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
 		err := a.FlushCallback()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
+
 			return
 		}
 	}
@@ -153,6 +157,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 		_, err := a.IndexVerifyCallback(ctx, w, doFix, acquireLock)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
+
 			return
 		}
 	}
@@ -169,12 +174,14 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	from, err := time.Parse("2006-01-02", fromRaw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+
 		return
 	}
 
 	to, err := time.Parse("2006-01-02", toRaw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+
 		return
 	}
 
@@ -184,6 +191,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 		tmp, err := strconv.ParseInt(threadRaw, 10, 0)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+
 			return
 		}
 
@@ -196,6 +204,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 		err := a.PreAggregateCallback(ctx, thread, from, to)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
+
 			return
 		}
 	}

@@ -64,6 +64,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		sort.Slice(metricsList, func(i, j int) bool {
 			aLabels := metricsList[i].Labels
 			bLabels := metricsList[j].Labels
+
 			return labels.Compare(aLabels, bLabels) < 0
 		})
 

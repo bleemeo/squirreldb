@@ -2,14 +2,13 @@ package remotestorage
 
 import (
 	"fmt"
+	"net/http"
+	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
-
-	"net/http"
-	"squirreldb/types"
-	"time"
 )
 
 type readMetrics struct {
@@ -31,9 +30,8 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	reqCtx := requestContext{
 		pb: &readRequest,
 	}
-	err := decodeRequest(request.Body, &reqCtx)
 
-	if err != nil {
+	if err := decodeRequest(request.Body, &reqCtx); err != nil {
 		logger.Printf("Error: Can't decode the read request (%v)", err)
 		http.Error(writer, "Can't decode the read request", http.StatusBadRequest)
 		requestsErrorRead.Inc()
@@ -82,7 +80,6 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 
 	encodedResponse, err := encodeResponse(&readResponse)
-
 	if err != nil {
 		logger.Printf("Error: Can't encode the read response (%v)", err)
 		http.Error(writer, "Can't encode the read response", http.StatusBadRequest)
@@ -105,16 +102,15 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
 	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
 	if err != nil {
-		return nil, types.MetricRequest{}, err
+		return nil, types.MetricRequest{}, fmt.Errorf("read matchers failed: %w", err)
 	}
 
 	start := time.Unix(promQuery.StartTimestampMs/1000, promQuery.StartTimestampMs%1000)
 	end := time.Unix(promQuery.EndTimestampMs/1000, promQuery.EndTimestampMs%1000)
 
 	metrics, err := index.Search(start, end, matchers)
-
 	if err != nil {
-		return nil, types.MetricRequest{}, err
+		return nil, types.MetricRequest{}, fmt.Errorf("search failed: %w", err)
 	}
 
 	ids := make([]types.MetricID, 0, metrics.Count())

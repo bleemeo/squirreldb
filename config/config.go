@@ -3,13 +3,7 @@ package config
 import (
 	"context"
 	goflag "flag"
-
-	"github.com/knadh/koanf"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/posflag"
-	"github.com/spf13/pflag"
-
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -18,6 +12,12 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"time"
+
+	"github.com/knadh/koanf"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/providers/posflag"
+	"github.com/spf13/pflag"
 )
 
 const (
@@ -42,41 +42,36 @@ func New() (*Config, error) {
 	instance := koanf.New(delimiter)
 
 	err := instance.Load(ConfMapProvider(defaults, delimiter), nil)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("koanf: %w", err)
 	}
 
 	filePaths, err := filePaths(folderRoot, fileExtensions)
-
 	if err != nil {
 		return nil, err
 	}
 
 	for _, filePath := range filePaths {
 		err = instance.Load(file.Provider(filePath), yaml.Parser())
-
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read option from file %s: %w", filePath, err)
 		}
 	}
 
 	err = instance.Load(newEnvProvider(), nil)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read option from environment: %w", err)
 	}
 
 	flagSet := flagSetFromFlags(flags)
 
 	if err := flagSet.Parse(os.Args); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse command line arguments: %w", err)
 	}
 
 	err = instance.Load(posflag.Provider(flagSet, delimiter, instance), nil)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse command line arguments: %w", err)
 	}
 
 	config := &Config{
@@ -92,6 +87,7 @@ func New() (*Config, error) {
 // it from a number of seconds.
 func (c *Config) Duration(key string) time.Duration {
 	value := c.Koanf.String(key)
+
 	return string2Duration(value)
 }
 
@@ -186,8 +182,10 @@ func (c *Config) Validate() bool {
 
 // ValidateRemote checks if the local configuration is consistent with the remote configuration.
 func (c *Config) ValidateRemote(state types.State) bool {
-	names := []string{"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
-		"cassandra.aggregate.size", "cassandra.partition_size.aggregate"}
+	names := []string{
+		"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
+		"cassandra.aggregate.size", "cassandra.partition_size.aggregate",
+	}
 	valid := true
 	exists := false
 	force := c.Bool("overwite-previous-config")
@@ -202,7 +200,8 @@ func (c *Config) ValidateRemote(state types.State) bool {
 
 		retry.Print(func() error {
 			exists, err = state.Read(name, &remoteStr) // nolint: scopelint
-			return err
+
+			return err // nolint: wrapcheck
 		}, retry.NewExponentialBackOff(context.Background(), 30*time.Second), logger,
 			"read config state "+name,
 		)
@@ -253,9 +252,8 @@ func (c *Config) writeRemote(state types.State, name string, value string) {
 // Return file paths.
 func filePaths(root string, fileExtensions []string) ([]string, error) {
 	filesInfo, err := ioutil.ReadDir(root)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list dir %s: %w", root, err)
 	}
 
 	var filePaths []string

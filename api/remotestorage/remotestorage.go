@@ -1,15 +1,14 @@
 package remotestorage
 
 import (
+	"log"
+	"os"
 	"runtime"
+	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/prompb"
-
-	"log"
-	"os"
-	"squirreldb/types"
-	"time"
 )
 
 //nolint: gochecknoglobals

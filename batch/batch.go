@@ -38,13 +38,13 @@ const (
 	backgroundTaskInterval = 15 * time.Second
 
 	// Each run of the background task, take the ownership of N metrics and sleep few milliseconds.
-	// This avoid that one SquirrelDB take ownership of all metrics from another instance
+	// This avoid that one SquirrelDB take ownership of all metrics from another instance.
 	transferredOwnershipLimit      = 1000
 	transferredOwnershipSleepDelay = 50 * time.Millisecond
 
 	takeoverInterval = 120 * time.Second
 	// Each run of the takeover task takeover N metrics that are overdue and sleep few milliseconds.
-	// This avoid that one SquirrelDB takeover of all overdue metrics
+	// This avoid that one SquirrelDB takeover of all overdue metrics.
 	takeoverLimit      = 1000
 	takeoverSleepDelay = 500 * time.Millisecond
 
@@ -249,7 +249,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 // randomDuration return a delay with a +/- 20% jitter.
 func randomDuration(target time.Duration) time.Duration {
 	jitter := target / 5
-	jitterFactor := rand.Float64()*2 - 1
+	jitterFactor := rand.Float64()*2 - 1 // nolint: gosec
 
 	return target + time.Duration(jitterFactor*float64(jitter))
 }
@@ -259,6 +259,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 		metrics, err := b.memoryStore.GetAllKnownMetrics(ctx)
 		if err != nil {
 			logger.Printf("Unable to query memory store for metrics overdue: %v", err)
+
 			return
 		}
 
@@ -281,6 +282,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 		err = b.takeoverMetrics(ctx, overdue, now)
 		if err != nil {
 			logger.Printf("Unable to takeover metrics: %v", err)
+
 			return
 		}
 
@@ -336,14 +338,14 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 
 		currentMetrics, err = b.memoryStore.GetSetPointsAndOffset(ctx, setMetrics, offsets)
 
-		return err
+		return err // nolint: wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"write points in temporary store",
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read from store failed: %w", err)
 	}
 
 	results := make([]bool, len(setMetrics))
@@ -381,6 +383,7 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 
 			if idxPrevious == len(previousMetric.Points) {
 				newPoints = currentMetric.Points[idxCurrent:]
+
 				break
 			}
 		}
@@ -428,14 +431,14 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 		err := retry.Print(func() error {
 			_, err := b.memoryStore.Append(ctx, appendPoints)
 
-			return err
+			return err // nolint: wrapcheck
 		},
 			retry.NewExponentialBackOff(ctx, 30*time.Second),
 			logger,
 			"append points in temporary store",
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("append points: %w", err)
 		}
 	}
 
@@ -478,23 +481,20 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 
 	var (
 		readPointsCount, setPointsCount int
-	)
-
-	var (
-		metrics []types.MetricData
-		offsets []int
+		metrics                         []types.MetricData
+		offsets                         []int
 	)
 
 	err := retry.Print(func() error {
 		var err error
 		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ctx, ids)
 
-		return err
+		return err // nolint: wrapcheck
 	}, retry.NewExponentialBackOff(ctx, 30*time.Second), logger,
 		"get points from the memory store",
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("read memory store: %w", err)
 	}
 
 	metricsToWrite := make([]types.MetricData, 0, len(metrics))
@@ -525,7 +525,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		"write points in persistent store",
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("write to persistent store: %w", err)
 	}
 
 	keptMetrics := make([]types.MetricData, len(metrics))
@@ -590,7 +590,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		"transfert ownership using memory store",
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("transfert ownership: %w", err)
 	}
 
 	err = retry.Print(func() error {
@@ -599,6 +599,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		// maximum deadline is now + b.batchSize
 		// Give two takeoverInterval as safely margin
 		ttl := 2*takeoverInterval + overdueThreshold + b.batchSize
+
 		return b.memoryStore.MarkToExpire(ctx, idToExpire, ttl)
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
@@ -606,7 +607,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		"mark metrics to expire in memory store",
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("mark metrics to expire: %w", err)
 	}
 
 	var storeDeadlines map[types.MetricID]time.Time
@@ -616,14 +617,14 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 
 		storeDeadlines, err = b.memoryStore.GetSetFlushDeadline(ctx, newDeadlines)
 
-		return err
+		return err // nolint: wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
 		"set deadline in memory store",
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("set deadline: %w", err)
 	}
 
 	b.mutex.Lock()
@@ -661,6 +662,7 @@ func sortMetrics(input []types.MetricData) int {
 				maxTS = point.Timestamp
 			} else {
 				needSort = true
+
 				break
 			}
 		}
@@ -717,6 +719,7 @@ func (i *readIter) Next() bool {
 		temporaryMetrics, err := i.b.readTemporary(i.ctx, []types.MetricID{id}, i.request.FromTimestamp, i.request.ToTimestamp)
 		if err != nil {
 			i.err = err
+
 			return false
 		}
 
@@ -734,6 +737,7 @@ func (i *readIter) Next() bool {
 			persistentMetrics, err := i.b.reader.ReadIter(i.ctx, idRequest)
 			if err != nil {
 				i.err = err
+
 				return false
 			}
 
@@ -741,6 +745,7 @@ func (i *readIter) Next() bool {
 				persistentData := persistentMetrics.At()
 				if persistentData.ID == id {
 					data.Points = append(persistentData.Points, data.Points...)
+
 					break
 				}
 			}
@@ -748,6 +753,7 @@ func (i *readIter) Next() bool {
 			err = persistentMetrics.Err()
 			if err != nil {
 				i.err = err
+
 				return false
 			}
 		}
@@ -764,9 +770,8 @@ func (i *readIter) Next() bool {
 // Returns the deduplicated and sorted points read from the temporary storage according to the request.
 func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTimestamp int64, toTimestamp int64) ([]types.MetricData, error) {
 	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, ids)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store read fail: %w", err)
 	}
 
 	temporaryMetrics := make([]types.MetricData, 0, len(ids))
@@ -829,7 +834,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 
 	pointsCount, err := b.memoryStore.Append(ctx, metrics)
 	if err != nil {
-		return err
+		return fmt.Errorf("fail to append points: %w", err)
 	}
 
 	b.mutex.Lock()
@@ -841,6 +846,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 
 		if previousCount < 0 {
 			b.mutex.Unlock()
+
 			return fmt.Errorf("unexpected \"previousCount\" == %d in batch.Write", previousCount)
 		}
 
@@ -896,7 +902,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 		_, err = b.memoryStore.GetSetFlushDeadline(ctx, deadlines)
 
 		if err != nil {
-			return err
+			return fmt.Errorf("fail to update flush deadline: %w", err)
 		}
 	}
 

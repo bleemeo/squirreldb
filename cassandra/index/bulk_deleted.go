@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"squirreldb/types"
 
 	"github.com/gocql/gocql"
@@ -93,6 +94,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -155,7 +157,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 			req := req
 			task := func() error {
 				bitmap, err := d.c.postingUpdate(req)
-				if err != nil && err != gocql.ErrNotFound {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
 
@@ -175,6 +177,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -186,7 +189,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 			req := req
 			task := func() error {
 				_, err := d.c.postingUpdate(req)
-				if err != nil && err != gocql.ErrNotFound {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
 
@@ -198,6 +201,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -209,7 +213,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 			req := req
 			task := func() error {
 				_, err := d.c.postingUpdate(req)
-				if err != nil && err != gocql.ErrNotFound {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
 
@@ -221,6 +225,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -239,6 +244,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {

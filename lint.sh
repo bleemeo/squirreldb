@@ -4,7 +4,7 @@ set -e
 
 UID=$(id -u)
 
-LINTER_VERSION=v1.27
+LINTER_VERSION=v1.32.2
 
 if [ -e .build-cache ]; then
    GO_MOUNT_CACHE="-v $(pwd)/.build-cache:/go/pkg"

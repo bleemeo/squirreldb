@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-
-	"github.com/dgryski/go-tsz"
-	"github.com/gocql/gocql"
-
 	"squirreldb/aggregate"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/dgryski/go-tsz"
+	"github.com/gocql/gocql"
 )
 
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
@@ -122,7 +121,7 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 	start := time.Now()
 
 	if err := tableInsertDataQuery.Exec(); err != nil {
-		return err
+		return fmt.Errorf("insert into data_aggregated fail: %w", err)
 	}
 
 	cassandraQueriesSecondsWriteAggregated.Observe(time.Since(start).Seconds())
@@ -143,6 +142,7 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 
 	if startBaseTimestamp == endBaseTimestamp {
 		err := c.writeRawPartitionData(data, startBaseTimestamp)
+
 		return err
 	}
 

@@ -27,7 +27,7 @@ type queryResult struct {
 //nolint: gochecknoglobals
 var (
 	// Choose name that didn't conflict with test (that is name that won't
-	// match any matchers from test()
+	// match any matchers from test().
 	names = []string{
 		"go_memstats_heap_alloc_bytes",
 		"go_memstats_heap_released_bytes",
@@ -77,8 +77,8 @@ var (
 
 func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) { //nolint: gocognit
 	now := time.Now()
-	proc, err := procfs.NewProc(os.Getpid())
 
+	proc, err := procfs.NewProc(os.Getpid())
 	if err != nil {
 		log.Fatalf("NewProc() failed: %v", err)
 	}
@@ -479,8 +479,8 @@ func runQuery(now time.Time, name string, cassandraIndex *index.CassandraIndex, 
 		}
 
 		matchers := fun(n)
-		ids, err := cassandraIndex.Search(now, now, matchers)
 
+		ids, err := cassandraIndex.Search(now, now, matchers)
 		if err != nil {
 			log.Fatalf("Search() failed: %v", err)
 		}

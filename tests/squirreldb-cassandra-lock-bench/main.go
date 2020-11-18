@@ -70,6 +70,12 @@ type result struct {
 }
 
 func main() {
+	if err := do(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func do() error {
 	flag.Parse()
 
 	debug.Level = 0
@@ -109,7 +115,7 @@ func main() {
 			lock := lockFactory.CreateLock(subLockName, *lockTTL)
 
 			for t := 0; t < *workerThreads; t++ {
-				workerSeed := rand.Int63()
+				workerSeed := rand.Int63() // nolint: gosec
 				p := p
 				t := t
 				n := n
@@ -186,12 +192,14 @@ func main() {
 	}
 
 	if globalResult.ErrCount > 0 {
-		os.Exit(1)
+		return fmt.Errorf("had %d error", globalResult.ErrCount)
 	}
+
+	return nil
 }
 
 func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory *locks.CassandraLocks, subLockName string, lock types.TryLocker) result { // nolint: gocognit
-	rnd := rand.New(rand.NewSource(workerSeed))
+	rnd := rand.New(rand.NewSource(workerSeed)) // nolint: gosec
 	r := result{}
 
 	for ctx.Err() == nil {

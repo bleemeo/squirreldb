@@ -93,6 +93,21 @@ func makeIndex() *index.CassandraIndex {
 func main() {
 	flag.Parse()
 
+	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
+	if found {
+		*cassandraAddresses = value
+	}
+
+	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
+	if found {
+		tmp, err := strconv.ParseInt(value, 10, 0)
+		if err != nil {
+			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
+		}
+
+		*cassanraReplicationFactor = int(tmp)
+	}
+
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
@@ -115,21 +130,6 @@ func main() {
 
 	debug.Level = 1
 
-	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
-	if found {
-		*cassandraAddresses = value
-	}
-
-	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
-	if found {
-		tmp, err := strconv.ParseInt(value, 10, 0)
-		if err != nil {
-			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
-		}
-
-		*cassanraReplicationFactor = int(tmp)
-	}
-
 	if !*noDropTables {
 		log.Printf("Droping tables")
 
@@ -150,7 +150,7 @@ func main() {
 		test(makeIndex())
 	}
 
-	rnd := rand.New(rand.NewSource(*seed))
+	rnd := rand.New(rand.NewSource(*seed)) // nolint: gosec
 	bench(makeIndex, rnd)
 
 	verifyHadIssue := false
@@ -162,7 +162,7 @@ func main() {
 		verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
 
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 	}
 
@@ -172,7 +172,7 @@ func main() {
 	}
 
 	if verifyHadIssue {
-		log.Fatal("Index verify had issue, see above")
+		log.Println("Index verify had issue, see above")
 	}
 }
 

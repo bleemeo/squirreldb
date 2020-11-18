@@ -28,7 +28,7 @@ const backlogMargin = time.Hour
 
 // run starts all CassandraTSDB pre-aggregations.
 func (c *CassandraTSDB) run(ctx context.Context) {
-	shard := rand.Intn(shardNumber)
+	shard := rand.Intn(shardNumber) // nolint: gosec
 	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
 	ticker := time.NewTicker(aggregateShardIntended)
 	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
@@ -91,6 +91,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 		case <-ticker.C:
 		case <-ctx.Done():
 			debug.Print(2, logger, "Cassandra TSDB service stopped")
+
 			return
 		}
 	}
@@ -185,7 +186,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					var err error
 					ids, err = c.index.AllIDs(currentFrom, currentTo)
 
-					return err
+					return err // nolint: wrapcheck
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 					"get IDs from the index",
 				)
@@ -198,6 +199,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					var err error
 
 					rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+
 					return err
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 					fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
@@ -269,7 +271,8 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 		var fromTimeStr string
 		retry.Print(func() error {
 			_, err := c.state.Read(name, &fromTimeStr)
-			return err
+
+			return err // nolint: wrapcheck
 		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"get state for shard "+name,
 		)
@@ -310,7 +313,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 		var err error
 		ids, err = c.index.AllIDs(fromTime, toTime)
 
-		return err
+		return err //nolint: wrapcheck
 	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 		"get IDs from the index",
 	)

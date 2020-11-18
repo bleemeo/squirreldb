@@ -63,7 +63,7 @@ func MetricsSetEqual(a, b types.MetricsSet) bool {
 		}
 	}
 
-	return a.Err() == b.Err()
+	return (a.Err() == nil) == (b.Err() == nil)
 }
 
 // Index implement a non-working index. It only useful for testing/benchmark. See each function for their limitation.
@@ -195,6 +195,7 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 
 		if err != nil {
 			log.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+
 			return 0
 		}
 	}
@@ -207,6 +208,7 @@ func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {
 			*labels = append((*labels)[:i], (*labels)[i+1:]...)
+
 			return label.Value, true
 		}
 	}

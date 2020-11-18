@@ -1,12 +1,12 @@
 package states
 
 import (
+	"errors"
+	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/gocql/gocql"
-
-	"fmt"
-	"strconv"
 )
 
 type CassandraStates struct {
@@ -22,7 +22,7 @@ func New(session *gocql.Session, lock sync.Locker) (*CassandraStates, error) {
 	statesTableCreateQuery.Consistency(gocql.All)
 
 	if err := statesTableCreateQuery.Exec(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
 	states := &CassandraStates{
@@ -40,12 +40,12 @@ func (c *CassandraStates) Read(name string, value interface{}) (found bool, err 
 
 	err = statesTableSelectStateQuery.Scan(&valueString)
 
-	if err == gocql.ErrNotFound {
+	if errors.Is(err, gocql.ErrNotFound) {
 		return false, nil
 	}
 
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read %s: %w", name, err)
 	}
 
 	switch v := value.(type) {
@@ -72,9 +72,11 @@ func (c *CassandraStates) Write(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
 	statesTableUpdateStateQuery := c.statesTableInsertStateQuery(name, valueString)
 
-	err := statesTableUpdateStateQuery.Exec()
+	if err := statesTableUpdateStateQuery.Exec(); err != nil {
+		return fmt.Errorf("update Cassandra: %w", err)
+	}
 
-	return err
+	return nil
 }
 
 // Returns states table insert state Query.

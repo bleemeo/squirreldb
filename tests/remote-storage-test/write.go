@@ -151,14 +151,13 @@ func write(now time.Time) {
 func writeWorker(workChannel chan prompb.WriteRequest) {
 	for req := range workChannel {
 		body, err := req.Marshal()
-
 		if err != nil {
 			log.Fatalf("Unable to marshal req: %v", err)
 		}
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteWrite, bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequest("POST", *remoteWrite, bytes.NewBuffer(compressedBody)) // nolint: noctx
 		if err != nil {
 			log.Fatalf("unable to create request: %v", err)
 		}

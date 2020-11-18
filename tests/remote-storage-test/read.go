@@ -205,8 +205,9 @@ func read(now time.Time) {
 			name: fmt.Sprintf("filler-batch-full-%d", n),
 			request: prompb.ReadRequest{
 				Queries: []*prompb.Query{
-					{StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
-						EndTimestampMs: time2Millisecond(now),
+					{
+						StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
+						EndTimestampMs:   time2Millisecond(now),
 						Matchers: []*prompb.LabelMatcher{
 							{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
 							{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "filler"},
@@ -235,7 +236,7 @@ func read(now time.Time) {
 			},
 		}
 
-		i := rand.Intn(6)
+		i := rand.Intn(6) // nolint: gosec
 		workChannel <- readRequest{
 			name: fmt.Sprintf("filler-batch-full-%d", n),
 			request: prompb.ReadRequest{
@@ -289,14 +290,13 @@ func read(now time.Time) {
 func readWorker(workChannel chan readRequest) {
 	for req := range workChannel {
 		body, err := req.request.Marshal()
-
 		if err != nil {
 			log.Fatalf("Unable to marshal req: %v", err)
 		}
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteRead, bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequest("POST", *remoteRead, bytes.NewBuffer(compressedBody)) // nolint: noctx
 		if err != nil {
 			log.Fatalf("unable to create request: %v", err)
 		}
@@ -450,6 +450,7 @@ func equal(name string, got, want prompb.ReadResponse) {
 	for i, gotResult := range got.Results {
 		if i >= len(want.Results) {
 			log.Printf("%s: got more result than expected. Extra result labels of 1st timeseries: %v", name, gotResult.Timeseries[0].Labels)
+
 			continue
 		}
 
@@ -458,6 +459,7 @@ func equal(name string, got, want prompb.ReadResponse) {
 		for j, gotTS := range sortedTimeseries {
 			if j >= len(want.Results[i].Timeseries) {
 				log.Printf("%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v", name, gotTS.Labels)
+
 				continue
 			}
 
@@ -484,5 +486,6 @@ func equal(name string, got, want prompb.ReadResponse) {
 
 func fmtSample(s prompb.Sample) string {
 	t := time.Unix(s.Timestamp/1000, (s.Timestamp%1000)*1e6)
+
 	return fmt.Sprintf("%v @ %v", s.Value, t)
 }

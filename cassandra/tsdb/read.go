@@ -1,19 +1,18 @@
 package tsdb
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
-
-	"github.com/dgryski/go-tsz"
-	"github.com/gocql/gocql"
-
-	"bytes"
-	"encoding/binary"
 	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
+
+	"github.com/dgryski/go-tsz"
+	"github.com/gocql/gocql"
 )
 
 type readIter struct {
@@ -73,6 +72,7 @@ func (i *readIter) Next() bool {
 
 	if i.offset >= len(i.request.IDs) {
 		i.close()
+
 		return false
 	}
 
@@ -199,7 +199,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 	cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
-		return tmp, err
+		return tmp, fmt.Errorf("read aggr. table: %w", err)
 	}
 
 	return tmp, nil
@@ -279,7 +279,7 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 	cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
-		return tmp, err
+		return tmp, fmt.Errorf("read raw tables: %w", err)
 	}
 
 	return tmp, nil
@@ -309,7 +309,7 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, f
 func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
 	i, err := tsz.NewIterator(values)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read TSZ value: %w", err)
 	}
 
 	result = result[:0]
@@ -327,9 +327,7 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 }
 
 func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
-	var (
-		streamNumber int
-	)
+	var streamNumber int
 
 	reader := bytes.NewReader(values)
 
@@ -349,18 +347,18 @@ func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string,
 	for i := 0; i < streamNumber; i++ {
 		length, err := binary.ReadUvarint(reader)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read length for stream %d: %w", i, err)
 		}
 
 		_, err = reader.Seek(int64(length), os.SEEK_CUR)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("seek in stream: %w", err)
 		}
 	}
 
 	length, err := binary.ReadUvarint(reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read stream length: %w", err)
 	}
 
 	startIndex, _ := reader.Seek(0, os.SEEK_CUR)
@@ -384,6 +382,7 @@ func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp i
 
 		if p.Timestamp > toTimestamp {
 			maxIndex = i
+
 			break
 		}
 	}

@@ -254,7 +254,6 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 		}
 
 		metrics, err := cassandraIndex.Search(now, now, tt.Matchers)
-
 		if err != nil {
 			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
@@ -286,7 +285,6 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 				},
 			},
 		})
-
 		if err != nil {
 			log.Fatalf("LookupIDs(__metric_id__ valid) failed: %v", err)
 		}

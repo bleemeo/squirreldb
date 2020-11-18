@@ -38,6 +38,7 @@ func (i *seriesIter) Next() bool {
 
 	if i.current.labels, ok = i.id2Labels[i.current.data.ID]; !ok {
 		i.err = fmt.Errorf("metric ID %d don't have labels", i.current.data.ID)
+
 		return false
 	}
 

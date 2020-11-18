@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
-
-	"github.com/prometheus/prometheus/prompb"
-
 	"net/http"
 	"squirreldb/types"
 	"time"
+
+	"github.com/prometheus/prometheus/prompb"
 )
 
 type writeMetrics struct {
@@ -138,9 +137,8 @@ func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeri
 	}
 
 	ids, ttls, err := index.LookupIDs(ctx, requests)
-
 	if err != nil {
-		return nil, fmt.Errorf("metric ID lookup failed: %v", err)
+		return nil, fmt.Errorf("metric ID lookup failed: %w", err)
 	}
 
 	for i, promSeries := range promTimeseries {

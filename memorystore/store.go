@@ -234,6 +234,7 @@ func (s *Store) Run(ctx context.Context) {
 			s.expire(time.Now())
 		case <-ctx.Done():
 			debug.Print(2, logger, "Expirator service stopped")
+
 			return
 		}
 	}

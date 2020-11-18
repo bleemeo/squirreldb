@@ -1,20 +1,20 @@
 package redis
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"sync"
-
-	goredis "github.com/go-redis/redis/v8"
-
-	"bytes"
-	"encoding/binary"
 	"squirreldb/compare"
 	"squirreldb/types"
+	"strconv"
+	"sync"
 	"time"
+
+	goredis "github.com/go-redis/redis/v8"
 )
 
 const (
@@ -48,8 +48,10 @@ type serializedPoints struct {
 	TimeToLive int64
 }
 
-const serializedSize = 24
-const defaultTTL = 24 * time.Hour
+const (
+	serializedSize = 24
+	defaultTTL     = 24 * time.Hour
+)
 
 // New creates a new Redis object.
 func New(options Options) *Redis {
@@ -94,6 +96,7 @@ func (r *Redis) getBuffer() *bytes.Buffer {
 
 func (r *Redis) getSerializedPoints() []serializedPoints {
 	result := r.serializedPointsPool.Get().([]serializedPoints)
+
 	return result
 }
 
@@ -119,7 +122,7 @@ func (r *Redis) fixClient(ctx context.Context) error {
 
 		r.clusterClient = nil
 	default:
-		return clusterErr
+		return fmt.Errorf("ping redis: %w", clusterErr)
 	}
 
 	return nil
@@ -167,12 +170,12 @@ func (r *Redis) sAdd(ctx context.Context, key string, members ...interface{}) er
 	if r.clusterClient != nil {
 		_, err := r.clusterClient.SAdd(ctx, key, members...).Result()
 
-		return err
+		return fmt.Errorf("redis: %w", err)
 	}
 
 	_, err := r.singleClient.SAdd(ctx, key, members...).Result()
 
-	return err
+	return fmt.Errorf("redis: %w", err)
 }
 
 func (r *Redis) sRem(ctx context.Context, key string, members ...interface{}) error {
@@ -183,12 +186,12 @@ func (r *Redis) sRem(ctx context.Context, key string, members ...interface{}) er
 	if r.clusterClient != nil {
 		_, err := r.clusterClient.SRem(ctx, key, members...).Result()
 
-		return err
+		return fmt.Errorf("redis: %w", err)
 	}
 
 	_, err := r.singleClient.SRem(ctx, key, members...).Result()
 
-	return err
+	return fmt.Errorf("redis: %w", err)
 }
 
 func (r *Redis) sPopN(ctx context.Context, key string, count int64) ([]string, error) {
@@ -221,7 +224,8 @@ func metricID2String(id types.MetricID) string {
 
 func string2MetricID(input string) (types.MetricID, error) {
 	v, err := strconv.ParseInt(input, 36, 0)
-	return types.MetricID(v), err
+
+	return types.MetricID(v), fmt.Errorf("convert metric ID: %w", err)
 }
 
 // Append implement batch.TemporaryStore interface.
@@ -254,8 +258,8 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 
 	for i, data := range points {
 		addedPoints += len(data.Points)
-		values, err := valuesFromData(data, buffer, tmp)
 
+		values, err := valuesFromData(data, buffer, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -265,23 +269,23 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 		commands[i] = pipe.Append(ctx, key, string(values))
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis failed: %w", err)
 		}
 	}
 
 	for i := range points {
 		tmp, err := commands[i].Result()
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 
-		if err != goredis.Nil {
+		if !errors.Is(err, goredis.Nil) {
 			results[i] = int(tmp / serializedSize)
 		}
 	}
@@ -326,8 +330,8 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 
 	for i, data := range points {
 		writtenPointsCount += len(data.Points)
-		values, err := valuesFromData(data, buffer, tmp)
 
+		values, err := valuesFromData(data, buffer, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -345,13 +349,13 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 
 	pipe.SAdd(ctx, knownMetricsKey, ids)
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 	}
 
@@ -360,11 +364,11 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 
 	for i, data := range points {
 		tmp, err := commands[i].Bytes()
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 
-		if err != goredis.Nil {
+		if !errors.Is(err, goredis.Nil) {
 			results[i], err = dataFromValues(data.ID, tmp, workBuffer)
 			if err != nil {
 				return nil, err
@@ -378,7 +382,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) { // nolint: gocognit
+func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) {
 	start := time.Now()
 
 	defer func() {
@@ -409,13 +413,13 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 		offsetCommands[i] = pipe.Get(ctx, offsetKey)
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return nil, nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, nil, fmt.Errorf("get from Redis: %w", err)
 		}
 	}
 
@@ -426,11 +430,11 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	for i, id := range ids {
 		values, err := metricCommands[i].Bytes()
 
-		if (err != nil) && (err != goredis.Nil) {
-			return nil, nil, err
+		if (err != nil) && (!errors.Is(err, goredis.Nil)) {
+			return nil, nil, fmt.Errorf("redis: %w", err)
 		}
 
-		if err != goredis.Nil {
+		if !errors.Is(err, goredis.Nil) {
 			metrics[i], err = dataFromValues(id, values, tmp)
 
 			if err != nil {
@@ -439,6 +443,7 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 
 			readPointsCount += len(values) / serializedSize
 		} else {
+			// err == goredis.Nil. No points for this metrics
 			metrics[i] = types.MetricData{
 				ID: id,
 			}
@@ -446,8 +451,8 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 
 		writeOffsets[i], err = offsetCommands[i].Int()
 
-		if (err != nil) && (err != goredis.Nil) {
-			return nil, nil, err
+		if (err != nil) && (!errors.Is(err, goredis.Nil)) {
+			return nil, nil, fmt.Errorf("update bitmap: %w", err)
 		}
 	}
 
@@ -488,13 +493,13 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 		pipe.Expire(ctx, deadlineKey, ttl)
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return fmt.Errorf("redis: %w", err)
 		}
 	}
 
@@ -533,26 +538,26 @@ func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 		pipe.Expire(ctx, deadlineKey, defaultTTL)
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 	}
 
 	for id := range deadlines {
 		tmp, err := commands[id].Result()
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 
-		if err != goredis.Nil {
+		if !errors.Is(err, goredis.Nil) {
 			results[id], err = time.Parse(time.RFC3339, tmp)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("parse time: %w", err)
 			}
 		}
 	}
@@ -573,7 +578,7 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 	}
 
 	err := r.sAdd(ctx, transfertKey, strings)
-	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry(ctx) {
+	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
 		err = r.sAdd(ctx, transfertKey, strings)
 	}
 
@@ -583,11 +588,11 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 // GetTransfert implement batch.TemporaryStore interface.
 func (r *Redis) GetTransfert(ctx context.Context, count int) (map[types.MetricID]time.Time, error) {
 	result, err := r.sPopN(ctx, transfertKey, int64(count))
-	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry(ctx) {
+	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
 		result, err = r.sPopN(ctx, transfertKey, int64(count))
 	}
 
-	if err != nil && err != goredis.Nil {
+	if err != nil && !errors.Is(err, goredis.Nil) {
 		return nil, err
 	}
 
@@ -603,11 +608,11 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 	}()
 
 	result, err := r.sMembers(ctx, knownMetricsKey)
-	if err != nil && err != goredis.Nil && r.clusterClient != nil && r.shouldRetry(ctx) {
+	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
 		result, err = r.sMembers(ctx, knownMetricsKey)
 	}
 
-	if err != nil && err != goredis.Nil {
+	if err != nil && !errors.Is(err, goredis.Nil) {
 		return nil, err
 	}
 
@@ -633,13 +638,13 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 		commands[i] = pipe.Get(ctx, deadlineKey)
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.clusterClient != nil && r.shouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 	}
 
@@ -650,15 +655,15 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 		}
 
 		tmp, err := commands[i].Result()
-		if err != nil && err != goredis.Nil {
-			return nil, err
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
 		}
 
-		if err != goredis.Nil {
+		if !errors.Is(err, goredis.Nil) {
 			results[id], err = time.Parse(time.RFC3339, tmp)
 
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("parse time: %w", err)
 			}
 		} else {
 			// The metric is known but don't have any deadline key ?
@@ -688,7 +693,7 @@ func dataFromValues(id types.MetricID, values []byte, dataSerialized []serialize
 
 	err := binary.Read(buffer, binary.BigEndian, &dataSerialized)
 	if err != nil {
-		return data, err
+		return data, fmt.Errorf("deserialize points: %w", err)
 	}
 
 	data.Points = make([]types.MetricPoint, len(dataSerialized))
@@ -729,7 +734,7 @@ func valuesFromData(data types.MetricData, buffer *bytes.Buffer, dataSerialized 
 	}
 
 	if err := binary.Write(buffer, binary.BigEndian, dataSerialized); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("deserialize points: %w", err)
 	}
 
 	return buffer.Bytes(), nil

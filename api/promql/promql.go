@@ -92,11 +92,13 @@ func (p *PromQL) Register(r *route.Router) {
 
 			if result.err != nil {
 				p.respondError(w, result.err, result.data)
+
 				return
 			}
 
 			if result.data != nil {
 				p.respond(w, result.data, result.warnings)
+
 				return
 			}
 
@@ -140,6 +142,7 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
 			st.Err = fmt.Errorf("Invalid matcher \"%s\", require labelName=labelValue", value)
+
 			return st
 		}
 
@@ -155,12 +158,11 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 
 	maxEvaluatedSeries := p.MaxEvaluatedSeries
 
-	maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series")
-	if maxEvaluatedSeriesText != "" {
+	if maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series"); maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
-
 		if err != nil {
 			st.Err = err
+
 			return st
 		}
 
@@ -178,12 +180,11 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 
 	maxEvaluatedPoints := p.MaxEvaluatedPoints
 
-	maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points")
-	if maxEvaluatedPointsText != "" {
+	if maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points"); maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
-
 		if err != nil {
 			st.Err = err
+
 			return st
 		}
 
@@ -271,12 +272,12 @@ func returnAPIError(err error) *apiError {
 		return nil
 	}
 
-	switch err.(type) {
-	case promql.ErrQueryCanceled:
+	switch {
+	case errors.Is(err, promql.ErrQueryCanceled("")):
 		return &apiError{errorCanceled, err}
-	case promql.ErrQueryTimeout:
+	case errors.Is(err, promql.ErrQueryTimeout("")):
 		return &apiError{errorTimeout, err}
-	case promql.ErrStorage:
+	case errors.Is(err, promql.ErrStorage{}):
 		return &apiError{errorInternal, err}
 	}
 
@@ -287,28 +288,33 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 	start, err := parseTime(r.FormValue("start"))
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'start': %w", err)
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
 	end, err := parseTime(r.FormValue("end"))
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'end': %w", err)
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
 	if end.Before(start) {
 		err := errors.New("end timestamp must not be before start time")
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
 	step, err := parseDuration(r.FormValue("step"))
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'step': %w", err)
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
 	if step <= 0 {
 		err := errors.New("zero or negative query resolution step widths are not accepted. Try a positive integer")
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
@@ -316,6 +322,7 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if end.Sub(start)/step > 11000 {
 		err := errors.New("exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 
@@ -327,6 +334,7 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 		timeout, err := parseDuration(to)
 		if err != nil {
 			err = fmt.Errorf("invalid parameter 'timeout': %w", err)
+
 			return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 		}
 
@@ -381,6 +389,7 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 		timeout, err := parseDuration(to)
 		if err != nil {
 			err = fmt.Errorf("invalid parameter 'timeout': %w", err)
+
 			return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 		}
 
@@ -391,6 +400,7 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 	qry, err := p.queryEngine.NewInstantQuery(p.queryable(r), r.FormValue("query"), ts)
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'query': %w", err)
+
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 	// From now on, we must only return with a finalizer in the result (to
@@ -503,12 +513,12 @@ func (p *PromQL) respond(w http.ResponseWriter, data interface{}, warnings stora
 	}
 
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
+
 	b, err := json.Marshal(&response{
 		Status:   statusMessage,
 		Data:     data,
 		Warnings: warningStrings,
 	})
-
 	if err != nil {
 		_ = p.logger.Log("msg", "error marshaling json response", "err", err)
 
@@ -527,13 +537,13 @@ func (p *PromQL) respond(w http.ResponseWriter, data interface{}, warnings stora
 
 func (p *PromQL) respondError(w http.ResponseWriter, apiErr *apiError, data interface{}) {
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
+
 	b, err := json.Marshal(&response{
 		Status:    statusError,
 		ErrorType: apiErr.typ,
 		Error:     apiErr.err.Error(),
 		Data:      data,
 	})
-
 	if err != nil {
 		_ = p.logger.Log("msg", "error marshaling json response", "err", err)
 

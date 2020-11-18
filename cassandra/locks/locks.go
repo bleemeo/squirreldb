@@ -6,14 +6,13 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"squirreldb/debug"
+	"squirreldb/retry"
+	"squirreldb/types"
 	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
-
-	"squirreldb/debug"
-	"squirreldb/retry"
-	"squirreldb/types"
 )
 
 const retryMaxDelay = 30 * time.Second
@@ -47,11 +46,11 @@ func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) 
 	// Improve a bit, and make sure the one which created the keyspace
 	// try first to create the tables.
 	if createdKeySpace {
-		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) // nolint: gosec
 
 		err = initTable(session)
 	} else if !tableExists(session) {
-		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
+		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) // nolint: gosec
 		debug.Print(1, logger, "created lock tables")
 
 		err = initTable(session)
@@ -77,6 +76,7 @@ func initTable(session *gocql.Session) error {
 
 func tableExists(session *gocql.Session) bool {
 	err := session.Query("SELECT name FROM locks WHERE name='test'").Exec()
+
 	return err == nil
 }
 
@@ -95,7 +95,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 		name:       name,
 		timeToLive: timeToLive,
 		c:          c,
-		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)),
+		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)), // nolint: gosec
 	}
 }
 
@@ -165,6 +165,7 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 		ok := l.tryLock(ctx)
 		if ok {
 			locksLockSuccess.Inc()
+
 			return true
 		}
 
@@ -172,7 +173,7 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 			return false
 		}
 
-		jitter := currentDelay.Seconds() * (1 + rand.Float64()/5)
+		jitter := currentDelay.Seconds() * (1 + rand.Float64()/5) // nolint: gosec
 		select {
 		case <-time.After(time.Duration(jitter) * time.Second):
 		case <-ctx.Done():
@@ -218,7 +219,7 @@ func (l *Lock) Unlock() {
 
 		cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
 
-		return err
+		return err // nolint: wrapcheck
 	},
 		retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger, "free lock")
 
@@ -247,7 +248,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 				cassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
-				return err
+				return err // nolint: wrapcheck
 			}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 				"refresh lock "+l.name,
 			)

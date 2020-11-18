@@ -1,16 +1,17 @@
 package session
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
 	"squirreldb/debug"
-
-	"github.com/gocql/gocql"
-
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gocql/gocql"
 )
 
 //nolint: gochecknoglobals
@@ -27,10 +28,10 @@ func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
-	session, err := cluster.CreateSession()
 
+	session, err := cluster.CreateSession()
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("create session: %w", err)
 	}
 
 	keyspaceCreated := false
@@ -38,7 +39,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 	if !keyspaceExists(session, options.Keyspace) {
 		// Not sure if we are allowed to create keyspace concurrently. Add a random jitter to
 		// reduce change of concurrent keyspace creation
-		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond) // nolint: gosec
 
 		replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 		query := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
@@ -46,11 +47,12 @@ func New(options Options) (*gocql.Session, bool, error) {
 		err = query.Exec()
 
 		// nolint: gocritic
-		if _, ok := err.(*gocql.RequestErrAlreadyExists); ok {
+		if errors.Is(err, &gocql.RequestErrAlreadyExists{}) {
 			keyspaceCreated = false
 		} else if err != nil {
 			session.Close()
-			return nil, false, err
+
+			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
 			debug.Print(1, logger, "keyspace %s created", options.Keyspace)
@@ -64,7 +66,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 
 	finalSession, err := cluster.CreateSession()
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("create session: %w", err)
 	}
 
 	return finalSession, keyspaceCreated, nil

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/knadh/koanf"
@@ -44,7 +45,7 @@ func newEnvProvider() koanf.Provider {
 func (ep listEnvProvider) Read() (map[string]interface{}, error) {
 	mp, err := ep.Provider.Read()
 	if err != nil {
-		return mp, err
+		return mp, fmt.Errorf("failed to read environment: %w", err)
 	}
 
 	flat, _ := maps.Flatten(mp, nil, delimiter)
@@ -64,5 +65,5 @@ func (ep listEnvProvider) Read() (map[string]interface{}, error) {
 
 	mp = maps.Unflatten(flat, ".")
 
-	return mp, err
+	return mp, nil
 }

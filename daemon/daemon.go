@@ -77,7 +77,7 @@ var errBadConfig = errors.New("configuration validation failed")
 func (s *SquirrelDB) RunRetry(ctx context.Context) error {
 	return retry.Print(func() error {
 		err := s.Run(ctx)
-		if err == errBadConfig {
+		if errors.Is(err, errBadConfig) {
 			return backoff.Permanent(err)
 		}
 
@@ -189,7 +189,6 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 // New return a SquirrelDB not yet initialized. Only configuration is loaded and validated.
 func New() (squirreldb *SquirrelDB, err error) {
 	cfg, err := config.New()
-
 	if err != nil {
 		return nil, fmt.Errorf("error: Can't load config: %w", err)
 	}
@@ -450,7 +449,7 @@ func (s *SquirrelDB) Index(started bool) (types.Index, error) {
 	if task, ok := s.index.(types.Task); started && ok {
 		err := task.Start()
 		if err != nil {
-			return s.index, err
+			return s.index, fmt.Errorf("start index task: %w", err)
 		}
 	}
 
@@ -517,7 +516,7 @@ func (s *SquirrelDB) TSDB(preAggregationStarted bool) (MetricReadWriter, error) 
 	if task, ok := s.persistentStore.(types.Task); preAggregationStarted && ok {
 		err := task.Start()
 		if err != nil {
-			return s.persistentStore, err
+			return s.persistentStore, fmt.Errorf("start persitent store task: %w", err)
 		}
 	}
 

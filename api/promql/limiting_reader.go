@@ -16,7 +16,7 @@ type limitingReader struct {
 func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
 	r, err := rdr.reader.ReadIter(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, err // nolint: wrapcheck
 	}
 
 	return limitDataSet{

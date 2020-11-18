@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -135,7 +136,6 @@ func main() {
 
 	if *verify {
 		verifyHadIssue, err := cassandraIndex.Verify(context.Background(), os.Stderr, *fix, *fix)
-
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 
 	expiration, err := time.Parse(time.RFC3339, *expirationText)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse time: %w", err)
 	}
 
 	for {
@@ -176,7 +176,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 
 		for len(ids) < 1000 {
 			record, err := reader.Read()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 
@@ -190,14 +190,14 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 
 			id, err := strconv.ParseInt(record[0], 10, 0)
 			if err != nil {
-				return err
+				return fmt.Errorf("parse ID: %w", err)
 			}
 
 			ids = append(ids, types.MetricID(id))
 
 			lbls, err := parser.ParseMetric(record[1])
 			if err != nil {
-				return err
+				return fmt.Errorf("parse labels: %w", err)
 			}
 
 			metrics = append(metrics, lbls)
@@ -210,7 +210,7 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 
 		_, err := cassandraIndex.InternalCreateMetric(context.Background(), start, end, metrics, ids, expirations, false)
 		if err != nil {
-			return err
+			return fmt.Errorf("create metrics: %w", err)
 		}
 	}
 

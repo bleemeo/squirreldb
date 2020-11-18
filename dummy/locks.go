@@ -46,6 +46,7 @@ func (l *tryLocker) tryLock() bool {
 
 	if !l.acquired {
 		l.acquired = true
+
 		return true
 	}
 
@@ -63,7 +64,7 @@ func (l *tryLocker) TryLock(ctx context.Context, retryDelay time.Duration) bool 
 			return false
 		}
 
-		jitter := retryDelay.Seconds() * (1 + rand.Float64()/2)
+		jitter := retryDelay.Seconds() * (1 + rand.Float64()/2) // nolint: gosec
 		select {
 		case <-time.After(time.Duration(jitter) * time.Second):
 		case <-ctx.Done():

@@ -3,16 +3,16 @@ package tsdb
 import (
 	"context"
 	"errors"
-	"sync"
-	"time"
-
-	"github.com/gocql/gocql"
-
+	"fmt"
 	"log"
 	"os"
 	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/gocql/gocql"
 )
 
 const (
@@ -62,14 +62,14 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 	dataTableCreateQuery.Consistency(gocql.All)
 
 	if err := dataTableCreateQuery.Exec(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create table data: %w", err)
 	}
 
 	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, options.DefaultTimeToLive)
 	aggregateDataTableCreateQuery.Consistency(gocql.All)
 
 	if err := aggregateDataTableCreateQuery.Exec(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create table data_aggregated: %w", err)
 	}
 
 	tsdb := &CassandraTSDB{
