@@ -11,7 +11,6 @@ require (
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.2
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
-	github.com/hashicorp/memberlist v0.2.2
 	github.com/json-iterator/go v1.1.10
 	github.com/knadh/koanf v0.14.0
 	github.com/mitchellh/mapstructure v1.3.3 // indirect

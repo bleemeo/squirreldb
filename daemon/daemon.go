@@ -16,12 +16,8 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
-	"squirreldb/cassandra/wal"
-	"squirreldb/cluster"
-	"squirreldb/cluster/seed"
 	"squirreldb/config"
 	"squirreldb/debug"
-	"squirreldb/distributor"
 	"squirreldb/dummy"
 	"squirreldb/memorystore"
 	"squirreldb/redis"
@@ -69,7 +65,6 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-	cluster                  types.Cluster
 }
 
 //nolint: gochecknoglobals
@@ -341,10 +336,6 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	tasks := []namedTasks{
 		{
-			Name: "cluster",
-			Task: types.TaskFun(s.clusterTask),
-		},
-		{
 			Name: "batching store",
 			Task: types.TaskFun(s.batchStoreTask),
 		},
@@ -533,65 +524,6 @@ func (s *SquirrelDB) TSDB(preAggregationStarted bool) (MetricReadWriter, error) 
 	return s.persistentStore, nil
 }
 
-func (s *SquirrelDB) clusterTask(ctx context.Context, readiness chan error) {
-	if s.Config.Bool("cluster.enabled") {
-		session, err := s.CassandraSession()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		schemaLock, err := s.SchemaLock()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		seeds := &seed.Cassandra{
-			Session:    session,
-			SchemaLock: schemaLock,
-		}
-
-		var wg sync.WaitGroup
-
-		subCtx, cancel := context.WithCancel(context.Background())
-		subReady := make(chan error)
-
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			seeds.Run(subCtx, subReady)
-		}()
-
-		err = <-subReady
-		if err != nil {
-			cancel()
-			readiness <- err
-
-			wg.Wait()
-
-			return
-		}
-
-		m := &cluster.Cluster{
-			SeedProvider:     seeds,
-			APIListenAddress: s.Config.String("remote_storage.listen_address"),
-			ClusterAddress:   s.Config.String("cluster.bind_address"),
-			ClusterPort:      s.Config.Int("cluster.bind_port"),
-		}
-
-		s.cluster = m
-		m.Run(ctx, readiness)
-		cancel()
-		wg.Wait()
-	} else {
-		s.cluster = nil
-		readiness <- nil
-		<-ctx.Done()
-	}
-}
-
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.temporary_store") {
 	case "redis":
@@ -660,76 +592,6 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		readiness <- nil
 
 		<-ctx.Done()
-	case "wal":
-		session, err := s.CassandraSession()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		schemaLock, err := s.SchemaLock()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		wal := &batch.WalBatcher{
-			WalStore: &wal.Cassandra{
-				ShardID:    1,
-				Session:    session,
-				SchemaLock: schemaLock,
-			},
-			PersitentStore: s.persistentStore,
-		}
-
-		s.store = wal
-		s.api.FlushCallback = func() error { wal.Flush(); return nil }
-
-		wal.Run(ctx, readiness)
-	case "distributor", "distributor2discard":
-		session, err := s.CassandraSession()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		if s.cluster == nil {
-			logger.Println("Cluster is disabled. Only one SquirrelDB should access Cassandra")
-		}
-
-		schemaLock, err := s.SchemaLock()
-		if err != nil {
-			readiness <- err
-			return
-		}
-
-		store := &distributor.Distributor{
-			Cluster:    s.cluster,
-			ShardCount: s.Config.Int("cluster.shard"),
-			StoreFactory: func(shardID int) distributor.FlushableStore {
-				if s.Config.String("internal.store") == "distributor2discard" {
-					return &dummy.DiscardTSDB{}
-				}
-				return &batch.WalBatcher{
-					WalStore: &wal.Cassandra{
-						ShardID:    shardID,
-						Session:    session,
-						SchemaLock: schemaLock,
-					},
-					PersitentStore: s.persistentStore,
-				}
-			},
-		}
-
-		if s.cluster == nil {
-			// Cluster is disabled, no need to spread on multiple shard
-			store.ShardCount = 1
-		}
-
-		s.store = store
-		s.api.FlushCallback = store.Flush
-
-		store.Run(ctx, readiness)
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
 	}

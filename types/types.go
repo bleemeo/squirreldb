@@ -32,21 +32,6 @@ type Task interface {
 	Stop() error
 }
 
-type Cluster interface {
-	// Addresses return a list of addresse to reach API of SquirrelDB that are in our cluster.
-	// It also return which index in the list is self.
-	// This list (once memberlist has converged) will be the same on everyone, including the order.
-	Nodes() []Node
-	Send(n Node, requestType uint8, data []byte) ([]byte, error)
-	SetRequestHandler(func(ctx context.Context, requestType uint8, data []byte) ([]byte, error))
-}
-
-type Node interface {
-	APIAddress() string
-	ClusterAddress() string
-	IsSelf() bool
-}
-
 type LookupRequest struct {
 	Labels labels.Labels
 	Start  time.Time
@@ -96,17 +81,4 @@ type TryLocker interface {
 type State interface {
 	Read(name string, value interface{}) (bool, error)
 	Write(name string, value interface{}) error
-}
-
-type WalStore interface {
-	Write(metrics []MetricData) error
-	Checkpoint() WalCheckpoint
-	ReadWAL() ([]MetricData, error)
-	Flush()
-}
-
-type WalCheckpoint interface {
-	Abort()
-	Purge()
-	ReadOther() ([]MetricData, error)
 }
