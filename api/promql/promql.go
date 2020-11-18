@@ -41,8 +41,8 @@ const (
 
 // nolint: gochecknoglobals
 var (
-	minTime = time.Unix(math.MinInt64/1000+62135596801, 0).UTC()
-	maxTime = time.Unix(math.MaxInt64/1000-62135596801, 999999999).UTC()
+	minTime = time.Unix(0, 0).UTC()
+	maxTime = time.Unix(math.MaxInt32*3600, 0).UTC()
 )
 
 type response struct {
@@ -116,6 +116,10 @@ func (p *PromQL) Register(r *route.Router) {
 	r.Post("/query_range", wrap(p.queryRange))
 	r.Get("/series", wrap(p.series))
 	r.Post("/series", wrap(p.series))
+
+	r.Get("/labels", wrap(p.labelNames))
+	r.Post("/labels", wrap(p.labelNames))
+	r.Get("/label/:name/values", wrap(p.labelValues))
 }
 
 func (p *PromQL) init() {
@@ -502,6 +506,82 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 	}
 
 	return apiFuncResult{metrics, nil, warnings, closer}
+}
+
+func (p *PromQL) labelNames(r *http.Request) apiFuncResult {
+	start, err := parseTimeParam(r, "start", minTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'start': %w", err)}, nil, nil}
+	}
+
+	end, err := parseTimeParam(r, "end", maxTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
+	}
+
+	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
+	}
+	defer q.Close()
+
+	names, warnings, err := q.LabelNames()
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorExec, err}, warnings, nil}
+	}
+
+	if names == nil {
+		names = []string{}
+	}
+
+	return apiFuncResult{names, nil, warnings, nil}
+}
+
+func (p *PromQL) labelValues(r *http.Request) (result apiFuncResult) {
+	ctx := r.Context()
+	name := route.Param(ctx, "name")
+
+	if !model.LabelNameRE.MatchString(name) {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid label name: %q", name)}, nil, nil}
+	}
+
+	start, err := parseTimeParam(r, "start", minTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'start': %w", err)}, nil, nil}
+	}
+
+	end, err := parseTimeParam(r, "end", maxTime)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
+	}
+
+	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
+	}
+	// From now on, we must only return with a finalizer in the result (to
+	// be called by the caller) or call q.Close ourselves (which is required
+	// in the case of a panic).
+	defer func() {
+		if result.finalizer == nil {
+			q.Close()
+		}
+	}()
+
+	closer := func() {
+		q.Close()
+	}
+
+	vals, warnings, err := q.LabelValues(name)
+	if err != nil {
+		return apiFuncResult{nil, &apiError{errorExec, err}, warnings, closer}
+	}
+
+	if vals == nil {
+		vals = []string{}
+	}
+
+	return apiFuncResult{vals, nil, warnings, closer}
 }
 
 func (p *PromQL) respond(w http.ResponseWriter, data interface{}, warnings storage.Warnings) {

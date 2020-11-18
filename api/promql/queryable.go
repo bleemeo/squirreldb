@@ -2,7 +2,6 @@ package promql
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -111,12 +110,22 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
 func (q querier) LabelValues(name string) ([]string, storage.Warnings, error) {
-	return nil, nil, errors.New("not implemented")
+	minT := time.Unix(q.mint/1000, q.mint%1000)
+	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+
+	res, err := q.index.LabelValues(minT, maxT, name, nil)
+
+	return res, nil, err
 }
 
 // LabelNames returns all the unique label names present in the block in sorted order.
 func (q querier) LabelNames() ([]string, storage.Warnings, error) {
-	return nil, nil, errors.New("not implemented")
+	minT := time.Unix(q.mint/1000, q.mint%1000)
+	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+
+	res, err := q.index.LabelNames(minT, maxT, nil)
+
+	return res, nil, err
 }
 
 // Close releases the resources of the Querier.

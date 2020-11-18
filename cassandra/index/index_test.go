@@ -9,6 +9,7 @@ import (
 	"sort"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,43 +242,49 @@ func (s *mockStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.
 	return results, nil
 }
 
-type mockByteIter struct {
+type valueAndByte struct {
+	value  string
+	buffer []byte
+}
+type mockPostingIter struct {
 	err     error
-	results [][]byte
-	next    []byte
+	results []valueAndByte
+	next    valueAndByte
 	idx     int
 }
 
-func (i *mockByteIter) HasNext() bool {
+func (i *mockPostingIter) HasNext() bool {
 	if i.err != nil {
 		return false
 	}
 	if i.idx < len(i.results) {
 		i.next = i.results[i.idx]
+
 		i.idx++
+
 		return true
 	}
 	return false
 }
 
-func (i *mockByteIter) Next() []byte {
-	if i.next == nil {
+func (i *mockPostingIter) Next() (string, []byte) {
+	if i.next.buffer == nil {
 		panic("This shouldn't happen. Probably HasNext() were not called")
 	}
 
 	r := i.next
 
 	// We do this to allow checking that HasNext()/Next() are always called thogether
-	i.next = nil
+	i.next.buffer = nil
 
-	return r
+	return r.value, r.buffer
 }
 
-func (i mockByteIter) Err() error {
+func (i mockPostingIter) Err() error {
 	return i.err
 }
 
-func (s *mockStore) SelectPostingByName(shard int32, name string) bytesIter {
+func (s *mockStore) SelectPostingByName(shard int32, name string) postingIter {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -289,24 +296,28 @@ func (s *mockStore) SelectPostingByName(shard int32, name string) bytesIter {
 
 	postings, ok := s.postings[shard]
 	if !ok {
-		return &mockByteIter{
+		return &mockPostingIter{
 			err: gocql.ErrNotFound,
 		}
 	}
 
 	m, ok := postings[name]
 	if !ok {
-		return &mockByteIter{
+		return &mockPostingIter{
 			err: gocql.ErrNotFound,
 		}
 	}
 
-	results := make([][]byte, 0, len(m))
-	for _, v := range m {
-		results = append(results, v)
+	results := make([]valueAndByte, 0, len(m))
+	for k, v := range m {
+		results = append(results, valueAndByte{value: k, buffer: v})
 	}
 
-	return &mockByteIter{
+	sort.Slice(results, func(i, j int) bool {
+		return strings.Compare(results[i].value, results[j].value) < 0
+	})
+
+	return &mockPostingIter{
 		err:     nil,
 		results: results,
 		idx:     0,
@@ -1893,7 +1904,27 @@ func Test_postingsForMatchers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.postingsForMatchers(shards, tt.matchers)
+			got, _, err := tt.index.idsForMatchers(shards, tt.matchers, 0)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+		t.Run(tt.name+" direct", func(t *testing.T) {
+			got, _, err := tt.index.idsForMatchers(shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1919,7 +1950,7 @@ func Test_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.postingsForMatchers(shards, matchersReverse)
+			got, _, err := tt.index.idsForMatchers(shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3028,7 +3059,27 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.postingsForMatchers(tt.shards, tt.matchers)
+			got, _, err := tt.index.idsForMatchers(tt.shards, tt.matchers, 0)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+		t.Run(tt.name+" direct", func(t *testing.T) {
+			got, _, err := tt.index.idsForMatchers(tt.shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3054,7 +3105,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.postingsForMatchers(tt.shards, matchersReverse)
+			got, _, err := tt.index.idsForMatchers(tt.shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -4065,5 +4116,425 @@ func Test_getTimeShards(t *testing.T) {
 		if shard == globalShardNumber {
 			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
 		}
+	}
+}
+
+func Test_FilteredLabelValues(t *testing.T) {
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t1 := t0.Add(postingShardSize)
+	t2 := t1.Add(postingShardSize)
+	t3 := t2.Add(postingShardSize * 2)
+	now := t3.Add(postingShardSize * 2)
+
+	index1, err := new(&mockStore{}, Options{
+		DefaultTimeToLive: 365 * 24 * time.Hour,
+		LockFactory:       &mockLockFactory{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = index1.lookupIDs(
+		context.Background(),
+		[]types.LookupRequest{
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "up",
+					"account_id": "1",
+					"job":        "prometheus",
+					"instance":   "localhost:9090",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "up",
+					"account_id": "2",
+					"job":        "node_exporter",
+					"instance":   "localhost:9100",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "up",
+					"account_id": "2",
+					"job":        "node_exporter",
+					"instance":   "remotehost:9100",
+				}),
+				Start: t1,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "node_cpu_seconds_total",
+					"account_id": "3",
+					"job":        "node_exporter",
+					"instance":   "remotehost:9100",
+					"cpu":        "0",
+					"mode":       "idle",
+				}),
+				Start: t0,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "node_cpu_seconds_total",
+					"account_id": "3",
+					"job":        "node_exporter",
+					"instance":   "remotehost:9100",
+					"mode":       "user",
+				}),
+				Start: t1,
+				End:   t2,
+			},
+			{ // index = 5
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "node_cpu_seconds_total",
+					"account_id": "3",
+					"job":        "node_exporter",
+					"instance":   "remotehost:9100",
+					"cpu":        "1",
+					"mode":       "user",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":   "node_filesystem_avail_bytes",
+					"account_id": "3",
+					"job":        "node_exporter",
+					"instance":   "localhost:9100",
+					"device":     "/dev/mapper/vg0-root",
+					"fstype":     "ext4",
+					"mountpoint": "/",
+				}),
+				Start: t1,
+				End:   t2,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":    "node_filesystem_avail_bytes",
+					"account_id":  "3",
+					"job":         "node_exporter",
+					"instance":    "localhost:9100",
+					"device":      "/dev/mapper/vg0-data",
+					"fstype":      "ext4",
+					"mountpoint":  "/srv/data",
+					"environment": "devel",
+				}),
+				Start: t0,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__":     "node_filesystem_avail_bytes",
+					"account_id":   "4",
+					"job":          "node_exporter",
+					"instance":     "remote:9100",
+					"device":       "/dev/mapper/vg0-data",
+					"fstype":       "ext4",
+					"mountpoint":   "/srv/data",
+					"environment":  "production",
+					"custom_label": "secret",
+				}),
+				Start: t0,
+				End:   t2,
+			},
+			{ // index == 9
+				Labels: labels.FromMap(map[string]string{
+					"__name__":    "node_filesystem_avail_bytes",
+					"job":         "node_exporter",
+					"instance":    "remote:9100",
+					"device":      "/dev/mapper/vg0-data",
+					"fstype":      "ext4",
+					"mountpoint":  "/srv/data",
+					"environment": "production",
+					"userID":      "42",
+					"secret_name": "secret_value",
+				}),
+				Start: t2,
+				End:   t2,
+			},
+		},
+		now,
+	)
+
+	tests := []struct {
+		name      string
+		index     *CassandraIndex
+		start     time.Time
+		end       time.Time
+		labelName string
+		matchers  []*labels.Matcher
+		want      []string
+	}{
+		{
+			name:  "names-account1",
+			index: index1,
+			start: t0,
+			end:   t2,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"1",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "instance", "job"},
+		},
+		{
+			name:  "names-account1-t1",
+			index: index1,
+			start: t1,
+			end:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"1",
+				),
+			},
+			labelName: postinglabelName,
+			want:      nil,
+		},
+		{
+			name:  "names-account2",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"2",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "instance", "job"},
+		},
+		{
+			name:  "names-account2-t1",
+			index: index1,
+			start: t1,
+			end:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"2",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "instance", "job"},
+		},
+		{
+			name:  "names-account3",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+		},
+		{
+			name:  "names-account3-t1",
+			index: index1,
+			start: t1,
+			end:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+		},
+		{
+			name:  "names-account3-t2",
+			index: index1,
+			start: t2,
+			end:   t2,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "device", "fstype", "instance", "job", "mode", "mountpoint"},
+		},
+		{
+			name:  "names-account3-t3",
+			index: index1,
+			start: t3,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: postinglabelName,
+			want:      nil,
+		},
+		{
+			name:      "names-all",
+			index:     index1,
+			start:     t0,
+			end:       t3,
+			matchers:  nil,
+			labelName: postinglabelName,
+			want:      []string{"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint", "secret_name", "userID"},
+		},
+		{
+			name:      "value-__name__-all",
+			index:     index1,
+			start:     t0,
+			end:       t3,
+			matchers:  nil,
+			labelName: "__name__",
+			want:      []string{"node_cpu_seconds_total", "node_filesystem_avail_bytes", "up"},
+		},
+		{
+			name:  "value-__name__-account3",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: "__name__",
+			want:      []string{"node_cpu_seconds_total", "node_filesystem_avail_bytes"},
+		},
+		{
+			name:  "value-mountpoint-account2",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"2",
+				),
+			},
+			labelName: "mountpoint",
+			want:      nil,
+		},
+		{
+			name:  "value-__name__-invalid-account",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"invalid",
+				),
+			},
+			labelName: "__name__",
+			want:      nil,
+		},
+		{
+			name:  "value-wronglabel-account3",
+			index: index1,
+			start: t0,
+			end:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"account_id",
+					"3",
+				),
+			},
+			labelName: "wronglabel",
+			want:      nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.index.labelValues(tt.start, tt.end, tt.labelName, tt.matchers)
+			if err != nil {
+				t.Errorf("filteredLabelValues() error = %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("filteredLabelValues() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_mergeSorted(t *testing.T) {
+	tests := []struct {
+		name       string
+		left       []string
+		right      []string
+		wantResult []string
+	}{
+		{
+			name:       "disjoint",
+			left:       []string{"a", "b", "c"},
+			right:      []string{"d", "e", "f"},
+			wantResult: []string{"a", "b", "c", "d", "e", "f"},
+		},
+		{
+			name:       "left-empty",
+			left:       []string{},
+			right:      []string{"d", "e", "f"},
+			wantResult: []string{"d", "e", "f"},
+		},
+		{
+			name:       "right-empty",
+			left:       []string{"d", "e", "f"},
+			right:      []string{},
+			wantResult: []string{"d", "e", "f"},
+		},
+		{
+			name:       "interleave",
+			left:       []string{"a", "c", "e"},
+			right:      []string{"b", "d", "f"},
+			wantResult: []string{"a", "b", "c", "d", "e", "f"},
+		},
+		{
+			name:       "dup-end",
+			left:       []string{"a", "b", "e", "f"},
+			right:      []string{"c", "d", "e", "f"},
+			wantResult: []string{"a", "b", "c", "d", "e", "f"},
+		},
+		{
+			name:       "dup-start",
+			left:       []string{"a", "b", "c", "d"},
+			right:      []string{"a", "b", "e", "f"},
+			wantResult: []string{"a", "b", "c", "d", "e", "f"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if gotResult := mergeSorted(tt.left, tt.right); !reflect.DeepEqual(gotResult, tt.wantResult) {
+				t.Errorf("mergeSorted() = %v, want %v", gotResult, tt.wantResult)
+			}
+		})
 	}
 }

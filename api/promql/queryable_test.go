@@ -15,6 +15,7 @@ import (
 const (
 	metricID1 = 42
 	metricID2 = 5323
+	metricID3 = 858
 )
 
 var (
@@ -141,6 +142,14 @@ func (idx mockIndex) lookupLabels(ids []types.MetricID) ([]labels.Labels, error)
 
 func (idx mockIndex) LookupIDs(ctx context.Context, request []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
+}
+
+func (idx mockIndex) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (idx mockIndex) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	return nil, errors.New("not implemented")
 }
 
 type mockSeries struct {

@@ -42,6 +42,8 @@ type Index interface {
 	AllIDs(start time.Time, end time.Time) ([]MetricID, error)
 	LookupIDs(ctx context.Context, requests []LookupRequest) ([]MetricID, []int64, error)
 	Search(start time.Time, end time.Time, matchers []*labels.Matcher) (MetricsSet, error)
+	LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error)
+	LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error)
 }
 
 type MetricsSet interface {

@@ -29,3 +29,19 @@ func (idx filteringIndex) Search(start time.Time, end time.Time, matchers []*lab
 
 	return idx.index.Search(start, end, filterMatcher)
 }
+
+func (idx filteringIndex) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	filterMatcher := make([]*labels.Matcher, 0, len(matchers)+1)
+	filterMatcher = append(filterMatcher, idx.matcher)
+	filterMatcher = append(filterMatcher, matchers...)
+
+	return idx.index.LabelValues(start, end, name, filterMatcher)
+}
+
+func (idx filteringIndex) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	filterMatcher := make([]*labels.Matcher, 0, len(matchers)+1)
+	filterMatcher = append(filterMatcher, idx.matcher)
+	filterMatcher = append(filterMatcher, matchers...)
+
+	return idx.index.LabelNames(start, end, filterMatcher)
+}

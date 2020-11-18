@@ -7,11 +7,14 @@ import (
 	"sort"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
+
+const postinglabelName = "__label|names__"
 
 type MetricsLabel struct {
 	List []types.MetricLabel
@@ -75,6 +78,26 @@ type Index struct {
 	idToLabels            map[types.MetricID]labels.Labels
 }
 
+// NewIndex create a new index pre-filled with metrics.
+func NewIndex(metrics []types.MetricLabel) *Index {
+	idx := &Index{
+		StoreMetricIDInMemory: true,
+		labelsToID:            make(map[string]types.MetricID, len(metrics)),
+		idToLabels:            make(map[types.MetricID]labels.Labels, len(metrics)),
+	}
+
+	for _, m := range metrics {
+		lbl := m.Labels.Copy()
+
+		sort.Sort(lbl)
+
+		idx.idToLabels[m.ID] = lbl
+		idx.labelsToID[lbl.String()] = m.ID
+	}
+
+	return idx
+}
+
 // AllIDs does not store IDs in any persistent store. So this is lost after every restart. It may even not store them at all!
 func (idx *Index) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, nil
@@ -82,9 +105,6 @@ func (idx *Index) AllIDs(start time.Time, end time.Time) ([]types.MetricID, erro
 
 // lookupLabels required StoreMetricIDInMemory (so not persistent after restart).
 func (idx *Index) lookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
-
 	results := make([]labels.Labels, len(ids))
 
 	for i, id := range ids {
@@ -154,6 +174,9 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 func (idx *Index) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	ids := make([]types.MetricID, 0)
 
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+
 outer:
 	for id, lbs := range idx.idToLabels {
 		for _, m := range matchers {
@@ -181,6 +204,55 @@ outer:
 	}
 
 	return &MetricsLabel{List: results}, nil
+}
+
+// LabelValues only works when StoreMetricIDInMemory is enabled.
+func (idx *Index) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	if name == "" || strings.Contains(name, "|") {
+		return nil, fmt.Errorf("invalid label name \"%s\"", name)
+	}
+
+	return idx.labelValues(name, matchers)
+}
+
+// LabelNames only works when StoreMetricIDInMemory is enabled.
+func (idx *Index) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return idx.labelValues(postinglabelName, matchers)
+}
+
+func (idx *Index) labelValues(name string, matchers []*labels.Matcher) ([]string, error) {
+	results := make(map[string]interface{})
+
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+
+outer:
+	for _, lbs := range idx.idToLabels {
+		for _, m := range matchers {
+			l := lbs.Get(m.Name)
+			if !m.Matches(l) {
+				continue outer
+			}
+		}
+
+		if name == postinglabelName {
+			for _, l := range lbs {
+				results[l.Name] = nil
+			}
+		} else if v := lbs.Get(name); v != "" {
+			results[v] = nil
+		}
+	}
+
+	list := make([]string, 0, len(results))
+
+	for n := range results {
+		list = append(list, n)
+	}
+
+	sort.Strings(list)
+
+	return list, nil
 }
 
 // copied from cassandra/index.

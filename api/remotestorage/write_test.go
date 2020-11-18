@@ -42,6 +42,14 @@ func (i mockIndex) Search(start time.Time, end time.Time, matchers []*labels.Mat
 	}, nil
 }
 
+func (i mockIndex) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (i mockIndex) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
 func Benchmark_metricsFromPromSeries(b *testing.B) {
 	dummyIndex := mockIndex{
 		fixedLookupID: MetricIDTest1,

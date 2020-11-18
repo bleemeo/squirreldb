@@ -38,3 +38,11 @@ func (idx *limitingIndex) Search(start time.Time, end time.Time, matchers []*lab
 
 	return r, nil
 }
+
+func (idx *limitingIndex) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	return idx.index.LabelValues(start, end, name, matchers)
+}
+
+func (idx *limitingIndex) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return idx.index.LabelNames(start, end, matchers)
+}

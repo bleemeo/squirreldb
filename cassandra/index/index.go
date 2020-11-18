@@ -13,6 +13,7 @@ import (
 	"squirreldb/debug"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,7 +136,8 @@ type storeImpl interface {
 	SelectIDS2Labels(id []types.MetricID) (map[types.MetricID]labels.Labels, error)
 	SelectExpiration(day time.Time) ([]byte, error)
 	SelectIDS2LabelsExpiration(id []types.MetricID) (map[types.MetricID]time.Time, error)
-	SelectPostingByName(shard int32, name string) bytesIter
+	// SelectPostingByName return  label value with the associated postings in sorted order
+	SelectPostingByName(shard int32, name string) postingIter
 	SelectPostingByNameValue(shard int32, name string, value string) ([]byte, error)
 	SelectValueForName(shard int32, name string) ([]string, [][]byte, error)
 	InsertPostings(shard int32, name string, value string, bitset []byte) error
@@ -152,6 +154,7 @@ type storeImpl interface {
 const (
 	globalAllPostingLabel = "__global__all|metrics__" // we use the "|" since it's invalid for prometheus label name
 	allPostingLabel       = "__all|metrics__"
+	postinglabelName      = "__label|names__"   // kept known labels name as label value
 	maybePostingLabel     = "__maybe|metrics__" // ID are added in two-phase in postings. This one is updated first. See updatePostings
 	existingShardsLabel   = "__shard|exists__"  // We store existings shards in postings
 	postingShardSize      = 7 * 24 * time.Hour
@@ -669,7 +672,7 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool
 	return nil
 }
 
-func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, labelNames map[string]interface{}, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) {
+func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, labelNames map[string]interface{}, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { // nolint: gocognit
 	localAll, err := c.postings([]int32{shard}, allPostingLabel, allPostingLabel)
 	if err != nil {
 		return false, err
@@ -709,7 +712,14 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		{name: "shard maybe present IDs", it: localMaybe},
 	}
 
+	seenLabelNames := make(map[string]bool, len(labelNames)+1)
 	for name := range labelNames {
+		seenLabelNames[name] = false
+	}
+
+	seenLabelNames[postinglabelName] = true
+
+	for name := range seenLabelNames {
 		if ctx.Err() != nil {
 			break
 		}
@@ -717,8 +727,13 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		iter := c.store.SelectPostingByName(shard, name)
 		for iter.HasNext() {
 			tmp := roaring.NewBTreeBitmap()
+			labelValue, buffer := iter.Next()
 
-			err := tmp.UnmarshalBinary(iter.Next())
+			if name == postinglabelName {
+				seenLabelNames[labelValue] = true
+			}
+
+			err := tmp.UnmarshalBinary(buffer)
 			if err != nil {
 				return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
 			}
@@ -745,10 +760,34 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 					)
 
 					if doFix {
-						return hadIssue, errors.New("can't fix, don't have label value")
+						return hadIssue, errors.New("not implemented")
 					}
 				}
 			}
+		}
+	}
+
+	for name, seen := range seenLabelNames {
+		_, ok := labelNames[name]
+
+		if !seen {
+			hadIssue = true
+
+			fmt.Fprintf(
+				w,
+				"shard %d: posting name %s was expected to exists\n",
+				shard,
+				name,
+			)
+		} else if !ok && name != postinglabelName {
+			hadIssue = true
+
+			fmt.Fprintf(
+				w,
+				"shard %d: posting name %s was not expected to exists\n",
+				shard,
+				name,
+			)
 		}
 	}
 
@@ -872,6 +911,106 @@ func (c *CassandraIndex) lookupLabels(ids []types.MetricID, addID bool, now time
 	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 	return labelList, nil
+}
+
+// LabelValues returns potential values for a label name. Values will have at least
+// one metrics matching matchers.
+// Typical matchers will filter by tenant ID, to get all values for one tenant.
+// It is not safe to use the strings beyond the lifefime of the querier.
+func (c *CassandraIndex) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	if name == "" || strings.Contains(name, "|") {
+		return nil, fmt.Errorf("invalid label name \"%s\"", name)
+	}
+
+	return c.labelValues(start, end, name, matchers)
+}
+
+// LabelNames returns the unique label names for metrics matching matchers in sorted order.
+// Typical matchers will filter by tenant ID, to get all values for one tenant.
+func (c *CassandraIndex) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return c.labelValues(start, end, postinglabelName, matchers)
+}
+
+func (c *CassandraIndex) labelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+	shards := getTimeShards(start, end)
+
+	bitmap, _, err := c.postingsForMatchers(shards, matchers, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		results []string
+		work    []string
+	)
+
+	for _, shard := range shards {
+		if work != nil {
+			work = work[:0]
+		}
+
+		iter := c.store.SelectPostingByName(shard, name)
+
+		for iter.HasNext() {
+			tmp := roaring.NewBTreeBitmap()
+			value, buffer := iter.Next()
+
+			err := tmp.UnmarshalBinary(buffer)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal fail: %w", err)
+			}
+
+			if len(matchers) == 0 || tmp.IntersectionCount(bitmap) > 0 {
+				work = append(work, value)
+			}
+		}
+
+		if results == nil {
+			results = work
+			work = nil
+		} else if len(work) > 0 {
+			results = mergeSorted(results, work)
+		}
+
+		if iter.Err() != nil {
+			return nil, iter.Err()
+		}
+	}
+
+	return results, nil
+}
+
+func mergeSorted(left, right []string) (result []string) {
+	result = make([]string, len(left)+len(right))
+
+	i := 0
+
+	for len(left) > 0 && len(right) > 0 {
+		switch {
+		case left[0] < right[0]:
+			result[i] = left[0]
+			left = left[1:]
+		case left[0] != right[0]:
+			result[i] = right[0]
+			right = right[1:]
+		default:
+			right = right[1:]
+			continue
+		}
+		i++
+	}
+
+	for j := 0; j < len(left); j++ {
+		result[i] = left[j]
+		i++
+	}
+
+	for j := 0; j < len(right); j++ {
+		result[i] = right[j]
+		i++
+	}
+
+	return result[:i]
 }
 
 // LookupIDs returns a IDs corresponding to the specified labels.Label lists
@@ -1459,7 +1598,17 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 			req.AddIDs = append(req.AddIDs, uint64(entry.id))
 			maybePresent[shard] = req
 
+			labelsList := make(labels.Labels, 0, len(entry.sortedLabels)*2)
+			labelsList = append(labelsList, entry.sortedLabels...)
+
 			for _, lbl := range entry.sortedLabels {
+				labelsList = append(labelsList, labels.Label{
+					Name:  postinglabelName,
+					Value: lbl.Name,
+				})
+			}
+
+			for _, lbl := range labelsList {
 				m, ok := shardToLabelToIndex[shard]
 				if !ok {
 					m = make(map[labels.Label]int)
@@ -1693,7 +1842,7 @@ func (c *CassandraIndex) Search(queryStart time.Time, queryEnd time.Time, matche
 
 	if !found {
 		var err error
-		ids, labelsList, err = c.postingsForMatchers(shards, matchers)
+		ids, labelsList, err = c.idsForMatchers(shards, matchers, 3)
 
 		if err != nil {
 			return nil, err
@@ -2297,129 +2446,12 @@ func (c *CassandraIndex) expirationUpdate(job expirationUpdateRequest) error {
 	return c.store.InsertExpiration(job.Day, buffer.Bytes())
 }
 
-// postingsForMatchers return metric IDs matching given matcher.
-// The logic is taken from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.Matcher) (ids []types.MetricID, labelsList []labels.Labels, err error) { //nolint: gocognit,gocyclo
-	labelMustBeSet := make(map[string]bool, len(matchers))
-
-	for _, m := range matchers {
-		if !m.Matches("") {
-			labelMustBeSet[m.Name] = true
-		}
-	}
-
-	var results *roaring.Bitmap
-
-	checkMatches := false
-
-	// Unlike Prometheus querier.go, we merge/update directly into results (instead of
-	// adding into its and notIts then building results).
-	// We do this in two loops, one which fill its (the one which could add IDs - the "its" of Prometheus)
-	// then one which remove ids (the "notIts" of Prometheus).
-	for _, m := range matchers {
-		// If there is only few results, prefer doing an explicit matching on labels
-		// for each IDs left. This may spare few Cassandra query.
-		// With postings filtering, we do one Cassandra query per matchers.
-		// With explicit matching on labels, we do one Cassandra query per IDs BUT this query will be done anyway if the
-		// series would be kept.
-		if results != nil && results.Count() <= 3 {
-			checkMatches = true
-
-			break
-		}
-
-		if labelMustBeSet[m.Name] {
-			matchesEmpty := m.Matches("")
-			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
-
-			if isNot && !matchesEmpty { // l!=""
-				// If the label can't be empty and is a Not, but the inner matcher can
-				// be empty we need to use inversePostingsForMatcher.
-				inverse, err := m.Inverse()
-				if err != nil {
-					return nil, nil, fmt.Errorf("inverse matcher: %w", err)
-				}
-
-				it, err := c.inversePostingsForMatcher(shards, inverse)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				if results == nil {
-					results = it
-				} else {
-					results = results.Intersect(it)
-				}
-			} else if !isNot { // l="a"
-				// Non-Not matcher, use normal postingsForMatcher.
-				it, err := c.postingsForMatcher(shards, m)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				if results == nil {
-					results = it
-				} else {
-					results = results.Intersect(it)
-				}
-			}
-		}
-	}
-
-	for _, m := range matchers {
-		if results != nil && results.Count() <= 3 {
-			checkMatches = true
-
-			break
-		}
-
-		if labelMustBeSet[m.Name] {
-			matchesEmpty := m.Matches("")
-			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
-
-			if isNot && matchesEmpty { // l!="foo"
-				// If the label can't be empty and is a Not and the inner matcher
-				// doesn't match empty, then subtract it out at the end.
-				inverse, err := m.Inverse()
-				if err != nil {
-					return nil, nil, fmt.Errorf("inverse matcher: %w", err)
-				}
-
-				it, err := c.postingsForMatcher(shards, inverse)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				if results == nil {
-					// If there's nothing to subtract from, add in everything and remove the notIts later.
-					results, err = c.postings(shards, allPostingLabel, allPostingLabel)
-					if err != nil {
-						return nil, nil, err
-					}
-				}
-
-				results = results.Difference(it)
-			}
-		} else { // l=""
-			// If the matchers for a labelname selects an empty value, it selects all
-			// the series which don't have the label name set too. See:
-			// https://github.com/prometheus/prometheus/issues/3575 and
-			// https://github.com/prometheus/prometheus/pull/3578#issuecomment-351653555
-			it, err := c.inversePostingsForMatcher(shards, m)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			if results == nil {
-				// If there's nothing to subtract from, add in everything and remove the notIts later.
-				results, err = c.postings(shards, allPostingLabel, allPostingLabel)
-				if err != nil {
-					return nil, nil, err
-				}
-			}
-
-			results = results.Difference(it)
-		}
+// idsForMatcher return metric IDs matching given matchers.
+// It's a wrapper around postingsForMatchers.
+func (c *CassandraIndex) idsForMatchers(shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (ids []types.MetricID, labelsList []labels.Labels, err error) {
+	results, checkMatches, err := c.postingsForMatchers(shards, matchers, directCheckThreshold)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if results == nil {
@@ -2451,6 +2483,132 @@ func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.
 	}
 
 	return ids, labelsList, nil
+}
+
+// postingsForMatchers return metric IDs matching given matcher.
+// The logic is inspired from Prometheus PostingsForMatchers (in querier.go).
+func (c *CassandraIndex) postingsForMatchers(shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { // nolint: gocognit
+	labelMustBeSet := make(map[string]bool, len(matchers))
+
+	for _, m := range matchers {
+		if !m.Matches("") {
+			labelMustBeSet[m.Name] = true
+		}
+	}
+
+	var results *roaring.Bitmap
+
+	// Unlike Prometheus querier.go, we merge/update directly into results (instead of
+	// adding into its and notIts then building results).
+	// We do this in two loops, one which fill its (the one which could add IDs - the "its" of Prometheus)
+	// then one which remove ids (the "notIts" of Prometheus).
+	for _, m := range matchers {
+		// If there is only few results, prefer doing an explicit matching on labels
+		// for each IDs left. This may spare few Cassandra query.
+		// With postings filtering, we do one Cassandra query per matchers.
+		// With explicit matching on labels, we do one Cassandra query per IDs BUT this query will be done anyway if the
+		// series would be kept.
+		if results != nil && results.Count() <= uint64(directCheckThreshold) {
+			needCheckMatches = true
+
+			break
+		}
+
+		if labelMustBeSet[m.Name] {
+			matchesEmpty := m.Matches("")
+			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
+
+			if isNot && !matchesEmpty { // l!=""
+				// If the label can't be empty and is a Not, but the inner matcher can
+				// be empty we need to use inversePostingsForMatcher.
+				inverse, err := m.Inverse()
+				if err != nil {
+					return nil, false, fmt.Errorf("inverse matcher: %w", err)
+				}
+
+				it, err := c.inversePostingsForMatcher(shards, inverse)
+				if err != nil {
+					return nil, false, err
+				}
+
+				if results == nil {
+					results = it
+				} else {
+					results = results.Intersect(it)
+				}
+			} else if !isNot { // l="a"
+				// Non-Not matcher, use normal postingsForMatcher.
+				it, err := c.postingsForMatcher(shards, m)
+				if err != nil {
+					return nil, false, err
+				}
+
+				if results == nil {
+					results = it
+				} else {
+					results = results.Intersect(it)
+				}
+			}
+		}
+	}
+
+	for _, m := range matchers {
+		if results != nil && results.Count() <= uint64(directCheckThreshold) {
+			needCheckMatches = true
+
+			break
+		}
+
+		if labelMustBeSet[m.Name] {
+			matchesEmpty := m.Matches("")
+			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
+
+			if isNot && matchesEmpty { // l!="foo"
+				// If the label can't be empty and is a Not and the inner matcher
+				// doesn't match empty, then subtract it out at the end.
+				inverse, err := m.Inverse()
+				if err != nil {
+					return nil, false, fmt.Errorf("inverse matcher: %w", err)
+				}
+
+				it, err := c.postingsForMatcher(shards, inverse)
+				if err != nil {
+					return nil, false, err
+				}
+
+				if results == nil {
+					// If there's nothing to subtract from, add in everything and remove the notIts later.
+					results, err = c.postings(shards, allPostingLabel, allPostingLabel)
+					if err != nil {
+						return nil, false, err
+					}
+				}
+
+				results = results.Difference(it)
+			}
+		} else { // l=""
+			// If the matchers for a labelname selects an empty value, it selects all
+			// the series which don't have the label name set too. See:
+			// https://github.com/prometheus/prometheus/issues/3575 and
+			// https://github.com/prometheus/prometheus/pull/3578#issuecomment-351653555
+			it, err := c.inversePostingsForMatcher(shards, m)
+			if err != nil {
+				return nil, false, err
+			}
+
+			if results == nil {
+				// If there's nothing to subtract from, add in everything and remove the notIts later.
+				results, err = c.postings(shards, allPostingLabel, allPostingLabel)
+				if err != nil {
+					return nil, false, err
+				}
+			}
+
+			results = results.Difference(it)
+		}
+	}
+
+	return results, needCheckMatches, nil
 }
 
 // postingsForMatcher return id that match one matcher.
@@ -2644,9 +2802,9 @@ func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 }
 
 // HasNext() must always be called once before each Next() (and next called once).
-type bytesIter interface {
+type postingIter interface {
 	HasNext() bool
-	Next() []byte
+	Next() (string, []byte)
 	Err() error
 }
 
@@ -2658,11 +2816,12 @@ type cassandraStore struct {
 type cassandraByteIter struct {
 	Iter   *gocql.Iter
 	buffer []byte
+	value  string
 	err    error
 }
 
 func (i *cassandraByteIter) HasNext() bool {
-	if i.Iter.Scan(&i.buffer) {
+	if i.Iter.Scan(&i.value, &i.buffer) {
 		return true
 	}
 
@@ -2671,8 +2830,8 @@ func (i *cassandraByteIter) HasNext() bool {
 	return false
 }
 
-func (i cassandraByteIter) Next() []byte {
-	return i.buffer
+func (i cassandraByteIter) Next() (string, []byte) {
+	return i.value, i.buffer
 }
 
 func (i cassandraByteIter) Err() error {
@@ -2965,7 +3124,7 @@ func (s cassandraStore) UpdateID2LabelsExpiration(id types.MetricID, expiration 
 	return query.Exec()
 }
 
-func (s cassandraStore) SelectPostingByName(shard int32, name string) bytesIter {
+func (s cassandraStore) SelectPostingByName(shard int32, name string) postingIter {
 	start := time.Now()
 
 	defer func() {
@@ -2973,7 +3132,7 @@ func (s cassandraStore) SelectPostingByName(shard int32, name string) bytesIter 
 	}()
 
 	iter := s.session.Query(
-		"SELECT bitset FROM index_postings WHERE shard = ? AND name = ?",
+		"SELECT value, bitset FROM index_postings WHERE shard = ? AND name = ?",
 		shard, name,
 	).Iter()
 
