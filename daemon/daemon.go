@@ -421,7 +421,6 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 
 			options := index.Options{
 				DefaultTimeToLive: s.Config.Duration("cassandra.default_time_to_live"),
-				IncludeID:         s.Config.Bool("index.include_id"),
 				LockFactory:       s.lockFactory,
 				States:            s.states,
 				SchemaLock:        schemaLock,

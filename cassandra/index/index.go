@@ -54,7 +54,6 @@ const (
 
 const (
 	timeToLiveLabelName = "__ttl__"
-	idLabelName         = "__metric_id__"
 )
 
 //nolint: gochecknoglobals
@@ -78,7 +77,6 @@ type lockFactory interface {
 
 type Options struct {
 	DefaultTimeToLive time.Duration
-	IncludeID         bool
 	LockFactory       lockFactory
 	States            types.State
 	SchemaLock        sync.Locker
@@ -853,7 +851,7 @@ func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name stri
 	return result, nil
 }
 
-func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID, addID bool, now time.Time) ([]labels.Labels, error) {
+func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID, now time.Time) ([]labels.Labels, error) {
 	start := time.Now()
 
 	founds := make([]bool, len(ids))
@@ -902,15 +900,8 @@ func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID,
 	c.searchMutex.Unlock()
 
 	labelList := make([]labels.Labels, len(ids))
-	for i, id := range ids {
-		labelList[i] = labelsDataList[i].labels
-		if addID {
-			labelList[i] = labelsDataList[i].labels.Copy()
-			labelList[i] = append(labelList[i], labels.Label{
-				Name:  idLabelName,
-				Value: strconv.FormatInt(int64(id), 10),
-			})
-		}
+	for i, d := range labelsDataList {
+		labelList[i] = d.labels
 	}
 
 	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
@@ -1030,7 +1021,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocyclo,gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -1048,13 +1039,6 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 	entries, labelsToIndices, err := c.lookupIDsFromCache(ctx, now, requests)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	if c.options.IncludeID {
-		/*if err := c.lookupIDsFromLabels(requests, cassandraRequests); err != nil {
-		return nil, nil, fmt.Errorf("lookup with %s failed: %v", idLabelName, err)
-		}*/
-		panic("not yet reimplemented")
 	}
 
 	labelsToQuery := make([]string, 0, len(requests))
@@ -1292,39 +1276,6 @@ func (c *CassandraIndex) refreshExpiration(ctx context.Context, id types.MetricI
 
 	req.AddIDs = append(req.AddIDs, uint64(id))
 	c.expirationUpdateRequests[newDay] = req
-
-	return nil
-}
-
-// lookupIDsFromLabels will idData for metrics which as the idLabelName label.
-func (c *CassandraIndex) lookupIDsFromLabels(ctx context.Context, requests []types.LookupRequest, cassandraRequests []lookupEntry) error { // nolint: unused
-	for i, req := range requests {
-		if cassandraRequests[i].id != 0 {
-			continue
-		}
-
-		idStr := req.Labels.Get(idLabelName)
-		if idStr != "" {
-			id, err := strconv.ParseUint(idStr, 10, 0)
-			if err != nil {
-				return fmt.Errorf("read Metric ID label: %w", err)
-			}
-
-			cassandraRequests[i].id = types.MetricID(id)
-
-			tmp, err := c.store.SelectIDS2LabelsExpiration(ctx, []types.MetricID{types.MetricID(id)})
-			if err != nil {
-				return fmt.Errorf("get expiration from store: %w", err)
-			}
-
-			expiration, ok := tmp[types.MetricID(id)]
-			if !ok {
-				return fmt.Errorf("label %s (value is %s) is provided but the metric does not exists", idLabelName, idStr)
-			}
-
-			cassandraRequests[i].cassandraEntryExpiration = expiration
-		}
-	}
 
 	return nil
 }
@@ -1839,20 +1790,6 @@ func (c *CassandraIndex) Search(ctx context.Context, queryStart time.Time, query
 		found      bool
 	)
 
-	if c.options.IncludeID {
-		var idStr string
-		idStr, found = getMatchersValue(matchers, idLabelName)
-
-		if found {
-			id, err := strconv.ParseInt(idStr, 10, 0)
-			if err != nil {
-				return nil, nil
-			}
-
-			ids = append(ids, types.MetricID(id))
-		}
-	}
-
 	if !found {
 		var err error
 		ids, labelsList, err = c.idsForMatchers(ctx, shards, matchers, 3)
@@ -1882,7 +1819,7 @@ func (l *metricsLabels) Next() bool {
 	}
 
 	if l.labelsList == nil {
-		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, false, time.Now())
+		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
 		if l.err != nil {
 			return false
 		}
@@ -2293,7 +2230,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 	}
 
 	if len(idToDeleteWithLabels) > 0 {
-		labelLists, err := c.lookupLabels(ctx, idToDeleteWithLabels, false, now)
+		labelLists, err := c.lookupLabels(ctx, idToDeleteWithLabels, now)
 		if err != nil {
 			return err
 		}
@@ -2475,7 +2412,7 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 	ids = bitsetToIDs(results)
 
 	if checkMatches {
-		labelsList, err = c.lookupLabels(ctx, ids, false, time.Now())
+		labelsList, err = c.lookupLabels(ctx, ids, time.Now())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2772,17 +2709,6 @@ func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 		if label.Name == key {
 			*labels = append((*labels)[:i], (*labels)[i+1:]...)
 			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// getMatchersValue gets value via its name from a labels.Matcher list.
-func getMatchersValue(matchers []*labels.Matcher, name string) (string, bool) {
-	for _, matcher := range matchers {
-		if matcher.Name == name {
-			return matcher.Value, true
 		}
 	}
 

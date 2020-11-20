@@ -554,7 +554,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	results := make(labels.Labels, 0, len(m))
 
 	for k, v := range m {
-		if dropSpecialLabel && (k == timeToLiveLabelName || k == idLabelName) {
+		if dropSpecialLabel && (k == timeToLiveLabelName) {
 			continue
 		}
 		results = append(results, labels.Label{
@@ -843,104 +843,6 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 				labelsIn := make(labels.Labels, len(tt.labels))
 				copy(labelsIn, tt.labels)
 				_ = timeToLiveFromLabels(&labelsIn)
-			}
-		})
-	}
-}
-
-func Test_getMatchersValue(t *testing.T) {
-	type args struct {
-		matchers []*labels.Matcher
-		name     string
-	}
-	tests := []struct {
-		name  string
-		args  args
-		want  string
-		want1 bool
-	}{
-		{
-			name: "contains",
-			args: args{
-				matchers: []*labels.Matcher{
-					labels.MustNewMatcher(
-						labels.MatchEqual,
-						"__name__",
-						"up",
-					),
-					labels.MustNewMatcher(
-						labels.MatchEqual,
-						"monitor",
-						"codelab",
-					),
-				},
-				name: "monitor",
-			},
-			want:  "codelab",
-			want1: true,
-		},
-		{
-			name: "contains_empty_value",
-			args: args{
-				matchers: []*labels.Matcher{
-					labels.MustNewMatcher(
-						labels.MatchEqual,
-						"__name__",
-						"down",
-					),
-					labels.MustNewMatcher(
-						labels.MatchEqual,
-						"job",
-						"",
-					),
-				},
-				name: "job",
-			},
-			want:  "",
-			want1: true,
-		},
-		{
-			name: "no_contains",
-			args: args{
-				matchers: []*labels.Matcher{
-					labels.MustNewMatcher(
-						labels.MatchEqual,
-						"__name__",
-						"up",
-					),
-				},
-				name: "monitor",
-			},
-			want:  "",
-			want1: false,
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				matchers: []*labels.Matcher{},
-				name:     "monitor",
-			},
-			want:  "",
-			want1: false,
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				matchers: nil,
-				name:     "monitor",
-			},
-			want:  "",
-			want1: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := getMatchersValue(tt.args.matchers, tt.args.name)
-			if got != tt.want {
-				t.Errorf("GetMatchersValue() got = %v, want %v", got, tt.want)
-			}
-			if got1 != tt.want1 {
-				t.Errorf("GetMatchersValue() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}

@@ -5,13 +5,12 @@ import (
 	"log"
 	"reflect"
 	"squirreldb/types"
-	"strconv"
 	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-func test(ctx context.Context, cassandraIndex types.Index) { //nolint: gocognit
+func test(ctx context.Context, cassandraIndex types.Index) {
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
 		{ // index 1
@@ -271,82 +270,6 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint: gocognit
 
 		if !reflect.DeepEqual(wantIDToIndex, gotIDToIndex) {
 			log.Fatalf("Search(%s) = %v, want %v", tt.Name, gotIDToIndex, wantIDToIndex)
-		}
-	}
-
-	if *includeID {
-		ids, _, err := cassandraIndex.LookupIDs(context.Background(), []types.LookupRequest{
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.Labels{
-					{Name: "__metric_id__", Value: strconv.FormatInt(int64(metricsIDs[1]), 10)},
-					{Name: "ignored", Value: "__metric_id__ win"},
-				},
-			},
-		})
-		if err != nil {
-			log.Fatalf("LookupIDs(__metric_id__ valid) failed: %v", err)
-		}
-
-		if ids[0] != metricsIDs[1] {
-			log.Fatalf("LookupIDs(__metric_id__ valid) = %v, want %v", ids[0], metricsIDs[1])
-		}
-
-		_, _, err = cassandraIndex.LookupIDs(context.Background(), []types.LookupRequest{
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.Labels{
-					{Name: "__metric_id__", Value: "00000000-0000-0000-0000-000000000001"},
-					{Name: "ignored", Value: "__metric_id__ win"},
-				},
-			},
-		})
-		if err == nil {
-			log.Fatalf("LookupIDs(__metric_id__ invalid) succeeded. It must fail")
-		}
-
-		results, err := cassandraIndex.Search(ctx, now, now, []*labels.Matcher{
-			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[1]), 10)),
-			labels.MustNewMatcher(labels.MatchEqual, "ignored", "only_id_is_used"),
-		})
-		if err != nil {
-			log.Fatalf("Search(__metric_id__ valid) failed: %v", err)
-		}
-
-		if results.Count() != 1 || !results.Next() {
-			log.Fatalf("Search(__metric_id__ valid).Count() = %d, want 1", results.Count())
-		}
-
-		if results.At().ID != metricsIDs[1] {
-			log.Fatalf("Search(__metric_id__ valid).Count() = %v, want [%v]", results.At(), metricsIDs[1])
-		}
-
-		got := results.At().Labels.Map()
-		if !reflect.DeepEqual(got, metrics[1]) {
-			log.Fatalf("Search(__metric_id__ valid) = %v, want %v", got, metrics[1])
-		}
-
-		results, err = cassandraIndex.Search(ctx, now, now, []*labels.Matcher{
-			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[2]), 10)),
-			labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "up"),
-		})
-		if err != nil {
-			log.Fatalf("Search(__metric_id__ valid 2) failed: %v", err)
-		}
-
-		if results.Count() != 1 || !results.Next() {
-			log.Fatalf("Search(__metric_id__ valid).Count() = %d, want 1", results.Count())
-		}
-
-		if results.At().ID != metricsIDs[2] {
-			log.Fatalf("Search(__metric_id__ valid).Count() = %v, want [%v]", results.At(), metricsIDs[2])
-		}
-
-		got = results.At().Labels.Map()
-		if !reflect.DeepEqual(got, metrics[2]) {
-			log.Fatalf("Search(__metric_id__ valid 2) = %v, want %v", got, metrics[2])
 		}
 	}
 

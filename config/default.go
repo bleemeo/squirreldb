@@ -17,7 +17,6 @@ var defaults = map[string]interface{}{
 	"promql.max_evaluated_points":           0,
 	"promql.max_evaluated_series":           0,
 	"batch.size":                            "15m",
-	"index.include_id":                      false,
 	"log.level":                             0,
 	"internal.index":                        "cassandra",
 	"internal.index_dummy_check_conflict":   true,

@@ -26,7 +26,6 @@ var (
 	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
-	includeID                 = flag.Bool("index.include-id", false, "IncludeID")
 	runExpiration             = flag.Bool("bench.expiration", false, "Run the expiration (should delete 1/2 of metrics")
 	expiredFaction            = flag.Int("expired-fraction", 2, "one part over N of the metric will be expired")
 	defaultTimeToLive         = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
@@ -78,7 +77,6 @@ func makeIndex(ctx context.Context) *index.CassandraIndex {
 
 	cassandraIndex, err := index.New(ctx, cassandraSession, index.Options{
 		DefaultTimeToLive: *defaultTimeToLive,
-		IncludeID:         *includeID,
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
 		SchemaLock:        squirrelLocks.CreateLock("schema-lock", 10*time.Second),
