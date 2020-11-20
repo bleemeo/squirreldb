@@ -39,11 +39,11 @@ type LookupRequest struct {
 }
 
 type Index interface {
-	AllIDs(start time.Time, end time.Time) ([]MetricID, error)
+	AllIDs(ctx context.Context, start time.Time, end time.Time) ([]MetricID, error)
 	LookupIDs(ctx context.Context, requests []LookupRequest) ([]MetricID, []int64, error)
-	Search(start time.Time, end time.Time, matchers []*labels.Matcher) (MetricsSet, error)
-	LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error)
-	LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error)
+	Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (MetricsSet, error)
+	LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error)
+	LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error)
 }
 
 type MetricsSet interface {

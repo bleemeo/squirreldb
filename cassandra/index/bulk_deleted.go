@@ -79,7 +79,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 // * the remote the id from all postings, making the ID free
 //
 // Note: it's not this function which clear the expiration table, this is done elsewhere.
-func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
+func (d *deleter) Delete(ctx context.Context) error { // nolint: gocognit,gocyclo
 	if len(d.deleteIDs) == 0 {
 		return nil
 	}
@@ -92,11 +92,11 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 	// expiration is reached.
 	d.c.deleteIDsFromCache(d.deleteIDs)
 
-	err := d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+	err := d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, sortedLabelsString := range d.deleteLabels {
 			sortedLabelsString := sortedLabelsString
 			task := func() error {
-				return d.c.store.DeleteLabels2ID(sortedLabelsString)
+				return d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
 			}
 			select {
 			case work <- task:
@@ -111,12 +111,12 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	shards, err := d.c.postings([]int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+	shards, err := d.c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
 	if err != nil {
 		return err
 	}
 
-	maybePresent, err := d.c.getMaybePresent(shards.Slice())
+	maybePresent, err := d.c.getMaybePresent(ctx, shards.Slice())
 	if err != nil {
 		return err
 	}
@@ -162,11 +162,11 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		})
 	}
 
-	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range presenceUpdates {
 			req := req
 			task := func() error {
-				bitmap, err := d.c.postingUpdate(req)
+				bitmap, err := d.c.postingUpdate(ctx, req)
 				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
@@ -194,11 +194,11 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range shardedUpdates {
 			req := req
 			task := func() error {
-				_, err := d.c.postingUpdate(req)
+				_, err := d.c.postingUpdate(ctx, req)
 				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
@@ -218,11 +218,15 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range maybePresenceUpdates {
 			req := req
 			task := func() error {
-				_, err := d.c.postingUpdate(req)
+				_, err := d.c.postingUpdate(ctx, req)
 				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
 				}
@@ -242,11 +246,11 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	err = d.c.concurrentTasks(func(ctx context.Context, work chan<- func() error) error {
+	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, id := range d.deleteIDs {
 			id := types.MetricID(id)
 			task := func() error {
-				return d.c.store.DeleteID2Labels(id)
+				return d.c.store.DeleteID2Labels(ctx, id)
 			}
 			select {
 			case work <- task:
@@ -261,7 +265,7 @@ func (d *deleter) Delete() error { // nolint: gocognit,gocyclo
 		return err
 	}
 
-	_, err = d.c.postingUpdate(postingUpdateRequest{
+	_, err = d.c.postingUpdate(ctx, postingUpdateRequest{
 		Shard:     globalShardNumber,
 		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,

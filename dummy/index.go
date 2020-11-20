@@ -99,8 +99,8 @@ func NewIndex(metrics []types.MetricLabel) *Index {
 }
 
 // AllIDs does not store IDs in any persistent store. So this is lost after every restart. It may even not store them at all!
-func (idx *Index) AllIDs(start time.Time, end time.Time) ([]types.MetricID, error) {
-	return nil, nil
+func (idx *Index) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+	return nil, ctx.Err()
 }
 
 // lookupLabels required StoreMetricIDInMemory (so not persistent after restart).
@@ -167,11 +167,11 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 		idx.labelsToID[current.String()] = id
 	}
 
-	return ids, ttls, nil
+	return ids, ttls, ctx.Err()
 }
 
 // Search only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) Search(queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (idx *Index) Search(ctx context.Context, queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	ids := make([]types.MetricID, 0)
 
 	idx.mutex.Lock()
@@ -203,24 +203,24 @@ outer:
 		}
 	}
 
-	return &MetricsLabel{List: results}, nil
+	return &MetricsLabel{List: results}, ctx.Err()
 }
 
 // LabelValues only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) LabelValues(start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx *Index) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
 	if name == "" || strings.Contains(name, "|") {
 		return nil, fmt.Errorf("invalid label name \"%s\"", name)
 	}
 
-	return idx.labelValues(name, matchers)
+	return idx.labelValues(name, matchers), ctx.Err()
 }
 
 // LabelNames only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) LabelNames(start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
-	return idx.labelValues(postinglabelName, matchers)
+func (idx *Index) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+	return idx.labelValues(postinglabelName, matchers), ctx.Err()
 }
 
-func (idx *Index) labelValues(name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx *Index) labelValues(name string, matchers []*labels.Matcher) []string {
 	results := make(map[string]interface{})
 
 	idx.mutex.Lock()
@@ -252,7 +252,7 @@ outer:
 
 	sort.Strings(list)
 
-	return list, nil
+	return list
 }
 
 // copied from cassandra/index.

@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"squirreldb/types"
@@ -39,7 +40,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	requests, id2labels, err := requestsFromPromReadRequest(&readRequest, r.index)
+	requests, id2labels, err := requestsFromPromReadRequest(ctx, &readRequest, r.index)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		requestsErrorRead.Inc()
@@ -99,7 +100,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 }
 
 // Returns a MetricRequest generated from a Query.
-func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
+func requestFromPromQuery(ctx context.Context, promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
 	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
 	if err != nil {
 		return nil, types.MetricRequest{}, fmt.Errorf("read matchers failed: %w", err)
@@ -108,7 +109,7 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels 
 	start := time.Unix(promQuery.StartTimestampMs/1000, promQuery.StartTimestampMs%1000)
 	end := time.Unix(promQuery.EndTimestampMs/1000, promQuery.EndTimestampMs%1000)
 
-	metrics, err := index.Search(start, end, matchers)
+	metrics, err := index.Search(ctx, start, end, matchers)
 	if err != nil {
 		return nil, types.MetricRequest{}, fmt.Errorf("search failed: %w", err)
 	}
@@ -140,7 +141,7 @@ func requestFromPromQuery(promQuery *prompb.Query, index types.Index, id2labels 
 }
 
 // Returns a MetricRequest list generated from a ReadRequest.
-func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, map[types.MetricID]labels.Labels, error) {
+func requestsFromPromReadRequest(ctx context.Context, promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, map[types.MetricID]labels.Labels, error) {
 	if len(promReadRequest.Queries) == 0 {
 		return nil, nil, nil
 	}
@@ -154,7 +155,7 @@ func requestsFromPromReadRequest(promReadRequest *prompb.ReadRequest, index type
 			err     error
 		)
 
-		id2labels, request, err = requestFromPromQuery(query, index, id2labels)
+		id2labels, request, err = requestFromPromQuery(ctx, query, index, id2labels)
 		if err != nil {
 			return requests, id2labels, err
 		}

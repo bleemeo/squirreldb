@@ -58,7 +58,7 @@ func makeSession() (*gocql.Session, bool) {
 	return cassandraSession, keyspaceCreated
 }
 
-func makeIndex() *index.CassandraIndex {
+func makeIndex(ctx context.Context) *index.CassandraIndex {
 	cassandraSession, keyspaceCreated := makeSession()
 
 	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
@@ -71,7 +71,7 @@ func makeIndex() *index.CassandraIndex {
 		log.Fatalf("Unable to create states: %v", err)
 	}
 
-	cassandraIndex, err := index.New(cassandraSession, index.Options{
+	cassandraIndex, err := index.New(ctx, cassandraSession, index.Options{
 		DefaultTimeToLive: *defaultTimeToLive,
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
@@ -86,6 +86,8 @@ func makeIndex() *index.CassandraIndex {
 
 func main() {
 	flag.Parse()
+
+	ctx := context.Background()
 
 	var err error
 
@@ -119,13 +121,13 @@ func main() {
 	if *dropTables {
 		session, _ := makeSession()
 
-		err := index.InternalDropTables(session)
+		err := index.InternalDropTables(ctx, session)
 		if err != nil {
 			log.Fatalf("unable to drop tables: %v", err)
 		}
 	}
 
-	cassandraIndex := makeIndex()
+	cassandraIndex := makeIndex(ctx)
 
 	if *doImport {
 		err := runImport(cassandraIndex)
@@ -146,7 +148,7 @@ func main() {
 	}
 
 	if *doExport {
-		err := runExport(cassandraIndex)
+		err := runExport(ctx, cassandraIndex)
 		if err != nil {
 			log.Fatalf("unable to export: %v", err)
 		}
@@ -217,10 +219,10 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 	return nil
 }
 
-func runExport(cassandraIndex *index.CassandraIndex) error {
+func runExport(ctx context.Context, cassandraIndex *index.CassandraIndex) error {
 	writer := csv.NewWriter(os.Stdout)
 
-	results, err := cassandraIndex.Search(start, end, []*labels.Matcher{
+	results, err := cassandraIndex.Search(ctx, start, end, []*labels.Matcher{
 		labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"),
 	})
 	if err != nil {

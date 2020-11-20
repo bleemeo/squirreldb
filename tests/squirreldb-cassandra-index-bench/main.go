@@ -63,7 +63,7 @@ func makeSession() (*gocql.Session, bool) {
 	return cassandraSession, keyspaceCreated
 }
 
-func makeIndex() *index.CassandraIndex {
+func makeIndex(ctx context.Context) *index.CassandraIndex {
 	cassandraSession, keyspaceCreated := makeSession()
 
 	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
@@ -76,7 +76,7 @@ func makeIndex() *index.CassandraIndex {
 		log.Fatalf("Unable to create states: %v", err)
 	}
 
-	cassandraIndex, err := index.New(cassandraSession, index.Options{
+	cassandraIndex, err := index.New(ctx, cassandraSession, index.Options{
 		DefaultTimeToLive: *defaultTimeToLive,
 		IncludeID:         *includeID,
 		LockFactory:       squirrelLocks,
@@ -92,6 +92,8 @@ func makeIndex() *index.CassandraIndex {
 
 func main() {
 	flag.Parse()
+
+	ctx := context.Background()
 
 	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
 	if found {
@@ -140,25 +142,25 @@ func main() {
 	rand.Seed(*seed)
 
 	if !*skipValid {
-		cassandraIndex := makeIndex()
+		cassandraIndex := makeIndex(ctx)
 
 		log.Printf("Start validating test")
-		test(cassandraIndex)
+		test(ctx, cassandraIndex)
 		log.Printf("Re-run validating test")
-		test(cassandraIndex)
+		test(ctx, cassandraIndex)
 		log.Printf("Re-run validating test on fresh index")
-		test(makeIndex())
+		test(ctx, makeIndex(ctx))
 	}
 
 	rnd := rand.New(rand.NewSource(*seed)) // nolint: gosec
-	bench(makeIndex, rnd)
+	bench(ctx, makeIndex, rnd)
 
 	verifyHadIssue := false
 
 	if *verify {
 		var err error
 
-		cassandraIndex := makeIndex()
+		cassandraIndex := makeIndex(ctx)
 		verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
 
 		if err != nil {

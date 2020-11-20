@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-func test(cassandraIndex types.Index) { //nolint: gocognit
+func test(ctx context.Context, cassandraIndex types.Index) { //nolint: gocognit
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
 		{ // index 1
@@ -253,7 +253,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			wantIDToIndex[metricsIDs[m]] = m
 		}
 
-		metrics, err := cassandraIndex.Search(now, now, tt.Matchers)
+		metrics, err := cassandraIndex.Search(ctx, now, now, tt.Matchers)
 		if err != nil {
 			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
 		}
@@ -307,7 +307,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("LookupIDs(__metric_id__ invalid) succeeded. It must fail")
 		}
 
-		results, err := cassandraIndex.Search(now, now, []*labels.Matcher{
+		results, err := cassandraIndex.Search(ctx, now, now, []*labels.Matcher{
 			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[1]), 10)),
 			labels.MustNewMatcher(labels.MatchEqual, "ignored", "only_id_is_used"),
 		})
@@ -328,7 +328,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 			log.Fatalf("Search(__metric_id__ valid) = %v, want %v", got, metrics[1])
 		}
 
-		results, err = cassandraIndex.Search(now, now, []*labels.Matcher{
+		results, err = cassandraIndex.Search(ctx, now, now, []*labels.Matcher{
 			labels.MustNewMatcher(labels.MatchEqual, "__metric_id__", strconv.FormatInt(int64(metricsIDs[2]), 10)),
 			labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "up"),
 		})
@@ -351,7 +351,7 @@ func test(cassandraIndex types.Index) { //nolint: gocognit
 	}
 
 	if !*noDropTables {
-		got, err := cassandraIndex.AllIDs(now, now)
+		got, err := cassandraIndex.AllIDs(ctx, now, now)
 		if err != nil {
 			log.Fatalf("AllIDs() failed: %v", err)
 		}

@@ -44,7 +44,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 
 	for ctx.Err() == nil {
 		start := time.Now()
-		workDone, tmp := c.aggregateShard(shard, &lastNotifiedAggretedFrom)
+		workDone, tmp := c.aggregateShard(ctx, shard, &lastNotifiedAggretedFrom)
 
 		if workDone {
 			aggregationSeconds.Observe(time.Since(start).Seconds())
@@ -184,7 +184,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 				retry.Print(func() error {
 					var err error
-					ids, err = c.index.AllIDs(currentFrom, currentTo)
+					ids, err = c.index.AllIDs(ctx, currentFrom, currentTo)
 
 					return err // nolint: wrapcheck
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
@@ -256,7 +256,7 @@ outter:
 }
 
 // aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.
-func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time.Time) (bool, time.Time) {
+func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotifiedAggretedFrom *time.Time) (bool, time.Time) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
@@ -311,7 +311,7 @@ func (c *CassandraTSDB) aggregateShard(shard int, lastNotifiedAggretedFrom *time
 
 	retry.Print(func() error {
 		var err error
-		ids, err = c.index.AllIDs(fromTime, toTime)
+		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
 		return err //nolint: wrapcheck
 	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,

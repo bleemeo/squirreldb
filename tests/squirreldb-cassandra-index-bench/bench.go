@@ -75,7 +75,7 @@ var (
 	}
 )
 
-func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) { //nolint: gocognit
+func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *index.CassandraIndex, rnd *rand.Rand) { //nolint: gocognit
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
@@ -85,9 +85,9 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 
 	var maxRSS int
 
-	cassandraIndex := cassandraIndexFactory()
+	cassandraIndex := cassandraIndexFactory(ctx)
 
-	ids, err := cassandraIndex.AllIDs(now, now)
+	ids, err := cassandraIndex.AllIDs(ctx, now, now)
 	if err != nil {
 		log.Fatalf("AllIDs() failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 
 		for p := 0; p < *workerProcesses; p++ {
 			p := p
-			localIndex := cassandraIndexFactory()
+			localIndex := cassandraIndexFactory(ctx)
 
 			wg.Add(1)
 
@@ -148,7 +148,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 	}
 
 	start := time.Now()
-	ids, err = cassandraIndex.AllIDs(now, now)
+	ids, err = cassandraIndex.AllIDs(ctx, now, now)
 
 	if err != nil {
 		log.Fatalf("AllIDs() failed: %v", err)
@@ -234,7 +234,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			maxRSS = stat.ResidentMemory()
 		}
 
-		result := runQuery(now, q.Name, cassandraIndex, q.Fun)
+		result := runQuery(ctx, now, q.Name, cassandraIndex, q.Fun)
 
 		if result.QueryCount == 0 {
 			continue
@@ -269,7 +269,7 @@ func bench(cassandraIndexFactory func() *index.CassandraIndex, rnd *rand.Rand) {
 			maxRSS = stat.ResidentMemory()
 		}
 
-		ids, err = cassandraIndex.AllIDs(now, now)
+		ids, err = cassandraIndex.AllIDs(ctx, now, now)
 		if err != nil {
 			log.Fatalf("AllIDs() failed: %v", err)
 		}
@@ -468,7 +468,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	return metrics
 }
 
-func runQuery(now time.Time, name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*labels.Matcher) queryResult {
+func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*labels.Matcher) queryResult {
 	start := time.Now()
 	count := 0
 
@@ -480,7 +480,7 @@ func runQuery(now time.Time, name string, cassandraIndex *index.CassandraIndex, 
 
 		matchers := fun(n)
 
-		ids, err := cassandraIndex.Search(now, now, matchers)
+		ids, err := cassandraIndex.Search(ctx, now, now, matchers)
 		if err != nil {
 			log.Fatalf("Search() failed: %v", err)
 		}

@@ -155,7 +155,7 @@ type mockStore struct {
 	expiration    map[time.Time][]byte
 }
 
-func (s *mockStore) Init() error {
+func (s *mockStore) Init(ctx context.Context) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -168,10 +168,10 @@ func (s *mockStore) Init() error {
 	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
 	s.expiration = make(map[time.Time][]byte)
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) SelectLabelsList2ID(input []string) (map[string]types.MetricID, error) {
+func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (map[string]types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -187,10 +187,10 @@ func (s *mockStore) SelectLabelsList2ID(input []string) (map[string]types.Metric
 		}
 	}
 
-	return results, nil
+	return results, ctx.Err()
 }
 
-func (s *mockStore) SelectIDS2Labels(ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
+func (s *mockStore) SelectIDS2Labels(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -207,10 +207,10 @@ func (s *mockStore) SelectIDS2Labels(ids []types.MetricID) (map[types.MetricID]l
 		}
 	}
 
-	return results, nil
+	return results, ctx.Err()
 }
 
-func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
+func (s *mockStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -221,10 +221,10 @@ func (s *mockStore) SelectExpiration(day time.Time) ([]byte, error) {
 		return nil, gocql.ErrNotFound
 	}
 
-	return result, nil
+	return result, ctx.Err()
 }
 
-func (s *mockStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.MetricID]time.Time, error) {
+func (s *mockStore) SelectIDS2LabelsExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -239,7 +239,7 @@ func (s *mockStore) SelectIDS2LabelsExpiration(ids []types.MetricID) (map[types.
 		}
 	}
 
-	return results, nil
+	return results, ctx.Err()
 }
 
 type valueAndByte struct {
@@ -284,7 +284,7 @@ func (i mockPostingIter) Err() error {
 	return i.err
 }
 
-func (s *mockStore) SelectPostingByName(shard int32, name string) postingIter {
+func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -296,16 +296,12 @@ func (s *mockStore) SelectPostingByName(shard int32, name string) postingIter {
 
 	postings, ok := s.postings[shard]
 	if !ok {
-		return &mockPostingIter{
-			err: gocql.ErrNotFound,
-		}
+		return &mockPostingIter{}
 	}
 
 	m, ok := postings[name]
 	if !ok {
-		return &mockPostingIter{
-			err: gocql.ErrNotFound,
-		}
+		return &mockPostingIter{}
 	}
 
 	results := make([]valueAndByte, 0, len(m))
@@ -318,13 +314,13 @@ func (s *mockStore) SelectPostingByName(shard int32, name string) postingIter {
 	})
 
 	return &mockPostingIter{
-		err:     nil,
+		err:     ctx.Err(),
 		results: results,
 		idx:     0,
 	}
 }
 
-func (s *mockStore) SelectPostingByNameValue(shard int32, name string, value string) ([]byte, error) {
+func (s *mockStore) SelectPostingByNameValue(ctx context.Context, shard int32, name string, value string) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -349,10 +345,10 @@ func (s *mockStore) SelectPostingByNameValue(shard int32, name string, value str
 		return nil, gocql.ErrNotFound
 	}
 
-	return result, nil
+	return result, ctx.Err()
 }
 
-func (s *mockStore) SelectValueForName(shard int32, name string) ([]string, [][]byte, error) {
+func (s *mockStore) SelectValueForName(ctx context.Context, shard int32, name string) ([]string, [][]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -380,10 +376,10 @@ func (s *mockStore) SelectValueForName(shard int32, name string) ([]string, [][]
 		buffers = append(buffers, v)
 	}
 
-	return values, buffers, nil
+	return values, buffers, ctx.Err()
 }
 
-func (s *mockStore) InsertPostings(shard int32, name string, value string, bitset []byte) error {
+func (s *mockStore) InsertPostings(ctx context.Context, shard int32, name string, value string, bitset []byte) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -407,10 +403,10 @@ func (s *mockStore) InsertPostings(shard int32, name string, value string, bitse
 
 	m[value] = bitset
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
+func (s *mockStore) InsertID2Labels(ctx context.Context, id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -419,10 +415,10 @@ func (s *mockStore) InsertID2Labels(id types.MetricID, sortedLabels labels.Label
 	s.id2labels[id] = sortedLabels
 	s.id2expiration[id] = expiration
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID) error {
+func (s *mockStore) InsertLabels2ID(ctx context.Context, sortedLabelsString string, id types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -430,10 +426,10 @@ func (s *mockStore) InsertLabels2ID(sortedLabelsString string, id types.MetricID
 
 	s.labels2id[sortedLabelsString] = id
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) InsertExpiration(day time.Time, bitset []byte) error {
+func (s *mockStore) InsertExpiration(ctx context.Context, day time.Time, bitset []byte) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -441,10 +437,10 @@ func (s *mockStore) InsertExpiration(day time.Time, bitset []byte) error {
 
 	s.expiration[day] = bitset
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) UpdateID2LabelsExpiration(id types.MetricID, expiration time.Time) error {
+func (s *mockStore) UpdateID2LabelsExpiration(ctx context.Context, id types.MetricID, expiration time.Time) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -452,10 +448,10 @@ func (s *mockStore) UpdateID2LabelsExpiration(id types.MetricID, expiration time
 
 	s.id2expiration[id] = expiration
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) DeleteLabels2ID(sortedLabelsString string) error {
+func (s *mockStore) DeleteLabels2ID(ctx context.Context, sortedLabelsString string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -468,10 +464,10 @@ func (s *mockStore) DeleteLabels2ID(sortedLabelsString string) error {
 
 	delete(s.labels2id, sortedLabelsString)
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) DeleteID2Labels(id types.MetricID) error {
+func (s *mockStore) DeleteID2Labels(ctx context.Context, id types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -486,10 +482,10 @@ func (s *mockStore) DeleteID2Labels(id types.MetricID) error {
 	delete(s.id2labels, id)
 	delete(s.id2expiration, id)
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) DeleteExpiration(day time.Time) error {
+func (s *mockStore) DeleteExpiration(ctx context.Context, day time.Time) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -502,10 +498,10 @@ func (s *mockStore) DeleteExpiration(day time.Time) error {
 
 	delete(s.expiration, day)
 
-	return nil
+	return ctx.Err()
 }
 
-func (s *mockStore) DeletePostings(shard int32, name string, value string) error {
+func (s *mockStore) DeletePostings(ctx context.Context, shard int32, name string, value string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -537,7 +533,7 @@ func (s *mockStore) DeletePostings(shard int32, name string, value string) error
 		}
 	}
 
-	return nil
+	return ctx.Err()
 }
 
 func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest {
@@ -572,7 +568,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 }
 
 func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.MetricID]map[string]string) *CassandraIndex {
-	index, err := new(&mockStore{}, Options{
+	index, err := new(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -1904,7 +1900,7 @@ func Test_postingsForMatchers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(shards, tt.matchers, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1924,7 +1920,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 		})
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(shards, tt.matchers, 1000)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1950,7 +1946,7 @@ func Test_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(shards, matchersReverse, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -1981,7 +1977,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	t5 := t4.Add(8 * 24 * time.Hour)
 	now := t5.Add(8 * 24 * time.Hour)
 
-	index1, err := new(&mockStore{}, Options{
+	index1, err := new(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -2147,7 +2143,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		}
 	}
 
-	index2, err := new(&mockStore{}, Options{
+	index2, err := new(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -3059,7 +3055,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(tt.shards, tt.matchers, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3079,7 +3075,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 		})
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(tt.shards, tt.matchers, 1000)
+			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3105,7 +3101,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(tt.shards, matchersReverse, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3345,7 +3341,7 @@ func Test_cache(t *testing.T) {
 	states := &mockState{}
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 
-	index1, err := new(store, Options{
+	index1, err := new(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3354,7 +3350,7 @@ func Test_cache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	index2, err := new(store, Options{
+	index2, err := new(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3448,7 +3444,7 @@ func Test_cluster(t *testing.T) {
 	lock := &mockLockFactory{}
 	states := &mockState{}
 
-	index1, err := new(store, Options{
+	index1, err := new(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3505,7 +3501,7 @@ func Test_cluster(t *testing.T) {
 
 	metricsID[0] = tmp[0]
 
-	index2, err := new(store, Options{
+	index2, err := new(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3797,7 +3793,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	store := &mockStore{}
-	index, err := new(store, Options{
+	index, err := new(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       &mockLockFactory{},
 		States:            &mockState{},
@@ -3844,9 +3840,9 @@ func Test_expiration(t *testing.T) {
 	}
 
 	index.expire(t0)
-	index.cassandraExpire(t0)
+	index.cassandraExpire(context.Background(), t0)
 
-	allIds, err := index.AllIDs(t0, t0)
+	allIds, err := index.AllIDs(context.Background(), t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3867,7 +3863,7 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
 	}
 
-	index.applyExpirationUpdateRequests()
+	index.applyExpirationUpdateRequests(context.Background())
 	// metrics[3] was moved to a new expiration slot
 	if len(store.expiration) != 4 {
 		t.Errorf("len(store.expiration) = %v, want 4", len(store.expiration))
@@ -3890,10 +3886,10 @@ func Test_expiration(t *testing.T) {
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
 	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t1)
+		index.cassandraExpire(context.Background(), t1)
 	}
 
-	allIds, err = index.AllIDs(t0, t1)
+	allIds, err = index.AllIDs(context.Background(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3922,10 +3918,10 @@ func Test_expiration(t *testing.T) {
 
 	index.expire(t2)
 	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t2)
+		index.cassandraExpire(context.Background(), t2)
 	}
 
-	allIds, err = index.AllIDs(t0, t2)
+	allIds, err = index.AllIDs(context.Background(), t0, t2)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3940,10 +3936,10 @@ func Test_expiration(t *testing.T) {
 
 	index.expire(t3)
 	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t3)
+		index.cassandraExpire(context.Background(), t3)
 	}
 
-	allIds, err = index.AllIDs(t0, t3)
+	allIds, err = index.AllIDs(context.Background(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3966,7 +3962,7 @@ func Test_expiration(t *testing.T) {
 		t.Error(err)
 	}
 
-	allIds, err = index.AllIDs(t0, t3)
+	allIds, err = index.AllIDs(context.Background(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3976,10 +3972,10 @@ func Test_expiration(t *testing.T) {
 
 	index.expire(t4)
 	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t4)
+		index.cassandraExpire(context.Background(), t4)
 	}
 
-	allIds, err = index.AllIDs(t0, t4)
+	allIds, err = index.AllIDs(context.Background(), t0, t4)
 	if err != nil {
 		t.Error(err)
 	}
@@ -3989,10 +3985,10 @@ func Test_expiration(t *testing.T) {
 
 	index.expire(t5)
 	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t5)
+		index.cassandraExpire(context.Background(), t5)
 	}
 
-	allIds, err = index.AllIDs(t0, t5)
+	allIds, err = index.AllIDs(context.Background(), t0, t5)
 	if err != nil {
 		t.Error(err)
 	}
@@ -4002,10 +3998,10 @@ func Test_expiration(t *testing.T) {
 
 	index.expire(t6)
 	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(t6)
+		index.cassandraExpire(context.Background(), t6)
 	}
 
-	allIds, err = index.AllIDs(t0, t6)
+	allIds, err = index.AllIDs(context.Background(), t0, t6)
 	if err != nil {
 		t.Error(err)
 	}
@@ -4126,7 +4122,7 @@ func Test_FilteredLabelValues(t *testing.T) {
 	t3 := t2.Add(postingShardSize * 2)
 	now := t3.Add(postingShardSize * 2)
 
-	index1, err := new(&mockStore{}, Options{
+	index1, err := new(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -4473,14 +4469,14 @@ func Test_FilteredLabelValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.labelValues(tt.start, tt.end, tt.labelName, tt.matchers)
+			got, err := tt.index.labelValues(context.Background(), tt.start, tt.end, tt.labelName, tt.matchers)
 			if err != nil {
-				t.Errorf("filteredLabelValues() error = %v", err)
+				t.Errorf("labelValues() error = %v", err)
 				return
 			}
 
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("filteredLabelValues() = %v, want %v", got, tt.want)
+				t.Errorf("labelValues() = %v, want %v", got, tt.want)
 			}
 		})
 	}

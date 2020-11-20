@@ -96,12 +96,12 @@ func (s *SquirrelDB) Run(ctx context.Context) error {
 		return err
 	}
 
-	_, err = s.Index(true)
+	_, err = s.Index(ctx, true)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.TSDB(true)
+	_, err = s.TSDB(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 }
 
 // Index return an Index. If started is true the index is started.
-func (s *SquirrelDB) Index(started bool) (types.Index, error) {
+func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
 	if s.index == nil {
 		switch s.Config.String("internal.index") {
 		case backendCassandra:
@@ -427,7 +427,7 @@ func (s *SquirrelDB) Index(started bool) (types.Index, error) {
 				SchemaLock:        schemaLock,
 			}
 
-			index, err := index.New(session, options)
+			index, err := index.New(ctx, session, options)
 			if err != nil {
 				return nil, err
 			}
@@ -457,7 +457,7 @@ func (s *SquirrelDB) Index(started bool) (types.Index, error) {
 }
 
 // TSDB return the metric persistent store. If started is true the tsdb is started.
-func (s *SquirrelDB) TSDB(preAggregationStarted bool) (MetricReadWriter, error) {
+func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (MetricReadWriter, error) {
 	if s.persistentStore == nil {
 		switch s.Config.String("internal.tsdb") {
 		case backendCassandra:
@@ -471,7 +471,7 @@ func (s *SquirrelDB) TSDB(preAggregationStarted bool) (MetricReadWriter, error) 
 				return nil, err
 			}
 
-			index, err := s.Index(false)
+			index, err := s.Index(ctx, false)
 			if err != nil {
 				return nil, err
 			}

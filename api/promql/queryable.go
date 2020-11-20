@@ -41,7 +41,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	metrics, err := q.index.Search(minT, maxT, matchers)
+	metrics, err := q.index.Search(q.ctx, minT, maxT, matchers)
 	if err != nil {
 		return &seriesIter{err: err}
 	}
@@ -113,7 +113,7 @@ func (q querier) LabelValues(name string) ([]string, storage.Warnings, error) {
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelValues(minT, maxT, name, nil)
+	res, err := q.index.LabelValues(q.ctx, minT, maxT, name, nil)
 
 	return res, nil, err
 }
@@ -123,7 +123,7 @@ func (q querier) LabelNames() ([]string, storage.Warnings, error) {
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelNames(minT, maxT, nil)
+	res, err := q.index.LabelNames(q.ctx, minT, maxT, nil)
 
 	return res, nil, err
 }

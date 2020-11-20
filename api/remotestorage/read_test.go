@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	"context"
 	"reflect"
 	"squirreldb/types"
 	"testing"
@@ -98,7 +99,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, got, err := requestFromPromQuery(tt.args.promQuery, tt.args.index, nil)
+			_, got, err := requestFromPromQuery(context.Background(), tt.args.promQuery, tt.args.index, nil)
 			if err != nil {
 				t.Errorf("requestFromPromQuery() failed: %v", err)
 			}
@@ -194,7 +195,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := requestsFromPromReadRequest(tt.args.promReadRequest, tt.args.index)
+			got, _, err := requestsFromPromReadRequest(context.Background(), tt.args.promReadRequest, tt.args.index)
 			if err != nil {
 				t.Errorf("requestsFromPromReadRequest() failed: %v", err)
 			}
