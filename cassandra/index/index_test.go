@@ -1,6 +1,7 @@
 package index
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -3023,6 +3024,23 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 		})
 	}
+
+	buffer := bytes.NewBuffer(nil)
+	hadIssue, err := index1.verify(context.Background(), now, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
+
+	hadIssue, err = index2.verify(context.Background(), now, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
 }
 
 func idsToBitset(ids []types.MetricID) *roaring.Bitmap {
@@ -3626,6 +3644,22 @@ func Test_cluster(t *testing.T) {
 		t.Errorf("lookupIDs() = %d, want != %d", tmp2[0], tmp[0])
 	}
 
+	buffer := bytes.NewBuffer(nil)
+	hadIssue, err := index1.verify(context.Background(), t6, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
+
+	hadIssue, err = index2.verify(context.Background(), t6, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
 }
 
 // Test_expiration will run a small scenario on the index to check expiration.
@@ -3741,6 +3775,15 @@ func Test_expiration(t *testing.T) {
 		}
 	}
 
+	buffer := bytes.NewBuffer(nil)
+	hadIssue, err := index.verify(context.Background(), t0, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
+
 	index.expire(t0)
 	index.cassandraExpire(context.Background(), t0)
 
@@ -3750,6 +3793,14 @@ func Test_expiration(t *testing.T) {
 	}
 	if len(allIds) != 4 {
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
+	}
+
+	hadIssue, err = index.verify(context.Background(), t0, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
@@ -3898,6 +3949,14 @@ func Test_expiration(t *testing.T) {
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
+	hadIssue, err = index.verify(context.Background(), t5, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+	}
+
 	index.expire(t6)
 	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t6)
@@ -3909,6 +3968,14 @@ func Test_expiration(t *testing.T) {
 	}
 	if len(allIds) != 0 {
 		t.Errorf("allIds = %v, want []", allIds)
+	}
+
+	hadIssue, err = index.verify(context.Background(), t6, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
 	}
 }
 

@@ -325,7 +325,11 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 }
 
 // Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit
+func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) {
+	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
+}
+
+func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -387,7 +391,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 		}
 
 		if len(pendingIds) > 0 {
-			err := c.verifyBulk(ctx, w, doFix, pendingIds, bulkDeleter, maybePresent, labelNamesByShard, allPosting, allGoodIds)
+			err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, maybePresent, labelNamesByShard, allPosting, allGoodIds)
 			if err != nil {
 				return hadIssue, err
 			}
@@ -471,7 +475,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 		if it == nil || !it.Any() {
 			errorCount++
 
-			fmt.Fprintf(w, "Shard %d is listed in all shards but don't exists", shard)
+			fmt.Fprintf(w, "Shard %d is listed in all shards but don't exists\n", shard)
 
 			if doFix {
 				_, err = shards.RemoveN(uint64(shard))
@@ -500,7 +504,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 	return errorCount, shards, nil
 }
 
-func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, maybePresent map[int32]*roaring.Bitmap, labelNamesByShard map[int32]map[string]interface{}, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit,gocyclo
+func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, maybePresent map[int32]*roaring.Bitmap, labelNamesByShard map[int32]map[string]interface{}, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit,gocyclo
 	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
@@ -652,7 +656,7 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, w io.Writer, doFix bool
 			continue
 		}
 
-		if time.Now().Add(24 * time.Hour).After(expiration) {
+		if now.Add(24 * time.Hour).After(expiration) {
 			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
 
 			if doFix {

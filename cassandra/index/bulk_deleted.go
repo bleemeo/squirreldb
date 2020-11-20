@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"squirreldb/types"
+	"sync"
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
@@ -222,13 +223,30 @@ func (d *deleter) Delete(ctx context.Context) error { // nolint: gocognit,gocycl
 		return ctx.Err()
 	}
 
+	var l sync.Mutex
+
+	shardsListUpdate := postingUpdateRequest{
+		Shard: globalShardNumber,
+		Label: labels.Label{
+			Name:  existingShardsLabel,
+			Value: existingShardsLabel,
+		},
+	}
+
 	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range maybePresenceUpdates {
 			req := req
 			task := func() error {
-				_, err := d.c.postingUpdate(ctx, req)
+				it, err := d.c.postingUpdate(ctx, req)
 				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 					return err
+				}
+
+				// it is nil iff it's empty (or an error occure)
+				if it == nil {
+					l.Lock()
+					shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(req.Shard))
+					l.Unlock()
 				}
 
 				return nil
@@ -244,6 +262,13 @@ func (d *deleter) Delete(ctx context.Context) error { // nolint: gocognit,gocycl
 	})
 	if err != nil {
 		return err
+	}
+
+	if len(shardsListUpdate.RemoveIDs) > 0 {
+		_, err := d.c.postingUpdate(ctx, shardsListUpdate)
+		if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+			return err
+		}
 	}
 
 	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
