@@ -16,6 +16,13 @@ import (
 )
 
 const (
+	rawPartitionSize       = 5 * 24 * time.Hour
+	aggregatePartitionSize = 80 * 24 * time.Hour
+	aggregateResolution    = 5 * time.Minute
+	aggregateSize          = 24 * time.Hour
+)
+
+const (
 	retryMaxDelay = 30 * time.Second
 )
 
@@ -24,10 +31,6 @@ var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {
 	DefaultTimeToLive         time.Duration
-	RawPartitionSize          time.Duration
-	AggregatePartitionSize    time.Duration
-	AggregateResolution       time.Duration
-	AggregateSize             time.Duration
 	AggregateIntendedDuration time.Duration
 	SchemaLock                sync.Locker
 }

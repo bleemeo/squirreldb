@@ -81,7 +81,7 @@ func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedDa
 	baseTimestampAggregatedPoints := make(map[int64][]aggregate.AggregatedPoint)
 
 	for _, aggregatedPoint := range aggregatedData.Points {
-		baseTimestamp := aggregatedPoint.Timestamp - (aggregatedPoint.Timestamp % c.options.AggregatePartitionSize.Milliseconds())
+		baseTimestamp := aggregatedPoint.Timestamp - (aggregatedPoint.Timestamp % aggregatePartitionSize.Milliseconds())
 
 		baseTimestampAggregatedPoints[baseTimestamp] = append(baseTimestampAggregatedPoints[baseTimestamp], aggregatedPoint)
 	}
@@ -114,7 +114,7 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 
 	firstPoint := aggregatedData.Points[0]
 	offsetMs := firstPoint.Timestamp - baseTimestamp
-	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp, c.options.AggregateResolution.Milliseconds())
+	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp, aggregateResolution.Milliseconds())
 
 	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive, aggregateValues)
 
@@ -137,8 +137,8 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 
 	// data.Points is sorted
 	n := len(data.Points)
-	startBaseTimestamp := data.Points[0].Timestamp - (data.Points[0].Timestamp % c.options.RawPartitionSize.Milliseconds())
-	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % c.options.RawPartitionSize.Milliseconds())
+	startBaseTimestamp := data.Points[0].Timestamp - (data.Points[0].Timestamp % rawPartitionSize.Milliseconds())
+	endBaseTimestamp := data.Points[n-1].Timestamp - (data.Points[n-1].Timestamp % rawPartitionSize.Milliseconds())
 
 	if startBaseTimestamp == endBaseTimestamp {
 		err := c.writeRawPartitionData(data, startBaseTimestamp)
@@ -150,7 +150,7 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData) error {
 	currentStartIndex := 0
 
 	for i, point := range data.Points {
-		baseTimestamp := point.Timestamp - (point.Timestamp % c.options.RawPartitionSize.Milliseconds())
+		baseTimestamp := point.Timestamp - (point.Timestamp % rawPartitionSize.Milliseconds())
 		if currentBaseTimestamp != baseTimestamp {
 			partitionData := types.MetricData{
 				ID:         data.ID,

@@ -1,15 +1,12 @@
 package config
 
 import (
-	"context"
 	goflag "flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"squirreldb/retry"
-	"squirreldb/types"
 	"strconv"
 	"time"
 
@@ -114,10 +111,6 @@ func (c *Config) Validate() bool {
 	keyspace := c.String("cassandra.keyspace")
 	replicationFactor := c.Int("cassandra.replication_factor")
 	batchSize := c.Duration("batch.size")
-	rawPartitionSize := c.Duration("cassandra.partition_size.raw")
-	aggregateResolution := c.Duration("cassandra.aggregate.resolution")
-	aggregateSize := c.Duration("cassandra.aggregate.size")
-	aggregatePartitionSize := c.Duration("cassandra.partition_size.aggregate")
 	aggregateIntendedDuration := c.Duration("cassandra.aggregate.intended_duration")
 	valid := true
 
@@ -139,114 +132,13 @@ func (c *Config) Validate() bool {
 		logger.Println("Error: 'batch.size' must be strictly greater than 0")
 	}
 
-	if aggregateResolution <= 0 {
-		valid = false
-
-		logger.Println("Error: 'cassandra.aggregate.resolution' must be strictly greater than 0")
-	}
-
 	if aggregateIntendedDuration <= 0 {
 		valid = false
 
 		logger.Println("Error: 'cassandra.aggregate.intended_duration' must be strictly greater than 0")
 	}
 
-	if rawPartitionSize < batchSize {
-		valid = false
-
-		logger.Printf("Error: 'cassandra.rawPartitionSize' (current value %v) must be greater than 'batch.size' (current value %v)", rawPartitionSize, batchSize)
-	}
-
-	// This is due to Cassandra storing the offset as millisecond in a int32
-	// It's also due to Gorilla TSZ storing time delta as uint32
-	if rawPartitionSize > 24*24*time.Hour {
-		valid = false
-
-		logger.Printf("Error: cassandra.rawPartitionSize' (current value %v) must be less than 24 days", rawPartitionSize)
-	}
-
-	if aggregateSize < aggregateResolution {
-		valid = false
-
-		logger.Printf("Error: 'cassandra.aggregate.size' (current value %v) must be greater than 'cassandra.aggregate.resolution' (current value %v)", aggregateSize, aggregateResolution)
-	}
-
-	if aggregatePartitionSize < aggregateSize {
-		valid = false
-
-		logger.Printf("Error: 'cassandra.partition_size.aggregate' (current value %v) must be greater than 'cassandra.aggregate.size' (current value %v)", aggregatePartitionSize, aggregateSize)
-	}
-
 	return valid
-}
-
-// ValidateRemote checks if the local configuration is consistent with the remote configuration.
-func (c *Config) ValidateRemote(state types.State) bool {
-	names := []string{
-		"cassandra.partition_size.raw", "cassandra.aggregate.resolution",
-		"cassandra.aggregate.size", "cassandra.partition_size.aggregate",
-	}
-	valid := true
-	exists := false
-	force := c.Bool("overwite-previous-config")
-
-	for _, name := range names {
-		local := c.Duration(name)
-
-		var (
-			remoteStr string
-			err       error
-		)
-
-		retry.Print(func() error {
-			exists, err = state.Read(name, &remoteStr) // nolint: scopelint
-
-			return err // nolint: wrapcheck
-		}, retry.NewExponentialBackOff(context.Background(), 30*time.Second), logger,
-			"read config state "+name,
-		)
-
-		remote := string2Duration(remoteStr)
-
-		if exists && (local != remote) {
-			valid = false
-			level := "Error"
-
-			if force {
-				level = "Warning"
-
-				c.writeRemote(state, name, local.String())
-			}
-
-			logger.Printf("%s: option '%s' changed from \"%s\" to \"%s\" since last SquirrelDB start", level, name, remote, local)
-		} else if !exists {
-			c.writeRemote(state, name, local.String())
-		}
-	}
-
-	if !valid {
-		logger.Printf("Changing thoses values is not (yet) supported and could result in lost of previously ingested data")
-
-		if force {
-			logger.Printf("Since --overwite-previous-config is set, ignoring this warning and updating previous config")
-			logger.Printf("This SquirrelDB will now use those values (if using multiple SquirrelDB instance restart the other with new config also)")
-
-			valid = true
-		} else {
-			logger.Printf("If you want to ignore this error and continue with new option (potentially losing all data already ingested) use the option --overwite-previous-config")
-		}
-	}
-
-	return valid
-}
-
-// writeRemote writes the remote constant value.
-func (c *Config) writeRemote(state types.State, name string, value string) {
-	retry.Print(func() error {
-		return state.Write(name, value)
-	}, retry.NewExponentialBackOff(context.Background(), 30*time.Second), logger,
-		"write config state "+name,
-	)
 }
 
 // Return file paths.

@@ -165,7 +165,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 	logger.Printf("Forced pre-aggregation requested between %v and %v", from, to)
 
 	currentFrom := from
-	currentFrom = currentFrom.Truncate(c.options.AggregateSize)
+	currentFrom = currentFrom.Truncate(aggregateSize)
 
 	wg.Add(threadCount)
 
@@ -180,7 +180,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 				rangeStart := time.Now()
 				currentFrom := currentFrom
-				currentTo := currentFrom.Add(c.options.AggregateSize)
+				currentTo := currentFrom.Add(aggregateSize)
 
 				retry.Print(func() error {
 					var err error
@@ -198,7 +198,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 				retry.Print(func() error {
 					var err error
 
-					rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds())
+					rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, aggregateResolution.Milliseconds())
 
 					return err
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
@@ -237,7 +237,7 @@ outter:
 			break outter
 		}
 
-		currentFrom = currentFrom.Add(c.options.AggregateSize)
+		currentFrom = currentFrom.Add(aggregateSize)
 	}
 
 	close(workChan)
@@ -283,7 +283,7 @@ func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotif
 	}
 
 	now := time.Now()
-	maxTime := now.Truncate(c.options.AggregateSize)
+	maxTime := now.Truncate(aggregateSize)
 
 	if fromTime.IsZero() {
 		fromTime = maxTime
@@ -295,7 +295,7 @@ func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotif
 		)
 	}
 
-	toTime := fromTime.Add(c.options.AggregateSize)
+	toTime := fromTime.Add(aggregateSize)
 	isSafeMargin := toTime.Before(now.Add(-backlogMargin))
 
 	if toTime.After(maxTime) || !isSafeMargin {
@@ -330,7 +330,7 @@ func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotif
 
 	start := time.Now()
 
-	if count, err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, c.options.AggregateResolution.Milliseconds()); err == nil {
+	if count, err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds()); err == nil {
 		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] and read %d points in %v",
 			shard, fromTime, toTime, count, time.Since(start))
 

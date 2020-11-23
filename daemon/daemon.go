@@ -131,15 +131,6 @@ func (s *SquirrelDB) Init() error {
 		return errBadConfig
 	}
 
-	states, err := s.States()
-	if err != nil {
-		return err
-	}
-
-	if !s.Config.ValidateRemote(states) {
-		return errBadConfig
-	}
-
 	return nil
 }
 
@@ -414,6 +405,11 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				return nil, err
 			}
 
+			states, err := s.States()
+			if err != nil {
+				return nil, err
+			}
+
 			schemaLock, err := s.SchemaLock()
 			if err != nil {
 				return nil, err
@@ -422,7 +418,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			options := index.Options{
 				DefaultTimeToLive: s.Config.Duration("cassandra.default_time_to_live"),
 				LockFactory:       s.lockFactory,
-				States:            s.states,
+				States:            states,
 				SchemaLock:        schemaLock,
 			}
 
@@ -487,10 +483,6 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 
 			options := tsdb.Options{
 				DefaultTimeToLive:         s.Config.Duration("cassandra.default_time_to_live"),
-				RawPartitionSize:          s.Config.Duration("cassandra.partition_size.raw"),
-				AggregatePartitionSize:    s.Config.Duration("cassandra.partition_size.aggregate"),
-				AggregateResolution:       s.Config.Duration("cassandra.aggregate.resolution"),
-				AggregateSize:             s.Config.Duration("cassandra.aggregate.size"),
 				AggregateIntendedDuration: s.Config.Duration("cassandra.aggregate.intended_duration"),
 				SchemaLock:                schemaLock,
 			}
