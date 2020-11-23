@@ -95,6 +95,7 @@ type CassandraIndex struct {
 	labelsToID               map[uint64][]idData
 	idInShard                map[int32]*roaring.Bitmap
 	idInShardLastAccess      map[int32]time.Time
+	existingShards           *roaring.Bitmap
 
 	searchMutex sync.Mutex
 	idsToLabels map[types.MetricID]labelsData
@@ -438,7 +439,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 			return 0, shards, ctx.Err()
 		}
 
-		queryShard := getTimeShards(current, current)
+		queryShard := []int32{ShardForTime(current.Unix())}
 
 		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel)
 		if err != nil {
@@ -799,7 +800,10 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 
 // AllIDs returns all ids stored in the index.
 func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
-	shards := getTimeShards(start, end)
+	shards, err := c.getTimeShards(ctx, start, end, false)
+	if err != nil {
+		return nil, err
+	}
 
 	bitmap, err := c.postings(ctx, shards, allPostingLabel, allPostingLabel)
 	if err != nil {
@@ -932,7 +936,10 @@ func (c *CassandraIndex) LabelNames(ctx context.Context, start, end time.Time, m
 }
 
 func (c *CassandraIndex) labelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
-	shards := getTimeShards(start, end)
+	shards, err := c.getTimeShards(ctx, start, end, false)
+	if err != nil {
+		return nil, err
+	}
 
 	bitmap, _, err := c.postingsForMatchers(ctx, shards, matchers, 0)
 	if err != nil {
@@ -1227,11 +1234,16 @@ func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, 
 			}
 		}
 
+		shards, err := c.getTimeShards(ctx, req.Start, req.End, true)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		entries[i] = lookupEntry{
 			idData:       data,
 			labelsKey:    labelsKey,
 			ttl:          ttl,
-			wantedShards: getTimeShards(req.Start, req.End),
+			wantedShards: shards,
 		}
 
 		if !found {
@@ -1679,6 +1691,18 @@ func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePres
 		return err
 	}
 
+	c.lookupIDMutex.Lock()
+	if c.existingShards == nil {
+		c.existingShards = roaring.NewBTreeBitmap()
+	}
+
+	_, err = c.existingShards.AddN(newShard...)
+	c.lookupIDMutex.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("update bitmap: %w", err)
+	}
+
 	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range maybePresent {
 			req := req
@@ -1778,7 +1802,11 @@ func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePres
 //   have label-not-defined matcher, so some other matcher must exists.
 func (c *CassandraIndex) Search(ctx context.Context, queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	start := time.Now()
-	shards := getTimeShards(queryStart, queryEnd)
+
+	shards, err := c.getTimeShards(ctx, queryStart, queryEnd, false)
+	if err != nil {
+		return nil, err
+	}
 
 	defer func() {
 		searchMetricsSeconds.Observe(time.Since(start).Seconds())
@@ -1976,7 +2004,11 @@ func (c *CassandraIndex) InternalUpdatePostingShards(ctx context.Context, ids []
 // The metrics will be added in all shards between start & end.
 func (c *CassandraIndex) InternalCreateMetric(ctx context.Context, start time.Time, end time.Time, metrics []labels.Labels, ids []types.MetricID, expirations []time.Time, skipPostings bool) ([]types.MetricID, error) {
 	requests := make([]lookupEntry, len(metrics))
-	shards := getTimeShards(start, end)
+
+	shards, err := c.getTimeShards(ctx, start, end, true)
+	if err != nil {
+		return nil, err
+	}
 
 	for i, labels := range metrics {
 		sortedLabelsString := labels.String()
@@ -2049,10 +2081,31 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 
 	c.lookupIDMutex.Unlock()
 
-	err := c.refreshPostingIDInShard(ctx, allShard)
+	_, err := c.getExistingShards(ctx, true)
+	if err != nil {
+		debug.Print(debug.Level1, logger, "refresh existingsShards failed: %v", err)
+	}
+
+	err = c.refreshPostingIDInShard(ctx, allShard)
 	if err != nil {
 		debug.Print(debug.Level1, logger, "refresh PostingIDInShard failed: %v", err)
 	}
+}
+
+func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool) (*roaring.Bitmap, error) {
+	c.lookupIDMutex.Lock()
+	defer c.lookupIDMutex.Unlock()
+
+	if c.existingShards == nil || forceUpdate {
+		tmp, err := c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+		if err != nil {
+			return nil, err
+		}
+
+		c.existingShards = tmp
+	}
+
+	return c.existingShards, nil
 }
 
 // cassandraExpire remove all entry in Cassandra that have expired.
@@ -2691,10 +2744,34 @@ func ShardForTime(ts int64) int32 {
 	return (int32(ts/3600) / shardSize) * shardSize
 }
 
-func getTimeShards(start time.Time, end time.Time) []int32 {
+func (c *CassandraIndex) getTimeShards(ctx context.Context, start time.Time, end time.Time, returnAll bool) ([]int32, error) {
 	shardSize := int32(postingShardSize.Hours())
 	startShard := ShardForTime(start.Unix())
 	endShard := ShardForTime(end.Unix())
+
+	var (
+		existingShards *roaring.Bitmap
+		err            error
+	)
+
+	if !returnAll {
+		existingShards, err = c.getExistingShards(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if min, ok := existingShards.Min(); ok && startShard < int32(min) {
+			startShard = int32(min)
+		}
+
+		if max := existingShards.Max(); endShard > int32(max) {
+			endShard = int32(max)
+		}
+	}
+
+	if startShard > endShard {
+		return nil, nil
+	}
 
 	results := make([]int32, 0, (endShard-startShard)/shardSize+1)
 	current := startShard
@@ -2704,7 +2781,7 @@ func getTimeShards(start time.Time, end time.Time) []int32 {
 		current += shardSize
 	}
 
-	return results
+	return results, nil
 }
 
 // popLabelsValue get and delete value via its name from a labels.Label list.

@@ -1100,7 +1100,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 
 func Test_postingsForMatchers(t *testing.T) {
 	now := time.Now()
-	shards := getTimeShards(now, now)
+	shards := []int32{ShardForTime(now.Unix())}
 	metrics1 := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
 			"__name__": "up",
@@ -2060,17 +2060,19 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		index    *CassandraIndex
-		shards   []int32
-		matchers []*labels.Matcher
-		want     []types.MetricID
-		wantLen  int
+		name       string
+		index      *CassandraIndex
+		queryStart time.Time
+		queryEnd   time.Time
+		matchers   []*labels.Matcher
+		want       []types.MetricID
+		wantLen    int
 	}{
 		{
-			name:   "eq-t0",
-			index:  index1,
-			shards: getTimeShards(t0, t0),
+			name:       "eq-t0",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   t0,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2084,9 +2086,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-t0t1",
-			index:  index1,
-			shards: getTimeShards(t0, t1),
+			name:       "eq-t0t1",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   t1,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2101,9 +2104,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-t1t5",
-			index:  index1,
-			shards: getTimeShards(t1, t5),
+			name:       "eq-t1t5",
+			index:      index1,
+			queryStart: t1,
+			queryEnd:   t5,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2116,9 +2120,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-t2now",
-			index:  index1,
-			shards: getTimeShards(t2, now),
+			name:       "eq-t2now",
+			index:      index1,
+			queryStart: t2,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2129,9 +2134,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want: []types.MetricID{},
 		},
 		{
-			name:   "eq-eq",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-eq",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2150,9 +2156,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-eq-t2",
-			index:  index1,
-			shards: getTimeShards(t2, t2),
+			name:       "eq-eq-t2",
+			index:      index1,
+			queryStart: t2,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2170,9 +2177,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-eq-t0+",
-			index:  index1,
-			shards: getTimeShards(t0, t0.Add(time.Hour)),
+			name:       "eq-eq-t0+",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   t0.Add(time.Hour),
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2190,9 +2198,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-neq",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-neq",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2210,9 +2219,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-nolabel",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-nolabel",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2230,9 +2240,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-nolabel-t3",
-			index:  index1,
-			shards: getTimeShards(t3, t3),
+			name:       "eq-nolabel-t3",
+			index:      index1,
+			queryStart: t3,
+			queryEnd:   t3,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2250,9 +2261,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-nolabel-t0",
-			index:  index1,
-			shards: getTimeShards(t0, t0),
+			name:       "eq-nolabel-t0",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   t0,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2268,9 +2280,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want: []types.MetricID{},
 		},
 		{
-			name:   "eq-label",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-label",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2290,9 +2303,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-label-t0t1",
-			index:  index1,
-			shards: getTimeShards(t0, t1),
+			name:       "eq-label-t0t1",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   t1,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2311,9 +2325,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-label-t1t2",
-			index:  index1,
-			shards: getTimeShards(t1, t2),
+			name:       "eq-label-t1t2",
+			index:      index1,
+			queryStart: t1,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2333,9 +2348,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-label-t2t5",
-			index:  index1,
-			shards: getTimeShards(t2, t5),
+			name:       "eq-label-t2t5",
+			index:      index1,
+			queryStart: t2,
+			queryEnd:   t5,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2354,9 +2370,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2371,9 +2388,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-re",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-re",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2392,9 +2410,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-nre",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-nre",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2412,9 +2431,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-re_nolabel",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-re_nolabel",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2432,9 +2452,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-re_label",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-re_label",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2454,9 +2475,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-re*",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-re*",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2477,9 +2499,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "re-nre*",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "re-nre*",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2495,9 +2518,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want: []types.MetricID{},
 		},
 		{
-			name:   "eq-nre_empty_and_devel",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-nre_empty_and_devel",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2516,9 +2540,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-nre-eq same label",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-nre-eq same label",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2541,9 +2566,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-eq-no_label",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-eq-no_label",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2566,9 +2592,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq-eq-eq_empty",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-eq-eq_empty",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2589,9 +2616,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want: []types.MetricID{},
 		},
 		{
-			name:   "eq-eq-re_empty",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq-eq-re_empty",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2615,9 +2643,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "eq_empty",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "eq_empty",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2636,9 +2665,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "neq_empty",
-			index:  index1,
-			shards: getTimeShards(t0, now),
+			name:       "neq_empty",
+			index:      index1,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
@@ -2658,9 +2688,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq",
-			index:  index2,
-			shards: getTimeShards(t0, now),
+			name:       "index2-eq",
+			index:      index2,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2677,9 +2708,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq-t2",
-			index:  index2,
-			shards: getTimeShards(t2, t2),
+			name:       "index2-eq-t2",
+			index:      index2,
+			queryStart: t2,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2696,9 +2728,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq-t1",
-			index:  index2,
-			shards: getTimeShards(t1, t1),
+			name:       "index2-eq-t1",
+			index:      index2,
+			queryStart: t1,
+			queryEnd:   t1,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2710,9 +2743,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want:    []types.MetricID{},
 		},
 		{
-			name:   "index2-eq-eq-t0t2",
-			index:  index2,
-			shards: getTimeShards(t0, t2),
+			name:       "index2-eq-eq-t0t2",
+			index:      index2,
+			queryStart: t0,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2734,9 +2768,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq-neq-t1t2",
-			index:  index2,
-			shards: getTimeShards(t1, t2),
+			name:       "index2-eq-neq-t1t2",
+			index:      index2,
+			queryStart: t1,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2758,9 +2793,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq-neq-t4t5",
-			index:  index2,
-			shards: getTimeShards(t4, t5),
+			name:       "index2-eq-neq-t4t5",
+			index:      index2,
+			queryStart: t4,
+			queryEnd:   t5,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2782,9 +2818,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-eq-neq-2",
-			index:  index2,
-			shards: getTimeShards(t0, now),
+			name:       "index2-eq-neq-2",
+			index:      index2,
+			queryStart: t0,
+			queryEnd:   now,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2801,9 +2838,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want:    []types.MetricID{},
 		},
 		{
-			name:   "index2-eq-neq-2-t2",
-			index:  index2,
-			shards: getTimeShards(t2, t2),
+			name:       "index2-eq-neq-2-t2",
+			index:      index2,
+			queryStart: t2,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -2820,9 +2858,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			want:    []types.MetricID{},
 		},
 		{
-			name:   "index2-re-neq-eq-neq-t2",
-			index:  index2,
-			shards: getTimeShards(t2, t2),
+			name:       "index2-re-neq-eq-neq-t2",
+			index:      index2,
+			queryStart: t2,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2854,9 +2893,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-re-neq-eq-neq-t4",
-			index:  index2,
-			shards: getTimeShards(t4, t4),
+			name:       "index2-re-neq-eq-neq-t4",
+			index:      index2,
+			queryStart: t4,
+			queryEnd:   t4,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2888,9 +2928,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-re-nre-eq-neq-t0",
-			index:  index2,
-			shards: getTimeShards(t0, t0),
+			name:       "index2-re-nre-eq-neq-t0",
+			index:      index2,
+			queryStart: t0,
+			queryEnd:   t0,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2922,9 +2963,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 		{
-			name:   "index2-re-nre-eq-neq-t1t2",
-			index:  index2,
-			shards: getTimeShards(t1, t2),
+			name:       "index2-re-nre-eq-neq-t1t2",
+			index:      index2,
+			queryStart: t1,
+			queryEnd:   t2,
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
@@ -2957,8 +2999,60 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		shards, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, false)
+		if err != nil {
+			t.Errorf("getTimeShards() error = %v", err)
+		}
+
+		shardsAll, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, true)
+		if err != nil {
+			t.Errorf("getTimeShards(returnAll=true) error = %v", err)
+		}
+
+		shards = shardsAll
+
+		t.Run(tt.name+" shardsAll", func(t *testing.T) {
+			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, tt.matchers, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			if err != nil {
+				t.Errorf("postingsForMatchers() error = %v", err)
+				return
+			}
+			if tt.wantLen == 0 {
+				// Avoid requirement to set tt.wantLen on simple test
+				tt.wantLen = len(tt.want)
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+				return
+			}
+			got = got[:len(tt.want)]
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			}
+		})
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -2978,7 +3072,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 		})
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, tt.matchers, 1000)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3004,7 +3098,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(context.Background(), tt.shards, matchersReverse, 0)
+			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 				return
@@ -3996,6 +4090,14 @@ func Test_getTimeShards(t *testing.T) {
 	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
 	base := time.Unix(int64(baseTS)*3600, 0)
 
+	index, err := new(context.Background(), &mockStore{}, Options{
+		DefaultTimeToLive: 365 * 24 * time.Hour,
+		LockFactory:       &mockLockFactory{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
 		name string
 		args args
@@ -4070,13 +4172,20 @@ func Test_getTimeShards(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getTimeShards(tt.args.start, tt.args.end); !reflect.DeepEqual(got, tt.want) {
+			got, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
+			if err != nil {
+				t.Error(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getTimeShards() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 
-	got := getTimeShards(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now())
+	got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
+	if err != nil {
+		t.Error(err)
+	}
 	for i, shard := range got {
 		if shard == globalShardNumber {
 			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
