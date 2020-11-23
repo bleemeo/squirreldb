@@ -80,6 +80,8 @@ func Benchmark_metricsFromPromSeries(b *testing.B) {
 }
 
 func Test_metricsFromTimeseries(t *testing.T) {
+	nowTS := time.Now().Unix() * 1000
+
 	type args struct {
 		promTimeseries []prompb.TimeSeries
 		index          types.Index
@@ -107,27 +109,27 @@ func Test_metricsFromTimeseries(t *testing.T) {
 						Samples: []prompb.Sample{
 							{
 								Value:     10,
-								Timestamp: 0,
+								Timestamp: nowTS + 0,
 							},
 							{
 								Value:     20,
-								Timestamp: 10000,
+								Timestamp: nowTS + 10000,
 							},
 							{
 								Value:     30,
-								Timestamp: 20000,
+								Timestamp: nowTS + 20000,
 							},
 							{
 								Value:     40,
-								Timestamp: 30000,
+								Timestamp: nowTS + 30000,
 							},
 							{
 								Value:     50,
-								Timestamp: 40000,
+								Timestamp: nowTS + 40000,
 							},
 							{
 								Value:     60,
-								Timestamp: 50000,
+								Timestamp: nowTS + 50000,
 							},
 						},
 					},
@@ -139,27 +141,27 @@ func Test_metricsFromTimeseries(t *testing.T) {
 					ID: MetricIDTest1,
 					Points: []types.MetricPoint{
 						{
-							Timestamp: 0,
+							Timestamp: nowTS + 0,
 							Value:     10,
 						},
 						{
-							Timestamp: 10000,
+							Timestamp: nowTS + 10000,
 							Value:     20,
 						},
 						{
-							Timestamp: 20000,
+							Timestamp: nowTS + 20000,
 							Value:     30,
 						},
 						{
-							Timestamp: 30000,
+							Timestamp: nowTS + 30000,
 							Value:     40,
 						},
 						{
-							Timestamp: 40000,
+							Timestamp: nowTS + 40000,
 							Value:     50,
 						},
 						{
-							Timestamp: 50000,
+							Timestamp: nowTS + 50000,
 							Value:     60,
 						},
 					},

@@ -2,14 +2,24 @@ package remotestorage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"squirreldb/cassandra/tsdb"
 	"squirreldb/types"
 	"time"
 
 	"github.com/prometheus/prometheus/prompb"
 )
+
+type errBadRequest struct {
+	err error
+}
+
+func (e errBadRequest) Error() string {
+	return fmt.Sprintf("bad request: %v", e.err)
+}
 
 type writeMetrics struct {
 	index    types.Index
@@ -35,51 +45,61 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	start := time.Now()
 	ctx := request.Context()
 
-	defer func() {
-		requestsSecondsWrite.Observe(time.Since(start).Seconds())
-	}()
+	err := w.do(ctx, request)
 
-	reqCtx := w.getRequestContext(ctx)
-	if ctx.Err() != nil || reqCtx == nil {
-		http.Error(writer, "Request cancelled", http.StatusBadRequest)
+	requestsSecondsWrite.Observe(time.Since(start).Seconds())
+
+	if err != nil {
 		requestsErrorWrite.Inc()
 
+		statusCode := http.StatusInternalServerError
+
+		switch {
+		case errors.Is(err, ctx.Err()):
+			statusCode = http.StatusRequestTimeout
+		case errors.As(err, &errBadRequest{}):
+			statusCode = http.StatusBadRequest
+		}
+
+		if statusCode != http.StatusRequestTimeout {
+			logger.Printf("Error: %v", err)
+		}
+
+		http.Error(writer, err.Error(), statusCode)
+
 		return
+	}
+}
+
+func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
+	reqCtx := w.getRequestContext(ctx)
+	if ctx.Err() != nil || reqCtx == nil {
+		return fmt.Errorf("request cancelled: %w", ctx.Err())
 	}
 
 	defer w.putRequestContext(reqCtx)
 
 	err := decodeRequest(request.Body, reqCtx)
 	if err != nil {
-		logger.Printf("Error: Can't decode the write request (%v)", err)
-		http.Error(writer, "Can't decode the write request", http.StatusBadRequest)
-		requestsErrorWrite.Inc()
-
-		return
+		return errBadRequest{err: fmt.Errorf("can't decode request: %w", err)}
 	}
 
 	writeRequest := reqCtx.pb.(*prompb.WriteRequest)
 
 	metrics, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
 	if err != nil && ctx.Err() == nil {
-		logger.Printf("Unable to convert to internal metric: %v", err)
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
-		requestsErrorWrite.Inc()
-
-		return
+		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
 
 	if ctx.Err() != nil {
-		return
+		return ctx.Err()
 	}
 
 	if err := w.writer.Write(ctx, metrics); err != nil && ctx.Err() == nil {
-		logger.Printf("Unable to write metric: %v", err)
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
-		requestsErrorWrite.Inc()
-
-		return
+		return fmt.Errorf("unable to write metrics: %w", err)
 	}
+
+	return nil
 }
 
 // Returns a MetricPoint list generated from a Sample list.
@@ -127,6 +147,10 @@ func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeri
 			if max < s.Timestamp {
 				max = s.Timestamp
 			}
+		}
+
+		if min < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
+			logger.Printf("warning: points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
 		}
 
 		requests = append(requests, types.LookupRequest{

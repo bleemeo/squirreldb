@@ -22,9 +22,10 @@ const (
 	lockTimeToLive = 10 * time.Minute
 )
 
-// Processed with aggregation for data older than backlogMargin seconds. If data older than this delay are received,
-// they won't be aggregated.
-const backlogMargin = time.Hour
+// MaxPastDelay is the maximum delay in the past a points could be write without aggregated data issue. Any point wrote with
+// a timestamp more than MaxPastDelay in the past is likely to be ignored in aggregated data.
+// This delay will also force the aggregation to run after 0h00 UTC + MaxPastDelay (since we check often, it will start at this time).
+const MaxPastDelay = 8 * time.Hour
 
 // run starts all CassandraTSDB pre-aggregations.
 func (c *CassandraTSDB) run(ctx context.Context) {
@@ -296,7 +297,7 @@ func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotif
 	}
 
 	toTime := fromTime.Add(aggregateSize)
-	isSafeMargin := toTime.Before(now.Add(-backlogMargin))
+	isSafeMargin := toTime.Before(now.Add(-MaxPastDelay))
 
 	if toTime.After(maxTime) || !isSafeMargin {
 		return false, fromTime
