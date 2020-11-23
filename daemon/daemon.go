@@ -487,7 +487,6 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 
 			options := tsdb.Options{
 				DefaultTimeToLive:         s.Config.Duration("cassandra.default_time_to_live"),
-				BatchSize:                 s.Config.Duration("batch.size"),
 				RawPartitionSize:          s.Config.Duration("cassandra.partition_size.raw"),
 				AggregatePartitionSize:    s.Config.Duration("cassandra.partition_size.aggregate"),
 				AggregateResolution:       s.Config.Duration("cassandra.aggregate.resolution"),

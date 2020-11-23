@@ -24,7 +24,6 @@ var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {
 	DefaultTimeToLive         time.Duration
-	BatchSize                 time.Duration
 	RawPartitionSize          time.Duration
 	AggregatePartitionSize    time.Duration
 	AggregateResolution       time.Duration

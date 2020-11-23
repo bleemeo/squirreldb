@@ -183,7 +183,7 @@ func (c *Config) Validate() bool {
 // ValidateRemote checks if the local configuration is consistent with the remote configuration.
 func (c *Config) ValidateRemote(state types.State) bool {
 	names := []string{
-		"batch.size", "cassandra.partition_size.raw", "cassandra.aggregate.resolution",
+		"cassandra.partition_size.raw", "cassandra.aggregate.resolution",
 		"cassandra.aggregate.size", "cassandra.partition_size.aggregate",
 	}
 	valid := true
