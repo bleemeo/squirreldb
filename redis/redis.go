@@ -169,13 +169,19 @@ func (r *Redis) sAdd(ctx context.Context, key string, members ...interface{}) er
 
 	if r.clusterClient != nil {
 		_, err := r.clusterClient.SAdd(ctx, key, members...).Result()
+		if err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
 
-		return fmt.Errorf("redis: %w", err)
+		return nil
 	}
 
 	_, err := r.singleClient.SAdd(ctx, key, members...).Result()
+	if err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
 
-	return fmt.Errorf("redis: %w", err)
+	return nil
 }
 
 func (r *Redis) sRem(ctx context.Context, key string, members ...interface{}) error {
@@ -185,13 +191,19 @@ func (r *Redis) sRem(ctx context.Context, key string, members ...interface{}) er
 
 	if r.clusterClient != nil {
 		_, err := r.clusterClient.SRem(ctx, key, members...).Result()
+		if err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
 
-		return fmt.Errorf("redis: %w", err)
+		return nil
 	}
 
 	_, err := r.singleClient.SRem(ctx, key, members...).Result()
+	if err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
 
-	return fmt.Errorf("redis: %w", err)
+	return nil
 }
 
 func (r *Redis) sPopN(ctx context.Context, key string, count int64) ([]string, error) {
@@ -224,8 +236,11 @@ func metricID2String(id types.MetricID) string {
 
 func string2MetricID(input string) (types.MetricID, error) {
 	v, err := strconv.ParseInt(input, 36, 0)
+	if err != nil {
+		return 0, fmt.Errorf("convert metric ID: %w", err)
+	}
 
-	return types.MetricID(v), fmt.Errorf("convert metric ID: %w", err)
+	return types.MetricID(v), nil
 }
 
 // Append implement batch.TemporaryStore interface.
