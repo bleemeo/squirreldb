@@ -657,7 +657,7 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 			continue
 		}
 
-		if now.Add(24 * time.Hour).After(expiration) {
+		if now.After(expiration.Add(24 * time.Hour)) {
 			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
 
 			if doFix {
