@@ -1,4 +1,5 @@
 /squirreldb*
+!squirreldb.conf
 dist
 
 /.idea

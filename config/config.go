@@ -3,10 +3,8 @@ package config
 import (
 	goflag "flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -20,11 +18,8 @@ import (
 const (
 	delimiter  = "."
 	envPrefix  = "SQUIRRELDB_"
-	folderRoot = "."
+	configFile = "squirreldb.conf"
 )
-
-//nolint: gochecknoglobals
-var fileExtensions = []string{".conf", ".yaml", ".yml"}
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[config] ", log.LstdFlags)
@@ -43,16 +38,13 @@ func New() (*Config, error) {
 		return nil, fmt.Errorf("koanf: %w", err)
 	}
 
-	filePaths, err := filePaths(folderRoot, fileExtensions)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, filePath := range filePaths {
-		err = instance.Load(file.Provider(filePath), yaml.Parser())
+	if _, err := os.Stat(configFile); err == nil {
+		err = instance.Load(file.Provider(configFile), yaml.Parser())
 		if err != nil {
-			return nil, fmt.Errorf("read option from file %s: %w", filePath, err)
+			return nil, fmt.Errorf("read option from file %s: %w", configFile, err)
 		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("fail to read %s: %w", configFile, err)
 	}
 
 	err = instance.Load(newEnvProvider(), nil)
@@ -139,31 +131,6 @@ func (c *Config) Validate() bool {
 	}
 
 	return valid
-}
-
-// Return file paths.
-func filePaths(root string, fileExtensions []string) ([]string, error) {
-	filesInfo, err := ioutil.ReadDir(root)
-	if err != nil {
-		return nil, fmt.Errorf("list dir %s: %w", root, err)
-	}
-
-	var filePaths []string
-
-filesLoop:
-	for _, fileInfo := range filesInfo {
-		path := filepath.Join(root, fileInfo.Name())
-
-		for _, fileExtension := range fileExtensions {
-			if filepath.Ext(path) == fileExtension {
-				filePaths = append(filePaths, path)
-
-				continue filesLoop
-			}
-		}
-	}
-
-	return filePaths, nil
 }
 
 // Returns a flag set generated from a flag list.
