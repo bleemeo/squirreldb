@@ -671,6 +671,9 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 
 // check that postings for given shard is consistent.
 func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { // nolint: gocognit,gocyclo
+	updates := make([]postingUpdateRequest, 0)
+	labelToIndex := make(map[labels.Label]int)
+
 	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
 	if err != nil {
 		return false, err
@@ -718,6 +721,25 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			shard,
 			id,
 		)
+
+		if doFix {
+			lbl := labels.Label{
+				Name:  maybePostingLabel,
+				Value: maybePostingLabel,
+			}
+
+			idx, ok := labelToIndex[lbl]
+			if !ok {
+				idx = len(updates)
+				updates = append(updates, postingUpdateRequest{
+					Label: lbl,
+					Shard: shard,
+				})
+				labelToIndex[lbl] = idx
+			}
+
+			updates[idx].AddIDs = append(updates[idx].AddIDs, id)
+		}
 	}
 
 	tmp = localMaybe.Difference(localAll)
@@ -737,6 +759,25 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			shard,
 			id,
 		)
+
+		if doFix {
+			lbl := labels.Label{
+				Name:  maybePostingLabel,
+				Value: maybePostingLabel,
+			}
+
+			idx, ok := labelToIndex[lbl]
+			if !ok {
+				idx = len(updates)
+				updates = append(updates, postingUpdateRequest{
+					Label: lbl,
+					Shard: shard,
+				})
+				labelToIndex[lbl] = idx
+			}
+
+			updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, id)
+		}
 	}
 
 	wantedPostings := make(map[labels.Label]*roaring.Bitmap)
@@ -842,11 +883,26 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 
 				fmt.Fprintf(
 					w,
-					"shard %d: extra posting for %s=%s exists\n",
+					"shard %d: extra posting for %s=%s exists (with %d IDs)\n",
 					shard,
 					name,
 					labelValue,
+					tmp.Count(),
 				)
+
+				if doFix {
+					idx, ok := labelToIndex[lbl]
+					if !ok {
+						idx = len(updates)
+						updates = append(updates, postingUpdateRequest{
+							Label: lbl,
+							Shard: shard,
+						})
+						labelToIndex[lbl] = idx
+					}
+
+					updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, tmp.Slice()...)
+				}
 			} else {
 				delete(wantedPostings, lbl)
 
@@ -868,6 +924,20 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 						name,
 						labelValue,
 					)
+
+					if doFix {
+						idx, ok := labelToIndex[lbl]
+						if !ok {
+							idx = len(updates)
+							updates = append(updates, postingUpdateRequest{
+								Label: lbl,
+								Shard: shard,
+							})
+							labelToIndex[lbl] = idx
+						}
+
+						updates[idx].AddIDs = append(updates[idx].AddIDs, id)
+					}
 				}
 
 				tmp2 = tmp.Difference(wanted)
@@ -891,6 +961,20 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 						localAll.Contains(id),
 						allGoodIds.Contains(id),
 					)
+
+					if doFix {
+						idx, ok := labelToIndex[lbl]
+						if !ok {
+							idx = len(updates)
+							updates = append(updates, postingUpdateRequest{
+								Label: lbl,
+								Shard: shard,
+							})
+							labelToIndex[lbl] = idx
+						}
+
+						updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, id)
+					}
 				}
 			}
 
@@ -908,16 +992,13 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 
 					fmt.Fprintf(
 						w,
-						"shard %d: posting for name %s has ID %d which is not in %s!\n",
+						"shard %d: posting for %s=%s has ID %d which is not in %s!\n",
 						shard,
 						name,
+						labelValue,
 						id,
 						reference.name,
 					)
-
-					if doFix {
-						return hadIssue, errors.New("not implemented")
-					}
 				}
 			}
 		}
@@ -933,6 +1014,29 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			lbl.Name,
 			lbl.Value,
 		)
+	}
+
+	if doFix && len(updates) > 0 {
+		err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range updates {
+				req := req
+				task := func() error {
+					_, err := c.postingUpdate(ctx, req)
+
+					return err
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			return hadIssue, err
+		}
 	}
 
 	return hadIssue, nil
