@@ -597,6 +597,14 @@ func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.Metr
 	return index
 }
 
+func bufferToStringTruncated(b []byte) string {
+	if len(b) > 5000 {
+		b = b[:5000]
+	}
+
+	return string(b)
+}
+
 func Benchmark_keyFromLabels(b *testing.B) {
 	tests := []struct {
 		name   string
@@ -2006,6 +2014,9 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		},
 		now,
 	)
+	if err != nil {
+		t.Error(err)
+	}
 
 	requests := make([]types.LookupRequest, 0)
 
@@ -2057,6 +2068,145 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	metrics2IDs, _, err := index2.lookupIDs(context.Background(), requests, now)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	index3, err := new(context.Background(), &mockStore{}, Options{
+		DefaultTimeToLive: 365 * 24 * time.Hour,
+		LockFactory:       &mockLockFactory{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metrics3IDs1, _, err := index3.lookupIDs(
+		context.Background(),
+		[]types.LookupRequest{
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up2",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up2",
+					"job":      "prometheus2",
+					"instance": "localhost:9090",
+				}),
+				Start: t0,
+				End:   t0,
+			},
+		},
+		t0,
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	metrics3IDs2, _, err := index3.lookupIDs(
+		context.Background(),
+		[]types.LookupRequest{
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t0,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up2",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t1,
+				End:   t1,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up3",
+					"job":      "prometheus2",
+					"instance": "localhost:9090",
+				}),
+				Start: t1,
+				End:   t1,
+			},
+		},
+		t2,
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	metrics3IDs3, _, err := index3.lookupIDs(
+		context.Background(),
+		[]types.LookupRequest{
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t3,
+				End:   t3,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up2",
+					"job":      "prometheus",
+					"instance": "localhost:9090",
+				}),
+				Start: t3,
+				End:   t3,
+			},
+			{
+				Labels: labels.FromMap(map[string]string{
+					"__name__": "up3",
+					"job":      "prometheus2",
+					"instance": "localhost:9090",
+				}),
+				Start: t4,
+				End:   t5,
+			},
+		},
+		now,
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if metrics3IDs2[0] != metrics3IDs1[0] {
+		t.Errorf("metrics3IDs2[0] = %d, want %d", metrics3IDs2[0], metrics3IDs1[0])
+	}
+
+	if metrics3IDs2[1] != metrics3IDs1[1] {
+		t.Errorf("metrics3IDs2[1] = %d, want %d", metrics3IDs2[1], metrics3IDs1[1])
+	}
+
+	if metrics3IDs3[0] != metrics3IDs1[0] {
+		t.Errorf("metrics3IDs3[0] = %d, want %d", metrics3IDs3[0], metrics3IDs1[0])
+	}
+
+	if metrics3IDs3[1] != metrics3IDs1[1] {
+		t.Errorf("metrics3IDs3[1] = %d, want %d", metrics3IDs3[1], metrics3IDs1[1])
+	}
+
+	if metrics3IDs3[2] != metrics3IDs2[2] {
+		t.Errorf("metrics3IDs3[2] = %d, want %d", metrics3IDs3[2], metrics3IDs1[2])
 	}
 
 	tests := []struct {
@@ -2997,6 +3147,164 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				// [...]
 			},
 		},
+		{
+			name:       "index3-metric1-t0",
+			index:      index3,
+			queryStart: t0,
+			queryEnd:   t0,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[0],
+			},
+		},
+		{
+			name:       "index3-metric1-t1",
+			index:      index3,
+			queryStart: t1,
+			queryEnd:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[0],
+			},
+		},
+		{
+			name:       "index3-metric1-t2",
+			index:      index3,
+			queryStart: t2,
+			queryEnd:   t2,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:       "index3-metric1-t3",
+			index:      index3,
+			queryStart: t3,
+			queryEnd:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[0],
+			},
+		},
+		{
+			name:       "index3-metric1-t0t3",
+			index:      index3,
+			queryStart: t0,
+			queryEnd:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[0],
+			},
+		},
+		{
+			name:       "index3-metric2-t1",
+			index:      index3,
+			queryStart: t1,
+			queryEnd:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up2",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[1],
+			},
+		},
+		{
+			name:       "index3-metric2-t3",
+			index:      index3,
+			queryStart: t3,
+			queryEnd:   t3,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up2",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs1[1],
+			},
+		},
+		{
+			name:       "index3-metric3-t1",
+			index:      index3,
+			queryStart: t1,
+			queryEnd:   t1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up3",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs2[2],
+			},
+		},
+		{
+			name:       "index3-metric3-t4",
+			index:      index3,
+			queryStart: t4,
+			queryEnd:   t4,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up3",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs2[2],
+			},
+		},
+		{
+			name:       "index3-metric3-t5",
+			index:      index3,
+			queryStart: t5,
+			queryEnd:   t5,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"up3",
+				),
+			},
+			want: []types.MetricID{
+				metrics3IDs2[2],
+			},
+		},
 	}
 	for _, tt := range tests {
 		shards, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, false)
@@ -3125,7 +3433,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	hadIssue, err = index2.verify(context.Background(), now, buffer, false, false)
@@ -3133,7 +3441,15 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+	}
+
+	hadIssue, err = index3.verify(context.Background(), now, buffer, false, false)
+	if err != nil {
+		t.Error(err)
+	}
+	if hadIssue {
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 }
 
@@ -3583,6 +3899,17 @@ func Test_cluster(t *testing.T) {
 		t.Error(err)
 	}
 
+	{
+		buffer := bytes.NewBuffer(nil)
+		hadIssue, err := index1.verify(context.Background(), t0, buffer, false, false)
+		if err != nil {
+			t.Error(err)
+		}
+		if hadIssue {
+			t.Fatalf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+		}
+	}
+
 	metricsID[2] = tmp[2]
 
 	if tmp[0] != metricsID[0] {
@@ -3744,7 +4071,7 @@ func Test_cluster(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	hadIssue, err = index2.verify(context.Background(), t6, buffer, false, false)
@@ -3752,7 +4079,7 @@ func Test_cluster(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 }
 
@@ -3875,7 +4202,7 @@ func Test_expiration(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	index.expire(t0)
@@ -3894,7 +4221,7 @@ func Test_expiration(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
@@ -4048,7 +4375,7 @@ func Test_expiration(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	index.expire(t6)
@@ -4069,7 +4396,7 @@ func Test_expiration(t *testing.T) {
 		t.Error(err)
 	}
 	if hadIssue {
-		t.Errorf("Verify() had issues: %s", string(buffer.Bytes()))
+		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 }
 

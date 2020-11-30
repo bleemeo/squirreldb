@@ -31,7 +31,7 @@ var (
 	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb", "Cassandra keyspace")
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
-	defaultTimeToLive         = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
+	defaultTimeToLive         = flag.Duration("index.ttl", 400*24*time.Hour, "Default time to live")
 	startText                 = flag.String("start", time.Now().Add(-365*24*time.Hour).Format(time.RFC3339), "Beginning of time to export/import")
 	endText                   = flag.String("end", time.Now().Format(time.RFC3339), "End of time to export/import")
 	doExport                  = flag.Bool("export", false, "Do index export to stdout")

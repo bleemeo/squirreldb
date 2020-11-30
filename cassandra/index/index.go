@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"sort"
 	"squirreldb/debug"
@@ -349,11 +350,6 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 
 	hadIssue = hadIssue || issueCount > 0
 
-	maybePresent, err := c.getMaybePresent(ctx, shards.Slice())
-	if err != nil {
-		return hadIssue, err
-	}
-
 	allGoodIds := roaring.NewBTreeBitmap()
 
 	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
@@ -361,10 +357,15 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 		return hadIssue, err
 	}
 
+	fmt.Fprintf(w, "Index had %d shards and should have %d metrics\n", shards.Count(), allPosting.Count())
+
+	if respf, ok := w.(http.Flusher); ok {
+		respf.Flush()
+	}
+
 	count := 0
 	it := allPosting.Iterator()
 
-	labelNamesByShard := make(map[int32]map[string]interface{})
 	pendingIds := make([]types.MetricID, 0, 10000)
 
 	for ctx.Err() == nil {
@@ -392,7 +393,7 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 		}
 
 		if len(pendingIds) > 0 {
-			err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, maybePresent, labelNamesByShard, allPosting, allGoodIds)
+			err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, allPosting, allGoodIds)
 			if err != nil {
 				return hadIssue, err
 			}
@@ -400,6 +401,10 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 	}
 
 	fmt.Fprintf(w, "Index contains %d metrics and %d ok\n", count, allGoodIds.Count())
+
+	if respf, ok := w.(http.Flusher); ok {
+		respf.Flush()
+	}
 
 	if doFix {
 		fmt.Fprintf(w, "Applying fix...")
@@ -413,19 +418,23 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 		shard := int32(shard)
 		fmt.Fprintf(w, "Checking shard %d\n", shard)
 
-		tmp, err := c.verifyShard(ctx, w, doFix, shard, labelNamesByShard[shard], allGoodIds)
+		tmp, err := c.verifyShard(ctx, w, doFix, shard, allGoodIds)
 		if err != nil {
 			return hadIssue, err
 		}
 
 		hadIssue = hadIssue || tmp
+
+		if respf, ok := w.(http.Flusher); ok {
+			respf.Flush()
+		}
 	}
 
 	return hadIssue, ctx.Err()
 }
 
-// verifyMissingShard search last 100 shards from now+1month for shard not present in existingShards.
-// It also verify that all shard actually exists.
+// verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
+// It also verify that all shards in existingShards actually exists.
 func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { // nolint: gocognit
 	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
 	if err != nil {
@@ -505,7 +514,8 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 	return errorCount, shards, nil
 }
 
-func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, maybePresent map[int32]*roaring.Bitmap, labelNamesByShard map[int32]map[string]interface{}, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit,gocyclo
+// check that given metric IDs existing in labels2id and id2labels.
+func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit
 	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
@@ -528,23 +538,6 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 			}
 
 			continue
-		}
-
-		for shard, it := range maybePresent {
-			if !it.Contains(uint64(id)) {
-				continue
-			}
-
-			m := labelNamesByShard[shard]
-			if m == nil {
-				m = make(map[string]interface{})
-			}
-
-			for _, l := range lbls {
-				m[l.Name] = nil
-			}
-
-			labelNamesByShard[shard] = m
 		}
 
 		allLabelsString = append(allLabelsString, lbls.String())
@@ -676,7 +669,8 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 	return nil
 }
 
-func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, labelNames map[string]interface{}, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { // nolint: gocognit
+// check that postings for given shard is consistent.
+func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { // nolint: gocognit,gocyclo
 	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
 	if err != nil {
 		return false, err
@@ -692,7 +686,7 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 
 		fmt.Fprintf(
 			w,
-			"shard %d is empty (but may need cleanup)!\n",
+			"shard %d is empty (automatic cleanup may fix this)!\n",
 			shard,
 		)
 	}
@@ -707,6 +701,110 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		)
 	}
 
+	tmp := localAll.Difference(localMaybe)
+	it := tmp.Iterator()
+
+	for {
+		id, eof := it.Next()
+		if eof {
+			break
+		}
+
+		hadIssue = true
+
+		fmt.Fprintf(
+			w,
+			"shard %d: ID %d is present in localAll but not in localMaybe!\n",
+			shard,
+			id,
+		)
+	}
+
+	tmp = localMaybe.Difference(localAll)
+	it = tmp.Iterator()
+
+	for {
+		id, eof := it.Next()
+		if eof {
+			break
+		}
+
+		hadIssue = true
+
+		fmt.Fprintf(
+			w,
+			"shard %d: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
+			shard,
+			id,
+		)
+	}
+
+	wantedPostings := make(map[labels.Label]*roaring.Bitmap)
+	labelNames := make(map[string]interface{})
+	it = localAll.Iterator()
+
+	pendingIds := make([]types.MetricID, 0, 10000)
+
+	for ctx.Err() == nil {
+		pendingIds = pendingIds[:0]
+
+		for ctx.Err() == nil {
+			id, eof := it.Next()
+			if eof {
+				break
+			}
+
+			pendingIds = append(pendingIds, types.MetricID(id))
+			if len(pendingIds) > 1000 {
+				break
+			}
+		}
+
+		if len(pendingIds) == 0 {
+			break
+		}
+
+		tmp, err := c.store.SelectIDS2Labels(ctx, pendingIds)
+		if err != nil {
+			return true, fmt.Errorf("get labels: %w", err)
+		}
+
+		for id, lbls := range tmp {
+			for _, lbl := range lbls {
+				labelNames[lbl.Name] = nil
+
+				bitset := wantedPostings[lbl]
+				if bitset == nil {
+					bitset = roaring.NewBTreeBitmap()
+				}
+
+				_, err = bitset.AddN(uint64(id))
+				if err != nil {
+					return true, fmt.Errorf("update bitmap: %w", err)
+				}
+
+				wantedPostings[lbl] = bitset
+
+				lbl2 := labels.Label{
+					Name:  postinglabelName,
+					Value: lbl.Name,
+				}
+
+				bitset = wantedPostings[lbl2]
+				if bitset == nil {
+					bitset = roaring.NewBTreeBitmap()
+				}
+
+				_, err = bitset.AddN(uint64(id))
+				if err != nil {
+					return true, fmt.Errorf("update bitmap: %w", err)
+				}
+
+				wantedPostings[lbl2] = bitset
+			}
+		}
+	}
+
 	references := []struct {
 		name string
 		it   *roaring.Bitmap
@@ -716,14 +814,9 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		{name: "shard maybe present IDs", it: localMaybe},
 	}
 
-	seenLabelNames := make(map[string]bool, len(labelNames)+1)
+	labelNames[postinglabelName] = true
+
 	for name := range labelNames {
-		seenLabelNames[name] = false
-	}
-
-	seenLabelNames[postinglabelName] = true
-
-	for name := range seenLabelNames {
 		if ctx.Err() != nil {
 			break
 		}
@@ -733,13 +826,72 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			tmp := roaring.NewBTreeBitmap()
 			labelValue, buffer := iter.Next()
 
-			if name == postinglabelName {
-				seenLabelNames[labelValue] = true
-			}
-
 			err := tmp.UnmarshalBinary(buffer)
 			if err != nil {
 				return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
+			}
+
+			lbl := labels.Label{
+				Name:  name,
+				Value: labelValue,
+			}
+
+			wanted := wantedPostings[lbl]
+			if wanted == nil {
+				hadIssue = true
+
+				fmt.Fprintf(
+					w,
+					"shard %d: extra posting for %s=%s exists\n",
+					shard,
+					name,
+					labelValue,
+				)
+			} else {
+				delete(wantedPostings, lbl)
+
+				tmp2 := wanted.Difference(tmp)
+				it := tmp2.Iterator()
+				for {
+					id, eof := it.Next()
+					if eof {
+						break
+					}
+
+					hadIssue = true
+
+					fmt.Fprintf(
+						w,
+						"shard %d: missing ID %d in posting for %s=%s\n",
+						shard,
+						id,
+						name,
+						labelValue,
+					)
+				}
+
+				tmp2 = tmp.Difference(wanted)
+				it = tmp2.Iterator()
+				for {
+					id, eof := it.Next()
+					if eof {
+						break
+					}
+
+					hadIssue = true
+
+					fmt.Fprintf(
+						w,
+						"shard %d: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
+						shard,
+						id,
+						name,
+						labelValue,
+						localMaybe.Contains(id),
+						localAll.Contains(id),
+						allGoodIds.Contains(id),
+					)
+				}
 			}
 
 			for _, reference := range references {
@@ -771,28 +923,16 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		}
 	}
 
-	for name, seen := range seenLabelNames {
-		_, ok := labelNames[name]
+	for lbl := range wantedPostings {
+		hadIssue = true
 
-		if !seen {
-			hadIssue = true
-
-			fmt.Fprintf(
-				w,
-				"shard %d: posting name %s was expected to exists\n",
-				shard,
-				name,
-			)
-		} else if !ok && name != postinglabelName {
-			hadIssue = true
-
-			fmt.Fprintf(
-				w,
-				"shard %d: posting name %s was not expected to exists\n",
-				shard,
-				name,
-			)
-		}
+		fmt.Fprintf(
+			w,
+			"shard %d: posting %s=%s was expected to exists\n",
+			shard,
+			lbl.Name,
+			lbl.Value,
+		)
 	}
 
 	return hadIssue, nil
@@ -1578,10 +1718,10 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 			req.AddIDs = append(req.AddIDs, uint64(entry.id))
 			maybePresent[shard] = req
 
-			labelsList := make(labels.Labels, 0, len(entry.sortedLabels)*2)
-			labelsList = append(labelsList, entry.sortedLabels...)
+			labelsList := make(labels.Labels, 0, len(entry.unsortedLabels)*2)
+			labelsList = append(labelsList, entry.unsortedLabels...)
 
-			for _, lbl := range entry.sortedLabels {
+			for _, lbl := range entry.unsortedLabels {
 				labelsList = append(labelsList, labels.Label{
 					Name:  postinglabelName,
 					Value: lbl.Name,
