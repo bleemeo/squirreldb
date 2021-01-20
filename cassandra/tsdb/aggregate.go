@@ -101,7 +101,8 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 // InternalWriteAggregated writes all specified metrics as aggregated data
 // This method should only by used for benchmark/tests or bulk import.
 // This will replace data for given aggregated row (based on timestamp of first time).
-func (c *CassandraTSDB) InternalWriteAggregated(ctx context.Context, metrics []aggregate.AggregatedData) error {
+// Also if writingTimestamp is not 0, it's the timestamp used to write in Cassandra (in microseconds since epoc).
+func (c *CassandraTSDB) InternalWriteAggregated(ctx context.Context, metrics []aggregate.AggregatedData, writingTimestamp int64) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -125,7 +126,7 @@ func (c *CassandraTSDB) InternalWriteAggregated(ctx context.Context, metrics []a
 
 			for _, data := range metrics[startIndex:endIndex] {
 				retry.Print(func() error {
-					return c.writeAggregateData(data) // nolint: scopelint
+					return c.writeAggregateData(data, writingTimestamp) // nolint: scopelint
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 					"write aggregated points to Cassandra",
 				)
@@ -383,7 +384,7 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 
 		pointsRead += len(metric.Points)
 
-		err := c.writeAggregateData(aggregatedMetric)
+		err := c.writeAggregateData(aggregatedMetric, 0)
 		if err != nil {
 			return pointsRead, err
 		}
