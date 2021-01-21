@@ -428,7 +428,6 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			}
 
 			s.index = index
-			s.api.IndexVerifyCallback = index.Verify
 		case backendDummy:
 			logger.Println("Warning: Using dummy for index (only do this for testing)")
 

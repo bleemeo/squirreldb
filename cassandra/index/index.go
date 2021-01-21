@@ -3,6 +3,7 @@ package index
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -324,6 +325,81 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 
 		return nil
 	})
+}
+
+// Dump writes a CSV with all metrics known by this index.
+// The format should not be considered stable and should only be used for debugging.
+func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
+	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
+	if err != nil {
+		return err
+	}
+
+	csvWriter := csv.NewWriter(w)
+	it := allPosting.Iterator()
+	pendingIds := make([]types.MetricID, 0, 10000)
+
+	for ctx.Err() == nil {
+		pendingIds = pendingIds[:0]
+
+		for ctx.Err() == nil {
+			id, eof := it.Next()
+			if eof {
+				break
+			}
+
+			metricID := types.MetricID(id)
+
+			pendingIds = append(pendingIds, metricID)
+
+			if len(pendingIds) > 1000 {
+				break
+			}
+		}
+
+		if len(pendingIds) == 0 {
+			break
+		}
+
+		if len(pendingIds) > 0 {
+			err := c.dumpBulk(ctx, csvWriter, pendingIds)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return ctx.Err()
+}
+
+func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID) error {
+	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("get labels: %w", err)
+	}
+
+	for _, id := range ids {
+		lbls, ok := id2Labels[id]
+		if !ok {
+			err := w.Write([]string{
+				strconv.FormatInt(int64(id), 10),
+				"Missing labels! Partial write ?",
+			})
+			if err != nil {
+				return err
+			}
+		} else {
+			err := w.Write([]string{
+				strconv.FormatInt(int64(id), 10),
+				lbls.String(),
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // Verify perform some verification of the indexes health.
