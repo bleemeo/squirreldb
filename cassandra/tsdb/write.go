@@ -24,6 +24,7 @@ func (c *CassandraTSDB) Write(ctx context.Context, metrics []types.MetricData) e
 
 // InternalWrite writes all specified metrics as aggregated data
 // This method should only by used for benchmark/tests or bulk import.
+// Metrics points should be sorted and deduplicated.
 // If writingTimestamp is not 0, it's the timestamp used to write in Cassandra (in microseconds since epoc).
 func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.MetricData, writingTimestamp int64) error {
 	if len(metrics) == 0 {
@@ -122,8 +123,18 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 	firstPoint := aggregatedData.Points[0]
 	offsetMs := firstPoint.Timestamp - baseTimestamp
 	aggregateValues := gorillaEncodeAggregate(aggregatedData.Points, firstPoint.Timestamp, baseTimestamp, aggregateResolution.Milliseconds())
+	maxTS := aggregatedData.Points[len(aggregatedData.Points)-1].Timestamp
 
-	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive, aggregateValues, writingTimestamp)
+	age := time.Now().Unix() - maxTS/1000
+	if age < 0 {
+		age = 0
+	}
+
+	if age >= aggregatedData.TimeToLive {
+		return nil
+	}
+
+	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive-age, aggregateValues, writingTimestamp)
 
 	start := time.Now()
 
@@ -198,8 +209,18 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 	// The minus one for baseTimestamp is to ensure baseTimestamp is strickyly less then
 	// data.Points[0].Timestamp
 	rawValues := gorillaEncode(data.Points, data.Points[0].Timestamp, baseTimestamp-1)
+	maxTS := data.Points[len(data.Points)-1].Timestamp
 
-	tableInsertDataQuery := c.tableInsertRawDataQuery(int64(data.ID), baseTimestamp, offsetMs, data.TimeToLive, rawValues, writingTimestamp)
+	age := time.Now().Unix() - maxTS/1000
+	if age < 0 {
+		age = 0
+	}
+
+	if age >= data.TimeToLive {
+		return nil
+	}
+
+	tableInsertDataQuery := c.tableInsertRawDataQuery(int64(data.ID), baseTimestamp, offsetMs, data.TimeToLive-age, rawValues, writingTimestamp)
 
 	start := time.Now()
 
