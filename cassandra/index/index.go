@@ -1080,7 +1080,7 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 		}
 	}
 
-	for lbl := range wantedPostings {
+	for lbl, wantValue := range wantedPostings {
 		hadIssue = true
 
 		fmt.Fprintf(
@@ -1090,6 +1090,20 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			lbl.Name,
 			lbl.Value,
 		)
+
+		if doFix {
+			idx, ok := labelToIndex[lbl]
+			if !ok {
+				idx = len(updates)
+				updates = append(updates, postingUpdateRequest{
+					Label: lbl,
+					Shard: shard,
+				})
+				labelToIndex[lbl] = idx
+			}
+
+			updates[idx].AddIDs = append(updates[idx].AddIDs, wantValue.Slice()...)
+		}
 	}
 
 	if doFix && len(updates) > 0 {
