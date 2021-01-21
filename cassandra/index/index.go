@@ -2311,9 +2311,8 @@ func (c *CassandraIndex) InternalUpdatePostingShards(ctx context.Context, ids []
 
 	for i, id := range ids {
 		reqs[i] = lookupEntry{
-			idData:       idData{id: id},
+			idData:       idData{id: id, unsortedLabels: labelsList[i]},
 			wantedShards: shards[i],
-			sortedLabels: labelsList[i],
 		}
 	}
 
