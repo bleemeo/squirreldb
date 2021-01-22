@@ -28,11 +28,11 @@ var (
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
 	seed                      = flag.Int64("seed", 42, "Seed used in random generator")
 	runDuration               = flag.Duration("run-time", time.Minute, "Duration of the bench")
-	workDuration              = flag.Duration("work-duration", 5*time.Millisecond, "Duration of one work (randomized +/- 50%")
-	wokerIdleDuration         = flag.Duration("idle-duration", time.Millisecond, "Sleep time after a job complete and before the new one start (randomized +/- 50%)")
-	workerThreads             = flag.Int("worker-threads", 2, "Number of concurrent threads per processes")
+	ctxTimeout                = flag.Duration("ctx-timeout", 15*time.Second, "Context deadline to acquire lock (0=unlimited)")
+	workDuration              = flag.Duration("work-duration", 100*time.Millisecond, "Duration of one work (randomized +/- 50%")
+	workerThreads             = flag.Int("worker-threads", 25, "Number of concurrent threads per processes")
 	workerProcesses           = flag.Int("worker-processes", 2, "Number of concurrent index (equivalent to process) inserting data")
-	tryLockDelay              = flag.Duration("try-lock-duration", 0, "If non-zero use try-lock with fixed sleep between attempt")
+	tryLockDelay              = flag.Duration("try-lock-duration", 15*time.Second, "If delay given to TryLock()")
 	recreateLock              = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
 	lockTTL                   = flag.Duration("lock-ttl", 2*time.Second, "TTL of the locks")
 	lockName                  = flag.String("lock-name", "benchmarking-lock", "Name prefix of the lock")
@@ -60,13 +60,15 @@ func makeLock() *locks.CassandraLocks {
 type result struct {
 	ErrCount         int
 	LockAcquired     int
-	LockTried        int
+	LockFail         int
+	LockTimeOut      int
 	AcquireMaxTime   time.Duration
 	AcquireTotalTime time.Duration
-	TryMaxTime       time.Duration
-	TryTotalTime     time.Duration
+	FailMaxTime      time.Duration
+	FailTotalTime    time.Duration
 	UnlockMaxTime    time.Duration
 	UnlockTotalTime  time.Duration
+	WorkTotalTime    time.Duration
 }
 
 func main() {
@@ -142,14 +144,16 @@ func do() error {
 
 	for r := range resultChan {
 		globalResult.LockAcquired += r.LockAcquired
-		globalResult.LockTried += r.LockTried
-		globalResult.TryTotalTime += r.TryTotalTime
+		globalResult.LockFail += r.LockFail
+		globalResult.LockTimeOut += r.LockTimeOut
+		globalResult.FailTotalTime += r.FailTotalTime
 		globalResult.AcquireTotalTime += r.AcquireTotalTime
 		globalResult.UnlockTotalTime += r.UnlockTotalTime
 		globalResult.ErrCount += r.ErrCount
+		globalResult.WorkTotalTime += r.WorkTotalTime
 
-		if globalResult.TryMaxTime < r.TryMaxTime {
-			globalResult.TryMaxTime = r.TryMaxTime
+		if globalResult.FailMaxTime < r.FailMaxTime {
+			globalResult.FailMaxTime = r.FailMaxTime
 		}
 
 		if globalResult.AcquireMaxTime < r.AcquireMaxTime {
@@ -161,20 +165,21 @@ func do() error {
 		}
 	}
 
-	log.Printf("In %v acquired %d locks and tried to acquire %d", duration, globalResult.LockAcquired, globalResult.LockTried)
-	log.Printf("This result in %.2f lock acquired/s and %.2f lock tried/s", float64(globalResult.LockAcquired)/duration.Seconds(), float64(globalResult.LockTried)/duration.Seconds())
+	log.Printf("Worked %.2f %% of time (%v)", globalResult.WorkTotalTime.Seconds()/duration.Seconds()*100, globalResult.WorkTotalTime)
+	log.Printf("In %v acquired %d locks + failed %d + timeout %d", duration, globalResult.LockAcquired, globalResult.LockFail, globalResult.LockTimeOut)
+	log.Printf("This result in %.2f lock acquired/s and %.2f lock fail/s (+ %.2f timeout/s)", float64(globalResult.LockAcquired)/duration.Seconds(), float64(globalResult.LockFail)/duration.Seconds(), float64(globalResult.LockTimeOut)/duration.Seconds())
 
-	if globalResult.LockTried > 0 {
+	if globalResult.LockFail > 0 {
 		log.Printf(
-			"Time to TryLock avg = %v max = %v",
-			globalResult.TryTotalTime/time.Duration(globalResult.LockTried),
-			globalResult.TryMaxTime,
+			"Time to fail Lock avg = %v max = %v",
+			globalResult.FailTotalTime/time.Duration(globalResult.LockFail),
+			globalResult.FailMaxTime,
 		)
 	}
 
 	if globalResult.LockAcquired > 0 {
 		log.Printf(
-			"Time to    Lock avg = %v max = %v  Unlock avg = %v max = %v",
+			"Time to      Lock avg = %v max = %v  Unlock avg = %v max = %v",
 			globalResult.AcquireTotalTime/time.Duration(globalResult.LockAcquired),
 			globalResult.AcquireMaxTime,
 			globalResult.UnlockTotalTime/time.Duration(globalResult.LockAcquired),
@@ -198,44 +203,28 @@ func do() error {
 	return nil
 }
 
-func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory *locks.CassandraLocks, subLockName string, lock types.TryLocker) result { // nolint: gocognit
+func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory *locks.CassandraLocks, subLockName string, lock types.TryLocker) result {
 	rnd := rand.New(rand.NewSource(workerSeed)) // nolint: gosec
 	r := result{}
 
 	for ctx.Err() == nil {
+		var cancel context.CancelFunc
+
+		ctx := ctx
+
+		if *ctxTimeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, *ctxTimeout)
+		}
+
 		if *recreateLock {
 			lock = lockFactory.CreateLock(subLockName, *lockTTL)
 		}
 
 		start := time.Now()
-		acquired := false
+		acquired := lock.TryLock(ctx, *tryLockDelay)
 
-		if *tryLockDelay > 0 {
-			for ctx.Err() == nil {
-				start := time.Now()
-				acquired = lock.TryLock(context.Background(), 0)
-
-				duration := time.Since(start)
-
-				r.LockTried++
-				r.TryTotalTime += duration
-
-				if r.TryMaxTime < duration {
-					r.TryMaxTime = duration
-				}
-
-				if acquired {
-					break
-				}
-
-				time.Sleep(*tryLockDelay)
-			}
-		} else {
-			lock.Lock()
-			acquired = true
-		}
-
-		if acquired {
+		switch {
+		case acquired:
 			duration := time.Since(start)
 
 			r.LockAcquired++
@@ -272,8 +261,24 @@ func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int
 				r.UnlockMaxTime = duration
 			}
 
-			sleep = time.Duration(float64(*wokerIdleDuration) * (rnd.Float64() + 0.5))
+			sleep = time.Duration(float64(*workDuration) * (rnd.Float64() + 0.5))
+			r.WorkTotalTime += sleep
 			time.Sleep(sleep)
+		case ctx.Err() != nil:
+			r.LockTimeOut++
+		default:
+			duration := time.Since(start)
+
+			r.LockFail++
+			r.FailTotalTime += duration
+
+			if r.FailMaxTime < duration {
+				r.FailMaxTime = duration
+			}
+		}
+
+		if cancel != nil {
+			cancel()
 		}
 	}
 
