@@ -16,10 +16,7 @@ import (
 	"github.com/gocql/gocql"
 )
 
-const (
-	retryMaxDelay        = 30 * time.Second
-	minDelayBetweenCheck = 50 * time.Millisecond
-)
+const retryMaxDelay = 30 * time.Second
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
@@ -34,11 +31,12 @@ type Lock struct {
 	c          CassandraLocks
 	lockID     string
 
-	mutex                     sync.Mutex
-	lastFailAcquiredByAnother time.Time
-	acquired                  bool
-	wg                        sync.WaitGroup
-	cancel                    context.CancelFunc
+	mutex        sync.Mutex
+	cond         *sync.Cond // cond use the mutex as Locker
+	localLocking bool
+	acquired     bool
+	wg           sync.WaitGroup
+	cancel       context.CancelFunc
 }
 
 // New creates a new CassandraLocks object.
@@ -96,19 +94,20 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 		logger.Printf("Warning: lock TTL = %v but should be at least 2s or two SquirrelDB may acquire the lock", timeToLive)
 	}
 
-	return &Lock{
+	l := &Lock{
 		name:       name,
 		timeToLive: timeToLive,
 		c:          c,
 		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)), // nolint: gosec
 	}
+
+	l.cond = sync.NewCond(&l.mutex)
+
+	return l
 }
 
 // tryLock try to acquire the Lock and return true if acquire.
 func (l *Lock) tryLock(ctx context.Context) bool {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-
 	if l.acquired {
 		debug.Print(debug.Level2, logger, "lock %s is already acquired by local instance", l.name)
 
@@ -118,10 +117,6 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	var holder string
 
 	start := time.Now()
-
-	if start.Sub(l.lastFailAcquiredByAnother) < minDelayBetweenCheck {
-		return false
-	}
 
 	locksTableInsertLockQuery := l.locksTableInsertLockQuery().WithContext(ctx)
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
@@ -159,8 +154,6 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}
 
 	if !acquired {
-		l.lastFailAcquiredByAnother = time.Now()
-
 		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s (i'm %s)", l.name, holder, l.lockID)
 
 		return false
@@ -194,6 +187,31 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 	}()
 
 	currentDelay := retryDelay / 100
+
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if (l.acquired || l.localLocking) && currentDelay == 0 {
+		return false
+	}
+
+	for l.acquired || l.localLocking {
+		l.cond.Wait()
+	}
+
+	if ctx.Err() != nil {
+		l.cond.Signal()
+
+		return false
+	}
+
+	l.localLocking = true
+
+	defer func() {
+		l.localLocking = false
+
+		l.cond.Signal()
+	}()
 
 	for {
 		ok := l.tryLock(ctx)
@@ -260,6 +278,7 @@ func (l *Lock) Unlock() {
 	locksUnlockSeconds.Observe(time.Since(start).Seconds())
 
 	l.acquired = false
+	l.cond.Signal()
 }
 
 func (l *Lock) updateLock(ctx context.Context) {
