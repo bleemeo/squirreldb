@@ -2,6 +2,7 @@ package locks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -15,7 +16,10 @@ import (
 	"github.com/gocql/gocql"
 )
 
-const retryMaxDelay = 30 * time.Second
+const (
+	retryMaxDelay        = 30 * time.Second
+	minDelayBetweenCheck = 50 * time.Millisecond
+)
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
@@ -30,10 +34,11 @@ type Lock struct {
 	c          CassandraLocks
 	lockID     string
 
-	mutex    sync.Mutex
-	acquired bool
-	wg       sync.WaitGroup
-	cancel   context.CancelFunc
+	mutex                     sync.Mutex
+	lastFailAcquiredByAnother time.Time
+	acquired                  bool
+	wg                        sync.WaitGroup
+	cancel                    context.CancelFunc
 }
 
 // New creates a new CassandraLocks object.
@@ -105,7 +110,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	defer l.mutex.Unlock()
 
 	if l.acquired {
-		debug.Print(debug.Level1, logger, "lock %s is already acquired by local instance", l.name)
+		debug.Print(debug.Level2, logger, "lock %s is already acquired by local instance", l.name)
 
 		return false
 	}
@@ -114,20 +119,49 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 
 	start := time.Now()
 
+	if start.Sub(l.lastFailAcquiredByAnother) < minDelayBetweenCheck {
+		return false
+	}
+
 	locksTableInsertLockQuery := l.locksTableInsertLockQuery().WithContext(ctx)
 	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
-	acquired, err := locksTableInsertLockQuery.ScanCAS(nil, &holder, nil)
+
+	acquired, err := locksTableInsertLockQuery.ScanCAS(&holder)
 
 	cassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		logger.Printf("Unable to acquire lock: %v", err)
 
+		// Be careful, it indeed a pointer and we took the address...
+		// We have to guess that gocql will return a pointer to this error
+		// or errors.As won't work :(
+		var unused *gocql.RequestErrWriteTimeout
+
+		// The context *may* be canceled after C* took the look. So try to unlock it.
+		// Also if C* reply with timeout, we actually don't known if write succeeded or not.
+		if ctx.Err() != nil || errors.As(err, &unused) {
+			locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
+
+			locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
+
+			cassStart := time.Now()
+
+			_, err = locksTableDeleteLockQuery.ScanCAS(nil)
+			if err != nil {
+				debug.Print(debug.Level1, logger, "oportinistic unlock fail: %v", err)
+			}
+
+			cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
+		}
+
 		return false
 	}
 
 	if !acquired {
-		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s", l.name, holder)
+		l.lastFailAcquiredByAnother = time.Now()
+
+		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s (i'm %s)", l.name, holder, l.lockID)
 
 		return false
 	}
@@ -272,11 +306,12 @@ func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
 // Returns locks table insert lock Query.
 func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
 	query := l.c.session.Query(`
-		INSERT INTO locks (name, lock_id, timestamp)
-		VALUES (?, ?, toUnixTimestamp(now()))
-		IF NOT EXISTS
+		UPDATE locks
 		USING TTL ?
-	`, l.name, l.lockID, int64(l.timeToLive.Seconds()))
+		SET lock_id = ?, timestamp = toUnixTimestamp(now())
+		WHERE name = ?
+		IF lock_id in (?, NULL)
+	`, int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
 
 	return query
 }
