@@ -336,6 +336,8 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 	}
 
 	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
 	it := allPosting.Iterator()
 	pendingIds := make([]types.MetricID, 0, 10000)
 
