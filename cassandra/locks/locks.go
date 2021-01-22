@@ -31,12 +31,14 @@ type Lock struct {
 	c          CassandraLocks
 	lockID     string
 
-	mutex        sync.Mutex
-	cond         *sync.Cond // cond use the mutex as Locker
-	localLocking bool
-	acquired     bool
-	wg           sync.WaitGroup
-	cancel       context.CancelFunc
+	mutex            sync.Mutex
+	cond             *sync.Cond // cond use the mutex as Locker
+	localTryingCount int
+	localLocking     bool
+	cassAcquired     bool
+	acquired         bool
+	wg               sync.WaitGroup
+	cancel           context.CancelFunc
 }
 
 // New creates a new CassandraLocks object.
@@ -109,9 +111,11 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 // tryLock try to acquire the Lock and return true if acquire.
 func (l *Lock) tryLock(ctx context.Context) bool {
 	if l.acquired {
-		debug.Print(debug.Level2, logger, "lock %s is already acquired by local instance", l.name)
+		panic("impossible case: tryLock should never be called when lock is acquired")
+	}
 
-		return false
+	if l.cassAcquired {
+		panic("impossible case: tryLock should never be called when Cassandra lock is acquired")
 	}
 
 	var holder string
@@ -160,6 +164,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}
 
 	l.acquired = true
+	l.cassAcquired = true
 
 	subCtx, cancel := context.WithCancel(context.Background())
 
@@ -195,14 +200,20 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 		return false
 	}
 
+	l.localTryingCount++
+
+	defer func() {
+		l.localTryingCount--
+	}()
+
 	for l.acquired || l.localLocking {
 		l.cond.Wait()
 	}
 
-	if ctx.Err() != nil {
-		l.cond.Signal()
+	if l.cassAcquired {
+		l.acquired = true
 
-		return false
+		return true
 	}
 
 	l.localLocking = true
@@ -212,6 +223,10 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 
 		l.cond.Signal()
 	}()
+
+	if ctx.Err() != nil {
+		return false
+	}
 
 	for {
 		ok := l.tryLock(ctx)
@@ -253,6 +268,14 @@ func (l *Lock) Unlock() {
 		panic("unlock of unlocked mutex")
 	}
 
+	l.acquired = false
+
+	if l.localTryingCount > 0 {
+		l.cond.Signal()
+
+		return
+	}
+
 	l.cancel()
 	l.wg.Wait()
 
@@ -277,7 +300,8 @@ func (l *Lock) Unlock() {
 
 	locksUnlockSeconds.Observe(time.Since(start).Seconds())
 
-	l.acquired = false
+	l.cassAcquired = false
+
 	l.cond.Signal()
 }
 
