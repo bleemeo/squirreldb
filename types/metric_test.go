@@ -1,9 +1,12 @@
 package types
 
 import (
+	"math"
 	"math/rand"
 	"reflect"
 	"testing"
+
+	"github.com/prometheus/prometheus/pkg/value"
 )
 
 func TestDeduplicatePoints(t *testing.T) {
@@ -176,6 +179,124 @@ func TestDeduplicatePoints(t *testing.T) {
 				points: nil,
 			},
 			want: nil,
+		},
+		{
+			name: "duplicated_nan_never_prefered",
+			args: args{
+				points: []MetricPoint{
+					{
+						Timestamp: 10000,
+						Value:     math.NaN(),
+					},
+					{
+						Timestamp: 10000,
+						Value:     10,
+					},
+					{
+						Timestamp: 20000,
+						Value:     math.NaN(),
+					},
+					{
+						Timestamp: 20000,
+						Value:     20,
+					},
+					{
+						Timestamp: 30000,
+						Value:     math.Float64frombits(value.NormalNaN),
+					},
+					{
+						Timestamp: 30000,
+						Value:     30,
+					},
+					{
+						Timestamp: 40000,
+						Value:     40,
+					},
+					{
+						Timestamp: 40000,
+						Value:     math.Float64frombits(value.StaleNaN),
+					},
+				},
+			},
+			want: []MetricPoint{
+				{
+					Timestamp: 10000,
+					Value:     10,
+				},
+				{
+					Timestamp: 20000,
+					Value:     20,
+				},
+				{
+					Timestamp: 30000,
+					Value:     30,
+				},
+				{
+					Timestamp: 40000,
+					Value:     40,
+				},
+			},
+		},
+		{
+			name: "duplicated_nan_never_prefered_unsorted",
+			args: args{
+				points: []MetricPoint{
+					{
+						Timestamp: 10000,
+						Value:     math.NaN(),
+					},
+					{
+						Timestamp: 30000,
+						Value:     30,
+					},
+					{
+						Timestamp: 10000,
+						Value:     10,
+					},
+					{
+						Timestamp: 20000,
+						Value:     math.NaN(),
+					},
+					{
+						Timestamp: 40000,
+						Value:     40,
+					},
+					{
+						Timestamp: 30000,
+						Value:     math.Float64frombits(value.NormalNaN),
+					},
+					{
+						Timestamp: 30000,
+						Value:     math.Float64frombits(value.NormalNaN),
+					},
+					{
+						Timestamp: 40000,
+						Value:     math.Float64frombits(value.StaleNaN),
+					},
+					{
+						Timestamp: 20000,
+						Value:     20,
+					},
+				},
+			},
+			want: []MetricPoint{
+				{
+					Timestamp: 10000,
+					Value:     10,
+				},
+				{
+					Timestamp: 20000,
+					Value:     20,
+				},
+				{
+					Timestamp: 30000,
+					Value:     30,
+				},
+				{
+					Timestamp: 40000,
+					Value:     40,
+				},
+			},
 		},
 	}
 	for _, tt := range tests {

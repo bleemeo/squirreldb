@@ -792,7 +792,7 @@ func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTim
 				if i == 0 || point.Timestamp > maxTS {
 					temporaryData.Points = append(temporaryData.Points, point)
 					maxTS = point.Timestamp
-				} else if point.Timestamp < maxTS {
+				} else {
 					temporaryData.Points = append(temporaryData.Points, point)
 					needSort = true
 				}

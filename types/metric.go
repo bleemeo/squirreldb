@@ -1,6 +1,7 @@
 package types
 
 import (
+	"math"
 	"math/rand"
 	"sort"
 
@@ -77,7 +78,9 @@ func sortPoints(points []MetricPoint) {
 	}
 
 	sort.Slice(points, func(i, j int) bool {
-		return points[i].Timestamp < points[j].Timestamp
+		// If timestamp are equal, ensure NaN value are after because we kept
+		// the first value in DeduplicatePoints
+		return points[i].Timestamp < points[j].Timestamp || (points[i].Timestamp == points[j].Timestamp && math.IsNaN(points[j].Value))
 	})
 }
 
