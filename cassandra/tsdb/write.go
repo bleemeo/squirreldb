@@ -191,11 +191,7 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData, writingTimestamp int
 		TimeToLive: data.TimeToLive,
 	}
 
-	if err := c.writeRawPartitionData(partitionData, currentBaseTimestamp, writingTimestamp); err != nil {
-		return err
-	}
-
-	return nil
+	return c.writeRawPartitionData(partitionData, currentBaseTimestamp, writingTimestamp)
 }
 
 // Write raw partition data.

@@ -518,11 +518,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 		}
 	}
 
-	if err := r.sRem(ctx, knownMetricsKey, idsStr); err != nil {
-		return err
-	}
-
-	return nil
+	return r.sRem(ctx, knownMetricsKey, idsStr)
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.

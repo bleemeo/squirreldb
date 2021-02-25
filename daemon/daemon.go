@@ -33,7 +33,7 @@ import (
 
 // nolint: gochecknoglobals
 var (
-	Version string = "unset"
+	Version = "unset"
 	Commit  string
 	Date    string
 )
@@ -178,6 +178,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 }
 
 // New return a SquirrelDB not yet initialized. Only configuration is loaded and validated.
+//nolint: forbidigo // This function is allowed to use fmt.Print*
 func New() (squirreldb *SquirrelDB, err error) {
 	cfg, err := config.New()
 	if err != nil {

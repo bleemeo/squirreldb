@@ -569,7 +569,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 }
 
 func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.MetricID]map[string]string) *CassandraIndex {
-	index, err := new(context.Background(), &mockStore{}, Options{
+	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -1888,7 +1888,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	t5 := t4.Add(8 * 24 * time.Hour)
 	now := t5.Add(8 * 24 * time.Hour)
 
-	index1, err := new(context.Background(), &mockStore{}, Options{
+	index1, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -2057,7 +2057,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		}
 	}
 
-	index2, err := new(context.Background(), &mockStore{}, Options{
+	index2, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -2070,7 +2070,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	index3, err := new(context.Background(), &mockStore{}, Options{
+	index3, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -3671,7 +3671,7 @@ func Test_cache(t *testing.T) {
 	states := &mockState{}
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 
-	index1, err := new(context.Background(), store, Options{
+	index1, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3680,7 +3680,7 @@ func Test_cache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	index2, err := new(context.Background(), store, Options{
+	index2, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3774,7 +3774,7 @@ func Test_cluster(t *testing.T) {
 	lock := &mockLockFactory{}
 	states := &mockState{}
 
-	index1, err := new(context.Background(), store, Options{
+	index1, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -3831,7 +3831,7 @@ func Test_cluster(t *testing.T) {
 
 	metricsID[0] = tmp[0]
 
-	index2, err := new(context.Background(), store, Options{
+	index2, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
@@ -4150,7 +4150,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	store := &mockStore{}
-	index, err := new(context.Background(), store, Options{
+	index, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       &mockLockFactory{},
 		States:            &mockState{},
@@ -4417,7 +4417,7 @@ func Test_getTimeShards(t *testing.T) {
 	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
 	base := time.Unix(int64(baseTS)*3600, 0)
 
-	index, err := new(context.Background(), &mockStore{}, Options{
+	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})
@@ -4527,7 +4527,7 @@ func Test_FilteredLabelValues(t *testing.T) {
 	t3 := t2.Add(postingShardSize * 2)
 	now := t3.Add(postingShardSize * 2)
 
-	index1, err := new(context.Background(), &mockStore{}, Options{
+	index1, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 	})

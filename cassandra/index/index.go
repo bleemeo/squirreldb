@@ -169,7 +169,7 @@ const (
 
 // New creates a new CassandraIndex object.
 func New(ctx context.Context, session *gocql.Session, options Options) (*CassandraIndex, error) {
-	return new(
+	return initialize(
 		ctx,
 		cassandraStore{
 			session:    session,
@@ -179,7 +179,7 @@ func New(ctx context.Context, session *gocql.Session, options Options) (*Cassand
 	)
 }
 
-func new(ctx context.Context, store storeImpl, options Options) (*CassandraIndex, error) {
+func initialize(ctx context.Context, store storeImpl, options Options) (*CassandraIndex, error) {
 	index := &CassandraIndex{
 		store:                    store,
 		options:                  options,

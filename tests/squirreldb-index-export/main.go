@@ -195,15 +195,15 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 				return fmt.Errorf("parse ID: %w", err)
 			}
 
-			ids = append(ids, types.MetricID(id))
+			ids = append(ids, types.MetricID(id)) // nolint: makezero
 
 			lbls, err := parser.ParseMetric(record[1])
 			if err != nil {
 				return fmt.Errorf("parse labels: %w", err)
 			}
 
-			metrics = append(metrics, lbls)
-			expirations = append(expirations, expiration)
+			metrics = append(metrics, lbls)               // nolint: makezero
+			expirations = append(expirations, expiration) // nolint: makezero
 		}
 
 		if len(metrics) == 0 {
