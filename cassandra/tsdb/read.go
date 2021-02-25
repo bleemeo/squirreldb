@@ -190,8 +190,12 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 			return tmp, fmt.Errorf("gorillaDecodeAggregate: %w", err)
 		}
 
-		aggregateData.Points = mergePoints(aggregateData.Points, tmp)
-		aggregateData.TimeToLive = compare.MaxInt64(aggregateData.TimeToLive, timeToLive)
+		points := filterPoints(tmp, fromTimestamp, toTimestamp)
+
+		if len(points) > 0 {
+			aggregateData.Points = mergePoints(aggregateData.Points, points)
+			aggregateData.TimeToLive = compare.MaxInt64(aggregateData.TimeToLive, timeToLive)
+		}
 
 		start = time.Now()
 	}
