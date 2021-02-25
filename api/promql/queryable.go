@@ -109,11 +109,11 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
-func (q querier) LabelValues(name string) ([]string, storage.Warnings, error) {
+func (q querier) LabelValues(name string, matchers ...*labels.Matcher) ([]string, storage.Warnings, error) {
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelValues(q.ctx, minT, maxT, name, nil)
+	res, err := q.index.LabelValues(q.ctx, minT, maxT, name, matchers)
 
 	return res, nil, err
 }
