@@ -39,14 +39,14 @@ func New(options Options) (*gocql.Session, bool, error) {
 	if !keyspaceExists(session, options.Keyspace) {
 		// Not sure if we are allowed to create keyspace concurrently. Add a random jitter to
 		// reduce change of concurrent keyspace creation
-		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond) // nolint: gosec
+		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond) //nolint: gosec
 
 		replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 		query := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
 
 		err = query.Exec()
 
-		// nolint: gocritic
+		//nolint: gocritic
 		if errors.Is(err, &gocql.RequestErrAlreadyExists{}) {
 			keyspaceCreated = false
 		} else if err != nil {

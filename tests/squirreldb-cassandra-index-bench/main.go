@@ -21,7 +21,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
@@ -150,7 +150,7 @@ func main() {
 		test(ctx, makeIndex(ctx))
 	}
 
-	rnd := rand.New(rand.NewSource(*seed)) // nolint: gosec
+	rnd := rand.New(rand.NewSource(*seed)) //nolint: gosec
 	bench(ctx, makeIndex, rnd)
 
 	verifyHadIssue := false

@@ -21,7 +21,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
@@ -117,7 +117,7 @@ func do() error {
 			lock := lockFactory.CreateLock(subLockName, *lockTTL)
 
 			for t := 0; t < *workerThreads; t++ {
-				workerSeed := rand.Int63() // nolint: gosec
+				workerSeed := rand.Int63() //nolint: gosec
 				p := p
 				t := t
 				n := n
@@ -204,7 +204,7 @@ func do() error {
 }
 
 func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory *locks.CassandraLocks, subLockName string, lock types.TryLocker) result {
-	rnd := rand.New(rand.NewSource(workerSeed)) // nolint: gosec
+	rnd := rand.New(rand.NewSource(workerSeed)) //nolint: gosec
 	r := result{}
 
 	for ctx.Err() == nil {

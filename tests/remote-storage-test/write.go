@@ -157,7 +157,7 @@ func writeWorker(workChannel chan prompb.WriteRequest) {
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteWrite, bytes.NewBuffer(compressedBody)) // nolint: noctx
+		request, err := http.NewRequest("POST", *remoteWrite, bytes.NewBuffer(compressedBody)) //nolint: noctx
 		if err != nil {
 			log.Fatalf("unable to create request: %v", err)
 		}

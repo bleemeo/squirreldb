@@ -409,7 +409,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
 }
 
-func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { // nolint: gocognit
+func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { //nolint: gocognit
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -513,7 +513,7 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 
 // verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { // nolint: gocognit
+func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { //nolint: gocognit
 	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
 	if err != nil {
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
@@ -593,7 +593,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { // nolint: gocognit
+func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { //nolint: gocognit
 	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
@@ -748,7 +748,7 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 }
 
 // check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { // nolint: gocognit,gocyclo
+func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { //nolint: gocognit,gocyclo
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
 
@@ -1368,7 +1368,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { // nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -1510,7 +1510,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 
 		wantedEntryExpiration := now.Add(time.Duration(entry.ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) // nolint: gosec
+		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
 		// The 3*backgroundCheckInterval is to be slightly larger than 2*backgroundCheckInterval used in lookupIDsFromCache.
 		// It ensure that live metrics stay in cache.
 		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration) || entry.idData.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
@@ -1552,7 +1552,7 @@ func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, 
 			// and then refresh entry from Cassandra (ignore the cache).
 			wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
 			cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-			cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) // nolint: gosec
+			cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
 
 			if err := c.refreshExpiration(ctx, data.id, data.cassandraEntryExpiration, cassandraExpiration); err != nil {
 				c.lookupIDMutex.Unlock()
@@ -1712,7 +1712,7 @@ type lookupEntry struct {
 // * If expired, delete entry for this metric from the index (the opposite of creation)
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pending []lookupEntry, allowForcingIDAndExpiration bool) ([]lookupEntry, error) { // nolint: gocognit
+func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pending []lookupEntry, allowForcingIDAndExpiration bool) ([]lookupEntry, error) { //nolint: gocognit
 	start := time.Now()
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 
@@ -1765,7 +1765,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 
 		wantedEntryExpiration := now.Add(time.Duration(entry.ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) // nolint: gosec
+		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
 
 		if !pending[i].cassandraEntryExpiration.IsZero() && allowForcingIDAndExpiration {
 			cassandraExpiration = pending[i].cassandraEntryExpiration
@@ -1864,7 +1864,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 //   reads won't get inconsistent result.
 //   It also means that retry of write will fix the issue
 // * The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
-func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []lookupEntry, updateCache bool) error { // nolint: gocognit
+func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []lookupEntry, updateCache bool) error { //nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -2830,7 +2830,7 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is inspired from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { // nolint: gocognit,gocyclo
+func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { //nolint: gocognit,gocyclo
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for _, m := range matchers {

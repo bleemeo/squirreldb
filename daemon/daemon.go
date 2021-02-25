@@ -31,7 +31,7 @@ import (
 	"github.com/gocql/gocql"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	Version = "unset"
 	Commit  string

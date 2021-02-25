@@ -1,7 +1,7 @@
 // Disable stylecheck because is complain on error message (should not be capitalized)
 // but we prefer keeping the exact message used by Prometheus.
 
-// nolint: stylecheck
+//nolint: stylecheck
 package promql
 
 import (
@@ -39,7 +39,7 @@ const (
 	statusError   status = "error"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	minTime = time.Unix(0, 0).UTC()
 	maxTime = time.Unix(math.MaxInt32*3600, 0).UTC()

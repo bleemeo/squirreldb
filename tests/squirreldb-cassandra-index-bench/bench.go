@@ -280,7 +280,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
 }
 
-func sentInsertRequest(now time.Time, rnd *rand.Rand, proc procfs.Proc, workChannel chan []types.LookupRequest, resultChan chan int) int { // nolint: gocognit
+func sentInsertRequest(now time.Time, rnd *rand.Rand, proc procfs.Proc, workChannel chan []types.LookupRequest, resultChan chan int) int { //nolint: gocognit
 	shardCount := *shardEnd - *shardStart + 1
 	instantStart := time.Now()
 	instantCount := 0

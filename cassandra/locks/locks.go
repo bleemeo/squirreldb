@@ -51,11 +51,11 @@ func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) 
 	// Improve a bit, and make sure the one which created the keyspace
 	// try first to create the tables.
 	if createdKeySpace {
-		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) // nolint: gosec
+		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) //nolint: gosec
 
 		err = initTable(session)
 	} else if !tableExists(session) {
-		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) // nolint: gosec
+		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint: gosec
 		debug.Print(1, logger, "created lock tables")
 
 		err = initTable(session)
@@ -100,7 +100,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 		name:       name,
 		timeToLive: timeToLive,
 		c:          c,
-		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)), // nolint: gosec
+		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)), //nolint: gosec
 	}
 
 	l.cond = sync.NewCond(&l.mutex)
@@ -171,7 +171,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	l.cancel = cancel
 
 	l.wg.Add(1)
-	go func() { // nolint: wsl
+	go func() { //nolint: wsl
 		defer l.wg.Done()
 		l.updateLock(subCtx)
 	}()
@@ -240,7 +240,7 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 			return false
 		}
 
-		jitter := currentDelay.Seconds() * (1 + rand.Float64()/5) // nolint: gosec
+		jitter := currentDelay.Seconds() * (1 + rand.Float64()/5) //nolint: gosec
 		select {
 		case <-time.After(time.Duration(jitter) * time.Second):
 		case <-ctx.Done():
@@ -294,7 +294,7 @@ func (l *Lock) Unlock() {
 
 		cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
 
-		return err // nolint: wrapcheck
+		return err //nolint: wrapcheck
 	},
 		retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger, "free lock")
 
@@ -325,7 +325,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 				cassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
-				return err // nolint: wrapcheck
+				return err //nolint: wrapcheck
 			}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 				"refresh lock "+l.name,
 			)

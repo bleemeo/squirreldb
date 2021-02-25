@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/prometheus/promql/parser"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb", "Cassandra keyspace")
@@ -195,15 +195,15 @@ func runImport(cassandraIndex *index.CassandraIndex) error {
 				return fmt.Errorf("parse ID: %w", err)
 			}
 
-			ids = append(ids, types.MetricID(id)) // nolint: makezero
+			ids = append(ids, types.MetricID(id)) //nolint: makezero
 
 			lbls, err := parser.ParseMetric(record[1])
 			if err != nil {
 				return fmt.Errorf("parse labels: %w", err)
 			}
 
-			metrics = append(metrics, lbls)               // nolint: makezero
-			expirations = append(expirations, expiration) // nolint: makezero
+			metrics = append(metrics, lbls)               //nolint: makezero
+			expirations = append(expirations, expiration) //nolint: makezero
 		}
 
 		if len(metrics) == 0 {

@@ -28,7 +28,7 @@ func (idx *limitingIndex) LookupIDs(ctx context.Context, requests []types.Lookup
 func (idx *limitingIndex) Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
 	r, err := idx.index.Search(ctx, start, end, matchers)
 	if err != nil {
-		return r, err // nolint: wrapcheck
+		return r, err //nolint: wrapcheck
 	}
 
 	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(r.Count()))

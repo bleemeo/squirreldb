@@ -71,7 +71,7 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData, writingTimestamp int64) {
 	for _, data := range metrics {
 		retry.Print(func() error {
-			return c.writeRawData(data, writingTimestamp) // nolint: scopelint
+			return c.writeRawData(data, writingTimestamp) //nolint: scopelint
 		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"write points to Cassandra",
 		)

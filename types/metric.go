@@ -115,7 +115,7 @@ func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond i
 func AddDuplicateForTest(input []MetricPoint, numberDuplicate int) []MetricPoint {
 	duplicates := make([]int, numberDuplicate)
 	for i := 0; i < numberDuplicate; i++ {
-		duplicates[i] = rand.Intn(len(input)) // nolint: gosec
+		duplicates[i] = rand.Intn(len(input)) //nolint: gosec
 	}
 	sort.Ints(duplicates)
 

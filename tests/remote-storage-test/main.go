@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-// nolint: gochecknoglobals
+//nolint: gochecknoglobals
 var (
 	remoteWrite = flag.String("write-url", "http://localhost:9201/write", "URL of remote write")
 	remoteRead  = flag.String("read-url", "http://localhost:9201/read", "URL of read write")

@@ -236,7 +236,7 @@ func read(now time.Time) {
 			},
 		}
 
-		i := rand.Intn(6) // nolint: gosec
+		i := rand.Intn(6) //nolint: gosec
 		workChannel <- readRequest{
 			name: fmt.Sprintf("filler-batch-full-%d", n),
 			request: prompb.ReadRequest{
@@ -296,7 +296,7 @@ func readWorker(workChannel chan readRequest) {
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteRead, bytes.NewBuffer(compressedBody)) // nolint: noctx
+		request, err := http.NewRequest("POST", *remoteRead, bytes.NewBuffer(compressedBody)) //nolint: noctx
 		if err != nil {
 			log.Fatalf("unable to create request: %v", err)
 		}
