@@ -10,6 +10,7 @@ import (
 	"squirreldb/types"
 	"time"
 
+	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -112,7 +113,12 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 
 	for i, promSample := range promSamples {
 		points[i].Timestamp = promSample.Timestamp
-		points[i].Value = promSample.Value
+		if math.IsNaN(promSample.Value) && !value.IsStaleNaN(promSample.Value) {
+			// Ensure canonical NaN value (but still allow StaleNaN).
+			points[i].Value = math.Float64frombits(value.NormalNaN)
+		} else {
+			points[i].Value = promSample.Value
+		}
 	}
 
 	return points
