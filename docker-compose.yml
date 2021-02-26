@@ -17,7 +17,7 @@ services:
         # monitoring to avoid false notification.
         glouton.enable: "false"
   squirreldb:
-    image: squirreldb
+    image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
         glouton.enable: "false"

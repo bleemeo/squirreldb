@@ -124,7 +124,7 @@ services:
     command: ["/bin/sh", "/usr/bin/redis-init.sh"]
 
   squirreldb1:
-    image: squirreldb
+    image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -136,7 +136,7 @@ services:
       default:
         ipv4_address: 172.28.0.31 # SquirrelDB don't care about its IP, but nginx will only resolv DNS name on startup. So if SquirrelDB change their IP, nginx will no longer send traffic to them
   squirreldb2:
-    image: squirreldb
+    image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
         glouton.enable: "false"

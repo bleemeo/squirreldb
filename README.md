@@ -4,20 +4,6 @@ SquirrelDB is a scalable high-available timeseries database (TSDB) compatible wi
 SquirrelDB store data in Cassandra which allow to rely on Cassandra's scalability and availability.
 
 
-## Build a release
-
-SquirrelDB use goreleaser and Docker to build its release, to build the release binaries
-and Docker images run:
-
-```
-# Optional, to speed-up subsequent build
-mkdir -p .build-cache
-./build.sh
-```
-
-The resulting binaries are in dist/ folder and a Docker image named "squirreldb" is built
-
-
 ## Quickstart using Docker-compose
 
 If you have Docker compose, you may run SquirrelDB, its Cassandra and Prometheus + Grafana
@@ -46,6 +32,20 @@ SquirrelDB allow both availability and scalability:
   scalling them is just adding more of them behind a load-balancer (like nginx).
 
 See [examples/squirreldb-ha](./examples/squirreldb_ha/) for a quickstart on HA setup.
+
+
+## Build a release
+
+SquirrelDB use goreleaser and Docker to build its release, to build the release binaries
+and Docker images run:
+
+```
+# Optional, to speed-up subsequent build
+mkdir -p .build-cache
+./build.sh
+```
+
+The resulting binaries are in dist/ folder and a Docker image named "squirreldb" is built
 
 
 ## Test and Develop
