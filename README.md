@@ -3,6 +3,7 @@
 SquirrelDB is a scalable high-available timeseries database (TSDB) compatible with Prometheus remote storage.
 SquirrelDB store data in Cassandra which allow to rely on Cassandra's scalability and availability.
 
+
 ## Build a release
 
 SquirrelDB use goreleaser and Docker to build its release, to build the release binaries
@@ -16,6 +17,7 @@ mkdir -p .build-cache
 
 The resulting binaries are in dist/ folder and a Docker image named "squirreldb" is built
 
+
 ## Quickstart using Docker-compose
 
 If you have Docker compose, you may run SquirrelDB, its Cassandra and Prometheus + Grafana
@@ -27,8 +29,23 @@ docker-compose up -d
 
 Then, go to http://localhost:3000 (default credentials are admin/admin) and:
 
-* Add a Prometheus datasource (using http://squirreldb:9090 as URL)
+* Add a Prometheus datasource (using http://squirreldb:9201 as URL)
 * Create your dashboard or import a dashboard (for example import dashboard with ID 1860).
+
+
+## HA setup
+
+SquirrelDB allow both availability and scalability:
+
+* The long term storage availability and scalability is done by a Cassandra cluster. Setup
+  a Cassandra cluster and use a replication level > 1 (3 is recommended).
+* The short term storage (by default last 15 minutes) which is store in-memory could be
+  moved to Redis.
+  A Redis cluster will provide availability and scalability of short term storage.
+* When short term storage is provided by Redis, SquirrelDB instance are stateless,
+  scalling them is just adding more of them behind a load-balancer (like nginx).
+
+See [examples/squirreldb-ha](./examples/squirreldb_ha/) for a quickstart on HA setup.
 
 
 ## Test and Develop
@@ -58,19 +75,6 @@ mkdir -p .build-cache  # enable cache and speed-up build/lint run
 ./lint.sh
 ```
 
-## HA setup
-
-SquirrelDB allow both availability and scalability:
-
-* The long term storage availability and scalability is done by a Cassandra cluster. Setup
-  a Cassandra cluster and use a replication level > 1 (3 is recommended).
-* The short term storage (by default last 15 minutes) which is store in-memory could be
-  moved to Redis.
-  A Redis cluster will provide availability and scalability of short term storage.
-* When short term storage is provided by Redis, SquirrelDB instance are stateless,
-  scalling them is just adding more of them behind a load-balancer (like nginx).
-
-See examples/squirreldb-ha for a quickstart on HA setup.
 
 ### Note on VS code
 

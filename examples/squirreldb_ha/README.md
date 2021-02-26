@@ -1,6 +1,6 @@
 # SquirrelDB HA setup
 
-This setup provide both scalability and availability of a Prometheus remote store using SquirrleDB.
+This setup provide both scalability and availability of a Prometheus remote store using SquirrelDB.
 
 To achieve this goal, you will need:
 
@@ -21,8 +21,8 @@ cassandra:
   # Once connected, SquirrelDB will get all other Cassandra node from the one it connected to.
   # So either have a majority a node addresses or a virtual address always reachable (load-balancer, Kubernetes service, ...)
   addresses:
-  - "cassanra1:9042"
-  - "cassanra2:9042"
+  - "cassandra1:9042"
+  - "cassandra2:9042"
   # Replication factor should be odd, since SquirrelDB rely on quorum for it's consistency
   replication_factor: 3
 redis:
@@ -92,7 +92,7 @@ nodetool removenode 7fdd8c1a-5830-4796-ad69-a791523e64f9
 ```
 
 For Redis, if you recreate a node (e.g. lost data, not just restart it), you will need to drop and re-add the node:
-* Fist find the node id of the lost node, using:
+* First find the node id of the lost node, using:
   ```
   docker exec -ti squirreldb_ha_redis1_1 redis-cli cluster nodes
   ```
