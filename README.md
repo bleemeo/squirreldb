@@ -1,5 +1,10 @@
 # SquirrelDB
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/bleemeo/squirreldb)](https://goreportcard.com/report/github.com/bleemeo/squirreldb)
+![Docker Image Version (latest by date)](https://img.shields.io/docker/v/bleemeo/squirreldb)
+![Docker Image Size (latest by date)](https://img.shields.io/docker/image-size/bleemeo/squirreldb)
+[![Open Source? Yes!](https://badgen.net/badge/Open%20Source%20%3F/Yes%21/blue?icon=github)](https://github.com/bleemeo/squirreldb/)
+
 SquirrelDB is a scalable high-available timeseries database (TSDB) compatible with Prometheus remote storage.
 SquirrelDB store data in Cassandra which allow to rely on Cassandra's scalability and availability.
 
