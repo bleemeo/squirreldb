@@ -78,24 +78,6 @@ The first command will:
 * The second will update metric, and keep only 1/2 to expire. The other will get the expiration date updated.
   Then run the expiration which should only delete 15k metrics
 
-# squirreldb-index-export
-
-This command allow to export/import SquirrelDB index to CSV. This should only
-be useful during development when one when to change index storage format without
-losing all data.
-
-DO NOT USE IT ON PRODUCTION. This is not well tested and will loss some information.
-
-Example of export + verification of the index:
-```
-go run tests/squirreldb-index-export/main.go -export -verify > all-metrics.csv
-```
-
-Example of re-import (this will drop existing table, which normally leave a Cassandra snapshot):
-```
-go run tests/squirreldb-index-export/main.go -drop-tables -import < all-metrics.csv
-```
-
 
 # remote-storage-test
 
