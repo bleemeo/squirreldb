@@ -14,12 +14,12 @@ Tests:
 To run test, you will need a Cassandra:
 
 ```
-docker run --name squirreldb-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
+docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
 ```
 
 And tell test programs to use this Cassandra:
 ```
-export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
+export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
 ```
 
 # squirreldb-cassandra-lock-bench

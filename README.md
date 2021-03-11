@@ -80,6 +80,13 @@ mkdir -p .build-cache  # enable cache and speed-up build/lint run
 ./lint.sh
 ```
 
+SquirrelDB has some tests that run using a real Cassandra (not like Go test which
+mock Cassandra). A helper shell script will start a Cassandra (using Docker) and run
+those tests:
+```
+./run-tests.sh
+```
+
 
 ### Note on VS code
 
