@@ -2,33 +2,36 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
+	"golang.org/x/sync/errgroup"
 )
 
-func write(now time.Time) {
+func write(ctx context.Context, now time.Time) error {
 	log.Println("Starting write phase")
 
 	workChannel := make(chan prompb.WriteRequest, *threads)
 
-	var wg sync.WaitGroup
+	group, ctx := errgroup.WithContext(ctx)
 
 	for n := 0; n < *threads; n++ {
-		wg.Add(1)
+		group.Go(func() error {
+			err := writeWorker(ctx, workChannel)
 
-		go func() {
-			defer wg.Done()
+			// make sure workChannel is drained
+			for range workChannel {
+			}
 
-			writeWorker(workChannel)
-		}()
+			return err
+		})
 	}
 
 	// First we generate "historical" data, because some store don't like
@@ -142,24 +145,36 @@ func write(now time.Time) {
 			}
 		}
 	}
+
 	close(workChannel)
-	wg.Wait()
+
+	err := group.Wait()
 
 	log.Println("Finished write phase")
+
+	return err
 }
 
-func writeWorker(workChannel chan prompb.WriteRequest) {
+func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest) error {
 	for req := range workChannel {
+		if ctx.Err() != nil {
+			break
+		}
+
 		body, err := req.Marshal()
 		if err != nil {
-			log.Fatalf("Unable to marshal req: %v", err)
+			log.Printf("Unable to marshal req: %v", err)
+
+			return err
 		}
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteWrite, bytes.NewBuffer(compressedBody)) //nolint: noctx
+		request, err := http.NewRequestWithContext(ctx, "POST", *remoteWrite, bytes.NewBuffer(compressedBody))
 		if err != nil {
-			log.Fatalf("unable to create request: %v", err)
+			log.Printf("unable to create request: %v", err)
+
+			return err
 		}
 
 		request.Header.Set("Content-Encoding", "snappy")
@@ -168,19 +183,27 @@ func writeWorker(workChannel chan prompb.WriteRequest) {
 
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
-			log.Fatalf("write failed: %v", err)
+			log.Printf("write failed: %v", err)
+
+			return err
 		}
 
 		if response.StatusCode >= 300 {
 			content, _ := ioutil.ReadAll(response.Body)
-			log.Fatalf("Response code = %d, content: %s", response.StatusCode, content)
+			log.Printf("Response code = %d, content: %s", response.StatusCode, content)
+
+			return err
 		}
 
 		_, err = io.Copy(ioutil.Discard, response.Body)
 		if err != nil {
-			log.Fatalf("Failed to read response: %v", err)
+			log.Printf("Failed to read response: %v", err)
+
+			return err
 		}
 
 		response.Body.Close()
 	}
+
+	return nil
 }

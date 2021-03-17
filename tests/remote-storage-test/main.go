@@ -4,10 +4,13 @@ import (
 	"context"
 	"flag"
 	"log"
+	"os"
 	"squirreldb/daemon"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -26,14 +29,35 @@ var (
 func main() {
 	flag.Parse()
 
-	var wg sync.WaitGroup
+	err := daemon.RunWithSignalHandler(run)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	metricResult, _ := prometheus.DefaultGatherer.Gather()
+	for _, mf := range metricResult {
+		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
+	}
+
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(ctx context.Context) error {
+	var (
+		wg          sync.WaitGroup
+		squirrelErr error
+	)
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	if *startSquirrelDB {
 		squirreldb, err := daemon.New()
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 
 		wg.Add(1)
@@ -41,32 +65,32 @@ func main() {
 		go func() {
 			defer wg.Done()
 
-			err := squirreldb.Run(ctx)
-			if err != nil {
-				log.Fatal(err)
-			}
+			squirrelErr = squirreldb.Run(ctx)
 		}()
 
-		time.Sleep(3 * time.Second)
+		squirreldb.Ready(ctx)
 	}
 
 	now, err := time.Parse(time.RFC3339, *nowStr)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	log.Printf("now = %v", now)
 
 	if !*skipWrite {
-		write(now)
+		if err := write(ctx, now); err != nil {
+			return err
+		}
 	}
 
 	if !*skipRead {
-		read(now)
+		if err := read(ctx, now); err != nil {
+			return err
+		}
 	}
 
-	cancel()
-	wg.Wait()
+	return squirrelErr
 }
 
 func time2Millisecond(t time.Time) int64 {

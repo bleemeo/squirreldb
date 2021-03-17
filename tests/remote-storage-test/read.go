@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,13 +10,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"golang.org/x/sync/errgroup"
 )
 
 type readRequest struct {
@@ -24,21 +25,23 @@ type readRequest struct {
 	response prompb.ReadResponse
 }
 
-func read(now time.Time) {
+func read(ctx context.Context, now time.Time) error {
 	log.Println("Starting read phase")
 
 	workChannel := make(chan readRequest, *threads)
 
-	var wg sync.WaitGroup
+	group, ctx := errgroup.WithContext(ctx)
 
 	for n := 0; n < *threads; n++ {
-		wg.Add(1)
+		group.Go(func() error {
+			err := readWorker(ctx, workChannel)
 
-		go func() {
-			defer wg.Done()
+			// make sure workChannel is drained
+			for range workChannel {
+			}
 
-			readWorker(workChannel)
-		}()
+			return err
+		})
 	}
 
 	workChannel <- readRequest{
@@ -282,55 +285,84 @@ func read(now time.Time) {
 	}
 
 	close(workChannel)
-	wg.Wait()
+
+	err := group.Wait()
 
 	log.Println("Finished read phase")
+
+	return err
 }
 
-func readWorker(workChannel chan readRequest) {
+func readWorker(ctx context.Context, workChannel chan readRequest) (err error) {
 	for req := range workChannel {
-		body, err := req.request.Marshal()
-		if err != nil {
-			log.Fatalf("Unable to marshal req: %v", err)
+		if ctx.Err() != nil {
+			if err == nil {
+				err = ctx.Err()
+			}
+
+			break
+		}
+
+		body, newErr := req.request.Marshal()
+		if newErr != nil {
+			log.Printf("Unable to marshal req: %v", newErr)
+
+			return newErr
 		}
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequest("POST", *remoteRead, bytes.NewBuffer(compressedBody)) //nolint: noctx
-		if err != nil {
-			log.Fatalf("unable to create request: %v", err)
+		request, newErr := http.NewRequestWithContext(ctx, "POST", *remoteRead, bytes.NewBuffer(compressedBody))
+		if newErr != nil {
+			log.Printf("unable to create request: %v", newErr)
+
+			return newErr
 		}
 
 		request.Header.Set("Content-Encoding", "snappy")
 		request.Header.Set("Content-Type", "application/x-protobuf")
 		request.Header.Set("X-Prometheus-Remote-Read-Version", "2.0.0")
 
-		response, err := http.DefaultClient.Do(request)
-		if err != nil {
-			log.Fatalf("read failed: %v", err)
+		response, newErr := http.DefaultClient.Do(request)
+		if newErr != nil {
+			log.Printf("read failed: %v", newErr)
+
+			return newErr
 		}
 
 		content, _ := ioutil.ReadAll(response.Body)
 
 		if response.StatusCode >= 300 {
-			log.Fatalf("Response code = %d, content: %s", response.StatusCode, content)
+			newErr = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)
+
+			log.Println(newErr)
+
+			return newErr
 		}
 
 		response.Body.Close()
 
-		uncompressed, err := snappy.Decode(nil, content)
-		if err != nil {
-			log.Fatalf("failed to uncompress: %v", err)
+		uncompressed, newErr := snappy.Decode(nil, content)
+		if newErr != nil {
+			log.Printf("failed to uncompress: %v", newErr)
+
+			return newErr
 		}
 
 		var pbResponce prompb.ReadResponse
 
-		if err := proto.Unmarshal(uncompressed, &pbResponce); err != nil {
-			log.Fatalf("failed to decode: %v", err)
+		if newErr := proto.Unmarshal(uncompressed, &pbResponce); newErr != nil {
+			log.Printf("failed to decode: %v", newErr)
+
+			return newErr
 		}
 
-		equal(req.name, pbResponce, req.response)
+		if newErr := equal(req.name, pbResponce, req.response); newErr != nil {
+			err = newErr
+		}
 	}
+
+	return err
 }
 
 func labelsEqual(got, want []prompb.Label) bool {
@@ -446,10 +478,12 @@ func sortTimeseries(v []*prompb.TimeSeries) []*prompb.TimeSeries {
 	return v2
 }
 
-func equal(name string, got, want prompb.ReadResponse) {
+func equal(name string, got, want prompb.ReadResponse) (err error) {
 	for i, gotResult := range got.Results {
 		if i >= len(want.Results) {
-			log.Printf("%s: got more result than expected. Extra result labels of 1st timeseries: %v", name, gotResult.Timeseries[0].Labels)
+			err = fmt.Errorf("%s: got more result than expected. Extra result labels of 1st timeseries: %v", name, gotResult.Timeseries[0].Labels)
+
+			log.Println(err)
 
 			continue
 		}
@@ -458,7 +492,9 @@ func equal(name string, got, want prompb.ReadResponse) {
 
 		for j, gotTS := range sortedTimeseries {
 			if j >= len(want.Results[i].Timeseries) {
-				log.Printf("%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v", name, gotTS.Labels)
+				err = fmt.Errorf("%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v", name, gotTS.Labels)
+
+				log.Println(err)
 
 				continue
 			}
@@ -466,22 +502,32 @@ func equal(name string, got, want prompb.ReadResponse) {
 			wantTS := want.Results[i].Timeseries[j]
 
 			if !labelsEqual(gotTS.Labels, wantTS.Labels) {
-				log.Printf("%s: labels = %v want %v", name, gotTS.Labels, wantTS.Labels)
+				err = fmt.Errorf("%s: labels = %v want %v", name, gotTS.Labels, wantTS.Labels)
+
+				log.Println(err)
 			}
 
 			if msg := samplesEqual(gotTS.Samples, wantTS.Samples); msg != "" {
-				log.Printf("%s: Results[%d].TS[%d] = %s", name, i, j, msg)
+				err = fmt.Errorf("%s: Results[%d].TS[%d] = %s", name, i, j, msg)
+
+				log.Println(err)
 			}
 		}
 
 		if len(want.Results[i].Timeseries) > len(gotResult.Timeseries) {
-			log.Printf("%s: want %d more TS in Results[%d]", name, len(want.Results[i].Timeseries)-len(gotResult.Timeseries), i)
+			err = fmt.Errorf("%s: want %d more TS in Results[%d]", name, len(want.Results[i].Timeseries)-len(gotResult.Timeseries), i)
+
+			log.Println(err)
 		}
 	}
 
 	if len(want.Results) > len(got.Results) {
-		log.Printf("%s: want %d more Results", name, len(want.Results)-len(got.Results))
+		err = fmt.Errorf("%s: want %d more Results", name, len(want.Results)-len(got.Results))
+
+		log.Println(err)
 	}
+
+	return err
 }
 
 func fmtSample(s prompb.Sample) string {

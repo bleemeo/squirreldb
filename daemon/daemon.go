@@ -65,6 +65,9 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
+
+	l      sync.Mutex
+	readyC chan interface{}
 }
 
 //nolint: gochecknoglobals
@@ -119,6 +122,8 @@ func (s *SquirrelDB) Run(ctx context.Context) error {
 		return err
 	}
 
+	close(s.readyC)
+
 	<-runTerminated
 
 	return err
@@ -127,11 +132,37 @@ func (s *SquirrelDB) Run(ctx context.Context) error {
 // Init initialize SquirrelDB Locks & State. It also validate configuration with cluster (need Cassandra access)
 // Init could be retried.
 func (s *SquirrelDB) Init() error {
+	s.l.Lock()
+
+	if s.readyC == nil {
+		s.readyC = make(chan interface{})
+	}
+
+	s.l.Unlock()
+
 	if !s.Config.Validate() {
 		return errBadConfig
 	}
 
 	return nil
+}
+
+// Ready block until SquirrelDB is ready (or ctx is canceled).
+func (s *SquirrelDB) Ready(ctx context.Context) {
+	s.l.Lock()
+
+	if s.readyC == nil {
+		s.readyC = make(chan interface{})
+	}
+
+	ch := s.readyC
+
+	s.l.Unlock()
+
+	select {
+	case <-ch:
+	case <-ctx.Done():
+	}
 }
 
 // RunWithSignalHandler runs given function with a context that is canceled on kill or ctrl+c
@@ -379,9 +410,9 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 		}
 	}
 
-	readiness <- ctx.Err()
-
 	s.api.Ready()
+
+	readiness <- ctx.Err()
 
 	<-ctx.Done()
 
