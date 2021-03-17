@@ -2,9 +2,11 @@ package index
 
 import (
 	"squirreldb/types"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
@@ -15,13 +17,32 @@ type labelsLookupCache struct {
 	cache map[types.MetricID]labelsEntry
 }
 
+// searchCache provide cache for Search() query.
+// This cache use TTL and max-size.
+// It's eviction policy is random (Golang map order).
+// The TTL used is rather short because invalidation isn't correct (only TTL based).
+// However (due to usage done in index.go) it won't yield ID that should NOT match,
+// but could take up to TTL to return ID that matched (stall result).
+type searchCache struct {
+	l     sync.Mutex
+	salt  []byte
+	cache map[uint64]searchEntry
+}
+
 type labelsEntry struct {
 	value           labels.Labels
 	cassandraExpire time.Time
 }
 
+type searchEntry struct {
+	value  []types.MetricID
+	expire time.Time
+}
+
 const (
-	labelCacheMaxSize = 10000
+	labelCacheMaxSize  = 10000
+	searchCacheMaxSize = 10000
+	searchCacheTTL     = 1 * time.Minute
 )
 
 // Get return the non-expired cache entry or an nil list.
@@ -103,4 +124,106 @@ func (c *labelsLookupCache) get(now time.Time, id types.MetricID) labels.Labels 
 	}
 
 	return entry.value
+}
+
+// Get return the non-expired cache entry or an nil list.
+func (c *searchCache) Get(shards []int32, matchers []*labels.Matcher) []types.MetricID {
+	return c.get(time.Now(), shards, matchers)
+}
+
+// Drop delete an entry.
+func (c *searchCache) Drop(shards []int32, matchers []*labels.Matcher) {
+	key := c.key(shards, matchers)
+
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	delete(c.cache, key)
+}
+
+// Set add an entry.
+func (c *searchCache) Set(shards []int32, matchers []*labels.Matcher, ids []types.MetricID) {
+	now := time.Now()
+	c.set(now, shards, matchers, ids)
+}
+
+func (c *searchCache) set(now time.Time, shards []int32, matchers []*labels.Matcher, ids []types.MetricID) {
+	key := c.key(shards, matchers)
+
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	if len(c.cache) > searchCacheMaxSize {
+		// First drop expired entry
+		for k, v := range c.cache {
+			if v.expire.Before(now) {
+				delete(c.cache, k)
+			}
+		}
+
+		// we want to evict at least 50%, to avoid doing set/evict one/set/evict one/...
+		if len(c.cache) > searchCacheMaxSize/2 {
+			toDelete := len(c.cache) - searchCacheMaxSize/2
+
+			for k := range c.cache {
+				delete(c.cache, k)
+
+				toDelete--
+
+				if toDelete <= 0 {
+					break
+				}
+			}
+		}
+	}
+
+	c.cache[key] = searchEntry{
+		value:  ids,
+		expire: now.Add(searchCacheTTL),
+	}
+}
+
+func (c *searchCache) get(now time.Time, shards []int32, matchers []*labels.Matcher) []types.MetricID {
+	key := c.key(shards, matchers)
+
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	entry := c.cache[key]
+
+	if entry.expire.IsZero() {
+		return nil
+	}
+
+	if entry.expire.Before(now) {
+		delete(c.cache, key)
+
+		return nil
+	}
+
+	return entry.value
+}
+
+// return a key from shards & matchers.
+// Currently collision are not handled, but because index.go do explicit labels
+// check & invalidate if it don't match, this should be an issue.
+func (c *searchCache) key(shards []int32, matchers []*labels.Matcher) uint64 {
+	h := xxhash.New()
+
+	// salt from a randomly choose prefix on SquirrelDB startup to make
+	// harder for an attacker to craft request that cause collision.
+	// Once more collision should yield invalid result, but will increase cache miss.
+	_, _ = h.Write(c.salt)
+
+	for _, s := range shards {
+		_, _ = h.WriteString(strconv.FormatInt(int64(s), 10))
+	}
+
+	for _, lbl := range matchers {
+		_, _ = h.WriteString(lbl.Name)
+		_, _ = h.WriteString(lbl.Value)
+		_, _ = h.WriteString(lbl.Type.String())
+	}
+
+	return h.Sum64()
 }

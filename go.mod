@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/armon/go-metrics v0.3.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.0
+	github.com/cespare/xxhash/v2 v2.1.1 // indirect
 	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
 	github.com/go-kit/kit v0.10.0
 	github.com/go-redis/redis/v8 v8.6.0

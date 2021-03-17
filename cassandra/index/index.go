@@ -3,6 +3,7 @@ package index
 import (
 	"bytes"
 	"context"
+	cryptoRand "crypto/rand"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -95,6 +96,7 @@ type CassandraIndex struct {
 	existingShards           *roaring.Bitmap
 
 	idsToLabels *labelsLookupCache
+	searchCache *searchCache
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -174,14 +176,22 @@ func New(ctx context.Context, session *gocql.Session, options Options) (*Cassand
 
 func initialize(ctx context.Context, store storeImpl, options Options) (*CassandraIndex, error) {
 	index := &CassandraIndex{
-		store:                    store,
-		options:                  options,
-		idInShard:                make(map[int32]*roaring.Bitmap),
-		idInShardLastAccess:      make(map[int32]time.Time),
-		labelsToID:               make(map[uint64][]idData),
-		idsToLabels:              &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
+		store:               store,
+		options:             options,
+		idInShard:           make(map[int32]*roaring.Bitmap),
+		idInShardLastAccess: make(map[int32]time.Time),
+		labelsToID:          make(map[uint64][]idData),
+		idsToLabels:         &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
+		searchCache: &searchCache{
+			cache: make(map[uint64]searchEntry),
+			salt:  make([]byte, 8),
+		},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+	}
+
+	if _, err := cryptoRand.Read(index.searchCache.salt); err != nil {
+		return nil, fmt.Errorf("failed to read random bytes: %w", err)
 	}
 
 	if err := index.store.Init(ctx); err != nil {
@@ -2734,18 +2744,34 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 // idsForMatcher return metric IDs matching given matchers.
 // It's a wrapper around postingsForMatchers.
 func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (ids []types.MetricID, labelsList []labels.Labels, err error) {
-	results, checkMatches, err := c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
-	if err != nil {
-		return nil, nil, err
+	var (
+		checkMatches    bool
+		resultFromCache bool
+	)
+
+	ids = c.searchCache.Get(shards, matchers)
+
+	if len(ids) == 0 {
+		var results *roaring.Bitmap
+
+		results, checkMatches, err = c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if results == nil {
+			return nil, nil, nil
+		}
+
+		ids = bitsetToIDs(results)
+	} else {
+		resultFromCache = true
 	}
 
-	if results == nil {
-		return nil, nil, nil
-	}
-
-	ids = bitsetToIDs(results)
-
-	if checkMatches {
+	// If result come from the cache, always re-check matches:
+	// * If cache is still valid, is won't add cost because lookupLabels will be done anyway (if metrics are read)
+	// * If cache is invalid (because the metrics got deleted), this check will catch it.
+	if checkMatches || resultFromCache {
 		labelsList, err = c.lookupLabels(ctx, ids, time.Now())
 		if err != nil {
 			return nil, nil, err
@@ -2763,8 +2789,29 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 			}
 		}
 
+		if resultFromCache && len(ids) != len(newIds) {
+			// cache is no longer valid, it contains metric that got deleted.
+			// Drop the cache entry, but we will return the current result:
+			// * it does not contains ID that are wrong (even if metric ID get reused)
+			// * it MAY not contains recently added metrics... but this isn't specific to this branch
+			c.searchCache.Drop(shards, matchers)
+		}
+
 		ids = newIds
 		labelsList = newLabels
+	}
+
+	// Note: we only fill the cache when miss and result is non-empty:
+	// * we don't want to refresh expiration and have entry expire after TTL even
+	//   if used. This is because we don't have correct invalidation.
+	// * we do not cache negative result (matcher that yield empty IDs).
+	// This allow to limit the stall cache result to only:
+	// * limited duration (TTL)
+	// * AND matchers that had at least one metric and after that more metrics.
+	//   so if your query are expected to return only one metric the cache
+	//   won't yield stall result.
+	if !resultFromCache && len(ids) > 0 {
+		c.searchCache.Set(shards, matchers, ids)
 	}
 
 	return ids, labelsList, nil
