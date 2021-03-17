@@ -19,8 +19,8 @@ import (
 	"squirreldb/config"
 	"squirreldb/debug"
 	"squirreldb/dummy"
-	"squirreldb/memorystore"
-	"squirreldb/redis"
+	"squirreldb/dummy/temporarystore"
+	redisTemporarystore "squirreldb/redis/temporarystore"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -518,16 +518,16 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 	case "redis":
 		redisAddresses := s.Config.Strings("redis.addresses")
 		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
-			options := redis.Options{
+			options := redisTemporarystore.Options{
 				Addresses: redisAddresses,
 			}
 
-			s.temporaryStore = redis.New(options)
+			s.temporaryStore = redisTemporarystore.New(options)
 			readiness <- nil
 
 			<-ctx.Done()
 		} else {
-			mem := memorystore.New()
+			mem := temporarystore.New()
 			s.temporaryStore = mem
 			readiness <- nil
 			mem.Run(ctx)

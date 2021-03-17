@@ -1,4 +1,4 @@
-package redis
+package temporarystore
 
 import (
 	"bytes"

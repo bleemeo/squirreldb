@@ -4,7 +4,7 @@ import (
 	"context"
 	"reflect"
 	"sort"
-	"squirreldb/memorystore"
+	"squirreldb/dummy/temporarystore"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -16,14 +16,14 @@ const (
 	MetricIDTest3 = 3
 )
 
-func newMemoryStore(initialData []types.MetricData) *memorystore.Store {
-	store := memorystore.New()
+func newMemoryStore(initialData []types.MetricData) *temporarystore.Store {
+	store := temporarystore.New()
 	store.Append(context.Background(), initialData)
 	return store
 }
 
-func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *memorystore.Store {
-	store := memorystore.New()
+func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *temporarystore.Store {
+	store := temporarystore.New()
 	store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
 	return store
 }
@@ -1200,7 +1200,7 @@ func TestBatch_flush(t *testing.T) {
 func TestBatch_write(t *testing.T) {
 
 	batchSize := 100 * time.Second
-	memoryStore := memorystore.New()
+	memoryStore := temporarystore.New()
 	writer1 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}
@@ -1932,7 +1932,7 @@ func Test_randomDuration(t *testing.T) {
 
 func Test_takeover(t *testing.T) {
 	batchSize := 100 * time.Second
-	memoryStore := memorystore.New()
+	memoryStore := temporarystore.New()
 	writer1 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}

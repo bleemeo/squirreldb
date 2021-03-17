@@ -1,4 +1,4 @@
-package redis
+package temporarystore
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
