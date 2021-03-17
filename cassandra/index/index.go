@@ -61,11 +61,6 @@ const (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
-type labelsData struct {
-	labels         labels.Labels
-	expirationTime time.Time
-}
-
 type idData struct {
 	id                       types.MetricID
 	unsortedLabels           labels.Labels
@@ -99,8 +94,7 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	searchMutex sync.Mutex
-	idsToLabels map[types.MetricID]labelsData
+	idsToLabels *labelsLookupCache
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -134,9 +128,8 @@ func (c *CassandraIndex) setIDData(key uint64, value idData) {
 type storeImpl interface {
 	Init(ctx context.Context) error
 	SelectLabelsList2ID(ctx context.Context, sortedLabelsListString []string) (map[string]types.MetricID, error)
-	SelectIDS2Labels(ctx context.Context, id []types.MetricID) (map[types.MetricID]labels.Labels, error)
+	SelectIDS2LabelsAndExpiration(ctx context.Context, id []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error)
 	SelectExpiration(ctx context.Context, day time.Time) ([]byte, error)
-	SelectIDS2LabelsExpiration(ctx context.Context, id []types.MetricID) (map[types.MetricID]time.Time, error)
 	// SelectPostingByName return  label value with the associated postings in sorted order
 	SelectPostingByName(ctx context.Context, shard int32, name string) postingIter
 	SelectPostingByNameValue(ctx context.Context, shard int32, name string, value string) ([]byte, error)
@@ -186,7 +179,7 @@ func initialize(ctx context.Context, store storeImpl, options Options) (*Cassand
 		idInShard:                make(map[int32]*roaring.Bitmap),
 		idInShardLastAccess:      make(map[int32]time.Time),
 		labelsToID:               make(map[uint64][]idData),
-		idsToLabels:              make(map[types.MetricID]labelsData),
+		idsToLabels:              &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 	}
@@ -261,7 +254,7 @@ func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 	if len(deleteIDs) > 0 {
 		c.lookupIDMutex.Lock()
-		c.searchMutex.Lock()
+		c.idsToLabels.Drop(deleteIDs)
 
 		// Since we don't force sorting labels on input, we don't known the key used
 		// for c.labelsToID (it's likely to be keyFromLabels(sortedLabels))
@@ -269,11 +262,7 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 
 		for _, id := range deleteIDs {
 			deleteIDsMap[types.MetricID(id)] = true
-
-			delete(c.idsToLabels, types.MetricID(id))
 		}
-
-		c.searchMutex.Unlock()
 
 		for key, idsData := range c.labelsToID {
 			for _, v := range idsData {
@@ -375,7 +364,7 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 }
 
 func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID) error {
-	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
+	id2Labels, _, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
 	}
@@ -594,14 +583,9 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 
 // check that given metric IDs existing in labels2id and id2labels.
 func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { //nolint: gocognit
-	id2Labels, err := c.store.SelectIDS2Labels(ctx, ids)
+	id2Labels, id2expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
-	}
-
-	id2expiration, err := c.store.SelectIDS2LabelsExpiration(ctx, ids)
-	if err != nil {
-		return fmt.Errorf("get expirations: %w", err)
 	}
 
 	allLabelsString := make([]string, 0, len(ids))
@@ -662,19 +646,14 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 		}
 
 		if id != id2 {
-			tmp, err := c.store.SelectIDS2Labels(ctx, []types.MetricID{id2})
+			tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
 			if err != nil {
 				return fmt.Errorf("get labels from store: %w", err)
 			}
 
 			lbls2 := tmp[id2]
-
-			tmp2, err := c.store.SelectIDS2LabelsExpiration(ctx, []types.MetricID{id2})
-			if err != nil {
-				return fmt.Errorf("get labels from store: %w", err)
-			}
-
 			expiration2, ok := tmp2[id2]
+
 			if !ok && lbls2 != nil {
 				return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id2, lbls2.String())
 			}
@@ -883,7 +862,7 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 			break
 		}
 
-		tmp, err := c.store.SelectIDS2Labels(ctx, pendingIds)
+		tmp, _, err := c.store.SelectIDS2LabelsAndExpiration(ctx, pendingIds)
 		if err != nil {
 			return true, fmt.Errorf("get labels: %w", err)
 		}
@@ -1198,23 +1177,19 @@ func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name stri
 func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID, now time.Time) ([]labels.Labels, error) {
 	start := time.Now()
 
-	founds := make([]bool, len(ids))
-	labelsDataList := make([]labelsData, len(ids))
+	miss := make([]bool, len(ids))
 	idToQuery := make([]types.MetricID, 0)
 
-	c.searchMutex.Lock()
-
-	for i, id := range ids {
-		labelsDataList[i], founds[i] = c.idsToLabels[id]
-		if !founds[i] {
-			idToQuery = append(idToQuery, id)
+	labelList := c.idsToLabels.MGet(now, ids)
+	for i, lbls := range labelList {
+		if lbls == nil {
+			idToQuery = append(idToQuery, ids[i])
+			miss[i] = true
 		}
 	}
 
-	c.searchMutex.Unlock()
-
 	if len(idToQuery) > 0 {
-		idToLabels, err := c.store.SelectIDS2Labels(ctx, idToQuery)
+		idToLabels, idToExpiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, idToQuery)
 		if err != nil {
 			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
@@ -1222,30 +1197,17 @@ func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID,
 		}
 
 		for i, id := range ids {
-			if !founds[i] {
+			if miss[i] {
 				var ok bool
 
-				labelsDataList[i].labels, ok = idToLabels[id]
+				labelList[i], ok = idToLabels[id]
 				if !ok {
 					return nil, fmt.Errorf("labels for metric ID %d not found", id)
 				}
+
+				c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
 			}
-
-			labelsDataList[i].expirationTime = now.Add(cacheExpirationDelay)
 		}
-	}
-
-	c.searchMutex.Lock()
-
-	for i, id := range ids {
-		c.idsToLabels[id] = labelsDataList[i]
-	}
-
-	c.searchMutex.Unlock()
-
-	labelList := make([]labels.Labels, len(ids))
-	for i, d := range labelsDataList {
-		labelList[i] = d.labels
 	}
 
 	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
@@ -1412,7 +1374,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 			idsToQuery = append(idsToQuery, id)
 		}
 
-		ids2Expiration, err := c.store.SelectIDS2LabelsExpiration(ctx, idsToQuery)
+		_, ids2Expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, idsToQuery)
 		if err != nil {
 			return nil, nil, fmt.Errorf("searching metric failed: %w", err)
 		}
@@ -2216,9 +2178,7 @@ func (l *metricsLabels) Count() int {
 // Deletes all expired cache entries.
 func (c *CassandraIndex) expire(now time.Time) {
 	c.lookupIDMutex.Lock()
-	c.searchMutex.Lock()
 	defer c.lookupIDMutex.Unlock()
-	defer c.searchMutex.Unlock()
 
 	for key, idsData := range c.labelsToID {
 		for _, idData := range idsData {
@@ -2230,12 +2190,6 @@ func (c *CassandraIndex) expire(now time.Time) {
 
 				break
 			}
-		}
-	}
-
-	for id, labelsData := range c.idsToLabels {
-		if labelsData.expirationTime.Before(now) {
-			delete(c.idsToLabels, id)
 		}
 	}
 }
@@ -2579,14 +2533,13 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 	dayToExpireUpdates := make(map[time.Time]int)
 	bulkDelete := newBulkDeleter(c)
-	idToDeleteWithLabels := make([]types.MetricID, 0)
 
 	metricIDs := make([]types.MetricID, len(ids))
 	for i, intID := range ids {
 		metricIDs[i] = types.MetricID(intID)
 	}
 
-	expires, err := c.store.SelectIDS2LabelsExpiration(ctx, metricIDs)
+	idToLabels, expires, err := c.store.SelectIDS2LabelsAndExpiration(ctx, metricIDs)
 	if err != nil {
 		return fmt.Errorf("get expiration from store : %w", err)
 	}
@@ -2618,18 +2571,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			continue
 		}
 
-		idToDeleteWithLabels = append(idToDeleteWithLabels, id)
-	}
-
-	if len(idToDeleteWithLabels) > 0 {
-		labelLists, err := c.lookupLabels(ctx, idToDeleteWithLabels, now)
-		if err != nil {
-			return err
-		}
-
-		for i, id := range idToDeleteWithLabels {
-			bulkDelete.PrepareDelete(id, labelLists[i], false)
-		}
+		bulkDelete.PrepareDelete(id, idToLabels[id], false)
 	}
 
 	c.newMetricLock.Lock()
@@ -3406,7 +3348,7 @@ func (s cassandraStore) SelectLabelsList2ID(ctx context.Context, sortedLabelsLis
 	return result, err
 }
 
-func (s cassandraStore) SelectIDS2Labels(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
+func (s cassandraStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {
@@ -3414,52 +3356,27 @@ func (s cassandraStore) SelectIDS2Labels(ctx context.Context, ids []types.Metric
 	}()
 
 	iter := s.session.Query(
-		"SELECT id, labels FROM index_id2labels WHERE id IN ?",
+		"SELECT id, labels, expiration_date FROM index_id2labels WHERE id IN ?",
 		ids,
 	).WithContext(ctx).Iter()
 
 	var (
-		lbls labels.Labels
-		id   int64
-	)
-
-	results := make(map[types.MetricID]labels.Labels, len(ids))
-
-	for iter.Scan(&id, &lbls) {
-		results[types.MetricID(id)] = lbls
-	}
-
-	err := iter.Close()
-
-	return results, err
-}
-
-func (s cassandraStore) SelectIDS2LabelsExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]time.Time, error) {
-	start := time.Now()
-
-	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
-	}()
-
-	iter := s.session.Query(
-		"SELECT id, expiration_date FROM index_id2labels WHERE id in ?",
-		ids,
-	).WithContext(ctx).Iter()
-
-	var (
+		lbls       labels.Labels
 		expiration time.Time
 		id         int64
 	)
 
-	results := make(map[types.MetricID]time.Time, len(ids))
+	results := make(map[types.MetricID]labels.Labels, len(ids))
+	results2 := make(map[types.MetricID]time.Time, len(ids))
 
-	for iter.Scan(&id, &expiration) {
-		results[types.MetricID(id)] = expiration
+	for iter.Scan(&id, &lbls, &expiration) {
+		results[types.MetricID(id)] = lbls
+		results2[types.MetricID(id)] = expiration
 	}
 
 	err := iter.Close()
 
-	return results, err
+	return results, results2, err
 }
 
 func (s cassandraStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte, error) {

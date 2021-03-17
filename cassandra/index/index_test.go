@@ -191,24 +191,28 @@ func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (ma
 	return results, ctx.Err()
 }
 
-func (s *mockStore) SelectIDS2Labels(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, error) {
+func (s *mockStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	s.queryCount++
 
 	results := make(map[types.MetricID]labels.Labels, len(ids))
+	results2 := make(map[types.MetricID]time.Time, len(ids))
 
 	for _, id := range ids {
-		var ok bool
+		tmp, ok := s.id2labels[id]
+		if ok {
+			results[id] = tmp
+		}
 
-		results[id], ok = s.id2labels[id]
-		if !ok {
-			return nil, gocql.ErrNotFound
+		tmp2, ok := s.id2expiration[id]
+		if ok {
+			results2[id] = tmp2
 		}
 	}
 
-	return results, ctx.Err()
+	return results, results2, ctx.Err()
 }
 
 func (s *mockStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte, error) {
@@ -223,24 +227,6 @@ func (s *mockStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte
 	}
 
 	return result, ctx.Err()
-}
-
-func (s *mockStore) SelectIDS2LabelsExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]time.Time, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	s.queryCount++
-
-	results := make(map[types.MetricID]time.Time, len(ids))
-
-	for _, id := range ids {
-		result, ok := s.id2expiration[id]
-		if ok {
-			results[id] = result
-		}
-	}
-
-	return results, ctx.Err()
 }
 
 type valueAndByte struct {
