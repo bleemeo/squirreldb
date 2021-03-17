@@ -553,8 +553,14 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 				Addresses: redisAddresses,
 			}
 
-			s.temporaryStore = redisTemporarystore.New(options)
-			readiness <- nil
+			tmp, err := redisTemporarystore.New(ctx, options)
+			s.temporaryStore = tmp
+
+			readiness <- err
+
+			if err != nil {
+				return
+			}
 
 			<-ctx.Done()
 		} else {

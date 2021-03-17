@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"squirreldb/compare"
+	"squirreldb/redis/client"
 	"squirreldb/types"
 	"strconv"
 	"sync"
@@ -33,10 +34,7 @@ type Options struct {
 }
 
 type Redis struct {
-	l             sync.Mutex
-	lastReload    time.Time
-	singleClient  *goredis.Client
-	clusterClient *goredis.ClusterClient
+	client *client.Client
 
 	bufferPool           sync.Pool
 	serializedPointsPool sync.Pool
@@ -54,24 +52,26 @@ const (
 )
 
 // New creates a new Redis object.
-func New(options Options) *Redis {
-	clusterClient := goredis.NewClusterClient(&goredis.ClusterOptions{
-		Addrs: options.Addresses,
-	})
-
+func New(ctx context.Context, options Options) (*Redis, error) {
 	redis := &Redis{
-		clusterClient: clusterClient,
+		client: &client.Client{
+			Addresses: options.Addresses,
+		},
 	}
 	redis.initPool()
 
-	if len(options.Addresses) == 1 {
-		client := goredis.NewClient(&goredis.Options{
-			Addr: options.Addresses[0],
-		})
-		redis.singleClient = client
+	cluster, err := redis.client.IsCluster(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	return redis
+	if cluster {
+		logger.Println("detected cluster")
+	} else {
+		logger.Println("detected single")
+	}
+
+	return redis, nil
 }
 
 func (r *Redis) initPool() {
@@ -100,136 +100,6 @@ func (r *Redis) getSerializedPoints() []serializedPoints {
 	return result
 }
 
-func (r *Redis) fixClient(ctx context.Context) error {
-	r.l.Lock()
-	defer r.l.Unlock()
-
-	if r.singleClient == nil || r.clusterClient == nil {
-		return nil
-	}
-
-	singleErr := r.singleClient.Ping(ctx).Err()
-	clusterErr := r.clusterClient.Ping(ctx).Err()
-	infoErr := r.singleClient.ClusterInfo(ctx).Err()
-
-	switch {
-	case clusterErr == nil:
-		logger.Println("detected cluster")
-
-		r.singleClient = nil
-	case singleErr == nil && infoErr != nil:
-		logger.Println("detected single")
-
-		r.clusterClient = nil
-	default:
-		return fmt.Errorf("ping redis: %w", clusterErr)
-	}
-
-	return nil
-}
-
-// when using redis cluster and a master is down, go-redis took quiet some time
-// to discovery it.
-// If shouldRetry return true, it means it tried to refresh the cluster nodes state
-// and last command may be retried.
-func (r *Redis) shouldRetry(ctx context.Context) bool {
-	r.l.Lock()
-	defer r.l.Unlock()
-
-	if r.lastReload.IsZero() || time.Since(r.lastReload) > 10*time.Second {
-		r.clusterClient.ReloadState(ctx)
-		r.lastReload = time.Now()
-
-		// ReloadState is asynchronious :(
-		// Wait a bit in order for ReloadState to run
-		time.Sleep(100 * time.Millisecond)
-
-		return true
-	}
-
-	return false
-}
-
-func (r *Redis) pipeline(ctx context.Context) (goredis.Pipeliner, error) {
-	if err := r.fixClient(ctx); err != nil {
-		return nil, err
-	}
-
-	if r.clusterClient != nil {
-		return r.clusterClient.Pipeline(), nil
-	}
-
-	return r.singleClient.Pipeline(), nil
-}
-
-func (r *Redis) sAdd(ctx context.Context, key string, members ...interface{}) error {
-	if err := r.fixClient(ctx); err != nil {
-		return err
-	}
-
-	if r.clusterClient != nil {
-		_, err := r.clusterClient.SAdd(ctx, key, members...).Result()
-		if err != nil {
-			return fmt.Errorf("redis: %w", err)
-		}
-
-		return nil
-	}
-
-	_, err := r.singleClient.SAdd(ctx, key, members...).Result()
-	if err != nil {
-		return fmt.Errorf("redis: %w", err)
-	}
-
-	return nil
-}
-
-func (r *Redis) sRem(ctx context.Context, key string, members ...interface{}) error {
-	if err := r.fixClient(ctx); err != nil {
-		return err
-	}
-
-	if r.clusterClient != nil {
-		_, err := r.clusterClient.SRem(ctx, key, members...).Result()
-		if err != nil {
-			return fmt.Errorf("redis: %w", err)
-		}
-
-		return nil
-	}
-
-	_, err := r.singleClient.SRem(ctx, key, members...).Result()
-	if err != nil {
-		return fmt.Errorf("redis: %w", err)
-	}
-
-	return nil
-}
-
-func (r *Redis) sPopN(ctx context.Context, key string, count int64) ([]string, error) {
-	if err := r.fixClient(ctx); err != nil {
-		return nil, err
-	}
-
-	if r.clusterClient != nil {
-		return r.clusterClient.SPopN(ctx, key, count).Result()
-	}
-
-	return r.singleClient.SPopN(ctx, key, count).Result()
-}
-
-func (r *Redis) sMembers(ctx context.Context, key string) ([]string, error) {
-	if err := r.fixClient(ctx); err != nil {
-		return nil, err
-	}
-
-	if r.clusterClient != nil {
-		return r.clusterClient.SMembers(ctx, key).Result()
-	}
-
-	return r.singleClient.SMembers(ctx, key).Result()
-}
-
 func metricID2String(id types.MetricID) string {
 	return strconv.FormatInt(int64(id), 36)
 }
@@ -255,7 +125,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 		return nil, nil
 	}
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +155,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
@@ -326,7 +196,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
 	}
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +235,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 	pipe.SAdd(ctx, knownMetricsKey, ids)
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
@@ -413,7 +283,7 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	metricCommands := make([]*goredis.StringCmd, len(ids))
 	offsetCommands := make([]*goredis.StringCmd, len(ids))
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -429,7 +299,7 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
@@ -490,7 +360,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 
 	idsStr := make([]string, len(ids))
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return err
 	}
@@ -509,7 +379,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
@@ -518,7 +388,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 		}
 	}
 
-	return r.sRem(ctx, knownMetricsKey, idsStr)
+	return r.client.SRem(ctx, knownMetricsKey, idsStr)
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
@@ -533,7 +403,7 @@ func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 		return nil, nil
 	}
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +420,7 @@ func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
@@ -588,9 +458,9 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 		strings[i] = metricID2String(id)
 	}
 
-	err := r.sAdd(ctx, transfertKey, strings)
-	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
-		err = r.sAdd(ctx, transfertKey, strings)
+	err := r.client.SAdd(ctx, transfertKey, strings)
+	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
+		err = r.client.SAdd(ctx, transfertKey, strings)
 	}
 
 	return err
@@ -598,9 +468,9 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 
 // GetTransfert implement batch.TemporaryStore interface.
 func (r *Redis) GetTransfert(ctx context.Context, count int) (map[types.MetricID]time.Time, error) {
-	result, err := r.sPopN(ctx, transfertKey, int64(count))
-	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
-		result, err = r.sPopN(ctx, transfertKey, int64(count))
+	result, err := r.client.SPopN(ctx, transfertKey, int64(count))
+	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
+		result, err = r.client.SPopN(ctx, transfertKey, int64(count))
 	}
 
 	if err != nil && !errors.Is(err, goredis.Nil) {
@@ -618,9 +488,9 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 		operationSecondsKnownMetrics.Observe(time.Since(start).Seconds())
 	}()
 
-	result, err := r.sMembers(ctx, knownMetricsKey)
-	if err != nil && !errors.Is(err, goredis.Nil) && r.clusterClient != nil && r.shouldRetry(ctx) {
-		result, err = r.sMembers(ctx, knownMetricsKey)
+	result, err := r.client.SMembers(ctx, knownMetricsKey)
+	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
+		result, err = r.client.SMembers(ctx, knownMetricsKey)
 	}
 
 	if err != nil && !errors.Is(err, goredis.Nil) {
@@ -635,7 +505,7 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 		return nil, nil
 	}
 
-	pipe, err := r.pipeline(ctx)
+	pipe, err := r.client.Pipeline(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -650,7 +520,7 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
-		if r.clusterClient != nil && r.shouldRetry(ctx) {
+		if r.client.ShouldRetry(ctx) {
 			_, err = pipe.Exec(ctx)
 		}
 
