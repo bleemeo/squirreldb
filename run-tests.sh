@@ -33,7 +33,7 @@ docker run --rm -u $UID -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/squirreldb-cassandra-lock-bench/ -run-time=10s'
+    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/squirreldb-cassandra-lock-bench/'
 
 echo
 echo "== Running squirreldb-cassandra-index-bench"
@@ -41,7 +41,7 @@ docker run --rm -u $UID -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/squirreldb-cassandra-index-bench/ -verify -bench.shard-size 100 -bench.query 100'
+    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/squirreldb-cassandra-index-bench/ -verify'
 
 echo
 echo "== Running remote-storage-test"
@@ -49,7 +49,7 @@ docker run --rm -u $UID -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test/ --scale 5 --threads 2 --start-bultin-squirreldb'
+    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test/ --start-bultin-squirreldb'
 
 echo
 echo "== Running squirreldb-cluster-redis"

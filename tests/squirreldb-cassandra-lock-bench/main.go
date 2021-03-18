@@ -27,7 +27,7 @@ var (
 	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
 	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
 	seed                      = flag.Int64("seed", 42, "Seed used in random generator")
-	runDuration               = flag.Duration("run-time", time.Minute, "Duration of the bench")
+	runDuration               = flag.Duration("run-time", 10*time.Second, "Duration of the bench")
 	ctxTimeout                = flag.Duration("ctx-timeout", 15*time.Second, "Context deadline to acquire lock (0=unlimited)")
 	workDuration              = flag.Duration("work-duration", 100*time.Millisecond, "Duration of one work (randomized +/- 50%")
 	workerThreads             = flag.Int("worker-threads", 25, "Number of concurrent threads per processes")
