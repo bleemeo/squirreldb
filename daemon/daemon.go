@@ -550,7 +550,8 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 		redisAddresses := s.Config.Strings("redis.addresses")
 		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
 			options := redisTemporarystore.Options{
-				Addresses: redisAddresses,
+				Addresses:    redisAddresses,
+				KeyNamespace: s.Config.String("internal.redis_namespace"),
 			}
 
 			tmp, err := redisTemporarystore.New(ctx, options)

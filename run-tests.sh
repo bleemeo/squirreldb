@@ -47,7 +47,6 @@ echo
 echo "== Running remote-storage-test"
 docker run --rm -u $UID -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_KEYSPACE=squirreldb_test \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
     goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test/ --scale 5 --threads 2 --start-bultin-squirreldb'

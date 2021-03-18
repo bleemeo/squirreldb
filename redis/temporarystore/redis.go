@@ -19,18 +19,19 @@ import (
 )
 
 const (
-	metricKeyPrefix   = "squirreldb-metric-"
-	offsetKeyPrefix   = "squirreldb-offset-"
-	deadlineKeyPrefix = "squirreldb-flushdeadline-"
-	knownMetricsKey   = "squirreldb-known-metrics"
-	transfertKey      = "squirreldb-transfert-metrics"
+	defaultMetricKeyPrefix   = "squirreldb-metric-"
+	defaultOffsetKeyPrefix   = "squirreldb-offset-"
+	defaultDeadlineKeyPrefix = "squirreldb-flushdeadline-"
+	defaultKnownMetricsKey   = "squirreldb-known-metrics"
+	defaultTransfertKey      = "squirreldb-transfert-metrics"
 )
 
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
 
 type Options struct {
-	Addresses []string
+	Addresses    []string
+	KeyNamespace string
 }
 
 type Redis struct {
@@ -38,6 +39,12 @@ type Redis struct {
 
 	bufferPool           sync.Pool
 	serializedPointsPool sync.Pool
+
+	metricKeyPrefix   string
+	offsetKeyPrefix   string
+	deadlineKeyPrefix string
+	knownMetricsKey   string
+	transfertKey      string
 }
 
 type serializedPoints struct {
@@ -59,6 +66,12 @@ func New(ctx context.Context, options Options) (*Redis, error) {
 		},
 	}
 	redis.initPool()
+
+	redis.metricKeyPrefix = options.KeyNamespace + defaultMetricKeyPrefix
+	redis.offsetKeyPrefix = options.KeyNamespace + defaultOffsetKeyPrefix
+	redis.deadlineKeyPrefix = options.KeyNamespace + defaultDeadlineKeyPrefix
+	redis.knownMetricsKey = options.KeyNamespace + defaultKnownMetricsKey
+	redis.transfertKey = options.KeyNamespace + defaultTransfertKey
 
 	cluster, err := redis.client.IsCluster(ctx)
 	if err != nil {
@@ -149,7 +162,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 			return nil, err
 		}
 
-		key := metricKeyPrefix + metricID2String(data.ID)
+		key := r.metricKeyPrefix + metricID2String(data.ID)
 
 		commands[i] = pipe.Append(ctx, key, string(values))
 	}
@@ -222,8 +235,8 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		}
 
 		idStr := metricID2String(data.ID)
-		metricKey := metricKeyPrefix + idStr
-		offsetKey := offsetKeyPrefix + idStr
+		metricKey := r.metricKeyPrefix + idStr
+		offsetKey := r.offsetKeyPrefix + idStr
 
 		commands[i] = pipe.GetSet(ctx, metricKey, string(values))
 		ids[i] = idStr
@@ -232,7 +245,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		pipe.Set(ctx, offsetKey, strconv.FormatInt(int64(offsets[i]), 10), defaultTTL)
 	}
 
-	pipe.SAdd(ctx, knownMetricsKey, ids)
+	pipe.SAdd(ctx, r.knownMetricsKey, ids)
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
 		if r.client.ShouldRetry(ctx) {
@@ -291,8 +304,8 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	var readPointsCount int
 
 	for i, id := range ids {
-		metricKey := metricKeyPrefix + metricID2String(id)
-		offsetKey := offsetKeyPrefix + metricID2String(id)
+		metricKey := r.metricKeyPrefix + metricID2String(id)
+		offsetKey := r.offsetKeyPrefix + metricID2String(id)
 
 		metricCommands[i] = pipe.Get(ctx, metricKey)
 		offsetCommands[i] = pipe.Get(ctx, offsetKey)
@@ -367,9 +380,9 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 
 	for i, id := range ids {
 		idStr := metricID2String(id)
-		metricKey := metricKeyPrefix + idStr
-		offsetKey := offsetKeyPrefix + idStr
-		deadlineKey := deadlineKeyPrefix + idStr
+		metricKey := r.metricKeyPrefix + idStr
+		offsetKey := r.offsetKeyPrefix + idStr
+		deadlineKey := r.deadlineKeyPrefix + idStr
 
 		idsStr[i] = idStr
 
@@ -388,7 +401,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 		}
 	}
 
-	return r.client.SRem(ctx, knownMetricsKey, idsStr)
+	return r.client.SRem(ctx, r.knownMetricsKey, idsStr)
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
@@ -412,7 +425,7 @@ func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 	results := make(map[types.MetricID]time.Time, len(deadlines))
 
 	for id, deadline := range deadlines {
-		deadlineKey := deadlineKeyPrefix + metricID2String(id)
+		deadlineKey := r.deadlineKeyPrefix + metricID2String(id)
 
 		commands[id] = pipe.GetSet(ctx, deadlineKey, deadline.Format(time.RFC3339))
 
@@ -458,9 +471,9 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 		strings[i] = metricID2String(id)
 	}
 
-	err := r.client.SAdd(ctx, transfertKey, strings)
+	err := r.client.SAdd(ctx, r.transfertKey, strings)
 	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
-		err = r.client.SAdd(ctx, transfertKey, strings)
+		err = r.client.SAdd(ctx, r.transfertKey, strings)
 	}
 
 	return err
@@ -468,9 +481,9 @@ func (r *Redis) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 
 // GetTransfert implement batch.TemporaryStore interface.
 func (r *Redis) GetTransfert(ctx context.Context, count int) (map[types.MetricID]time.Time, error) {
-	result, err := r.client.SPopN(ctx, transfertKey, int64(count))
+	result, err := r.client.SPopN(ctx, r.transfertKey, int64(count))
 	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
-		result, err = r.client.SPopN(ctx, transfertKey, int64(count))
+		result, err = r.client.SPopN(ctx, r.transfertKey, int64(count))
 	}
 
 	if err != nil && !errors.Is(err, goredis.Nil) {
@@ -488,9 +501,9 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 		operationSecondsKnownMetrics.Observe(time.Since(start).Seconds())
 	}()
 
-	result, err := r.client.SMembers(ctx, knownMetricsKey)
+	result, err := r.client.SMembers(ctx, r.knownMetricsKey)
 	if err != nil && !errors.Is(err, goredis.Nil) && r.client.ShouldRetry(ctx) {
-		result, err = r.client.SMembers(ctx, knownMetricsKey)
+		result, err = r.client.SMembers(ctx, r.knownMetricsKey)
 	}
 
 	if err != nil && !errors.Is(err, goredis.Nil) {
@@ -514,7 +527,7 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 	results := make(map[types.MetricID]time.Time, len(ids))
 
 	for i, idStr := range ids {
-		deadlineKey := deadlineKeyPrefix + idStr
+		deadlineKey := r.deadlineKeyPrefix + idStr
 
 		commands[i] = pipe.Get(ctx, deadlineKey)
 	}

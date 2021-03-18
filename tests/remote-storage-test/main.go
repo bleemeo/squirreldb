@@ -29,6 +29,18 @@ var (
 func main() {
 	flag.Parse()
 
+	if _, ok := os.LookupEnv("SQUIRRELDB_CASSANDRA_KEYSPACE"); !ok {
+		// If not explicitly changed, use squirreldb_test as keyspace. We do
+		// not want to touch real data
+		os.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb_test")
+	}
+
+	if _, ok := os.LookupEnv("SQUIRRELDB_INTERNAL_REDIS_NAMESPACE"); !ok {
+		// If not explicitly changed, use test: as namespace. We do
+		// not want to touch real data
+		os.Setenv("SQUIRRELDB_INTERNAL_REDIS_NAMESPACE", "test:")
+	}
+
 	err := daemon.RunWithSignalHandler(run)
 
 	metricResult, _ := prometheus.DefaultGatherer.Gather()
