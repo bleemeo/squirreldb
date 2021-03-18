@@ -87,6 +87,11 @@ those tests:
 ./run-tests.sh
 ```
 
+Finally there is also a version of run-test which use clustered Cassandra and Redis,
+and also run longer tests:
+```
+./run-tests-cluster.sh
+```
 
 ### Note on VS code
 
