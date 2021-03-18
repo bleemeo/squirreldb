@@ -473,7 +473,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 	}
 
 	if task, ok := s.index.(types.Task); started && ok {
-		err := task.Start()
+		err := task.Start(ctx)
 		if err != nil {
 			return s.index, fmt.Errorf("start index task: %w", err)
 		}
@@ -535,7 +535,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 	}
 
 	if task, ok := s.persistentStore.(types.Task); preAggregationStarted && ok {
-		err := task.Start()
+		err := task.Start(ctx)
 		if err != nil {
 			return s.persistentStore, fmt.Errorf("start persitent store task: %w", err)
 		}

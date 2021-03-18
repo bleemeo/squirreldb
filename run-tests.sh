@@ -53,4 +53,13 @@ docker run --rm -u $UID -e HOME=/go/pkg \
     goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test/ --scale 5 --threads 2 --start-bultin-squirreldb'
 
 echo
+echo "== Running squirreldb-cluster-redis"
+docker run --rm -u $UID -e HOME=/go/pkg \
+    -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/squirreldb-cluster-redis/'
+
+
+echo
 echo "== Success =="

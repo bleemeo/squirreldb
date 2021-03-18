@@ -24,6 +24,24 @@ type Client struct {
 	clusterClient *goredis.ClusterClient
 }
 
+// Close dispatch Close to either cluster of single instance client.
+// It will also reset the assumption of cluster vs single instance.
+func (c *Client) Close() {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	if c.clusterClient != nil {
+		c.clusterClient.Close()
+	}
+
+	if c.singleClient != nil {
+		c.singleClient.Close()
+	}
+
+	c.clusterClient = nil
+	c.singleClient = nil
+}
+
 // Pipeline dispatch Pipeline to either cluster of single instance client.
 func (c *Client) Pipeline(ctx context.Context) (goredis.Pipeliner, error) {
 	if err := c.fixClient(ctx); err != nil {
@@ -35,6 +53,32 @@ func (c *Client) Pipeline(ctx context.Context) (goredis.Pipeliner, error) {
 	}
 
 	return c.singleClient.Pipeline(), nil
+}
+
+// Publish dispatch Publish to either cluster of single instance client.
+func (c *Client) Publish(ctx context.Context, channel string, message interface{}) (int64, error) {
+	if err := c.fixClient(ctx); err != nil {
+		return 0, err
+	}
+
+	if c.clusterClient != nil {
+		return c.clusterClient.Publish(ctx, channel, message).Result()
+	}
+
+	return c.singleClient.Publish(ctx, channel, message).Result()
+}
+
+// Subscribe dispatch Subscribe to either cluster of single instance client.
+func (c *Client) Subscribe(ctx context.Context, channel string) (*goredis.PubSub, error) {
+	if err := c.fixClient(ctx); err != nil {
+		return nil, err
+	}
+
+	if c.clusterClient != nil {
+		return c.clusterClient.Subscribe(ctx, channel), nil
+	}
+
+	return c.singleClient.Subscribe(ctx, channel), nil
 }
 
 // SAdd dispatch SAdd to either cluster of single instance client.

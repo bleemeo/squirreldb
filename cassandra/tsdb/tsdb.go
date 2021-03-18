@@ -91,7 +91,7 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 }
 
 // Start starts all Cassandra Index services.
-func (c *CassandraTSDB) Start() error {
+func (c *CassandraTSDB) Start(_ context.Context) error {
 	if c.cancel != nil {
 		return nil
 	}

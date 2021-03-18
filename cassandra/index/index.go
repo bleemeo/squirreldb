@@ -202,7 +202,7 @@ func initialize(ctx context.Context, store storeImpl, options Options) (*Cassand
 }
 
 // Start starts all Cassandra Index services.
-func (c *CassandraIndex) Start() error {
+func (c *CassandraIndex) Start(_ context.Context) error {
 	if c.cancel != nil {
 		return nil
 	}

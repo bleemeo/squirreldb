@@ -24,12 +24,19 @@ func (f TaskFun) Run(ctx context.Context, readiness chan error) {
 
 // Task is a background worker that will be running until Stop() is called
 // If Start() fail, the worker isn't running, but Start() could be retried.
-// Start() could after worker is running and will do nothing and return nil.
+// Start() called after worker is running and will do nothing and return nil.
 // Stop() will shutdown and wait for shutdown before returning.
 // Start() & Stop() could be be called concurrently.
+// The context for Start() is should only be used for start itself. The worker
+// will continue to run even if context is cancelled.
 type Task interface {
-	Start() error
+	Start(ctx context.Context) error
 	Stop() error
+}
+
+type Cluster interface {
+	Publish(topic string, message []byte) error
+	Subscribe(topic string, callback func([]byte))
 }
 
 type LookupRequest struct {
