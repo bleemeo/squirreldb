@@ -115,6 +115,24 @@ go run ./tests/remote-storage-test
 go run ./tests/remote-storage-test --read-url http://localhost:9201/read --write-url http://localhost:9201/write
 ```
 
+# remote-storage-test2
+
+This is another testing program that rely on remote write & remote read. The difference with previous:
+* It does not check metric values.
+* It does read and write concurrently
+* New metrics are created (churn) and it measure the time between first write and first read that seen such
+  metrics.
+  It's the primary feature of this test, ensure that query cache is invalidated when metric are created.
+
+
+```
+# Using built-in SquirrelDB
+go run ./tests/remote-storage-test2
+
+# Using existing remote storage
+go run ./tests/remote-storage-test2 --read-url http://localhost:9201/read --write-url http://localhost:9201/write
+```
+
 # Run on Cassandra cluster
 
 The easiest is to use run-tests-cluster.sh:

@@ -55,6 +55,17 @@ docker run --network squirreldb_ha_default --rm -u $UID -e HOME=/go/pkg \
     goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test/ --threads 3 --scale 10'
 
 echo
+echo "== Running remote-storage-test2"
+docker run --network squirreldb_ha_default --rm -u $UID -e HOME=/go/pkg \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042 -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3 \
+    -e SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379 \
+    -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go run -race ./tests/remote-storage-test2/ --test.processes 2 --test.run-duration 1m'
+
+
+echo
 echo "== Running squirreldb-cluster-redis"
 docker run --network squirreldb_ha_default --rm -u $UID -e HOME=/go/pkg \
     -e SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379 \
