@@ -26,6 +26,7 @@ type writeMetrics struct {
 	index    types.Index
 	writer   types.MetricWriter
 	reqCtxCh chan *requestContext
+	metrics  *metrics
 }
 
 func (w *writeMetrics) getRequestContext(ctx context.Context) *requestContext {
@@ -48,10 +49,10 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 
 	err := w.do(ctx, request)
 
-	requestsSecondsWrite.Observe(time.Since(start).Seconds())
+	w.metrics.RequestsSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 
 	if err != nil {
-		requestsErrorWrite.Inc()
+		w.metrics.RequestsError.WithLabelValues("write").Inc()
 
 		statusCode := http.StatusInternalServerError
 
@@ -87,10 +88,12 @@ func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
 
 	writeRequest := reqCtx.pb.(*prompb.WriteRequest)
 
-	metrics, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
+	metrics, totalPoints, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
 	if err != nil && ctx.Err() == nil {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
+
+	w.metrics.RequestsPoints.WithLabelValues("write").Add(float64(totalPoints))
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -125,9 +128,9 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a metric list generated from a TimeSeries list.
-func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, error) {
+func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, int, error) {
 	if len(promTimeseries) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	idToIndex := make(map[types.MetricID]int, len(promTimeseries))
@@ -168,7 +171,7 @@ func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeri
 
 	ids, ttls, err := index.LookupIDs(ctx, requests)
 	if err != nil {
-		return nil, fmt.Errorf("metric ID lookup failed: %w", err)
+		return nil, totalPoints, fmt.Errorf("metric ID lookup failed: %w", err)
 	}
 
 	for i, promSeries := range promTimeseries {
@@ -192,7 +195,5 @@ func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeri
 		totalPoints += len(data.Points)
 	}
 
-	requestsPointsTotalWrite.Add(float64(totalPoints))
-
-	return metrics, nil
+	return metrics, totalPoints, nil
 }

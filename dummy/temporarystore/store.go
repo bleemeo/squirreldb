@@ -10,6 +10,8 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const expiratorInterval = 60
@@ -28,16 +30,18 @@ type storeData struct {
 
 type Store struct {
 	knownMetrics     map[types.MetricID]interface{}
-	metrics          map[types.MetricID]storeData
+	metricsStore     map[types.MetricID]storeData
 	transfertMetrics []types.MetricID
 	mutex            sync.Mutex
+	metrics          *metrics
 }
 
 // New creates a new Store object.
-func New() *Store {
+func New(reg prometheus.Registerer) *Store {
 	store := &Store{
-		metrics:      make(map[types.MetricID]storeData),
+		metricsStore: make(map[types.MetricID]storeData),
 		knownMetrics: make(map[types.MetricID]interface{}),
+		metrics:      newMetrics(reg),
 	}
 
 	return store
@@ -55,19 +59,19 @@ func (s *Store) Append(ctx context.Context, points []types.MetricData) ([]int, e
 	pointCount := make([]int, len(points))
 
 	for i, data := range points {
-		storeData := s.metrics[data.ID]
+		storeData := s.metricsStore[data.ID]
 
 		storeData.ID = data.ID
 		storeData.Points = append(storeData.Points, data.Points...)
 		storeData.TimeToLive = compare.MaxInt64(storeData.TimeToLive, data.TimeToLive)
-		s.metrics[data.ID] = storeData
+		s.metricsStore[data.ID] = storeData
 
-		pointsTotal.Add(float64(len(data.Points)))
+		s.metrics.PointsTotal.Add(float64(len(data.Points)))
 
 		pointCount[i] = len(storeData.Points)
 	}
 
-	metricsTotal.Set(float64(len(s.metrics)))
+	s.metrics.MetricsTotal.Set(float64(len(s.metricsStore)))
 
 	return pointCount, nil
 }
@@ -93,21 +97,21 @@ func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, 
 	oldData := make([]types.MetricData, len(points))
 
 	for i, data := range points {
-		storeData := s.metrics[data.ID]
+		storeData := s.metricsStore[data.ID]
 
 		oldData[i] = storeData.MetricData
 
-		pointsTotal.Add(float64(len(data.Points) - len(storeData.MetricData.Points)))
+		s.metrics.PointsTotal.Add(float64(len(data.Points) - len(storeData.MetricData.Points)))
 
 		storeData.MetricData = data
 		storeData.expirationTime = expirationTime
 		storeData.WriteOffset = offsets[i]
 
-		s.metrics[data.ID] = storeData
+		s.metricsStore[data.ID] = storeData
 		s.knownMetrics[data.ID] = nil
 	}
 
-	metricsTotal.Set(float64(len(s.metrics)))
+	s.metrics.MetricsTotal.Set(float64(len(s.metricsStore)))
 
 	return oldData, nil
 }
@@ -125,7 +129,7 @@ func (s *Store) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	writeOffsets := make([]int, len(ids))
 
 	for i, id := range ids {
-		storeData, exists := s.metrics[id]
+		storeData, exists := s.metricsStore[id]
 
 		if exists {
 			metrics[i] = storeData.MetricData
@@ -146,9 +150,9 @@ func (s *Store) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 
 func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.Time) error {
 	for _, id := range ids {
-		if entry, found := s.metrics[id]; found {
+		if entry, found := s.metricsStore[id]; found {
 			entry.expirationTime = now.Add(ttl)
-			s.metrics[id] = entry
+			s.metricsStore[id] = entry
 		}
 
 		delete(s.knownMetrics, id)
@@ -165,10 +169,10 @@ func (s *Store) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 	results := make(map[types.MetricID]time.Time, len(deadlines))
 
 	for id, deadline := range deadlines {
-		state := s.metrics[id]
+		state := s.metricsStore[id]
 		results[id] = state.flushDeadline
 		state.flushDeadline = deadline
-		s.metrics[id] = state
+		s.metricsStore[id] = state
 	}
 
 	return results, nil
@@ -198,7 +202,7 @@ func (s *Store) GetTransfert(ctx context.Context, count int) (map[types.MetricID
 
 	for i := 0; i < endIndex; i++ {
 		id := s.transfertMetrics[i]
-		results[id] = s.metrics[id].flushDeadline
+		results[id] = s.metricsStore[id].flushDeadline
 	}
 
 	copy(s.transfertMetrics, s.transfertMetrics[endIndex:])
@@ -212,10 +216,10 @@ func (s *Store) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	results := make(map[types.MetricID]time.Time, len(s.metrics))
+	results := make(map[types.MetricID]time.Time, len(s.metricsStore))
 
 	for id := range s.knownMetrics {
-		results[id] = s.metrics[id].flushDeadline
+		results[id] = s.metricsStore[id].flushDeadline
 	}
 
 	return results, nil
@@ -247,14 +251,14 @@ func (s *Store) expire(now time.Time) {
 
 	var pointsCount int
 
-	for id, storeData := range s.metrics {
+	for id, storeData := range s.metricsStore {
 		if storeData.expirationTime.Before(now) {
-			delete(s.metrics, id)
+			delete(s.metricsStore, id)
 		} else {
 			pointsCount += len(storeData.Points)
 		}
 	}
 
-	pointsTotal.Set(float64(pointsCount))
-	metricsTotal.Set(float64(len(s.metrics)))
+	s.metrics.PointsTotal.Set(float64(pointsCount))
+	s.metrics.MetricsTotal.Set(float64(len(s.metricsStore)))
 }

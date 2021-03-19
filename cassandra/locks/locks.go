@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const retryMaxDelay = 30 * time.Second
@@ -23,6 +24,7 @@ var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
 
 type CassandraLocks struct {
 	session *gocql.Session
+	metrics *metrics
 }
 
 type Lock struct {
@@ -42,7 +44,7 @@ type Lock struct {
 }
 
 // New creates a new CassandraLocks object.
-func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) {
+func New(reg prometheus.Registerer, session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) {
 	var err error
 
 	// Creation of tables concurrently is not possible on Cassandra.
@@ -67,6 +69,7 @@ func New(session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) 
 
 	locks := &CassandraLocks{
 		session: session,
+		metrics: newMetrics(reg),
 	}
 
 	return locks, nil
@@ -127,7 +130,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 
 	acquired, err := locksTableInsertLockQuery.ScanCAS(&holder)
 
-	cassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
+	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		logger.Printf("Unable to acquire lock: %v", err)
@@ -151,7 +154,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 				debug.Print(debug.Level1, logger, "oportinistic unlock fail: %v", err)
 			}
 
-			cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
+			l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
 		}
 
 		return false
@@ -184,11 +187,11 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 	start := time.Now()
 
-	pendingLock.Inc()
+	l.c.metrics.PendingLock.Inc()
 
-	defer pendingLock.Dec()
+	defer l.c.metrics.PendingLock.Dec()
 	defer func() {
-		locksLockSeconds.Observe(time.Since(start).Seconds())
+		l.c.metrics.LocksLockSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	currentDelay := retryDelay / 100
@@ -231,7 +234,7 @@ func (l *Lock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 	for {
 		ok := l.tryLock(ctx)
 		if ok {
-			locksLockSuccess.Inc()
+			l.c.metrics.LocksLockSuccess.Inc()
 
 			return true
 		}
@@ -292,13 +295,13 @@ func (l *Lock) Unlock() {
 			logger.Printf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
 		}
 
-		cassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
+		l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
 
 		return err //nolint: wrapcheck
 	},
 		retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger, "free lock")
 
-	locksUnlockSeconds.Observe(time.Since(start).Seconds())
+	l.c.metrics.LocksUnlockSeconds.Observe(time.Since(start).Seconds())
 
 	l.cassAcquired = false
 
@@ -323,7 +326,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 				err := locksTableUpdateLockQuery.Exec()
 
-				cassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
+				l.c.metrics.CassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
 				return err //nolint: wrapcheck
 			}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,

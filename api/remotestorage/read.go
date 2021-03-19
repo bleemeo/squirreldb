@@ -9,12 +9,12 @@ import (
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/prompb"
-	"github.com/prometheus/prometheus/storage/remote"
 )
 
 type readMetrics struct {
-	index  types.Index
-	reader types.MetricReader
+	index   types.Index
+	reader  types.MetricReader
+	metrics *metrics
 }
 
 // ServeHTTP handles read requests.
@@ -23,7 +23,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	ctx := request.Context()
 
 	defer func() {
-		requestsSecondsRead.Observe(time.Since(start).Seconds())
+		r.metrics.RequestsSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	var readRequest prompb.ReadRequest
@@ -35,7 +35,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err := decodeRequest(request.Body, &reqCtx); err != nil {
 		logger.Printf("Error: Can't decode the read request (%v)", err)
 		http.Error(writer, "Can't decode the read request", http.StatusBadRequest)
-		requestsErrorRead.Inc()
+		r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 		return
 	}
@@ -43,7 +43,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	requests, id2labels, err := requestsFromPromReadRequest(ctx, &readRequest, r.index)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
-		requestsErrorRead.Inc()
+		r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 		return
 	}
@@ -55,19 +55,21 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			logger.Printf("Error: Can't retrieve metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			requestsErrorRead.Inc()
+			r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 			return
 		}
 
-		timeseries, err := promTimeseriesFromMetrics(metricIter, id2labels, len(request.IDs))
+		timeseries, totalPoints, err := promTimeseriesFromMetrics(metricIter, id2labels, len(request.IDs))
 		if err != nil {
 			logger.Printf("Error: Can't format metric data for %v: %v", readRequest.Queries[i].Matchers, err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			requestsErrorRead.Inc()
+			r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 			return
 		}
+
+		r.metrics.RequestsPoints.WithLabelValues("read").Add(float64(totalPoints))
 
 		promQueryResult := &prompb.QueryResult{
 			Timeseries: timeseries,
@@ -84,7 +86,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		logger.Printf("Error: Can't encode the read response (%v)", err)
 		http.Error(writer, "Can't encode the read response", http.StatusBadRequest)
-		requestsErrorRead.Inc()
+		r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 		return
 	}
@@ -93,7 +95,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 	if err != nil {
 		logger.Printf("Error: Can't write the read response (%v)", err)
-		requestsErrorRead.Inc()
+		r.metrics.RequestsError.WithLabelValues("read").Inc()
 
 		return
 	}
@@ -101,7 +103,7 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 // Returns a MetricRequest generated from a Query.
 func requestFromPromQuery(ctx context.Context, promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
-	matchers, err := remote.FromLabelMatchers(promQuery.Matchers)
+	matchers, err := fromLabelMatchers(promQuery.Matchers)
 	if err != nil {
 		return nil, types.MetricRequest{}, fmt.Errorf("read matchers failed: %w", err)
 	}
@@ -204,7 +206,7 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, id2labels ma
 }
 
 // Returns a TimeSeries pointer list generated from a metric list.
-func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.MetricID]labels.Labels, sizeHint int) ([]*prompb.TimeSeries, error) {
+func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.MetricID]labels.Labels, sizeHint int) ([]*prompb.TimeSeries, int, error) {
 	totalPoints := 0
 
 	promTimeseries := make([]*prompb.TimeSeries, 0, sizeHint)
@@ -214,7 +216,7 @@ func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.
 
 		promSeries, err := promSeriesFromMetric(data.ID, data, id2labels)
 		if err != nil {
-			return nil, err
+			return nil, totalPoints, err
 		}
 
 		promTimeseries = append(promTimeseries, promSeries)
@@ -222,7 +224,5 @@ func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.
 		totalPoints += len(data.Points)
 	}
 
-	requestsPointsTotalRead.Add(float64(totalPoints))
-
-	return promTimeseries, metrics.Err()
+	return promTimeseries, totalPoints, metrics.Err()
 }

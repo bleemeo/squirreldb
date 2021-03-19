@@ -23,6 +23,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"golang.org/x/sync/errgroup"
 )
@@ -100,6 +101,7 @@ type CassandraIndex struct {
 
 	idsToLabels *labelsLookupCache
 	searchCache *searchCache
+	metrics     *metrics
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -128,6 +130,8 @@ func (c *CassandraIndex) setIDData(key uint64, value idData) {
 
 	list = append(list, value)
 	c.labelsToID[key] = list
+
+	c.metrics.CacheSize.WithLabelValues("lookup-id").Inc()
 }
 
 type storeImpl interface {
@@ -166,18 +170,22 @@ const (
 )
 
 // New creates a new CassandraIndex object.
-func New(ctx context.Context, session *gocql.Session, options Options) (*CassandraIndex, error) {
+func New(ctx context.Context, reg prometheus.Registerer, session *gocql.Session, options Options) (*CassandraIndex, error) {
+	metrics := newMetrics(reg)
+
 	return initialize(
 		ctx,
 		cassandraStore{
 			session:    session,
 			schemaLock: options.SchemaLock,
+			metrics:    metrics,
 		},
 		options,
+		metrics,
 	)
 }
 
-func initialize(ctx context.Context, store storeImpl, options Options) (*CassandraIndex, error) {
+func initialize(ctx context.Context, store storeImpl, options Options, metrics *metrics) (*CassandraIndex, error) {
 	index := &CassandraIndex{
 		store:               store,
 		options:             options,
@@ -191,6 +199,7 @@ func initialize(ctx context.Context, store storeImpl, options Options) (*Cassand
 		},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+		metrics:                  metrics,
 	}
 
 	if _, err := cryptoRand.Read(index.searchCache.salt); err != nil {
@@ -269,7 +278,8 @@ func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 	if len(deleteIDs) > 0 {
 		c.lookupIDMutex.Lock()
-		c.idsToLabels.Drop(deleteIDs)
+		size := c.idsToLabels.Drop(deleteIDs)
+		c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 
 		// Since we don't force sorting labels on input, we don't known the key used
 		// for c.labelsToID (it's likely to be keyFromLabels(sortedLabels))
@@ -286,6 +296,8 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 					// 1) normally only 1 entry match the hash
 					// 2) it's a cache, we don't loss data
 					delete(c.labelsToID, key)
+
+					c.metrics.CacheSize.WithLabelValues("lookup-id").Sub(float64(len(idsData)))
 
 					break
 				}
@@ -1203,10 +1215,13 @@ func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID,
 		}
 	}
 
+	c.metrics.CacheAccess.WithLabelValues("lookup-labels", "miss").Add(float64(len(idToQuery)))
+	c.metrics.CacheAccess.WithLabelValues("lookup-labels", "hit").Add(float64(len(ids) - len(idToQuery)))
+
 	if len(idToQuery) > 0 {
 		idToLabels, idToExpiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, idToQuery)
 		if err != nil {
-			lookupLabelsSeconds.Observe(time.Since(start).Seconds())
+			c.metrics.LookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 			return nil, fmt.Errorf("get labels from store: %w", err)
 		}
@@ -1220,12 +1235,14 @@ func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID,
 					return nil, fmt.Errorf("labels for metric ID %d not found", id)
 				}
 
-				c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
+				size := c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
+
+				c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 			}
 		}
 	}
 
-	lookupLabelsSeconds.Observe(time.Since(start).Seconds())
+	c.metrics.LookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
 	return labelList, nil
 }
@@ -1349,10 +1366,8 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 	start := time.Now()
 
 	defer func() {
-		LookupIDRequestSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.LookupIDRequestSeconds.Observe(time.Since(start).Seconds())
 	}()
-
-	LookupIDs.Add(float64(len(requests)))
 
 	for _, req := range requests {
 		if len(req.Labels) == 0 {
@@ -1375,7 +1390,8 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		labelsToQuery = append(labelsToQuery, lbls)
 	}
 
-	LookupIDMisses.Add(float64(miss))
+	c.metrics.CacheAccess.WithLabelValues("lookup-id", "hit").Add(float64(len(requests) - miss))
+	c.metrics.CacheAccess.WithLabelValues("lookup-id", "miss").Add(float64(miss))
 
 	if len(labelsToQuery) > 0 {
 		labels2ID, err := c.store.SelectLabelsList2ID(ctx, labelsToQuery)
@@ -1417,7 +1433,7 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		}
 	}
 
-	LookupIDNew.Add(float64(notFoundCount))
+	c.metrics.LookupIDNew.Add(float64(notFoundCount))
 
 	if notFoundCount > 0 {
 		indicies := make([]int, 0, len(labelsToIndices))
@@ -1586,7 +1602,7 @@ func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, 
 }
 
 func (c *CassandraIndex) refreshExpiration(ctx context.Context, id types.MetricID, oldExpiration time.Time, newExpiration time.Time) error {
-	LookupIDRefresh.Inc()
+	c.metrics.LookupIDRefresh.Inc()
 
 	err := c.store.UpdateID2LabelsExpiration(ctx, id, newExpiration)
 	if err != nil {
@@ -1700,7 +1716,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 
 	defer func() {
-		CreateMetricSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.CreateMetricSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
@@ -1729,7 +1745,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 		case ok:
 			newID = id
 
-			LookupIDConcurrentNew.Inc()
+			c.metrics.LookupIDConcurrentNew.Inc()
 		case entry.id != 0 && allowForcingIDAndExpiration:
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
@@ -1851,7 +1867,7 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 	start := time.Now()
 
 	defer func() {
-		updatePostingSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.UpdatePostingSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	if updateCache {
@@ -1972,7 +1988,8 @@ func (c *CassandraIndex) invalidateSearchCacheListenner(message []byte) {
 	if err != nil {
 		logger.Printf("unable to deserialize new metrics message. Search cache may be wrong: %v", err)
 	} else {
-		c.searchCache.Invalidate(metrics)
+		size := c.searchCache.Invalidate(metrics)
+		c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
 	}
 }
 
@@ -2162,7 +2179,7 @@ func (c *CassandraIndex) Search(ctx context.Context, queryStart time.Time, query
 	}
 
 	defer func() {
-		searchMetricsSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.SearchMetricsSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	if len(matchers) == 0 {
@@ -2184,7 +2201,7 @@ func (c *CassandraIndex) Search(ctx context.Context, queryStart time.Time, query
 		}
 	}
 
-	searchMetricsTotal.Add(float64(len(ids)))
+	c.metrics.SearchMetrics.Add(float64(len(ids)))
 
 	return &metricsLabels{c: c, ctx: ctx, ids: ids, labelsList: labelsList}, nil
 }
@@ -2235,7 +2252,11 @@ func (c *CassandraIndex) expire(now time.Time) {
 	c.lookupIDMutex.Lock()
 	defer c.lookupIDMutex.Unlock()
 
+	size := 0
+
 	for key, idsData := range c.labelsToID {
+		size += len(idsData)
+
 		for _, idData := range idsData {
 			if idData.cacheExpirationTime.Before(now) {
 				// This may delete too many entry, but:
@@ -2243,10 +2264,14 @@ func (c *CassandraIndex) expire(now time.Time) {
 				// 2) it's a cache, we don't loss data
 				delete(c.labelsToID, key)
 
+				size -= len(idsData)
+
 				break
 			}
 		}
 	}
+
+	c.metrics.CacheSize.WithLabelValues("lookup-id").Set(float64(size))
 }
 
 func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
@@ -2255,7 +2280,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 	start := time.Now()
 
 	defer func() {
-		expirationMoveSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.ExpirationMoveSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	expireUpdates := make([]expirationUpdateRequest, 0, len(c.expirationUpdateRequests))
@@ -2469,7 +2494,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 	start := time.Now()
 
 	defer func() {
-		expireTotalSeconds.Observe(time.Since(start).Seconds())
+		c.metrics.ExpireTotalSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	var lastProcessedDay time.Time
@@ -2610,7 +2635,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		if !ok {
 			// This shouldn't happen. It means that metric were partially created.
 			// Cleanup this metric from all posting if ever it's present in this list.
-			expireGhostMetric.Inc()
+			c.metrics.ExpireGhostMetric.Inc()
 
 			bulkDelete.PrepareDelete(id, nil, false)
 
@@ -2663,10 +2688,10 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		return err
 	}
 
-	expireLockSeconds.Observe(time.Since(start).Seconds())
+	c.metrics.ExpireLockSeconds.Observe(time.Since(start).Seconds())
 
-	expireMetricDelete.Add(float64(len(bulkDelete.deleteIDs)))
-	expireMetric.Add(float64(len(ids)))
+	c.metrics.ExpireMetricDelete.Add(float64(len(bulkDelete.deleteIDs)))
+	c.metrics.ExpireMetric.Add(float64(len(ids)))
 
 	return nil
 }
@@ -2768,7 +2793,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 
 	if missingIDs.Any() {
 		slice := missingIDs.Slice()
-		expireConflictMetric.Add(float64(len(slice)))
+		c.metrics.ExpireConflictMetric.Add(float64(len(slice)))
 
 		c.deleteIDsFromCache(slice)
 	}
@@ -2805,6 +2830,8 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 	if len(ids) == 0 {
 		var results *roaring.Bitmap
 
+		c.metrics.CacheAccess.WithLabelValues("search", "miss").Inc()
+
 		results, checkMatches, err = c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
 		if err != nil {
 			return nil, nil, err
@@ -2816,6 +2843,8 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 
 		ids = bitsetToIDs(results)
 	} else {
+		c.metrics.CacheAccess.WithLabelValues("search", "hit").Inc()
+
 		resultFromCache = true
 	}
 
@@ -2845,7 +2874,8 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 			// Drop the cache entry, but we will return the current result:
 			// * it does not contains ID that are wrong (even if metric ID get reused)
 			// * it MAY not contains recently added metrics... but this isn't specific to this branch
-			c.searchCache.Drop(shards, matchers)
+			size := c.searchCache.Drop(shards, matchers)
+			c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
 		}
 
 		ids = newIds
@@ -2862,7 +2892,8 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 	//   so if your query are expected to return only one metric the cache
 	//   won't yield stall result.
 	if !resultFromCache && len(ids) > 0 {
-		c.searchCache.Set(shards, matchers, ids)
+		size := c.searchCache.Set(shards, matchers, ids)
+		c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
 	}
 
 	return ids, labelsList, nil
@@ -3219,6 +3250,7 @@ type postingIter interface {
 type cassandraStore struct {
 	session    *gocql.Session
 	schemaLock sync.Locker
+	metrics    *metrics
 }
 
 type cassandraByteIter struct {
@@ -3258,7 +3290,7 @@ func (s cassandraStore) Init(ctx context.Context) error {
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	queries := []string{
@@ -3318,7 +3350,7 @@ func (s cassandraStore) InsertPostings(ctx context.Context, shard int32, name st
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3331,7 +3363,7 @@ func (s cassandraStore) InsertID2Labels(ctx context.Context, id types.MetricID, 
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3344,7 +3376,7 @@ func (s cassandraStore) InsertLabels2ID(ctx context.Context, sortedLabelsString 
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3357,7 +3389,7 @@ func (s cassandraStore) DeleteLabels2ID(ctx context.Context, sortedLabelsString 
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3370,7 +3402,7 @@ func (s cassandraStore) DeleteID2Labels(ctx context.Context, id types.MetricID) 
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3383,7 +3415,7 @@ func (s cassandraStore) DeleteExpiration(ctx context.Context, day time.Time) err
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3396,7 +3428,7 @@ func (s cassandraStore) DeletePostings(ctx context.Context, shard int32, name st
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3409,7 +3441,7 @@ func (s cassandraStore) InsertExpiration(ctx context.Context, day time.Time, bit
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	return s.session.Query(
@@ -3422,7 +3454,7 @@ func (s cassandraStore) SelectLabelsList2ID(ctx context.Context, sortedLabelsLis
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	iter := s.session.Query(
@@ -3450,7 +3482,7 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids [
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	iter := s.session.Query(
@@ -3481,7 +3513,7 @@ func (s cassandraStore) SelectExpiration(ctx context.Context, day time.Time) ([]
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	query := s.session.Query(
@@ -3499,7 +3531,7 @@ func (s cassandraStore) UpdateID2LabelsExpiration(ctx context.Context, id types.
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsWrite.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	query := s.session.Query(
@@ -3515,7 +3547,7 @@ func (s cassandraStore) SelectPostingByName(ctx context.Context, shard int32, na
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	iter := s.session.Query(
@@ -3532,7 +3564,7 @@ func (s cassandraStore) SelectPostingByNameValue(ctx context.Context, shard int3
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	query := s.session.Query(
@@ -3549,7 +3581,7 @@ func (s cassandraStore) SelectValueForName(ctx context.Context, shard int32, nam
 	start := time.Now()
 
 	defer func() {
-		cassandraQueriesSecondsRead.Observe(time.Since(start).Seconds())
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
 	iter := s.session.Query(

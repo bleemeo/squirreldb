@@ -61,8 +61,8 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 
 	wg.Wait()
 
-	requestsPointsTotalWriteRaw.Add(float64(rawPointsCount))
-	requestsSecondsWriteRaw.Observe(time.Since(start).Seconds())
+	c.metrics.RequestsPoints.WithLabelValues("write", "raw").Add(float64(rawPointsCount))
+	c.metrics.RequestsSeconds.WithLabelValues("write", "raw").Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -101,15 +101,15 @@ func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedDa
 		}
 
 		if err := c.writeAggregateRow(aggregatedData.ID, aggregatedPartitionData, baseTimestamp, writingTimestamp); err != nil {
-			requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
-			requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
+			c.metrics.RequestsSeconds.WithLabelValues("write", "aggregated").Observe(time.Since(start).Seconds())
+			c.metrics.RequestsPoints.WithLabelValues("write", "aggregated").Add(float64(len(aggregatedData.Points)))
 
 			return err
 		}
 	}
 
-	requestsSecondsWriteAggregated.Observe(time.Since(start).Seconds())
-	requestsPointsTotalWriteAggregated.Add(float64(len(aggregatedData.Points)))
+	c.metrics.RequestsSeconds.WithLabelValues("write", "aggregated").Observe(time.Since(start).Seconds())
+	c.metrics.RequestsPoints.WithLabelValues("write", "aggregated").Add(float64(len(aggregatedData.Points)))
 
 	return nil
 }
@@ -142,7 +142,7 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 		return fmt.Errorf("insert into data_aggregated fail: %w", err)
 	}
 
-	cassandraQueriesSecondsWriteAggregated.Observe(time.Since(start).Seconds())
+	c.metrics.CassandraQueriesSeconds.WithLabelValues("write", "aggregated").Observe(time.Since(start).Seconds())
 
 	return nil
 }
@@ -224,7 +224,7 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 		return fmt.Errorf("unable to write raw for ID=%d, baseTimestamp=%d and offsetMs=%d: %w", data.ID, baseTimestamp, offsetMs, err)
 	}
 
-	cassandraQueriesSecondsWriteRaw.Observe(time.Since(start).Seconds())
+	c.metrics.CassandraQueriesSeconds.WithLabelValues("write", "raw").Observe(time.Since(start).Seconds())
 
 	return nil
 }

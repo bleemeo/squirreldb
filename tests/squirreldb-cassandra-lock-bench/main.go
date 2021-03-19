@@ -7,12 +7,9 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"squirreldb/cassandra/locks"
-	"squirreldb/cassandra/session"
-	"squirreldb/debug"
+	"squirreldb/daemon"
 	"squirreldb/types"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,39 +20,18 @@ import (
 
 //nolint: gochecknoglobals
 var (
-	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
-	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
-	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
-	seed                      = flag.Int64("seed", 42, "Seed used in random generator")
-	runDuration               = flag.Duration("run-time", 10*time.Second, "Duration of the bench")
-	ctxTimeout                = flag.Duration("ctx-timeout", 15*time.Second, "Context deadline to acquire lock (0=unlimited)")
-	workDuration              = flag.Duration("work-duration", 100*time.Millisecond, "Duration of one work (randomized +/- 50%")
-	workerThreads             = flag.Int("worker-threads", 25, "Number of concurrent threads per processes")
-	workerProcesses           = flag.Int("worker-processes", 2, "Number of concurrent index (equivalent to process) inserting data")
-	tryLockDelay              = flag.Duration("try-lock-duration", 15*time.Second, "If delay given to TryLock()")
-	recreateLock              = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
-	lockTTL                   = flag.Duration("lock-ttl", 2*time.Second, "TTL of the locks")
-	lockName                  = flag.String("lock-name", "benchmarking-lock", "Name prefix of the lock")
-	count                     = flag.Int("count", 1, "Number of different lock/task")
+	seed            = flag.Int64("seed", 42, "Seed used in random generator")
+	runDuration     = flag.Duration("run-time", 10*time.Second, "Duration of the bench")
+	ctxTimeout      = flag.Duration("ctx-timeout", 15*time.Second, "Context deadline to acquire lock (0=unlimited)")
+	workDuration    = flag.Duration("work-duration", 100*time.Millisecond, "Duration of one work (randomized +/- 50%")
+	workerThreads   = flag.Int("worker-threads", 25, "Number of concurrent threads per processes")
+	workerProcesses = flag.Int("worker-processes", 2, "Number of concurrent index (equivalent to process) inserting data")
+	tryLockDelay    = flag.Duration("try-lock-duration", 15*time.Second, "If delay given to TryLock()")
+	recreateLock    = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
+	lockTTL         = flag.Duration("lock-ttl", 2*time.Second, "TTL of the locks")
+	lockName        = flag.String("lock-name", "benchmarking-lock", "Name prefix of the lock")
+	count           = flag.Int("count", 1, "Number of different lock/task")
 )
-
-func makeLock() *locks.CassandraLocks {
-	cassandraSession, keyspaceCreated, err := session.New(session.Options{
-		Addresses:         strings.Split(*cassandraAddresses, ","),
-		ReplicationFactor: *cassanraReplicationFactor,
-		Keyspace:          *cassandraKeyspace,
-	})
-	if err != nil {
-		log.Fatalf("Unable to open Cassandra session: %v", err)
-	}
-
-	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
-	if err != nil {
-		log.Fatalf("Unable to create locks: %v", err)
-	}
-
-	return squirrelLocks
-}
 
 type result struct {
 	ErrCount         int
@@ -72,34 +48,29 @@ type result struct {
 }
 
 func main() {
-	if err := do(); err != nil {
-		os.Exit(1)
+	daemon.SetTestEnvironment()
+
+	err := daemon.RunWithSignalHandler(run)
+
+	metricResult, _ := prometheus.DefaultGatherer.Gather()
+	for _, mf := range metricResult {
+		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
+	}
+
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
-func do() error {
-	flag.Parse()
-
-	debug.Level = 0
-
-	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
-	if found {
-		*cassandraAddresses = value
-	}
-
-	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
-	if found {
-		tmp, err := strconv.ParseInt(value, 10, 0)
-		if err != nil {
-			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
-		}
-
-		*cassanraReplicationFactor = int(tmp)
+func run(ctx context.Context) error {
+	cfg, err := daemon.Config()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	rand.Seed(*seed)
 
-	ctx, cancel := context.WithTimeout(context.Background(), *runDuration)
+	ctx, cancel := context.WithTimeout(ctx, *runDuration)
 	resultChan := make(chan result, (*workerProcesses)*(*workerThreads)*(*count))
 	jobRunning := make([]int32, *count)
 
@@ -110,7 +81,18 @@ func do() error {
 	start := time.Now()
 
 	for p := 0; p < *workerProcesses; p++ {
-		lockFactory := makeLock()
+		squirreldb := &daemon.SquirrelDB{
+			Config: cfg,
+			MetricRegistry: prometheus.WrapRegistererWith(
+				map[string]string{"process": strconv.FormatInt(int64(p), 10)},
+				prometheus.DefaultRegisterer,
+			),
+		}
+
+		lockFactory, err := squirreldb.LockFactory()
+		if err != nil {
+			return err
+		}
 
 		for n := 0; n < *count; n++ {
 			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
@@ -191,11 +173,6 @@ func do() error {
 		log.Printf("Had %d errors, see logs", globalResult.ErrCount)
 	}
 
-	metricResult, _ := prometheus.DefaultGatherer.Gather()
-	for _, mf := range metricResult {
-		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
-	}
-
 	if globalResult.ErrCount > 0 {
 		return fmt.Errorf("had %d error", globalResult.ErrCount)
 	}
@@ -203,7 +180,7 @@ func do() error {
 	return nil
 }
 
-func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory *locks.CassandraLocks, subLockName string, lock types.TryLocker) result {
+func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory daemon.LockFactory, subLockName string, lock types.TryLocker) result {
 	rnd := rand.New(rand.NewSource(workerSeed)) //nolint: gosec
 	r := result{}
 

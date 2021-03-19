@@ -3,16 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
 	"runtime/pprof"
 	"squirreldb/cassandra/index"
-	"squirreldb/config"
 	"squirreldb/daemon"
-	"squirreldb/dummy"
-	"squirreldb/types"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -44,43 +41,26 @@ var (
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
-type Factory struct {
-	l       sync.Mutex
-	cfg     *config.Config
-	cluster types.Cluster
-}
-
-func (f *Factory) makeIndex(ctx context.Context) types.Index {
-	f.l.Lock()
-
-	if f.cluster == nil {
-		f.cluster = &dummy.LocalCluster{}
-	}
-
-	f.l.Unlock()
-
-	squirreldb := &daemon.SquirrelDB{
-		Config:          f.cfg,
-		ExistingCluster: f.cluster,
-	}
-
-	idx, err := squirreldb.Index(ctx, false)
-	if err != nil {
-		log.Fatalf("Unable to create index: %v", err)
-	}
-
-	return idx
-}
-
 func main() {
 	daemon.SetTestEnvironment()
 
-	cfg, err := daemon.Config()
+	err := daemon.RunWithSignalHandler(run)
+
+	metricResult, _ := prometheus.DefaultGatherer.Gather()
+	for _, mf := range metricResult {
+		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
+	}
+
 	if err != nil {
 		log.Fatal(err)
 	}
+}
 
-	ctx := context.Background()
+func run(ctx context.Context) error {
+	cfg, err := daemon.Config()
+	if err != nil {
+		return err
+	}
 
 	if !*runExpiration && *verify {
 		log.Println("Force running expiration because index verify is enabled")
@@ -88,16 +68,16 @@ func main() {
 		*runExpiration = true
 	}
 
-	factory := &Factory{
-		cfg: cfg,
+	squirreldb := &daemon.SquirrelDB{
+		Config: cfg,
+		MetricRegistry: prometheus.WrapRegistererWith(
+			map[string]string{"process": "test1"},
+			prometheus.DefaultRegisterer,
+		),
 	}
 
 	if !*noDropTables {
 		log.Printf("Droping tables")
-
-		squirreldb := &daemon.SquirrelDB{
-			Config: cfg,
-		}
 
 		err := squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
@@ -121,47 +101,65 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if !*skipValid {
-		cassandraIndex := factory.makeIndex(ctx)
+	cassandraIndex, err := squirreldb.Index(ctx, false)
+	if err != nil {
+		return err
+	}
 
+	if !*skipValid {
 		log.Printf("Start validating test")
 		test(ctx, cassandraIndex)
 		log.Printf("Re-run validating test")
 		test(ctx, cassandraIndex)
+
 		log.Printf("Re-run validating test on fresh index")
-		test(ctx, factory.makeIndex(ctx))
+
+		squirreldb2 := &daemon.SquirrelDB{
+			Config: cfg,
+			MetricRegistry: prometheus.WrapRegistererWith(
+				map[string]string{"process": "test2"},
+				prometheus.DefaultRegisterer,
+			),
+		}
+
+		cassandraIndex2, err := squirreldb2.Index(ctx, false)
+		if err != nil {
+			return err
+		}
+
+		test(ctx, cassandraIndex2)
 	}
 
 	rnd := rand.New(rand.NewSource(*seed)) //nolint: gosec
-	bench(ctx, factory.makeIndex, rnd)
 
-	verifyHadIssue := false
+	err = bench(ctx, cfg, rnd)
+	if err != nil {
+		return err
+	}
 
 	if *verify {
-		var err error
+		squirreldb3 := &daemon.SquirrelDB{
+			Config:         cfg,
+			MetricRegistry: prometheus.NewRegistry(),
+		}
 
-		idx := factory.makeIndex(ctx)
+		idx, err := squirreldb3.Index(ctx, false)
+		if err != nil {
+			return err
+		}
+
 		cassandraIndex, ok := idx.(*index.CassandraIndex)
 
 		if !ok {
-			verifyHadIssue = true
+			return fmt.Errorf("can not verify, index isn't a CassandraIndex")
+		}
 
-			log.Println("Can not verify, index isn't a CassandraIndex")
-		} else {
-			verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
+		_, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
 
-			if err != nil {
-				log.Println(err)
-			}
+		if err != nil {
+			return err
 		}
 	}
 
-	result, _ := prometheus.DefaultGatherer.Gather()
-	for _, mf := range result {
-		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
-	}
-
-	if verifyHadIssue {
-		log.Println("Index verify had issue, see above")
-	}
+	return nil
 }

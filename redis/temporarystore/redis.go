@@ -16,6 +16,7 @@ import (
 	"time"
 
 	goredis "github.com/go-redis/redis/v8"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -35,7 +36,8 @@ type Options struct {
 }
 
 type Redis struct {
-	client *client.Client
+	client  *client.Client
+	metrics *metrics
 
 	bufferPool           sync.Pool
 	serializedPointsPool sync.Pool
@@ -59,11 +61,12 @@ const (
 )
 
 // New creates a new Redis object.
-func New(ctx context.Context, options Options) (*Redis, error) {
+func New(ctx context.Context, reg prometheus.Registerer, options Options) (*Redis, error) {
 	redis := &Redis{
 		client: &client.Client{
 			Addresses: options.Addresses,
 		},
+		metrics: newMetrics(reg),
 	}
 	redis.initPool()
 
@@ -131,7 +134,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 	start := time.Now()
 
 	defer func() {
-		operationSecondsAdd.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("add").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(points) == 0 {
@@ -188,7 +191,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 		}
 	}
 
-	operationPointssAdd.Add(float64(addedPoints))
+	r.metrics.OperationPoints.WithLabelValues("add").Add(float64(addedPoints))
 
 	return results, nil
 }
@@ -198,7 +201,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 	start := time.Now()
 
 	defer func() {
-		operationSecondsSet.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("set").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(points) == 0 {
@@ -274,7 +277,7 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 		}
 	}
 
-	operationPointssSet.Add(float64(writtenPointsCount))
+	r.metrics.OperationPoints.WithLabelValues("set").Add(float64(writtenPointsCount))
 
 	return results, nil
 }
@@ -284,7 +287,7 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 	start := time.Now()
 
 	defer func() {
-		operationSecondsGet.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("get").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(ids) == 0 {
@@ -354,7 +357,7 @@ func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 		}
 	}
 
-	operationPointssGet.Add(float64(readPointsCount))
+	r.metrics.OperationPoints.WithLabelValues("get").Add(float64(readPointsCount))
 
 	return metrics, writeOffsets, nil
 }
@@ -364,7 +367,7 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 	start := time.Now()
 
 	defer func() {
-		operationSecondsExpire.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("expire").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(ids) == 0 {
@@ -409,7 +412,7 @@ func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.Met
 	start := time.Now()
 
 	defer func() {
-		operationSecondsSetDeadline.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("set-deadline").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(deadlines) == 0 {
@@ -498,7 +501,7 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 	start := time.Now()
 
 	defer func() {
-		operationSecondsKnownMetrics.Observe(time.Since(start).Seconds())
+		r.metrics.OperationSeconds.WithLabelValues("known-metrics").Observe(time.Since(start).Seconds())
 	}()
 
 	result, err := r.client.SMembers(ctx, r.knownMetricsKey)

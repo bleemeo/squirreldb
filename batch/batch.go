@@ -32,6 +32,8 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -106,16 +108,18 @@ type Batch struct {
 	memoryStore TemporaryStore
 	reader      types.MetricReader
 	writer      types.MetricWriter
+	metrics     *metrics
 }
 
 // New creates a new Batch object.
-func New(batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
+func New(reg prometheus.Registerer, batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
 		states:      make(map[types.MetricID]stateData),
 		memoryStore: memoryStore,
 		reader:      reader,
 		writer:      writer,
+		metrics:     newMetrics(reg),
 	}
 
 	return batch
@@ -186,7 +190,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 	start := time.Now()
 
 	defer func() {
-		backgroundSeconds.Observe(time.Since(start).Seconds())
+		b.metrics.BackgroundSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	for !shutdown {
@@ -209,7 +213,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		}
 		b.mutex.Unlock()
 
-		transferOwnerTotal.Add(float64(len(metrics)))
+		b.metrics.TransferOwner.Add(float64(len(metrics)))
 
 		if len(metrics) < transferredOwnershipLimit {
 			break
@@ -317,7 +321,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 
 	err := b.flush(ctx, ids, now, false)
 
-	takeoverInTotal.Add(float64(len(metrics)))
+	b.metrics.Takeover.WithLabelValues("in").Add(float64(len(metrics)))
 
 	return err
 }
@@ -455,8 +459,8 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 		}
 	}
 
-	conflictFlushTotal.Add(float64(countNeedReSet))
-	newPointsDuringFlushTotal.Add(float64(countNewPoint))
+	b.metrics.ConflictFlushTotal.Add(float64(countNeedReSet))
+	b.metrics.NewPointsDuringFlush.Add(float64(countNewPoint))
 
 	return results, nil
 }
@@ -515,7 +519,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		}
 	}
 
-	duplicatedPointsTotal.Add(float64(sortMetrics(metricsToWrite)))
+	b.metrics.DuplicatedPoints.Add(float64(sortMetrics(metricsToWrite)))
 
 	err = retry.Print(func() error {
 		return b.writer.Write(ctx, metricsToWrite)
@@ -551,8 +555,8 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		setPointsCount += len(keptMetrics[i].Points)
 	}
 
-	flushPointsTotalRead.Add(float64(readPointsCount))
-	flushPointsTotalSet.Add(float64(setPointsCount))
+	b.metrics.FlushPoints.WithLabelValues("read").Add(float64(readPointsCount))
+	b.metrics.FlushPoints.WithLabelValues("set").Add(float64(setPointsCount))
 
 	results, err := b.setPointsAndOffset(ctx, metrics, keptMetrics, offsets, 0)
 	if err != nil {
@@ -636,7 +640,7 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		}
 
 		if !storeDeadlines[id].Equal(previousDeadline) {
-			takeoverOutTotal.Inc()
+			b.metrics.Takeover.WithLabelValues("out").Inc()
 			delete(b.states, id)
 		}
 	}
@@ -705,7 +709,7 @@ func (i *readIter) Next() bool {
 		start := time.Now()
 
 		defer func() {
-			requestsSecondsRead.Observe(time.Since(start).Seconds())
+			i.b.metrics.RequestsSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 		}()
 
 		idRequest := types.MetricRequest{
@@ -760,7 +764,7 @@ func (i *readIter) Next() bool {
 
 		if len(data.Points) > 0 {
 			i.current = data
-			requestsPointsTotalRead.Add(float64(len(data.Points)))
+			i.b.metrics.RequestsPoints.WithLabelValues("read").Add(float64(len(data.Points)))
 
 			return true
 		}
@@ -818,7 +822,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 	start := time.Now()
 
 	defer func() {
-		requestsSecondsWrite.Observe(time.Since(start).Seconds())
+		b.metrics.RequestsSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(metrics) == 0 {
@@ -875,7 +879,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 				// This will catch case where the current owner is dead, but give him
 				// the first threshold to act.
 				metricToFlush[metrics[i].ID] = nil
-				nonOwnerWriteTotal.Inc()
+				b.metrics.NonOwnerWrite.Inc()
 			}
 		}
 	}
@@ -906,7 +910,7 @@ func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.
 		}
 	}
 
-	requestsPointsTotalWrite.Add(float64(writtenPointsCount))
+	b.metrics.RequestsPoints.WithLabelValues("write").Add(float64(writtenPointsCount))
 
 	if len(metricToFlush) != 0 {
 		tmp := make([]types.MetricID, len(metricToFlush))

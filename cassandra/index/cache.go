@@ -68,8 +68,8 @@ func (c *labelsLookupCache) MGet(now time.Time, ids []types.MetricID) []labels.L
 	return result
 }
 
-// Set add entry to the cache.
-func (c *labelsLookupCache) Set(now time.Time, id types.MetricID, value labels.Labels, cassandraExpiration time.Time) {
+// Set add entry to the cache. Return the current cache size.
+func (c *labelsLookupCache) Set(now time.Time, id types.MetricID, value labels.Labels, cassandraExpiration time.Time) int {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -101,16 +101,20 @@ func (c *labelsLookupCache) Set(now time.Time, id types.MetricID, value labels.L
 		value:           value,
 		cassandraExpire: cassandraExpiration,
 	}
+
+	return len(c.cache)
 }
 
-// Drop delete entries from cache.
-func (c *labelsLookupCache) Drop(ids []uint64) {
+// Drop delete entries from cache. Return the cache size.
+func (c *labelsLookupCache) Drop(ids []uint64) int {
 	c.l.Lock()
 	defer c.l.Unlock()
 
 	for _, id := range ids {
 		delete(c.cache, types.MetricID(id))
 	}
+
+	return len(c.cache)
 }
 
 func (c *labelsLookupCache) get(now time.Time, id types.MetricID) labels.Labels {
@@ -134,17 +138,19 @@ func (c *searchCache) Get(shards []int32, matchers []*labels.Matcher) []types.Me
 }
 
 // Drop delete an entry.
-func (c *searchCache) Drop(shards []int32, matchers []*labels.Matcher) {
+func (c *searchCache) Drop(shards []int32, matchers []*labels.Matcher) int {
 	key := c.key(shards, matchers)
 
 	c.l.Lock()
 	defer c.l.Unlock()
 
 	delete(c.cache, key)
+
+	return len(c.cache)
 }
 
 // Invalidate drop entry that are impacted by given metrics.
-func (c *searchCache) Invalidate(metrics []labels.Labels) {
+func (c *searchCache) Invalidate(metrics []labels.Labels) int {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -157,15 +163,17 @@ func (c *searchCache) Invalidate(metrics []labels.Labels) {
 			}
 		}
 	}
+
+	return len(c.cache)
 }
 
 // Set add an entry.
-func (c *searchCache) Set(shards []int32, matchers []*labels.Matcher, ids []types.MetricID) {
+func (c *searchCache) Set(shards []int32, matchers []*labels.Matcher, ids []types.MetricID) int {
 	now := time.Now()
-	c.set(now, shards, matchers, ids)
+	return c.set(now, shards, matchers, ids)
 }
 
-func (c *searchCache) set(now time.Time, shards []int32, matchers []*labels.Matcher, ids []types.MetricID) {
+func (c *searchCache) set(now time.Time, shards []int32, matchers []*labels.Matcher, ids []types.MetricID) int {
 	key := c.key(shards, matchers)
 
 	c.l.Lock()
@@ -200,6 +208,8 @@ func (c *searchCache) set(now time.Time, shards []int32, matchers []*labels.Matc
 		matchers: matchers,
 		expire:   now.Add(searchCacheTTL),
 	}
+
+	return len(c.cache)
 }
 
 func (c *searchCache) get(now time.Time, shards []int32, matchers []*labels.Matcher) []types.MetricID {

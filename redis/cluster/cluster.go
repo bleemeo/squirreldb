@@ -12,6 +12,7 @@ import (
 	"os"
 	"squirreldb/redis/client"
 	"sync"
+	"time"
 
 	goredis "github.com/go-redis/redis/v8"
 	"github.com/golang/snappy"
@@ -42,7 +43,7 @@ type Cluster struct {
 	listenner      map[string][]func([]byte)
 	redisChannel   string
 
-	messageReceived prometheus.Counter
+	metrics *metrics
 }
 
 func (c *Cluster) Start(ctx context.Context) error {
@@ -50,8 +51,13 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return nil
 	}
 
-	if err := c.makeMetrics(); err != nil {
-		return err
+	if c.metrics == nil {
+		reg := c.MetricRegistry
+		if reg == nil {
+			reg = prometheus.DefaultRegisterer
+		}
+
+		c.metrics = newMetrics(reg)
 	}
 
 	c.redisChannel = c.Keyspace + pubsubName
@@ -116,6 +122,12 @@ func (c *Cluster) Stop() error {
 
 // Publish send a message to given topic. Publish must not be called before Start() (or after Stop()).
 func (c *Cluster) Publish(ctx context.Context, topic string, message []byte) error {
+	start := time.Now()
+
+	defer func() {
+		c.metrics.MessageSeconds.WithLabelValues("sent").Observe(time.Since(start).Seconds())
+	}()
+
 	if len(topic) > 255 {
 		return ErrTopicTooLong
 	}
@@ -145,23 +157,6 @@ func (c *Cluster) Subscribe(topic string, callback func([]byte)) {
 	c.listenner[topic] = append(c.listenner[topic], callback)
 }
 
-func (c *Cluster) makeMetrics() error {
-	c.messageReceived = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "squirreldb",
-		Subsystem: "redis_cluster",
-		Name:      "message_total",
-		Help:      "Total messages received by Redis (from myself or not)",
-	})
-
-	if c.MetricRegistry != nil {
-		if err := c.MetricRegistry.Register(c.messageReceived); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 	defer c.wg.Done()
 
@@ -170,17 +165,21 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 	for ctx.Err() == nil {
 		select {
 		case msg := <-ch:
-			c.messageReceived.Inc()
+			start := time.Now()
 
 			topic, message, err := decode(msg.Payload)
 			if err != nil {
 				logger.Printf("failed to decode message: %v", err)
+				c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
+
 				continue
 			}
 
 			for _, f := range c.listenner[topic] {
 				f(message)
 			}
+
+			c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
 		case <-ctx.Done():
 			continue
 		}

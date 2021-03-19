@@ -48,7 +48,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 		workDone, tmp := c.aggregateShard(ctx, shard, &lastNotifiedAggretedFrom)
 
 		if workDone {
-			aggregationSeconds.Observe(time.Since(start).Seconds())
+			c.metrics.AggregationSeconds.Observe(time.Since(start).Seconds())
 		}
 
 		if !tmp.IsZero() {
@@ -76,7 +76,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 				}
 			}
 
-			aggregatdUntilSeconds.Set(float64(minTime.Unix()))
+			c.metrics.AggregatdUntilSeconds.Set(float64(minTime.Unix()))
 
 			if minTime.After(lastNotifiedAggretedUntil) {
 				logger.Printf("All shard are aggregated until %s", minTime)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -42,6 +43,7 @@ type lockFactory interface {
 type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
+	metrics *metrics
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -56,7 +58,7 @@ type CassandraTSDB struct {
 }
 
 // New created a new CassandraTSDB object.
-func New(session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
+func New(reg prometheus.Registerer, session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
 
@@ -77,6 +79,7 @@ func New(session *gocql.Session, options Options, index types.Index, lockFactory
 	tsdb := &CassandraTSDB{
 		session:     session,
 		options:     options,
+		metrics:     newMetrics(reg),
 		index:       index,
 		lockFactory: lockFactory,
 		state:       state,

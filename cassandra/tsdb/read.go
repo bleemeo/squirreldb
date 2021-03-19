@@ -142,15 +142,15 @@ func (c *CassandraTSDB) readAggregateData(id types.MetricID, buffer types.Metric
 		tmp, err = c.readAggregatePartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp, function)
 
 		if err != nil {
-			requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
-			requestsPointsTotalReadAggregated.Add(float64(len(buffer.Points)))
+			c.metrics.RequestsSeconds.WithLabelValues("read", "aggregated").Observe(time.Since(start).Seconds())
+			c.metrics.RequestsPoints.WithLabelValues("read", "aggregated").Add(float64(len(buffer.Points)))
 
 			return buffer, tmp, err
 		}
 	}
 
-	requestsPointsTotalReadAggregated.Add(float64(len(buffer.Points)))
-	requestsSecondsReadAggregated.Observe(time.Since(start).Seconds())
+	c.metrics.RequestsPoints.WithLabelValues("read", "aggregated").Add(float64(len(buffer.Points)))
+	c.metrics.RequestsSeconds.WithLabelValues("read", "aggregated").Observe(time.Since(start).Seconds())
 
 	return buffer, tmp, nil
 }
@@ -185,7 +185,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 
 		tmp, err = gorillaDecodeAggregate(values, baseTimestamp, function, tmp, aggregateResolution.Milliseconds())
 		if err != nil {
-			cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
+			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "aggregated").Observe(queryDuration.Seconds())
 
 			return tmp, fmt.Errorf("gorillaDecodeAggregate: %w", err)
 		}
@@ -200,7 +200,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 		start = time.Now()
 	}
 
-	cassandraQueriesSecondsReadAggregated.Observe(queryDuration.Seconds())
+	c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "aggregated").Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
 		return tmp, fmt.Errorf("read aggr. table: %w", err)
@@ -221,15 +221,15 @@ func (c *CassandraTSDB) readRawData(id types.MetricID, buffer types.MetricData, 
 		tmp, err = c.readRawPartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp)
 
 		if err != nil {
-			requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
-			requestsPointsTotalReadRaw.Add(float64(len(buffer.Points)))
+			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
+			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points)))
 
 			return buffer, tmp, err
 		}
 	}
 
-	requestsPointsTotalReadRaw.Add(float64(len(buffer.Points)))
-	requestsSecondsReadRaw.Observe(time.Since(start).Seconds())
+	c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points)))
+	c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
 
 	return buffer, tmp, nil
 }
@@ -265,7 +265,7 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 		tmp, err = gorillaDecode(values, baseTimestamp-1, tmp, 1)
 
 		if err != nil {
-			cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
+			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "raw").Observe(queryDuration.Seconds())
 
 			return tmp, fmt.Errorf("gorillaDecode: %w", err)
 		}
@@ -280,7 +280,7 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 		start = time.Now()
 	}
 
-	cassandraQueriesSecondsReadRaw.Observe(queryDuration.Seconds())
+	c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "raw").Observe(queryDuration.Seconds())
 
 	if err := tableSelectDataIter.Close(); err != nil {
 		return tmp, fmt.Errorf("read raw tables: %w", err)

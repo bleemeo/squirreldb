@@ -409,7 +409,7 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 				return nil, err
 			}
 
-			factory, err := locks.New(session, s.cassandraKeyspaceCreated)
+			factory, err := locks.New(s.MetricRegistry, session, s.cassandraKeyspaceCreated)
 			if err != nil {
 				return nil, err
 			}
@@ -472,6 +472,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
 	s.api.MaxConcurrentRemoteWrite = s.Config.Int("remote_storage.max_concurrent_write")
+	s.api.MetricRegisty = s.MetricRegistry
 
 	s.api.Run(ctx, readiness)
 }
@@ -609,7 +610,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			index, err := index.New(ctx, session, options)
+			index, err := index.New(ctx, s.MetricRegistry, session, options)
 			if err != nil {
 				return nil, err
 			}
@@ -673,7 +674,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 				SchemaLock:                schemaLock,
 			}
 
-			tsdb, err := tsdb.New(session, options, index, lockFactory, states)
+			tsdb, err := tsdb.New(s.MetricRegistry, session, options, index, lockFactory, states)
 			if err != nil {
 				return nil, err
 			}
@@ -709,7 +710,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 				Keyspace:  s.Config.String("internal.redis_keyspace"),
 			}
 
-			tmp, err := redisTemporarystore.New(ctx, options)
+			tmp, err := redisTemporarystore.New(ctx, s.MetricRegistry, options)
 			s.temporaryStore = tmp
 
 			readiness <- err
@@ -720,7 +721,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 
 			<-ctx.Done()
 		} else {
-			mem := temporarystore.New()
+			mem := temporarystore.New(s.MetricRegistry)
 			s.temporaryStore = mem
 			readiness <- nil
 			mem.Run(ctx)
@@ -757,7 +758,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		batch := batch.New(squirrelBatchSize, s.temporaryStore, s.persistentStore, s.persistentStore)
+		batch := batch.New(s.MetricRegistry, squirrelBatchSize, s.temporaryStore, s.persistentStore, s.persistentStore)
 		s.store = batch
 		s.api.FlushCallback = batch.Flush
 

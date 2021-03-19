@@ -8,6 +8,8 @@ import (
 	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -17,13 +19,13 @@ const (
 )
 
 func newMemoryStore(initialData []types.MetricData) *temporarystore.Store {
-	store := temporarystore.New()
+	store := temporarystore.New(prometheus.NewRegistry())
 	store.Append(context.Background(), initialData)
 	return store
 }
 
 func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *temporarystore.Store {
-	store := temporarystore.New()
+	store := temporarystore.New(prometheus.NewRegistry())
 	store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
 	return store
 }
@@ -682,6 +684,7 @@ func TestBatch_read(t *testing.T) {
 				memoryStore: tt.fields.memoryStore,
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
+				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := b.ReadIter(context.Background(), tt.args.request)
 			if (err != nil) != tt.wantErr {
@@ -825,6 +828,7 @@ func TestBatch_readTemporary(t *testing.T) {
 				memoryStore: tt.fields.memoryStore,
 				reader:      tt.fields.reader,
 				writer:      tt.fields.writer,
+				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := b.readTemporary(context.Background(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
@@ -1180,6 +1184,7 @@ func TestBatch_flush(t *testing.T) {
 				states:      tt.fields.states,
 				memoryStore: tt.fields.memoryStore,
 				writer:      tt.fields.writer,
+				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 			b.flush(context.Background(), tt.args.ids, tt.args.now, tt.args.shutdown)
 
@@ -1198,17 +1203,16 @@ func TestBatch_flush(t *testing.T) {
 // TestBatch_write test behavior of two SquirrelDB sharing the same
 // memoryStore (e.g. Redis)
 func TestBatch_write(t *testing.T) {
-
 	batchSize := 100 * time.Second
-	memoryStore := temporarystore.New()
+	memoryStore := temporarystore.New(prometheus.NewRegistry())
 	writer1 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}
 	writer2 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}
-	batch1 := New(batchSize, memoryStore, nil, writer1)
-	batch2 := New(batchSize, memoryStore, nil, writer2)
+	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
+	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
 
 	type args struct {
 		ids      []types.MetricID
@@ -1900,10 +1904,10 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.shutdown1 {
-				batch1 = New(batchSize, memoryStore, nil, writer1)
+				batch1 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
 			}
 			if tt.shutdown2 {
-				batch2 = New(batchSize, memoryStore, nil, writer2)
+				batch2 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
 			}
 
 			writer1.metrics = []types.MetricData{}
@@ -1932,15 +1936,15 @@ func Test_randomDuration(t *testing.T) {
 
 func Test_takeover(t *testing.T) {
 	batchSize := 100 * time.Second
-	memoryStore := temporarystore.New()
+	memoryStore := temporarystore.New(prometheus.NewRegistry())
 	writer1 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}
 	writer2 := &mockMetricWriter{
 		metrics: []types.MetricData{},
 	}
-	batch1 := New(batchSize, memoryStore, nil, writer1)
-	batch2 := New(batchSize, memoryStore, nil, writer2)
+	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
+	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
 	ctx := context.Background()
 
 	batch1.write(

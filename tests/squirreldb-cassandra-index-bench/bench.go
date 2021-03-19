@@ -8,11 +8,15 @@ import (
 	"os"
 	"sort"
 	"squirreldb/cassandra/index"
+	"squirreldb/config"
+	"squirreldb/daemon"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -75,21 +79,35 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cassandraIndexFactory func(context.Context) types.Index, rnd *rand.Rand) { //nolint: gocognit
+func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint: gocognit
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
 	if err != nil {
-		log.Fatalf("NewProc() failed: %v", err)
+		return fmt.Errorf("NewProc() failed: %w", err)
 	}
 
 	var maxRSS int
 
-	idx := cassandraIndexFactory(ctx)
+	cluster := &dummy.LocalCluster{}
+
+	squirreldb := &daemon.SquirrelDB{
+		Config:          cfg,
+		ExistingCluster: cluster,
+		MetricRegistry: prometheus.WrapRegistererWith(
+			map[string]string{"process": "bench-query"},
+			prometheus.DefaultRegisterer,
+		),
+	}
+
+	idx, err := squirreldb.Index(ctx, false)
+	if err != nil {
+		return err
+	}
 
 	ids, err := idx.AllIDs(ctx, now, now)
 	if err != nil {
-		log.Fatalf("AllIDs() failed: %v", err)
+		return fmt.Errorf("AllIDs() failed: %w", err)
 	}
 
 	metricsBefore := len(ids)
@@ -117,7 +135,19 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 
 		for p := 0; p < *workerProcesses; p++ {
 			p := p
-			localIndex := cassandraIndexFactory(ctx)
+			squirreldb := &daemon.SquirrelDB{
+				Config: cfg,
+				MetricRegistry: prometheus.WrapRegistererWith(
+					map[string]string{"process": fmt.Sprintf("bench%d", p)},
+					prometheus.DefaultRegisterer,
+				),
+				ExistingCluster: cluster,
+			}
+
+			localIndex, err := squirreldb.Index(ctx, false)
+			if err != nil {
+				return err
+			}
 
 			wg.Add(1)
 
@@ -151,7 +181,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 	ids, err = idx.AllIDs(ctx, now, now)
 
 	if err != nil {
-		log.Fatalf("AllIDs() failed: %v", err)
+		return fmt.Errorf("AllIDs() failed: %w", err)
 	}
 
 	log.Printf("There is %d entry in the index (%d added). AllIDs took %v", len(ids), len(ids)-metricsBefore, time.Since(start))
@@ -234,7 +264,10 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 			maxRSS = stat.ResidentMemory()
 		}
 
-		result := runQuery(ctx, now, q.Name, idx, q.Fun)
+		result, err := runQuery(ctx, now, q.Name, idx, q.Fun)
+		if err != nil {
+			return err
+		}
 
 		if result.QueryCount == 0 {
 			continue
@@ -253,7 +286,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 	if *runExpiration {
 		cassandraIndex, ok := idx.(*index.CassandraIndex)
 		if !ok {
-			log.Fatalf("Can not run expiration on index which is not a CassandraIndex")
+			return fmt.Errorf("can not run expiration on index which is not a CassandraIndex")
 		}
 
 		beforePurge := len(ids)
@@ -261,7 +294,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 
 		err = cassandraIndex.InternalForceExpirationTimestamp(beforeYesterday)
 		if err != nil {
-			log.Fatalf("state.Write() failed: %v", err)
+			return fmt.Errorf("state.Write() failed: %w", err)
 		}
 
 		start = time.Now()
@@ -276,13 +309,15 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) type
 
 		ids, err = idx.AllIDs(ctx, now, now)
 		if err != nil {
-			log.Fatalf("AllIDs() failed: %v", err)
+			return fmt.Errorf("AllIDs() failed: %w", err)
 		}
 
 		log.Printf("RunOnce took %v and deleted %d metrics", stop.Sub(start), beforePurge-len(ids))
 	}
 
 	log.Printf("Peak memory seen = %d kB (rss)", maxRSS/1024)
+
+	return nil
 }
 
 func sentInsertRequest(now time.Time, rnd *rand.Rand, proc procfs.Proc, workChannel chan []types.LookupRequest, resultChan chan int) int { //nolint: gocognit
@@ -473,7 +508,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	return metrics
 }
 
-func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex types.Index, fun func(i int) []*labels.Matcher) queryResult {
+func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex types.Index, fun func(i int) []*labels.Matcher) (queryResult, error) {
 	start := time.Now()
 	count := 0
 
@@ -487,7 +522,7 @@ func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex ty
 
 		ids, err := cassandraIndex.Search(ctx, now, now, matchers)
 		if err != nil {
-			log.Fatalf("Search() failed: %v", err)
+			return queryResult{}, fmt.Errorf("Search() failed: %w", err)
 		}
 
 		count += ids.Count()
@@ -498,5 +533,5 @@ func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex ty
 		Time:        time.Since(start),
 		ResultCount: count,
 		QueryCount:  n,
-	}
+	}, nil
 }

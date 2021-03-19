@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"squirreldb/daemon"
-	"squirreldb/redis/cluster"
+	"squirreldb/types"
 	"strconv"
 	"sync"
 	"time"
@@ -26,13 +26,11 @@ var (
 )
 
 func main() {
-	reg := prometheus.NewRegistry()
+	daemon.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(func(ctx context.Context) error {
-		return run(ctx, reg)
-	})
+	err := daemon.RunWithSignalHandler(run)
 
-	metricResult, _ := reg.Gather()
+	metricResult, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range metricResult {
 		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
 	}
@@ -42,7 +40,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, reg prometheus.Registerer) error {
+func run(ctx context.Context) error {
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err
@@ -51,15 +49,24 @@ func run(ctx context.Context, reg prometheus.Registerer) error {
 	clients := make([]*BenchClient, *workerProcesses)
 
 	for i := range clients {
-		clients[i] = &BenchClient{
-			Addresses: cfg.Strings("redis.addresses"),
-			Registry: prometheus.WrapRegistererWith(
+		squirreldb := &daemon.SquirrelDB{
+			Config: cfg,
+			MetricRegistry: prometheus.WrapRegistererWith(
 				map[string]string{"process": strconv.FormatInt(int64(i), 10)},
-				reg,
+				prometheus.DefaultRegisterer,
 			),
 		}
 
-		err := clients[i].Init(ctx)
+		cluster, err := squirreldb.Cluster(ctx)
+		if err != nil {
+			return err
+		}
+
+		clients[i] = &BenchClient{
+			cluster: cluster,
+		}
+
+		err = clients[i].Init()
 		if err != nil {
 			return err
 		}
@@ -171,8 +178,6 @@ func run(ctx context.Context, reg prometheus.Registerer) error {
 }
 
 type BenchClient struct {
-	Addresses []string
-	Registry  prometheus.Registerer
 	topic1    map[string]bool
 	topic2    map[string]bool
 	msgTopic1 int
@@ -183,28 +188,18 @@ type BenchClient struct {
 	counter1 int
 	counter2 int
 
-	client *cluster.Cluster
+	cluster types.Cluster
 }
 
 func (b *BenchClient) Close() {
-	_ = b.client.Stop()
+	_ = b.cluster.Close()
 }
 
-func (b *BenchClient) Init(ctx context.Context) error {
-	b.client = &cluster.Cluster{
-		Addresses:      b.Addresses,
-		MetricRegistry: b.Registry,
-		Keyspace:       "test:",
-	}
-
+func (b *BenchClient) Init() error {
 	b.topic1 = make(map[string]bool)
 	b.topic2 = make(map[string]bool)
 
-	if err := b.client.Start(ctx); err != nil {
-		return err
-	}
-
-	b.client.Subscribe("topic1", func(payload []byte) {
+	b.cluster.Subscribe("topic1", func(payload []byte) {
 		b.l.Lock()
 		defer b.l.Unlock()
 
@@ -212,7 +207,7 @@ func (b *BenchClient) Init(ctx context.Context) error {
 		b.topic1[string(payload)] = true
 	})
 
-	b.client.Subscribe("topic2", func(payload []byte) {
+	b.cluster.Subscribe("topic2", func(payload []byte) {
 		b.l.Lock()
 		defer b.l.Unlock()
 
@@ -248,10 +243,10 @@ func (b *BenchClient) thread(ctx context.Context, deadline time.Time, processID 
 		payload := []byte(fmt.Sprintf("%d-%d-%d", processID, workerID, counter1+counter2))
 
 		if rand.Float64() < 0.5 { // nolint: gosec
-			err = b.client.Publish(ctx, "topic1", payload)
+			err = b.cluster.Publish(ctx, "topic1", payload)
 			counter1++
 		} else {
-			err = b.client.Publish(ctx, "topic2", payload)
+			err = b.cluster.Publish(ctx, "topic2", payload)
 			counter2++
 		}
 

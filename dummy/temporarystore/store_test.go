@@ -6,6 +6,8 @@ import (
 	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -415,7 +417,8 @@ func TestAppend(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				metricsStore: tt.fields.metrics,
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := s.Append(context.Background(), tt.args.points)
 			if err != nil {
@@ -424,8 +427,8 @@ func TestAppend(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Append() = %v, want %v", got, tt.want)
 			}
-			if !reflect.DeepEqual(s.metrics, tt.wantState) {
-				t.Errorf("Append() metrics = %v, want %v", s.metrics, tt.wantState)
+			if !reflect.DeepEqual(s.metricsStore, tt.wantState) {
+				t.Errorf("Append() metrics = %v, want %v", s.metricsStore, tt.wantState)
 			}
 		})
 	}
@@ -500,11 +503,12 @@ func TestStore_expire(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				metricsStore: tt.fields.metrics,
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			s.expire(tt.args.now)
-			if !reflect.DeepEqual(s.metrics, tt.want) {
-				t.Errorf("expire() metrics = %v, want %v", s.metrics, tt.want)
+			if !reflect.DeepEqual(s.metricsStore, tt.want) {
+				t.Errorf("expire() metrics = %v, want %v", s.metricsStore, tt.want)
 			}
 		})
 	}
@@ -642,7 +646,8 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.fields.metrics,
+				metricsStore: tt.fields.metrics,
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			got, gotOffset, err := s.ReadPointsAndOffset(context.Background(), tt.args.ids)
 			if (err != nil) != tt.wantErr {
@@ -1085,8 +1090,9 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics:      tt.fields.metrics,
+				metricsStore: tt.fields.metrics,
 				knownMetrics: make(map[types.MetricID]interface{}),
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := s.getSetPointsAndOffset(tt.args.points, tt.args.offsets, tt.args.now)
 			if err != nil {
@@ -1095,8 +1101,8 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getSetPointsAndOffset() = %v, want %v", got, tt.want)
 			}
-			if !reflect.DeepEqual(s.metrics, tt.wantState) {
-				t.Errorf("getSetPointsAndOffset() metrics = %v, want %v", s.metrics, tt.wantState)
+			if !reflect.DeepEqual(s.metricsStore, tt.wantState) {
+				t.Errorf("getSetPointsAndOffset() metrics = %v, want %v", s.metricsStore, tt.wantState)
 			}
 		})
 	}
@@ -1158,13 +1164,14 @@ func TestStore_markToExpire(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.state,
+				metricsStore: tt.state,
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			if err := s.markToExpire(tt.args.ids, tt.args.ttl, tt.args.now); err != nil {
 				t.Errorf("Store.markToExpire() error = %v", err)
 			}
-			if !reflect.DeepEqual(s.metrics, tt.wantState) {
-				t.Errorf("Store.markToExpire() metrics = %v, want %v", s.metrics, tt.wantState)
+			if !reflect.DeepEqual(s.metricsStore, tt.wantState) {
+				t.Errorf("Store.markToExpire() metrics = %v, want %v", s.metricsStore, tt.wantState)
 			}
 		})
 	}
@@ -1210,7 +1217,7 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 				MetricIDTest2: time.Unix(200, 0),
 			},
 			want: map[types.MetricID]time.Time{
-				MetricIDTest2: time.Time{},
+				MetricIDTest2: {},
 			},
 			wantState: map[types.MetricID]storeData{
 				MetricIDTest2: {
@@ -1222,7 +1229,8 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics: tt.state,
+				metricsStore: tt.state,
+				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := s.GetSetFlushDeadline(context.Background(), tt.args)
 			if err != nil {
@@ -1232,8 +1240,8 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Store.GetSetFlushDeadline() = %v, want %v", got, tt.want)
 			}
-			if !reflect.DeepEqual(s.metrics, tt.wantState) {
-				t.Errorf("Store.GetSetFlushDeadline() flushDeadlines = %v, want %v", s.metrics, tt.wantState)
+			if !reflect.DeepEqual(s.metricsStore, tt.wantState) {
+				t.Errorf("Store.GetSetFlushDeadline() flushDeadlines = %v, want %v", s.metricsStore, tt.wantState)
 			}
 		})
 	}
@@ -1292,7 +1300,7 @@ func TestStore_GetTransfert(t *testing.T) {
 			want: map[types.MetricID]time.Time{
 				MetricIDTest1: time.Unix(0, 0),
 				MetricIDTest2: time.Unix(42, 0),
-				MetricIDTest3: time.Time{},
+				MetricIDTest3: {},
 			},
 			wantState: []types.MetricID{},
 		},
@@ -1329,8 +1337,9 @@ func TestStore_GetTransfert(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
-				metrics:          tt.fields.metrics,
+				metricsStore:     tt.fields.metrics,
 				transfertMetrics: tt.fields.transfertMetrics,
+				metrics:          newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := s.GetTransfert(context.Background(), tt.args)
 			if err != nil {
@@ -1348,7 +1357,7 @@ func TestStore_GetTransfert(t *testing.T) {
 }
 
 func TestStore_GetAllKnownMetrics(t *testing.T) {
-	store := New()
+	store := New(prometheus.NewRegistry())
 	store.getSetPointsAndOffset(
 		[]types.MetricData{
 			{
@@ -1364,7 +1373,7 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 	)
 
 	want := map[types.MetricID]time.Time{
-		MetricIDTest1: time.Time{},
+		MetricIDTest1: {},
 	}
 
 	got, _ := store.GetAllKnownMetrics(context.Background())

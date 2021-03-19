@@ -18,6 +18,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
@@ -560,7 +561,7 @@ func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.Metr
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		panic(err)
 	}
@@ -1880,7 +1881,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2050,7 +2051,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2064,7 +2065,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3667,7 +3668,7 @@ func Test_cache(t *testing.T) {
 		LockFactory:       lock,
 		States:            states,
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3677,7 +3678,7 @@ func Test_cache(t *testing.T) {
 		LockFactory:       lock,
 		States:            states,
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3772,7 +3773,7 @@ func Test_cluster(t *testing.T) {
 		LockFactory:       lock,
 		States:            states,
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Error(err)
 	}
@@ -3830,7 +3831,7 @@ func Test_cluster(t *testing.T) {
 		LockFactory:       lock,
 		States:            states,
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Error(err)
 	}
@@ -4150,7 +4151,7 @@ func Test_expiration(t *testing.T) {
 		LockFactory:       &mockLockFactory{},
 		States:            &mockState{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 
 	if err != nil {
 		t.Error(err)
@@ -4417,7 +4418,7 @@ func Test_getTimeShards(t *testing.T) {
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4528,7 +4529,7 @@ func Test_FilteredLabelValues(t *testing.T) {
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
 		Cluster:           &dummy.LocalCluster{},
-	})
+	}, newMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}

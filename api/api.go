@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
 )
@@ -36,6 +37,7 @@ type API struct {
 	PreAggregateCallback     func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteWrite int
 	PromQLMaxEvaluatedPoints uint64
+	MetricRegisty            prometheus.Registerer
 	PromQLMaxEvaluatedSeries uint32
 
 	ready      int32
@@ -68,6 +70,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		Reader:                   a.Reader,
 		Writer:                   a.Writer,
 		MaxConcurrentRemoteWrite: a.MaxConcurrentRemoteWrite,
+		MetricRegisty:            a.MetricRegisty,
 	}
 
 	promql.Register(router.WithPrefix("/api/v1"))
