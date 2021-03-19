@@ -25,7 +25,7 @@ type readRequest struct {
 	response prompb.ReadResponse
 }
 
-func read(ctx context.Context, now time.Time) error {
+func read(ctx context.Context, now time.Time, readURL string) error {
 	log.Println("Starting read phase")
 
 	workChannel := make(chan readRequest, *threads)
@@ -34,7 +34,7 @@ func read(ctx context.Context, now time.Time) error {
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := readWorker(ctx, workChannel)
+			err := readWorker(ctx, workChannel, readURL)
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -293,7 +293,7 @@ func read(ctx context.Context, now time.Time) error {
 	return err
 }
 
-func readWorker(ctx context.Context, workChannel chan readRequest) (err error) {
+func readWorker(ctx context.Context, workChannel chan readRequest, readURL string) (err error) {
 	for req := range workChannel {
 		if ctx.Err() != nil {
 			if err == nil {
@@ -312,7 +312,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest) (err error) {
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, newErr := http.NewRequestWithContext(ctx, "POST", *remoteRead, bytes.NewBuffer(compressedBody))
+		request, newErr := http.NewRequestWithContext(ctx, "POST", readURL, bytes.NewBuffer(compressedBody))
 		if newErr != nil {
 			log.Printf("unable to create request: %v", newErr)
 

@@ -1,31 +1,51 @@
 # Tests
 
-This folder contains tests that are not unit-test. Mostly is contains tests
-that require an external component.
-
-Most tests are mainly benchmark (but usually with some validating which allow
-to ensure correct behavior).
+This folder contains tests that are not unit-test. Mostly it contains tests
+that require an external component (Cassandra or Redis).
 
 Tests:
 
 * squirreldb-cassandra-index-bench: Tests & benchmark Cassandra Index.
+* squirreldb-cassandra-lock-bench: Ensure validity of locks using Cassandra and
+  benchmark performance achived with them.
+* squirreldb-cluster-redis: Test the cluster pub/sub.
+* remote-storage-test: simple write then read using the Prometheus remote storage.
+  It ensure data wrote can be re-read.
 
 
-To run test, you will need a Cassandra:
+
+To run test, you will need a Cassandra (and in some test Redis):
 
 ```
 docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
+docker run --name squirreldb-test-redis -d redis
 ```
 
-And tell test programs to use this Cassandra:
+And tell test programs to use this Cassandra and Redis:
 ```
 export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
+export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.IPAddress }}'):6379
 ```
+
+Note: some test will clear store (Cassandra or Redis) before processing.
+* For Cassandra, it's the keyspace "squirreldb_test" which is dropped
+* For Redis, it's all key starting with "test:"
 
 # squirreldb-cassandra-lock-bench
 
-This test does few validation test and the will create a "shard" with a fixed number of metrics.
-Think "shard" a one tenant, queries will only ask metric from one shard.
+This test validate the Cassandra distributed locks are correct: that is two nodes
+can not hold the same lock are the same time.
+It also allow to known how fast lock can be took/released.
+
+It test this by:
+* Simulating multiple SquirrelDB nodes in one system process (multiple instance
+  of the CassandraLock objects).
+* Since running in the same process, it use Golang mutex to check that Cassandra
+  lock are correct.
+* The simulation took lock and do some works for few milliseconds (sleeping), while
+  other node try to acquire this lock.
+  Be aware that because we simulare work by sleeping, the maximum number of lock
+  acquired/s could be limited by this delay.
 
 Run it with:
 ```
@@ -84,35 +104,42 @@ The first command will:
 This program do some testing on remote write & remote read. It verify that what was
 written could be re-read.
 
-Unlike the other one, it do require a running SquirrelDB (or actually any remote read/write storage).
+You may use this program against any Prometheus remote read/write storage. You may also
+request this test to start SquirrelDB for you:
 
-To run it, start SquirrelDB (for example using docker-compose sample file):
 ```
-docker-compose up -d
-```
-
-Then run it:
-```
+# Using built-in SquirrelDB
 go run ./tests/remote-storage-test
-```
 
+# Using existing remote storage
+go run ./tests/remote-storage-test --read-url http://localhost:9201/read --write-url http://localhost:9201/write
+```
 
 # Run on Cassandra cluster
 
+The easiest is to use run-tests-cluster.sh:
+```
+./run-tests-cluster.sh
+```
+
 To run those program with a Cassandra cluster, the easiest way is:
 
-* Start a Cassandra cluster using example/squirreldb_ha:
+* Start a Cassandra & redis cluster using example/squirreldb_ha:
 ```
-(cd examples/squirreldb_ha; docker-compose up -d --scale cassandra3=1 cassandra1 cassandra2 cassandra3)
+(cd examples/squirreldb_ha; docker-compose up -d cassandra{1,2,3} redis{1,2,3,4,5,6} redis_init)
 ```
-* Configure program to use those Cassandra and use replication 3:
+
+* Configure program to use those Cassandra & Redis and use replication 3:
 ```
 export SQUIRRELDB_CASSANDRA_ADDRESSES=172.28.0.11:9042,172.28.0.12:9042
+export SQUIRRELDB_REDIS_ADDRESSES=172.28.0.21:6379,172.28.0.22:6379
 export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
 ```
 * Run tests:
 ```
 go run ./tests/squirreldb-cassandra-index-bench/
+go run ./tests/remote-storage-test
+...
 ```
 
 Note: the replication factor is only used at initial creation. To change its value, you need

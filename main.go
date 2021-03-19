@@ -27,9 +27,13 @@ func main() {
 	daemon.Commit = commit
 	daemon.Date = date
 
-	squirreldb, err := daemon.New()
+	cfg, err := daemon.Config()
 	if err != nil {
 		logger.Fatal(err)
+	}
+
+	squirreldb := &daemon.SquirrelDB{
+		Config: cfg,
 	}
 
 	logger.Printf("Starting SquirrelDB %s (commit %s)", version, commit)

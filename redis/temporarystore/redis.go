@@ -30,8 +30,8 @@ const (
 var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
 
 type Options struct {
-	Addresses    []string
-	KeyNamespace string
+	Addresses []string
+	Keyspace  string
 }
 
 type Redis struct {
@@ -67,11 +67,11 @@ func New(ctx context.Context, options Options) (*Redis, error) {
 	}
 	redis.initPool()
 
-	redis.metricKeyPrefix = options.KeyNamespace + defaultMetricKeyPrefix
-	redis.offsetKeyPrefix = options.KeyNamespace + defaultOffsetKeyPrefix
-	redis.deadlineKeyPrefix = options.KeyNamespace + defaultDeadlineKeyPrefix
-	redis.knownMetricsKey = options.KeyNamespace + defaultKnownMetricsKey
-	redis.transfertKey = options.KeyNamespace + defaultTransfertKey
+	redis.metricKeyPrefix = options.Keyspace + defaultMetricKeyPrefix
+	redis.offsetKeyPrefix = options.Keyspace + defaultOffsetKeyPrefix
+	redis.deadlineKeyPrefix = options.Keyspace + defaultDeadlineKeyPrefix
+	redis.knownMetricsKey = options.Keyspace + defaultKnownMetricsKey
+	redis.transfertKey = options.Keyspace + defaultTransfertKey
 
 	cluster, err := redis.client.IsCluster(ctx)
 	if err != nil {

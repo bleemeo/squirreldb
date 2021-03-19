@@ -75,7 +75,7 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *index.CassandraIndex, rnd *rand.Rand) { //nolint: gocognit
+func bench(ctx context.Context, cassandraIndexFactory func(context.Context) types.Index, rnd *rand.Rand) { //nolint: gocognit
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
@@ -85,9 +85,9 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 
 	var maxRSS int
 
-	cassandraIndex := cassandraIndexFactory(ctx)
+	idx := cassandraIndexFactory(ctx)
 
-	ids, err := cassandraIndex.AllIDs(ctx, now, now)
+	ids, err := idx.AllIDs(ctx, now, now)
 	if err != nil {
 		log.Fatalf("AllIDs() failed: %v", err)
 	}
@@ -148,7 +148,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 	}
 
 	start := time.Now()
-	ids, err = cassandraIndex.AllIDs(ctx, now, now)
+	ids, err = idx.AllIDs(ctx, now, now)
 
 	if err != nil {
 		log.Fatalf("AllIDs() failed: %v", err)
@@ -234,7 +234,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 			maxRSS = stat.ResidentMemory()
 		}
 
-		result := runQuery(ctx, now, q.Name, cassandraIndex, q.Fun)
+		result := runQuery(ctx, now, q.Name, idx, q.Fun)
 
 		if result.QueryCount == 0 {
 			continue
@@ -251,6 +251,11 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 	}
 
 	if *runExpiration {
+		cassandraIndex, ok := idx.(*index.CassandraIndex)
+		if !ok {
+			log.Fatalf("Can not run expiration on index which is not a CassandraIndex")
+		}
+
 		beforePurge := len(ids)
 		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
 
@@ -269,7 +274,7 @@ func bench(ctx context.Context, cassandraIndexFactory func(context.Context) *ind
 			maxRSS = stat.ResidentMemory()
 		}
 
-		ids, err = cassandraIndex.AllIDs(ctx, now, now)
+		ids, err = idx.AllIDs(ctx, now, now)
 		if err != nil {
 			log.Fatalf("AllIDs() failed: %v", err)
 		}
@@ -381,7 +386,7 @@ func loadBalancer(input chan []types.LookupRequest, outputs []chan []types.Looku
 }
 
 // worker is more or less equivalent to on SquirrelDB process.
-func worker(localIndex *index.CassandraIndex, workChanel chan []types.LookupRequest, result chan int) {
+func worker(localIndex types.Index, workChanel chan []types.LookupRequest, result chan int) {
 	token := make(chan bool, *workerThreads)
 	for n := 0; n < *workerThreads; n++ {
 		token <- true
@@ -468,7 +473,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	return metrics
 }
 
-func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex *index.CassandraIndex, fun func(i int) []*labels.Matcher) queryResult {
+func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex types.Index, fun func(i int) []*labels.Matcher) queryResult {
 	start := time.Now()
 	count := 0
 

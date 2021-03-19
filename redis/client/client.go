@@ -55,6 +55,19 @@ func (c *Client) Pipeline(ctx context.Context) (goredis.Pipeliner, error) {
 	return c.singleClient.Pipeline(), nil
 }
 
+// Scan dispatch Scan to either cluster of single instance client.
+func (c *Client) Scan(ctx context.Context, cursor uint64, match string, count int64) (*goredis.ScanCmd, error) {
+	if err := c.fixClient(ctx); err != nil {
+		return nil, err
+	}
+
+	if c.clusterClient != nil {
+		return c.clusterClient.Scan(ctx, cursor, match, count), nil
+	}
+
+	return c.singleClient.Scan(ctx, cursor, match, count), nil
+}
+
 // Publish dispatch Publish to either cluster of single instance client.
 func (c *Client) Publish(ctx context.Context, channel string, message interface{}) (int64, error) {
 	if err := c.fixClient(ctx); err != nil {

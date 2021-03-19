@@ -8,69 +8,49 @@ import (
 	"os"
 	"runtime/pprof"
 	"squirreldb/cassandra/index"
-	"squirreldb/cassandra/locks"
-	"squirreldb/cassandra/session"
-	"squirreldb/cassandra/states"
-	"squirreldb/debug"
+	"squirreldb/config"
+	"squirreldb/daemon"
 	"squirreldb/dummy"
 	"squirreldb/types"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 )
 
 //nolint: gochecknoglobals
 var (
-	cassandraAddresses        = flag.String("cassandra.addresses", "localhost:9042", "Cassandra cluster addresses")
-	cassandraKeyspace         = flag.String("cassandra.keyspace", "squirreldb_test", "Cassandra keyspace")
-	cassanraReplicationFactor = flag.Int("cassandra.replication", 1, "Cassandra replication factor")
-	runExpiration             = flag.Bool("bench.expiration", false, "Run the expiration (should delete 1/2 of metrics")
-	expiredFaction            = flag.Int("expired-fraction", 2, "one part over N of the metric will be expired")
-	defaultTimeToLive         = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
-	seed                      = flag.Int64("bench.seed", 42, "Seed used in random generator")
-	sortInsert                = flag.Bool("bench.insert-sorted", false, "Keep label sorted at insertion time (Prometheus do it)")
-	queryCount                = flag.Int("bench.query", 100, "Number of query to run")
-	skipWrite                 = flag.Bool("bench.skip-write", false, "Do not insert into index for benchmark. Useful with -no-drop and a previous run that filled index")
-	skipValid                 = flag.Bool("skip-validation", false, "Do not run the validation and only run benchmark")
-	onlyQuery                 = flag.String("bench.only-query", "", "Only run the query that exactly match the name")
-	queryMaxTime              = flag.Duration("bench.max-time", 5*time.Second, "Maxium time for one query time")
-	shardSize                 = flag.Int("bench.shard-size", 100, "How many metrics to add in one shard (a shard is a label with the same value. Think tenant)")
-	shardStart                = flag.Int("bench.shard-start", 1, "Start at shard number N")
-	shardEnd                  = flag.Int("bench.shard-end", 5, "End at shard number N (included)")
-	insertBatchSize           = flag.Int("bench.batch-size", 1000, "Number of metrics to lookup at once")
-	noDropTables              = flag.Bool("no-drop", false, "Don't drop tables before (in such case, you should not change shardSize and seed)")
-	workerThreads             = flag.Int("bench.worker-max-threads", 1, "Number of concurrent threads inserting data (1 == not threaded)")
-	workerProcesses           = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
-	workerClients             = flag.Int("bench.worker-client", 1, "Number of concurrent client inserting data")
-	fairLB                    = flag.Bool("force-fair-lb", false, "Force fair load-balancing even if worker is busy")
-	verify                    = flag.Bool("verify", false, "Run the index verification process")
-	cpuprofile                = flag.String("cpuprofile", "", "write cpu profile to file")
+	runExpiration     = flag.Bool("bench.expiration", false, "Run the expiration (should delete 1/2 of metrics")
+	expiredFaction    = flag.Int("expired-fraction", 2, "one part over N of the metric will be expired")
+	defaultTimeToLive = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
+	seed              = flag.Int64("bench.seed", 42, "Seed used in random generator")
+	sortInsert        = flag.Bool("bench.insert-sorted", false, "Keep label sorted at insertion time (Prometheus do it)")
+	queryCount        = flag.Int("bench.query", 100, "Number of query to run")
+	skipWrite         = flag.Bool("bench.skip-write", false, "Do not insert into index for benchmark. Useful with -no-drop and a previous run that filled index")
+	skipValid         = flag.Bool("skip-validation", false, "Do not run the validation and only run benchmark")
+	onlyQuery         = flag.String("bench.only-query", "", "Only run the query that exactly match the name")
+	queryMaxTime      = flag.Duration("bench.max-time", 5*time.Second, "Maxium time for one query time")
+	shardSize         = flag.Int("bench.shard-size", 100, "How many metrics to add in one shard (a shard is a label with the same value. Think tenant)")
+	shardStart        = flag.Int("bench.shard-start", 1, "Start at shard number N")
+	shardEnd          = flag.Int("bench.shard-end", 5, "End at shard number N (included)")
+	insertBatchSize   = flag.Int("bench.batch-size", 1000, "Number of metrics to lookup at once")
+	noDropTables      = flag.Bool("no-drop", false, "Don't drop tables before (in such case, you should not change shardSize and seed)")
+	workerThreads     = flag.Int("bench.worker-max-threads", 1, "Number of concurrent threads inserting data (1 == not threaded)")
+	workerProcesses   = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
+	workerClients     = flag.Int("bench.worker-client", 1, "Number of concurrent client inserting data")
+	fairLB            = flag.Bool("force-fair-lb", false, "Force fair load-balancing even if worker is busy")
+	verify            = flag.Bool("verify", false, "Run the index verification process")
+	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 )
-
-func makeSession() (*gocql.Session, bool) {
-	cassandraSession, keyspaceCreated, err := session.New(session.Options{
-		Addresses:         strings.Split(*cassandraAddresses, ","),
-		ReplicationFactor: *cassanraReplicationFactor,
-		Keyspace:          *cassandraKeyspace,
-	})
-	if err != nil {
-		log.Fatalf("Unable to open Cassandra session: %v", err)
-	}
-
-	return cassandraSession, keyspaceCreated
-}
 
 type Factory struct {
 	l       sync.Mutex
+	cfg     *config.Config
 	cluster types.Cluster
 }
 
-func (f *Factory) makeIndex(ctx context.Context) *index.CassandraIndex {
+func (f *Factory) makeIndex(ctx context.Context) types.Index {
 	f.l.Lock()
 
 	if f.cluster == nil {
@@ -79,51 +59,53 @@ func (f *Factory) makeIndex(ctx context.Context) *index.CassandraIndex {
 
 	f.l.Unlock()
 
-	cassandraSession, keyspaceCreated := makeSession()
-
-	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
-	if err != nil {
-		log.Fatalf("Unable to create locks: %v", err)
+	squirreldb := &daemon.SquirrelDB{
+		Config:          f.cfg,
+		ExistingCluster: f.cluster,
 	}
 
-	squirrelStates, err := states.New(cassandraSession, squirrelLocks.CreateLock("schema-lock", 10*time.Second))
-	if err != nil {
-		log.Fatalf("Unable to create states: %v", err)
-	}
-
-	cassandraIndex, err := index.New(ctx, cassandraSession, index.Options{
-		DefaultTimeToLive: *defaultTimeToLive,
-		LockFactory:       squirrelLocks,
-		States:            squirrelStates,
-		SchemaLock:        squirrelLocks.CreateLock("schema-lock", 10*time.Second),
-		Cluster:           f.cluster,
-	})
+	idx, err := squirreldb.Index(ctx, false)
 	if err != nil {
 		log.Fatalf("Unable to create index: %v", err)
 	}
 
-	return cassandraIndex
+	return idx
 }
 
 func main() {
-	flag.Parse()
+	daemon.SetTestEnvironment()
+
+	cfg, err := daemon.Config()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	ctx := context.Background()
 
-	value, found := os.LookupEnv("SQUIRRELDB_CASSANDRA_ADDRESSES")
-	if found {
-		*cassandraAddresses = value
+	if !*runExpiration && *verify {
+		log.Println("Force running expiration because index verify is enabled")
+
+		*runExpiration = true
 	}
 
-	value, found = os.LookupEnv("SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR")
-	if found {
-		tmp, err := strconv.ParseInt(value, 10, 0)
-		if err != nil {
-			log.Fatalf("Bad SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR: %v", err)
+	factory := &Factory{
+		cfg: cfg,
+	}
+
+	if !*noDropTables {
+		log.Printf("Droping tables")
+
+		squirreldb := &daemon.SquirrelDB{
+			Config: cfg,
 		}
 
-		*cassanraReplicationFactor = int(tmp)
+		err := squirreldb.DropCassandraData(ctx, false)
+		if err != nil {
+			log.Fatalf("failed to drop keyspace: %v", err)
+		}
 	}
+
+	rand.Seed(*seed)
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -138,25 +120,6 @@ func main() {
 
 		defer pprof.StopCPUProfile()
 	}
-
-	if !*runExpiration && *verify {
-		log.Println("Force running expiration because index verify is enabled")
-
-		*runExpiration = true
-	}
-
-	debug.Level = 1
-
-	if !*noDropTables {
-		log.Printf("Droping tables")
-
-		session, _ := makeSession()
-		drop(session)
-	}
-
-	rand.Seed(*seed)
-
-	factory := &Factory{}
 
 	if !*skipValid {
 		cassandraIndex := factory.makeIndex(ctx)
@@ -177,11 +140,19 @@ func main() {
 	if *verify {
 		var err error
 
-		cassandraIndex := factory.makeIndex(ctx)
-		verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
+		idx := factory.makeIndex(ctx)
+		cassandraIndex, ok := idx.(*index.CassandraIndex)
 
-		if err != nil {
-			log.Println(err)
+		if !ok {
+			verifyHadIssue = true
+
+			log.Println("Can not verify, index isn't a CassandraIndex")
+		} else {
+			verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
+
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}
 
@@ -192,19 +163,5 @@ func main() {
 
 	if verifyHadIssue {
 		log.Println("Index verify had issue, see above")
-	}
-}
-
-func drop(session *gocql.Session) {
-	queries := []string{
-		"DROP TABLE IF EXISTS index_labels2id",
-		"DROP TABLE IF EXISTS index_postings",
-		"DROP TABLE IF EXISTS index_id2labels",
-		"DROP TABLE IF EXISTS index_expiration",
-	}
-	for _, query := range queries {
-		if err := session.Query(query).Exec(); err != nil {
-			log.Fatalf("Unable to drop table: %v", err)
-		}
 	}
 }

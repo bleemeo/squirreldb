@@ -20,6 +20,7 @@ import (
 	"squirreldb/debug"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
+	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
 	"squirreldb/retry"
@@ -56,7 +57,10 @@ type MetricReadWriter interface {
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
-	Config                   *config.Config
+	Config          *config.Config
+	ExistingCluster types.Cluster
+	MetricRegistry  prometheus.Registerer
+
 	cassandraSession         *gocql.Session
 	lockFactory              LockFactory
 	states                   types.State
@@ -65,7 +69,6 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-	cluster                  types.Cluster
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -128,9 +131,19 @@ func (s *SquirrelDB) Stop() {
 	s.wg.Wait()
 }
 
+// ListenPort return the port listenning on. Should not be used before Start().
+// This is useful for tests that use port "0" to known the actual listenning port.
+func (s *SquirrelDB) ListenPort() int {
+	return s.api.ListenPort()
+}
+
 // Init initialize SquirrelDB Locks & State. It also validate configuration with cluster (need Cassandra access)
 // Init could be retried.
 func (s *SquirrelDB) Init() error {
+	if s.MetricRegistry == nil {
+		s.MetricRegistry = prometheus.DefaultRegisterer
+	}
+
 	if !s.Config.Validate() {
 		return errBadConfig
 	}
@@ -193,16 +206,12 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 	}
 }
 
-// New return a SquirrelDB not yet initialized. Only configuration is loaded and validated.
+// Config return the configuration after validation.
 //nolint: forbidigo // This function is allowed to use fmt.Print*
-func New() (squirreldb *SquirrelDB, err error) {
-	cfg, err := config.New()
+func Config() (cfg *config.Config, err error) {
+	cfg, err = config.New()
 	if err != nil {
 		return nil, fmt.Errorf("error: Can't load config: %w", err)
-	}
-
-	squirreldb = &SquirrelDB{
-		Config: cfg,
 	}
 
 	if cfg.Bool("help") {
@@ -223,12 +232,127 @@ func New() (squirreldb *SquirrelDB, err error) {
 	}
 
 	if !cfg.Validate() {
-		return squirreldb, errBadConfig
+		return cfg, errBadConfig
 	}
 
 	debug.Level = cfg.Int("log.level")
 
-	return squirreldb, nil
+	return cfg, nil
+}
+
+// DropCassandraData delete the Cassandra keyspace. If forceNonTestKeyspace also drop if the
+// keyspace is not "squirreldb_test".
+// This method is intended for testing, where keyspace is overrided to squirreldb_test.
+func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace bool) error {
+	keyspace := s.Config.String("cassandra.keyspace")
+
+	if keyspace != "squirreldb_test" && !forceNonTestKeyspace {
+		return fmt.Errorf("refuse to drop keyspace %s without forceNonTestKeyspace", keyspace)
+	}
+
+	session, err := s.CassandraSessionNoKeyspace()
+	if err != nil {
+		return err
+	}
+
+	err = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
+	if err != nil {
+		return fmt.Errorf("failed to drop keyspace: %w", err)
+	}
+
+	session.Close()
+
+	return nil
+}
+
+// DropTemporaryStore delete the temporary store data. If forceNonTestKeyspace also drop if the
+// namespace prefix is not "test:".
+// This method is intended for testing, where namespace prefix is overrided to "test:".
+// Currently it drop Redis keys that start with namespace prefix.
+func (s *SquirrelDB) DropTemporaryStore(ctx context.Context, forceNonTestKeyspace bool) error {
+	redisAddresses := s.Config.Strings("redis.addresses")
+	prefix := s.Config.String("internal.redis_keyspace")
+
+	if prefix != "test:" && !forceNonTestKeyspace {
+		return fmt.Errorf("refuse to drop with prefix \"%s\" without forceNonTestKeyspace", prefix)
+	}
+
+	if len(redisAddresses) == 0 || redisAddresses[0] == "" {
+		return nil
+	}
+
+	client := &client.Client{
+		Addresses: redisAddresses,
+	}
+
+	defer client.Close()
+
+	scan, err := client.Scan(ctx, 0, prefix+"*", 100)
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	keys := make([]string, 0, 100)
+	it := scan.Iterator()
+
+	for {
+		keys = keys[:0]
+
+		for it.Next(ctx) {
+			keys = append(keys, it.Val())
+
+			if len(keys) >= 100 {
+				break
+			}
+		}
+
+		if len(keys) == 0 {
+			break
+		}
+
+		pipeline, err := client.Pipeline(ctx)
+		if err != nil {
+			return fmt.Errorf("del failed: %w", err)
+		}
+
+		for _, k := range keys {
+			pipeline.Del(ctx, k)
+		}
+
+		_, err = pipeline.Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("del failed: %w", err)
+		}
+	}
+
+	if err := it.Err(); err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	return nil
+}
+
+// SetTestEnvironment configure few environment variable used in testing.
+// This method MUST be called before first usage of Config().
+// It will set Cassandra & Redis to use alternative keyspace to avoid confict with
+// normal SquirrelDB. It will only do it if not explicitly set.
+func SetTestEnvironment() {
+	if _, ok := os.LookupEnv("SQUIRRELDB_CASSANDRA_KEYSPACE"); !ok {
+		// If not explicitly changed, use squirreldb_test as keyspace. We do
+		// not want to touch real data
+		os.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb_test")
+	}
+
+	if _, ok := os.LookupEnv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE"); !ok {
+		// If not explicitly changed, use test: as namespace. We do
+		// not want to touch real data
+		os.Setenv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE", "test:")
+	}
+
+	if _, ok := os.LookupEnv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS"); !ok {
+		// If not explicitly set, use a dynamic port.
+		os.Setenv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS", "127.0.0.1:0")
+	}
 }
 
 // SchemaLock return a lock to modify the Cassandra schema.
@@ -239,6 +363,19 @@ func (s *SquirrelDB) SchemaLock() (types.TryLocker, error) {
 	}
 
 	return lockFactory.CreateLock("cassandra-schema", 10*time.Second), nil
+}
+
+// CassandraSessionNoKeyspace return a Cassandra without keyspace selected.
+func (s *SquirrelDB) CassandraSessionNoKeyspace() (*gocql.Session, error) {
+	cluster := gocql.NewCluster(s.Config.Strings("cassandra.addresses")...)
+	cluster.Timeout = 10 * time.Second
+
+	session, err := cluster.CreateSession()
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	return session, nil
 }
 
 // CassandraSession return the Cassandra session used for SquirrelDB.
@@ -414,13 +551,13 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 // Cluster return an types.Cluster. The returned cluster should be closed after use.
 func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
-	if s.cluster == nil {
+	if s.ExistingCluster == nil {
 		redisAddresses := s.Config.Strings("redis.addresses")
 		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
 			c := &cluster.Cluster{
-				Addresses:        redisAddresses,
-				MetricRegistry:   prometheus.DefaultRegisterer,
-				ChannelNamespace: s.Config.String("internal.redis_namespace"),
+				Addresses:      redisAddresses,
+				MetricRegistry: s.MetricRegistry,
+				Keyspace:       s.Config.String("internal.redis_keyspace"),
 			}
 
 			err := c.Start(ctx)
@@ -430,13 +567,13 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 				return c, err
 			}
 
-			s.cluster = c
+			s.ExistingCluster = c
 		} else {
-			s.cluster = &dummy.LocalCluster{}
+			s.ExistingCluster = &dummy.LocalCluster{}
 		}
 	}
 
-	return s.cluster, nil
+	return s.ExistingCluster, nil
 }
 
 // Index return an Index. If started is true the index is started.
@@ -568,8 +705,8 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 		redisAddresses := s.Config.Strings("redis.addresses")
 		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
 			options := redisTemporarystore.Options{
-				Addresses:    redisAddresses,
-				KeyNamespace: s.Config.String("internal.redis_namespace"),
+				Addresses: redisAddresses,
+				Keyspace:  s.Config.String("internal.redis_keyspace"),
 			}
 
 			tmp, err := redisTemporarystore.New(ctx, options)

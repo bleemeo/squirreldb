@@ -43,7 +43,7 @@ func main() {
 }
 
 func run(ctx context.Context, reg prometheus.Registerer) error {
-	squirreldb, err := daemon.New()
+	cfg, err := daemon.Config()
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func run(ctx context.Context, reg prometheus.Registerer) error {
 
 	for i := range clients {
 		clients[i] = &BenchClient{
-			Addresses: squirreldb.Config.Strings("redis.addresses"),
+			Addresses: cfg.Strings("redis.addresses"),
 			Registry: prometheus.WrapRegistererWith(
 				map[string]string{"process": strconv.FormatInt(int64(i), 10)},
 				reg,
@@ -192,9 +192,9 @@ func (b *BenchClient) Close() {
 
 func (b *BenchClient) Init(ctx context.Context) error {
 	b.client = &cluster.Cluster{
-		Addresses:        b.Addresses,
-		MetricRegistry:   b.Registry,
-		ChannelNamespace: "test:",
+		Addresses:      b.Addresses,
+		MetricRegistry: b.Registry,
+		Keyspace:       "test:",
 	}
 
 	b.topic1 = make(map[string]bool)

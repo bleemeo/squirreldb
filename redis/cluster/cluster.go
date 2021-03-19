@@ -32,15 +32,15 @@ const (
 
 // Cluster implement types.Cluster using Redis pub/sub.
 type Cluster struct {
-	Addresses        []string
-	MetricRegistry   prometheus.Registerer
-	ChannelNamespace string
-	l                sync.Mutex
-	client           *client.Client
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	listenner        map[string][]func([]byte)
-	redisChannel     string
+	Addresses      []string
+	MetricRegistry prometheus.Registerer
+	Keyspace       string
+	l              sync.Mutex
+	client         *client.Client
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	listenner      map[string][]func([]byte)
+	redisChannel   string
 
 	messageReceived prometheus.Counter
 }
@@ -54,7 +54,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 
-	c.redisChannel = c.ChannelNamespace + pubsubName
+	c.redisChannel = c.Keyspace + pubsubName
 	c.client = &client.Client{
 		Addresses: c.Addresses,
 	}

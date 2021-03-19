@@ -38,9 +38,10 @@ type API struct {
 	PromQLMaxEvaluatedPoints uint64
 	PromQLMaxEvaluatedSeries uint32
 
-	ready  int32
-	logger log.Logger
-	router http.Handler
+	ready      int32
+	logger     log.Logger
+	router     http.Handler
+	listenPort int
 }
 
 // Run start the HTTP api server.
@@ -88,6 +89,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		return
 	}
 
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		a.listenPort = tcpAddr.Port
+	}
+
 	go func() {
 		serverStopped <- server.Serve(ln)
 	}()
@@ -114,6 +119,13 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	_ = level.Debug(a.logger).Log("msg", "server stopped")
+}
+
+// ListenPort return the port listenning on. Should not be used before Run()
+// signalled its readiness.
+// This is useful for tests that use port "0" to known the actual listenning port.
+func (a *API) ListenPort() int {
+	return a.listenPort
 }
 
 // Ready mark the system as ready to access requests.

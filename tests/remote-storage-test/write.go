@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func write(ctx context.Context, now time.Time) error {
+func write(ctx context.Context, now time.Time, writeURL string) error {
 	log.Println("Starting write phase")
 
 	workChannel := make(chan prompb.WriteRequest, *threads)
@@ -24,7 +24,7 @@ func write(ctx context.Context, now time.Time) error {
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := writeWorker(ctx, workChannel)
+			err := writeWorker(ctx, workChannel, writeURL)
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -155,7 +155,7 @@ func write(ctx context.Context, now time.Time) error {
 	return err
 }
 
-func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest) error {
+func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writeURL string) error {
 	for req := range workChannel {
 		if ctx.Err() != nil {
 			break
@@ -170,7 +170,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest) erro
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequestWithContext(ctx, "POST", *remoteWrite, bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequestWithContext(ctx, "POST", writeURL, bytes.NewBuffer(compressedBody))
 		if err != nil {
 			log.Printf("unable to create request: %v", err)
 
