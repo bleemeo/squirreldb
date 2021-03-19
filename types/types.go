@@ -35,8 +35,10 @@ type Task interface {
 }
 
 type Cluster interface {
-	Publish(topic string, message []byte) error
+	// Publish sends a message that will be received by all subscribed nodes including sender.
+	Publish(ctx context.Context, topic string, message []byte) error
 	Subscribe(topic string, callback func([]byte))
+	Close() error
 }
 
 type LookupRequest struct {

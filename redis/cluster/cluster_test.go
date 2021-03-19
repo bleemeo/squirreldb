@@ -13,48 +13,42 @@ func Test_decode(t *testing.T) {
 	tests := []struct {
 		name    string
 		topic   string
-		sender  []byte
 		message []byte
 	}{
 		{
 			name:    "simple",
 			topic:   "index:new-metric",
-			sender:  makePrefix(),
 			message: []byte("test"),
 		},
 		{
 			name:    "utf-topic",
 			topic:   "emoji:😇",
-			sender:  makePrefix(),
 			message: []byte("test"),
 		},
 		{
 			name:    "zero",
 			topic:   "",
-			sender:  makePrefix(),
 			message: []byte(""),
 		},
 		{
 			name:    "large",
 			topic:   "this-topic-is-rather-long. Still less than 255 because we can't encode more",
-			sender:  makePrefix(),
 			message: []byte("This bytes will include... bytes\x00\x01\x02"),
 		},
 		{
 			name:    "huge",
 			topic:   "big-binary",
-			sender:  makePrefix(),
 			message: blob,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			serialized, err := encode(tt.topic, tt.sender, tt.message)
+			serialized, err := encode(tt.topic, tt.message)
 			if err != nil {
 				t.Errorf("encode() error = %v", err)
 			}
 
-			gotTopic, gotSender, gotMessage, err := decode(serialized)
+			gotTopic, gotMessage, err := decode(serialized)
 
 			if err != nil {
 				t.Errorf("decode() error = %v", err)
@@ -62,10 +56,6 @@ func Test_decode(t *testing.T) {
 
 			if gotTopic != tt.topic {
 				t.Errorf("topic = %v, want %v", gotTopic, tt.topic)
-			}
-
-			if !bytes.Equal(gotSender, tt.sender) {
-				t.Errorf("sender = %v, want %v", gotSender, tt.sender)
 			}
 
 			if !bytes.Equal(gotMessage, tt.message) {

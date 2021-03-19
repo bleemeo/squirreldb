@@ -104,7 +104,7 @@ func run(ctx context.Context, reg prometheus.Registerer) error {
 		for _, cl := range clients {
 			cl.l.Lock()
 
-			ok = len(cl.topic1) == totalTopic1-cl.counter1 && len(cl.topic2) == totalTopic2-cl.counter2
+			ok = len(cl.topic1) == totalTopic1 && len(cl.topic2) == totalTopic2
 
 			cl.l.Unlock()
 
@@ -154,14 +154,14 @@ func run(ctx context.Context, reg prometheus.Registerer) error {
 			err = cl.err
 		}
 
-		if len(cl.topic1) != totalTopic1-cl.counter1 {
-			err = fmt.Errorf("process %d received %d message on topic1, want %d", i, len(cl.topic1), totalTopic1-cl.counter1)
+		if len(cl.topic1) != totalTopic1 {
+			err = fmt.Errorf("process %d received %d message on topic1, want %d", i, len(cl.topic1), totalTopic1)
 
 			log.Println(err)
 		}
 
-		if len(cl.topic2) != totalTopic2-cl.counter2 {
-			err = fmt.Errorf("process %d received %d message on topic2, want %d", i, len(cl.topic2), totalTopic2-cl.counter2)
+		if len(cl.topic2) != totalTopic2 {
+			err = fmt.Errorf("process %d received %d message on topic2, want %d", i, len(cl.topic2), totalTopic2)
 
 			log.Println(err)
 		}

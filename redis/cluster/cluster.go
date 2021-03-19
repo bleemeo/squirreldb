@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"squirreldb/redis/client"
 	"sync"
@@ -28,8 +27,7 @@ var (
 )
 
 const (
-	prefixLength = 8
-	pubsubName   = "squirreldb:cluster:v1"
+	pubsubName = "squirreldb:cluster:v1"
 )
 
 // Cluster implement types.Cluster using Redis pub/sub.
@@ -38,7 +36,6 @@ type Cluster struct {
 	MetricRegistry   prometheus.Registerer
 	ChannelNamespace string
 	l                sync.Mutex
-	prefix           []byte
 	client           *client.Client
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
@@ -58,7 +55,6 @@ func (c *Cluster) Start(ctx context.Context) error {
 	}
 
 	c.redisChannel = c.ChannelNamespace + pubsubName
-	c.prefix = makePrefix()
 	c.client = &client.Client{
 		Addresses: c.Addresses,
 	}
@@ -67,7 +63,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	if err != nil {
 		c.client.Close()
 
-		return err
+		return fmt.Errorf("cluster-redis failed to connect to redis: %w", err)
 	}
 
 	if cluster {
@@ -100,6 +96,10 @@ func (c *Cluster) Start(ctx context.Context) error {
 	return nil
 }
 
+func (c *Cluster) Close() error {
+	return c.Stop()
+}
+
 func (c *Cluster) Stop() error {
 	if c.cancel == nil {
 		return errors.New("not started")
@@ -120,7 +120,7 @@ func (c *Cluster) Publish(ctx context.Context, topic string, message []byte) err
 		return ErrTopicTooLong
 	}
 
-	payload, err := encode(topic, c.prefix, message)
+	payload, err := encode(topic, message)
 	if err != nil {
 		return err
 	}
@@ -172,13 +172,9 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 		case msg := <-ch:
 			c.messageReceived.Inc()
 
-			topic, sender, message, err := decode(msg.Payload)
+			topic, message, err := decode(msg.Payload)
 			if err != nil {
 				logger.Printf("failed to decode message: %v", err)
-				continue
-			}
-
-			if bytes.Equal(sender, c.prefix) {
 				continue
 			}
 
@@ -193,18 +189,7 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 	pubsub.Close()
 }
 
-func makePrefix() []byte {
-	prefix := make([]byte, prefixLength)
-
-	_, err := rand.Read(prefix) // nolint: gosec
-	if err != nil {
-		panic(err)
-	}
-
-	return prefix
-}
-
-func encode(topic string, sender []byte, message []byte) (string, error) {
+func encode(topic string, message []byte) (string, error) {
 	result := bytes.NewBuffer(make([]byte, len(message))[:0])
 
 	b64w := base64.NewEncoder(base64.StdEncoding, result)
@@ -215,10 +200,6 @@ func encode(topic string, sender []byte, message []byte) (string, error) {
 	}
 
 	if err := binary.Write(snapWriter, binary.BigEndian, uint32(len(message))); err != nil {
-		return "", err
-	}
-
-	if _, err := snapWriter.Write(sender); err != nil {
 		return "", err
 	}
 
@@ -236,7 +217,7 @@ func encode(topic string, sender []byte, message []byte) (string, error) {
 	return result.String(), nil
 }
 
-func decode(input string) (topic string, sender []byte, message []byte, err error) {
+func decode(input string) (topic string, message []byte, err error) {
 	b64r := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(input)))
 	snapReader := snappy.NewReader(b64r)
 
@@ -246,28 +227,20 @@ func decode(input string) (topic string, sender []byte, message []byte, err erro
 	)
 
 	if err := binary.Read(snapReader, binary.BigEndian, &topicLen); err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
 
 	if err := binary.Read(snapReader, binary.BigEndian, &messageLen); err != nil {
-		return "", nil, nil, err
-	}
-
-	sender = make([]byte, prefixLength)
-
-	if n, err := snapReader.Read(sender); err != nil {
-		return "", nil, nil, err
-	} else if n != prefixLength {
-		return "", nil, nil, fmt.Errorf("%w: read %d, want %d", ErrReadTooShort, n, prefixLength)
+		return "", nil, err
 	}
 
 	buffer := make([]byte, topicLen)
 
 	if topicLen > 0 {
 		if n, err := snapReader.Read(buffer); err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		} else if n != int(topicLen) {
-			return "", nil, nil, fmt.Errorf("%w: read %d, want %d", ErrReadTooShort, n, topicLen)
+			return "", nil, fmt.Errorf("%w: read %d, want %d", ErrReadTooShort, n, topicLen)
 		}
 	}
 
@@ -275,11 +248,11 @@ func decode(input string) (topic string, sender []byte, message []byte, err erro
 
 	if messageLen > 0 {
 		if n, err := io.ReadFull(snapReader, message); err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		} else if n != int(messageLen) {
-			return "", nil, nil, fmt.Errorf("%w: read %d, want %d", ErrReadTooShort, n, messageLen)
+			return "", nil, fmt.Errorf("%w: read %d, want %d", ErrReadTooShort, n, messageLen)
 		}
 	}
 
-	return string(buffer), sender, message, nil
+	return string(buffer), message, nil
 }
