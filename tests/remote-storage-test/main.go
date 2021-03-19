@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"squirreldb/daemon"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,33 +53,18 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	var (
-		wg          sync.WaitGroup
-		squirrelErr error
-	)
-
-	ctx, cancel := context.WithCancel(ctx)
-
-	defer func() {
-		cancel()
-		wg.Wait()
-	}()
-
 	if *startSquirrelDB {
 		squirreldb, err := daemon.New()
 		if err != nil {
 			return err
 		}
 
-		wg.Add(1)
+		err = squirreldb.Start(ctx)
+		if err != nil {
+			return err
+		}
 
-		go func() {
-			defer wg.Done()
-
-			squirrelErr = squirreldb.Run(ctx)
-		}()
-
-		squirreldb.Ready(ctx)
+		defer squirreldb.Stop()
 	}
 
 	now, err := time.Parse(time.RFC3339, *nowStr)
@@ -102,7 +86,7 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	return squirrelErr
+	return nil
 }
 
 func time2Millisecond(t time.Time) int64 {

@@ -12,8 +12,11 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/debug"
+	"squirreldb/dummy"
+	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -62,7 +65,20 @@ func makeSession() (*gocql.Session, bool) {
 	return cassandraSession, keyspaceCreated
 }
 
-func makeIndex(ctx context.Context) *index.CassandraIndex {
+type Factory struct {
+	l       sync.Mutex
+	cluster types.Cluster
+}
+
+func (f *Factory) makeIndex(ctx context.Context) *index.CassandraIndex {
+	f.l.Lock()
+
+	if f.cluster == nil {
+		f.cluster = &dummy.LocalCluster{}
+	}
+
+	f.l.Unlock()
+
 	cassandraSession, keyspaceCreated := makeSession()
 
 	squirrelLocks, err := locks.New(cassandraSession, keyspaceCreated)
@@ -80,6 +96,7 @@ func makeIndex(ctx context.Context) *index.CassandraIndex {
 		LockFactory:       squirrelLocks,
 		States:            squirrelStates,
 		SchemaLock:        squirrelLocks.CreateLock("schema-lock", 10*time.Second),
+		Cluster:           f.cluster,
 	})
 	if err != nil {
 		log.Fatalf("Unable to create index: %v", err)
@@ -139,26 +156,28 @@ func main() {
 
 	rand.Seed(*seed)
 
+	factory := &Factory{}
+
 	if !*skipValid {
-		cassandraIndex := makeIndex(ctx)
+		cassandraIndex := factory.makeIndex(ctx)
 
 		log.Printf("Start validating test")
 		test(ctx, cassandraIndex)
 		log.Printf("Re-run validating test")
 		test(ctx, cassandraIndex)
 		log.Printf("Re-run validating test on fresh index")
-		test(ctx, makeIndex(ctx))
+		test(ctx, factory.makeIndex(ctx))
 	}
 
 	rnd := rand.New(rand.NewSource(*seed)) //nolint: gosec
-	bench(ctx, makeIndex, rnd)
+	bench(ctx, factory.makeIndex, rnd)
 
 	verifyHadIssue := false
 
 	if *verify {
 		var err error
 
-		cassandraIndex := makeIndex(ctx)
+		cassandraIndex := factory.makeIndex(ctx)
 		verifyHadIssue, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
 
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	cryptoRand "crypto/rand"
 	"encoding/csv"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -49,10 +50,11 @@ const (
 )
 
 const (
-	newMetricLockName     = "index-new-metric"
-	expireMetricLockName  = "index-ttl-metric"
-	expireMetricStateName = "index-expired-until"
-	expireBatchSize       = 10000
+	clusterChannelNewMetric = "index-new-metrics"
+	newMetricLockName       = "index-new-metric"
+	expireMetricLockName    = "index-ttl-metric"
+	expireMetricStateName   = "index-expired-until"
+	expireBatchSize         = 10000
 )
 
 const (
@@ -78,6 +80,7 @@ type Options struct {
 	LockFactory       lockFactory
 	States            types.State
 	SchemaLock        sync.Locker
+	Cluster           types.Cluster
 }
 
 type CassandraIndex struct {
@@ -198,6 +201,8 @@ func initialize(ctx context.Context, store storeImpl, options Options) (*Cassand
 		return nil, fmt.Errorf("failed to initialize store: %w", err)
 	}
 
+	options.Cluster.Subscribe(clusterChannelNewMetric, index.invalidateSearchCacheListenner)
+
 	return index, nil
 }
 
@@ -250,7 +255,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 }
 
 // RunOnce run the tasks scheduled by Run, return true if more work is pending.
-// Prefer using Run() than calling RunOnce multiple time. RunOnce is mostly here
+// Prefer using Start() than calling RunOnce multiple time. RunOnce is mostly here
 // for squirreldb-cassandra-index-bench program.
 func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 	c.expire(now)
@@ -1340,7 +1345,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit,gocyclo
 	start := time.Now()
 
 	defer func() {
@@ -1439,6 +1444,12 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		done, err := c.createMetrics(ctx, now, pending, false)
 
 		c.newMetricLock.Unlock()
+
+		if err == nil || ctx.Err() != nil {
+			// Make sure to invalidate the cache when create "fail" because of
+			// cancelled context, as some metrics may be fully created.
+			c.invalidateSearchCache(ctx, done)
+		}
 
 		if err != nil {
 			return nil, nil, err
@@ -1952,6 +1963,40 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 	return nil
 }
 
+func (c *CassandraIndex) invalidateSearchCacheListenner(message []byte) {
+	var metrics []labels.Labels
+
+	dec := gob.NewDecoder(bytes.NewReader(message))
+	err := dec.Decode(&metrics)
+
+	if err != nil {
+		logger.Printf("unable to deserialize new metrics message. Search cache may be wrong: %v", err)
+	} else {
+		c.searchCache.Invalidate(metrics)
+	}
+}
+
+func (c *CassandraIndex) invalidateSearchCache(ctx context.Context, entries []lookupEntry) {
+	metrics := make([]labels.Labels, len(entries))
+
+	for i, ent := range entries {
+		metrics[i] = ent.sortedLabels
+	}
+
+	buffer := bytes.NewBuffer(nil)
+	enc := gob.NewEncoder(buffer)
+	err := enc.Encode(metrics)
+
+	if err != nil {
+		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
+	} else {
+		err := c.options.Cluster.Publish(ctx, "index-new-metrics", buffer.Bytes())
+		if err != nil {
+			logger.Printf("unable to send message for new metrics to other node. Their cache won't be invalidated: %v", err)
+		}
+	}
+}
+
 func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map[int32]bool) error {
 	return c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for shard := range shards {
@@ -2331,6 +2376,12 @@ func (c *CassandraIndex) InternalCreateMetric(ctx context.Context, start time.Ti
 	done, err := c.createMetrics(ctx, time.Now(), requests, true)
 
 	c.newMetricLock.Unlock()
+
+	if err == nil || ctx.Err() != nil {
+		// Make sure to invalidate the cache when create "fail" because of
+		// cancelled context, as some metrics may be fully created.
+		c.invalidateSearchCache(ctx, done)
+	}
 
 	if err != nil {
 		return nil, err

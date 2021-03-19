@@ -20,9 +20,10 @@ type labelsLookupCache struct {
 // searchCache provide cache for Search() query.
 // This cache use TTL and max-size.
 // It's eviction policy is random (Golang map order).
-// The TTL used is rather short because invalidation isn't correct (only TTL based).
-// However (due to usage done in index.go) it won't yield ID that should NOT match,
-// but could take up to TTL to return ID that matched (stall result).
+// A TTL is used because there is no strong guarantee that cluster message don't get lost.
+// But in the nominal case, the invalidation is correct:
+// * new metrics invalidate all search cache that match the given metrics
+// * on deletion, on access the cache get invalidated.
 type searchCache struct {
 	l     sync.Mutex
 	salt  []byte
@@ -35,14 +36,15 @@ type labelsEntry struct {
 }
 
 type searchEntry struct {
-	value  []types.MetricID
-	expire time.Time
+	value    []types.MetricID
+	matchers []*labels.Matcher
+	expire   time.Time
 }
 
 const (
 	labelCacheMaxSize  = 10000
 	searchCacheMaxSize = 10000
-	searchCacheTTL     = 1 * time.Minute
+	searchCacheTTL     = 15 * time.Minute
 )
 
 // Get return the non-expired cache entry or an nil list.
@@ -141,6 +143,22 @@ func (c *searchCache) Drop(shards []int32, matchers []*labels.Matcher) {
 	delete(c.cache, key)
 }
 
+// Invalidate drop entry that are impacted by given metrics.
+func (c *searchCache) Invalidate(metrics []labels.Labels) {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	for k, entry := range c.cache {
+		for _, lbls := range metrics {
+			if matcherMatches(entry.matchers, lbls) {
+				delete(c.cache, k)
+
+				break
+			}
+		}
+	}
+}
+
 // Set add an entry.
 func (c *searchCache) Set(shards []int32, matchers []*labels.Matcher, ids []types.MetricID) {
 	now := time.Now()
@@ -178,8 +196,9 @@ func (c *searchCache) set(now time.Time, shards []int32, matchers []*labels.Matc
 	}
 
 	c.cache[key] = searchEntry{
-		value:  ids,
-		expire: now.Add(searchCacheTTL),
+		value:    ids,
+		matchers: matchers,
+		expire:   now.Add(searchCacheTTL),
 	}
 }
 
@@ -196,6 +215,23 @@ func (c *searchCache) get(now time.Time, shards []int32, matchers []*labels.Matc
 	}
 
 	if entry.expire.Before(now) {
+		delete(c.cache, key)
+
+		return nil
+	}
+
+	// validate the matchers are the correct one (e.g. no key collision).
+	equal := len(matchers) == len(entry.matchers)
+
+	for i, m := range matchers {
+		other := entry.matchers[i]
+		if m.Type != other.Type || m.Name != other.Name || m.Value != other.Value {
+			equal = false
+			break
+		}
+	}
+
+	if !equal {
 		delete(c.cache, key)
 
 		return nil

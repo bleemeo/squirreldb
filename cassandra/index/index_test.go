@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"squirreldb/dummy"
 	"squirreldb/types"
 	"strconv"
 	"strings"
@@ -558,6 +559,7 @@ func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.Metr
 	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		panic(err)
@@ -1877,6 +1879,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	index1, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2046,6 +2049,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	index2, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2059,6 +2063,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	index3, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3661,6 +3666,7 @@ func Test_cache(t *testing.T) {
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3670,6 +3676,7 @@ func Test_cache(t *testing.T) {
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3764,6 +3771,7 @@ func Test_cluster(t *testing.T) {
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Error(err)
@@ -3821,6 +3829,7 @@ func Test_cluster(t *testing.T) {
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       lock,
 		States:            states,
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Error(err)
@@ -4140,6 +4149,7 @@ func Test_expiration(t *testing.T) {
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       &mockLockFactory{},
 		States:            &mockState{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 
 	if err != nil {
@@ -4406,6 +4416,7 @@ func Test_getTimeShards(t *testing.T) {
 	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -4516,6 +4527,7 @@ func Test_FilteredLabelValues(t *testing.T) {
 	index1, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 365 * 24 * time.Hour,
 		LockFactory:       &mockLockFactory{},
+		Cluster:           &dummy.LocalCluster{},
 	})
 	if err != nil {
 		t.Fatal(err)

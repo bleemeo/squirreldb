@@ -20,6 +20,7 @@ import (
 	"squirreldb/debug"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
+	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -27,8 +28,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/gocql/gocql"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 //nolint: gochecknoglobals
@@ -57,7 +58,6 @@ type MetricReadWriter interface {
 type SquirrelDB struct {
 	Config                   *config.Config
 	cassandraSession         *gocql.Session
-	cassandraKeyspaceCreated bool
 	lockFactory              LockFactory
 	states                   types.State
 	temporaryStore           batch.TemporaryStore
@@ -65,9 +65,10 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-
-	l      sync.Mutex
-	readyC chan interface{}
+	cluster                  types.Cluster
+	cancel                   context.CancelFunc
+	wg                       sync.WaitGroup
+	cassandraKeyspaceCreated bool
 }
 
 //nolint: gochecknoglobals
@@ -75,25 +76,10 @@ var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 var errBadConfig = errors.New("configuration validation failed")
 
-// RunRetry will run SquirrelDB (possibly Init()ializing it) and retry on errors.
-// It may still fait on permanent error (like bad configuation).
-func (s *SquirrelDB) RunRetry(ctx context.Context) error {
-	return retry.Print(func() error {
-		err := s.Run(ctx)
-		if errors.Is(err, errBadConfig) {
-			return backoff.Permanent(err)
-		}
-
-		return err
-	}, retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
-		"Running SquirrelDB",
-	)
-}
-
-// Run will run SquirrelDB (possibly Init()ializing it).
-// On error, we can retry calling Run() which will resume starting SquirrelDB.
-func (s *SquirrelDB) Run(ctx context.Context) error {
+// Start will run SquirrelDB and Init()ializing it. It return when SquirrelDB
+// is ready.
+// On error, we can retry calling Start() which will resume starting SquirrelDB.
+func (s *SquirrelDB) Start(ctx context.Context) error {
 	err := s.Init()
 	if err != nil {
 		return err
@@ -110,36 +96,41 @@ func (s *SquirrelDB) Run(ctx context.Context) error {
 	}
 
 	readiness := make(chan error)
-	runTerminated := make(chan interface{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+
+	s.wg.Add(1)
 
 	go func() {
+		defer s.wg.Done()
+
 		s.run(ctx, readiness)
-		close(runTerminated)
 	}()
 
 	err = <-readiness
 	if err != nil {
+		s.cancel()
+		s.cancel = nil
+		s.wg.Wait()
+
 		return err
 	}
 
-	close(s.readyC)
+	return nil
+}
 
-	<-runTerminated
+func (s *SquirrelDB) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 
-	return err
+	s.wg.Wait()
 }
 
 // Init initialize SquirrelDB Locks & State. It also validate configuration with cluster (need Cassandra access)
 // Init could be retried.
 func (s *SquirrelDB) Init() error {
-	s.l.Lock()
-
-	if s.readyC == nil {
-		s.readyC = make(chan interface{})
-	}
-
-	s.l.Unlock()
-
 	if !s.Config.Validate() {
 		return errBadConfig
 	}
@@ -147,22 +138,16 @@ func (s *SquirrelDB) Init() error {
 	return nil
 }
 
-// Ready block until SquirrelDB is ready (or ctx is canceled).
-func (s *SquirrelDB) Ready(ctx context.Context) {
-	s.l.Lock()
-
-	if s.readyC == nil {
-		s.readyC = make(chan interface{})
+func (s *SquirrelDB) Run(ctx context.Context) error {
+	err := s.Start(ctx)
+	if err != nil {
+		return err
 	}
 
-	ch := s.readyC
+	<-ctx.Done()
+	s.Stop()
 
-	s.l.Unlock()
-
-	select {
-	case <-ch:
-	case <-ctx.Done():
-	}
+	return nil
 }
 
 // RunWithSignalHandler runs given function with a context that is canceled on kill or ctrl+c
@@ -427,6 +412,33 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	}
 }
 
+// Cluster return an types.Cluster. The returned cluster should be closed after use.
+func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
+	if s.cluster == nil {
+		redisAddresses := s.Config.Strings("redis.addresses")
+		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+			c := &cluster.Cluster{
+				Addresses:        redisAddresses,
+				MetricRegistry:   prometheus.DefaultRegisterer,
+				ChannelNamespace: s.Config.String("internal.redis_namespace"),
+			}
+
+			err := c.Start(ctx)
+			if err != nil {
+				_ = c.Stop()
+
+				return c, err
+			}
+
+			s.cluster = c
+		} else {
+			s.cluster = &dummy.LocalCluster{}
+		}
+	}
+
+	return s.cluster, nil
+}
+
 // Index return an Index. If started is true the index is started.
 func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
 	if s.index == nil {
@@ -447,11 +459,17 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				return nil, err
 			}
 
+			cluster, err := s.Cluster(ctx)
+			if err != nil {
+				return nil, err
+			}
+
 			options := index.Options{
 				DefaultTimeToLive: s.Config.Duration("cassandra.default_time_to_live"),
 				LockFactory:       s.lockFactory,
 				States:            states,
 				SchemaLock:        schemaLock,
+				Cluster:           cluster,
 			}
 
 			index, err := index.New(ctx, session, options)
