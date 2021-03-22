@@ -53,6 +53,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
 	router.Get("/flush", a.flushHandler)
+	router.Get("/ready", a.readyHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
@@ -160,6 +161,10 @@ func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Flush points (of this SquirrelDB instance) from temporary store to TSDB done in %v\n", time.Since(start))
+}
+
+func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {
+	fmt.Fprintln(w, "Ready")
 }
 
 type indexVerifier interface {
