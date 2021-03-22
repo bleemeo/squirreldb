@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/google/go-cmp/cmp"
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -3453,6 +3454,61 @@ func idsToBitset(ids []types.MetricID) *roaring.Bitmap {
 	}
 
 	return result
+}
+
+func Test_PilosaBugs(t *testing.T) {
+	b1 := roaring.NewBTreeBitmap()
+	b1.AddN(1, 2)
+	b2 := roaring.NewBTreeBitmap()
+	b2.AddN(3)
+
+	// Clone() is broken.
+	// b1Bis := b1.Clone()
+	// b2Bis := b2.Clone()
+	// This is workaround clone
+	b1Bis := roaring.NewBTreeBitmap()
+	b1Bis.UnionInPlace(b1)
+	b2Bis := roaring.NewBTreeBitmap()
+	b2Bis.UnionInPlace(b2)
+
+	b1.UnionInPlace(b2)
+	if b1.Count() != 3 {
+		t.Errorf("b1.Count() = %d, want 3", b1.Count())
+	}
+
+	if b1Bis.Count() != 2 {
+		t.Errorf("b1.Count() = %d, want 2", b1Bis.Count())
+	}
+
+	b1Bis.UnionInPlace(b2Bis)
+	if b1Bis.Count() != 3 {
+		t.Errorf("b1.Count() = %d, want 3", b1Bis.Count())
+	}
+}
+
+func Test_PilosaSerialization(t *testing.T) {
+	want := roaring.NewBTreeBitmap()
+	want = want.Flip(1, 36183)
+	_, _ = want.Remove(31436, 31437)
+
+	/*
+		use the following to get gotBinary value
+
+		buffer := bytes.NewBuffer(nil)
+		want.WriteTo(buffer)
+		fmt.Println(buffer.Bytes())
+	*/
+
+	gotBinary := []byte{60, 48, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 84, 141, 24, 0, 0, 0, 2, 0, 1, 0, 203, 122, 206, 122, 87, 141}
+	got := roaring.NewBTreeBitmap()
+	err := got.UnmarshalBinary(gotBinary)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if diff := cmp.Diff(want.Slice(), got.Slice()); diff != "" {
+		t.Errorf("got != want: %s", diff)
+	}
 }
 
 func Test_freeFreeID(t *testing.T) {

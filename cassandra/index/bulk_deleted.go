@@ -16,6 +16,7 @@ type deleter struct {
 	deleteLabels            []string
 	deleteIDs               []uint64
 	unshardedPostingUpdates []postingUpdateRequest
+	invalidateKey           []postingsCacheKey
 	labelToPostingUpdates   map[string]map[string]int
 }
 
@@ -35,6 +36,14 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 	if sortedLabels != nil && !skipLabels2Id {
 		sortedLabelsString := sortedLabels.String()
 		d.deleteLabels = append(d.deleteLabels, sortedLabelsString)
+	}
+
+	for _, lbl := range sortedLabels {
+		d.invalidateKey = append(d.invalidateKey, postingsCacheKey{
+			Shard: globalShardNumber,
+			Name:  lbl.Name,
+			Value: lbl.Value,
+		})
 	}
 
 	labelsList := make(labels.Labels, 0, len(sortedLabels)*2)
@@ -112,7 +121,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint: gocognit,gocyclo
 		return err
 	}
 
-	shards, err := d.c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+	shards, err := d.c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 	if err != nil {
 		return err
 	}
@@ -162,6 +171,8 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint: gocognit,gocyclo
 			RemoveIDs: d.deleteIDs,
 		})
 	}
+
+	d.c.invalidatePostings(ctx, d.invalidateKey)
 
 	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
 		for _, req := range presenceUpdates {

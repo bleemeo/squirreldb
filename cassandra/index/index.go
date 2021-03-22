@@ -3,7 +3,6 @@ package index
 import (
 	"bytes"
 	"context"
-	cryptoRand "crypto/rand"
 	"encoding/csv"
 	"encoding/gob"
 	"errors"
@@ -51,11 +50,11 @@ const (
 )
 
 const (
-	clusterChannelNewMetric = "index-new-metrics"
-	newMetricLockName       = "index-new-metric"
-	expireMetricLockName    = "index-ttl-metric"
-	expireMetricStateName   = "index-expired-until"
-	expireBatchSize         = 10000
+	clusterChannelPostingInvalidate = "index-invalidate-postings"
+	newMetricLockName               = "index-new-metric"
+	expireMetricLockName            = "index-ttl-metric"
+	expireMetricStateName           = "index-expired-until"
+	expireBatchSize                 = 10000
 )
 
 const (
@@ -99,9 +98,9 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	idsToLabels *labelsLookupCache
-	searchCache *searchCache
-	metrics     *metrics
+	idsToLabels   *labelsLookupCache
+	postingsCache *postingsCache
+	metrics       *metrics
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -193,24 +192,19 @@ func initialize(ctx context.Context, store storeImpl, options Options, metrics *
 		idInShardLastAccess: make(map[int32]time.Time),
 		labelsToID:          make(map[uint64][]idData),
 		idsToLabels:         &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
-		searchCache: &searchCache{
-			cache: make(map[uint64]searchEntry),
-			salt:  make([]byte, 8),
+		postingsCache: &postingsCache{
+			cache: make(map[postingsCacheKey]postingEntry),
 		},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 		metrics:                  metrics,
 	}
 
-	if _, err := cryptoRand.Read(index.searchCache.salt); err != nil {
-		return nil, fmt.Errorf("failed to read random bytes: %w", err)
-	}
-
 	if err := index.store.Init(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	options.Cluster.Subscribe(clusterChannelNewMetric, index.invalidateSearchCacheListenner)
+	options.Cluster.Subscribe(clusterChannelPostingInvalidate, index.invalidatePostingsListenner)
 
 	return index, nil
 }
@@ -320,7 +314,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 		for _, shard := range shards {
 			shard := int32(shard)
 			task := func() error {
-				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
+				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 				if err != nil {
 					return err
 				}
@@ -346,7 +340,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 // Dump writes a CSV with all metrics known by this index.
 // The format should not be considered stable and should only be used for debugging.
 func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
-	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
+	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
 	if err != nil {
 		return err
 	}
@@ -446,7 +440,7 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 
 	allGoodIds := roaring.NewBTreeBitmap()
 
-	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
+	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
 	if err != nil {
 		return hadIssue, err
 	}
@@ -530,7 +524,7 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 // verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
 func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { //nolint: gocognit
-	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 	if err != nil {
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
 	}
@@ -544,7 +538,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 
 		queryShard := []int32{ShardForTime(current.Unix())}
 
-		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel)
+		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
 			return 0, shards, err
 		}
@@ -571,7 +565,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 
 		shard := int32(shard)
 
-		it, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel)
+		it, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
 			return 0, shards, fmt.Errorf("get postings for maybe metric IDs: %w", err)
 		}
@@ -758,12 +752,12 @@ func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix boo
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
 
-	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
+	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return false, err
 	}
 
-	localMaybe, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
+	localMaybe, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return false, err
 	}
@@ -1147,7 +1141,7 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 		return nil, err
 	}
 
-	bitmap, err := c.postings(ctx, shards, allPostingLabel, allPostingLabel)
+	bitmap, err := c.postings(ctx, shards, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1157,7 +1151,7 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 
 // postings return ids matching give Label name & value
 // If value is the empty string, it match any values (but the label must be set).
-func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name string, value string) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name string, value string, useCache bool) (*roaring.Bitmap, error) { // nolint: gocognit
 	if name == allPostingLabel {
 		value = allPostingLabel
 	}
@@ -1168,29 +1162,57 @@ func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name stri
 
 	var result *roaring.Bitmap
 
+	cloneDone := false
+
 	for _, shard := range shards {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		tmp := roaring.NewBTreeBitmap()
+		var tmp *roaring.Bitmap
 
-		buffer, err := c.store.SelectPostingByNameValue(ctx, shard, name, value)
+		if useCache {
+			tmp = c.postingsCache.Get(shard, name, value)
 
-		if errors.Is(err, gocql.ErrNotFound) {
-			err = nil
-		} else if err == nil {
-			err = tmp.UnmarshalBinary(buffer)
+			status := "miss"
+			if tmp != nil {
+				status = "hit"
+			}
+
+			c.metrics.CacheAccess.WithLabelValues("postings", status).Inc()
 		}
 
-		if err != nil {
-			return nil, fmt.Errorf("unmarshal fail: %w", err)
+		if tmp == nil {
+			tmp = roaring.NewBTreeBitmap()
+
+			buffer, err := c.store.SelectPostingByNameValue(ctx, shard, name, value)
+
+			if errors.Is(err, gocql.ErrNotFound) {
+				err = nil
+			} else if err == nil {
+				err = tmp.UnmarshalBinary(buffer)
+			}
+
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal fail: %w", err)
+			}
+
+			if useCache {
+				size := c.postingsCache.Set(shard, name, value, tmp)
+
+				c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
+			}
 		}
 
 		if result == nil {
 			result = tmp
 		} else {
-			result.UnionInPlace(tmp)
+			if useCache && !cloneDone {
+				cloneDone = true
+				result = result.Union(tmp)
+			} else {
+				result.UnionInPlace(tmp)
+			}
 		}
 	}
 
@@ -1362,7 +1384,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit,gocyclo
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit
 	start := time.Now()
 
 	defer func() {
@@ -1460,12 +1482,6 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 		done, err := c.createMetrics(ctx, now, pending, false)
 
 		c.newMetricLock.Unlock()
-
-		if err == nil || ctx.Err() != nil {
-			// Make sure to invalidate the cache when create "fail" because of
-			// cancelled context, as some metrics may be fully created.
-			c.invalidateSearchCache(ctx, done)
-		}
 
 		if err != nil {
 			return nil, nil, err
@@ -1719,7 +1735,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 		c.metrics.CreateMetricSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel)
+	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1890,6 +1906,7 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 	updates := make([]postingUpdateRequest, 0)
 	shardToLabelToIndex := make(map[int32]map[labels.Label]int)
 	now := time.Now()
+	keysToInvalidate := make([]postingsCacheKey, 0)
 
 	c.lookupIDMutex.Lock()
 	for _, entry := range pending {
@@ -1920,6 +1937,12 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 				labelsList = append(labelsList, labels.Label{
 					Name:  postinglabelName,
 					Value: lbl.Name,
+				})
+
+				keysToInvalidate = append(keysToInvalidate, postingsCacheKey{
+					Shard: shard,
+					Name:  lbl.Name,
+					Value: lbl.Value,
 				})
 			}
 
@@ -1958,6 +1981,8 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 	}
 	c.lookupIDMutex.Unlock()
 
+	c.invalidatePostings(ctx, keysToInvalidate)
+
 	if len(maybePresent) > 0 {
 		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
@@ -1979,35 +2004,29 @@ func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []look
 	return nil
 }
 
-func (c *CassandraIndex) invalidateSearchCacheListenner(message []byte) {
-	var metrics []labels.Labels
+func (c *CassandraIndex) invalidatePostingsListenner(message []byte) {
+	var keys []postingsCacheKey
 
 	dec := gob.NewDecoder(bytes.NewReader(message))
-	err := dec.Decode(&metrics)
+	err := dec.Decode(&keys)
 
 	if err != nil {
 		logger.Printf("unable to deserialize new metrics message. Search cache may be wrong: %v", err)
 	} else {
-		size := c.searchCache.Invalidate(metrics)
-		c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
+		size := c.postingsCache.Invalidate(keys)
+		c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
 	}
 }
 
-func (c *CassandraIndex) invalidateSearchCache(ctx context.Context, entries []lookupEntry) {
-	metrics := make([]labels.Labels, len(entries))
-
-	for i, ent := range entries {
-		metrics[i] = ent.sortedLabels
-	}
-
+func (c *CassandraIndex) invalidatePostings(ctx context.Context, entries []postingsCacheKey) {
 	buffer := bytes.NewBuffer(nil)
 	enc := gob.NewEncoder(buffer)
-	err := enc.Encode(metrics)
+	err := enc.Encode(entries)
 
 	if err != nil {
 		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
 	} else {
-		err := c.options.Cluster.Publish(ctx, "index-new-metrics", buffer.Bytes())
+		err := c.options.Cluster.Publish(ctx, clusterChannelPostingInvalidate, buffer.Bytes())
 		if err != nil {
 			logger.Printf("unable to send message for new metrics to other node. Their cache won't be invalidated: %v", err)
 		}
@@ -2019,7 +2038,7 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 		for shard := range shards {
 			shard := shard
 			task := func() error {
-				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel)
+				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 				if err != nil {
 					return err
 				}
@@ -2402,12 +2421,6 @@ func (c *CassandraIndex) InternalCreateMetric(ctx context.Context, start time.Ti
 
 	c.newMetricLock.Unlock()
 
-	if err == nil || ctx.Err() != nil {
-		// Make sure to invalidate the cache when create "fail" because of
-		// cancelled context, as some metrics may be fully created.
-		c.invalidateSearchCache(ctx, done)
-	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -2472,7 +2485,7 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 	defer c.lookupIDMutex.Unlock()
 
 	if c.existingShards == nil || forceUpdate {
-		tmp, err := c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel)
+		tmp, err := c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 		if err != nil {
 			return nil, err
 		}
@@ -2733,7 +2746,7 @@ type postingUpdateRequest struct {
 }
 
 func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateRequest) (*roaring.Bitmap, error) {
-	bitmap, err := c.postings(ctx, []int32{job.Shard}, job.Label.Name, job.Label.Value)
+	bitmap, err := c.postings(ctx, []int32{job.Shard}, job.Label.Name, job.Label.Value, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2820,38 +2833,18 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 // idsForMatcher return metric IDs matching given matchers.
 // It's a wrapper around postingsForMatchers.
 func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (ids []types.MetricID, labelsList []labels.Labels, err error) {
-	var (
-		checkMatches    bool
-		resultFromCache bool
-	)
-
-	ids = c.searchCache.Get(shards, matchers)
-
-	if len(ids) == 0 {
-		var results *roaring.Bitmap
-
-		c.metrics.CacheAccess.WithLabelValues("search", "miss").Inc()
-
-		results, checkMatches, err = c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		if results == nil {
-			return nil, nil, nil
-		}
-
-		ids = bitsetToIDs(results)
-	} else {
-		c.metrics.CacheAccess.WithLabelValues("search", "hit").Inc()
-
-		resultFromCache = true
+	results, checkMatches, err := c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// If result come from the cache, always re-check matches:
-	// * If cache is still valid, is won't add cost because lookupLabels will be done anyway (if metrics are read)
-	// * If cache is invalid (because the metrics got deleted), this check will catch it.
-	if checkMatches || resultFromCache {
+	if results == nil {
+		return nil, nil, nil
+	}
+
+	ids = bitsetToIDs(results)
+
+	if checkMatches {
 		labelsList, err = c.lookupLabels(ctx, ids, time.Now())
 		if err != nil {
 			return nil, nil, err
@@ -2869,31 +2862,8 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 			}
 		}
 
-		if resultFromCache && len(ids) != len(newIds) {
-			// cache is no longer valid, it contains metric that got deleted.
-			// Drop the cache entry, but we will return the current result:
-			// * it does not contains ID that are wrong (even if metric ID get reused)
-			// * it MAY not contains recently added metrics... but this isn't specific to this branch
-			size := c.searchCache.Drop(shards, matchers)
-			c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
-		}
-
 		ids = newIds
 		labelsList = newLabels
-	}
-
-	// Note: we only fill the cache when miss and result is non-empty:
-	// * we don't want to refresh expiration and have entry expire after TTL even
-	//   if used. This is because we don't have correct invalidation.
-	// * we do not cache negative result (matcher that yield empty IDs).
-	// This allow to limit the stall cache result to only:
-	// * limited duration (TTL)
-	// * AND matchers that had at least one metric and after that more metrics.
-	//   so if your query are expected to return only one metric the cache
-	//   won't yield stall result.
-	if !resultFromCache && len(ids) > 0 {
-		size := c.searchCache.Set(shards, matchers, ids)
-		c.metrics.CacheSize.WithLabelValues("search").Set(float64(size))
 	}
 
 	return ids, labelsList, nil
@@ -3000,7 +2970,7 @@ func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32
 
 				if results == nil {
 					// If there's nothing to subtract from, add in everything and remove the notIts later.
-					results, err = c.postings(ctx, shards, allPostingLabel, allPostingLabel)
+					results, err = c.postings(ctx, shards, allPostingLabel, allPostingLabel, true)
 					if err != nil {
 						return nil, false, err
 					}
@@ -3020,7 +2990,7 @@ func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32
 
 			if results == nil {
 				// If there's nothing to subtract from, add in everything and remove the notIts later.
-				results, err = c.postings(ctx, shards, allPostingLabel, allPostingLabel)
+				results, err = c.postings(ctx, shards, allPostingLabel, allPostingLabel, true)
 				if err != nil {
 					return nil, false, err
 				}
@@ -3037,7 +3007,7 @@ func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32
 // This method will not return postings for missing labels.
 func (c *CassandraIndex) postingsForMatcher(ctx context.Context, shards []int32, m *labels.Matcher) (*roaring.Bitmap, error) {
 	if m.Type == labels.MatchEqual {
-		return c.postings(ctx, shards, m.Name, m.Value)
+		return c.postings(ctx, shards, m.Name, m.Value, true)
 	}
 
 	var it *roaring.Bitmap
