@@ -14,8 +14,8 @@ import (
 // Store implement Prometheus.Queryable and read from SquirrelDB store.
 type Store struct {
 	Err    error
-	Index  types.Index
-	Reader types.MetricReader
+	Index  *limitingIndex
+	Reader *limitingReader
 }
 
 type querier struct {

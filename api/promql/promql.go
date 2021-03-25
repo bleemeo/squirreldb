@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -68,8 +69,10 @@ type PromQL struct {
 	Reader             types.MetricReader
 	MaxEvaluatedSeries uint32
 	MaxEvaluatedPoints uint64
+	MetricRegisty      prometheus.Registerer
 
 	logger      log.Logger
+	metrics     *metrics
 	queryEngine *promql.Engine
 }
 
@@ -78,6 +81,7 @@ type apiFunc func(r *http.Request) apiFuncResult
 // Register the API's endpoints in the given router.
 func (p *PromQL) Register(r *route.Router) {
 	p.init()
+	p.metrics = newMetrics(p.MetricRegisty)
 
 	wrap := func(f apiFunc) http.HandlerFunc {
 		hf := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +130,7 @@ func (p *PromQL) init() {
 	p.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	opts := promql.EngineOpts{
 		Logger:             log.With(p.logger, "component", "query engine"),
-		Reg:                nil,
+		Reg:                p.MetricRegisty,
 		MaxSamples:         50000000,
 		Timeout:            2 * time.Minute,
 		ActiveQueryTracker: nil,
@@ -135,11 +139,11 @@ func (p *PromQL) init() {
 	p.queryEngine = promql.NewEngine(opts)
 }
 
-func (p *PromQL) queryable(r *http.Request) storage.Queryable {
-	st := Store{
-		Index:  p.Index,
-		Reader: p.Reader,
-	}
+func (p *PromQL) queryable(r *http.Request) Store {
+	idx := p.Index
+	reader := p.Reader
+
+	st := Store{}
 
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
 	if value != "" {
@@ -150,8 +154,8 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 			return st
 		}
 
-		st.Index = filteringIndex{
-			index: st.Index,
+		idx = filteringIndex{
+			index: idx,
 			matcher: labels.MustNewMatcher(
 				labels.MatchEqual,
 				part[0],
@@ -175,11 +179,9 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 		}
 	}
 
-	if maxEvaluatedSeries > 0 {
-		st.Index = &limitingIndex{
-			index:          st.Index,
-			maxTotalSeries: maxEvaluatedSeries,
-		}
+	st.Index = &limitingIndex{
+		index:          idx,
+		maxTotalSeries: maxEvaluatedSeries,
 	}
 
 	maxEvaluatedPoints := p.MaxEvaluatedPoints
@@ -197,11 +199,9 @@ func (p *PromQL) queryable(r *http.Request) storage.Queryable {
 		}
 	}
 
-	if maxEvaluatedPoints > 0 {
-		st.Reader = &limitingReader{
-			reader:         st.Reader,
-			maxTotalPoints: maxEvaluatedPoints,
-		}
+	st.Reader = &limitingReader{
+		reader:         reader,
+		maxTotalPoints: maxEvaluatedPoints,
 	}
 
 	return st
@@ -289,6 +289,12 @@ func returnAPIError(err error) *apiError {
 }
 
 func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
+	t0 := time.Now()
+
+	defer func() {
+		p.metrics.RequestsSeconds.WithLabelValues("query_range").Observe(time.Since(t0).Seconds())
+	}()
+
 	start, err := parseTime(r.FormValue("start"))
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'start': %w", err)
@@ -346,7 +352,14 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	qry, err := p.queryEngine.NewRangeQuery(p.queryable(r), r.FormValue("query"), start, end, step)
+	store := p.queryable(r)
+
+	defer func() {
+		p.metrics.RequestsSeries.WithLabelValues("query_range").Observe(float64(store.Index.returnedSeries))
+		p.metrics.RequestsPoints.WithLabelValues("query_range").Observe(float64(store.Reader.returnedPoints))
+	}()
+
+	qry, err := p.queryEngine.NewRangeQuery(store, r.FormValue("query"), start, end, step)
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
@@ -380,6 +393,12 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 }
 
 func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
+	t0 := time.Now()
+
+	defer func() {
+		p.metrics.RequestsSeconds.WithLabelValues("query").Observe(time.Since(t0).Seconds())
+	}()
+
 	ts, err := parseTimeParam(r, "time", time.Now())
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
@@ -401,7 +420,14 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	qry, err := p.queryEngine.NewInstantQuery(p.queryable(r), r.FormValue("query"), ts)
+	store := p.queryable(r)
+
+	defer func() {
+		p.metrics.RequestsSeries.WithLabelValues("query").Observe(float64(store.Index.returnedSeries))
+		p.metrics.RequestsPoints.WithLabelValues("query").Observe(float64(store.Reader.returnedPoints))
+	}()
+
+	qry, err := p.queryEngine.NewInstantQuery(store, r.FormValue("query"), ts)
 	if err != nil {
 		err = fmt.Errorf("invalid parameter 'query': %w", err)
 
@@ -437,6 +463,12 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 }
 
 func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
+	t0 := time.Now()
+
+	defer func() {
+		p.metrics.RequestsSeconds.WithLabelValues("series").Observe(time.Since(t0).Seconds())
+	}()
+
 	if err := r.ParseForm(); err != nil {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("error parsing form values: %w", err)}, nil, nil}
 	}
@@ -466,7 +498,14 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 		matcherSets = append(matcherSets, matchers)
 	}
 
-	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	store := p.queryable(r)
+
+	defer func() {
+		p.metrics.RequestsSeries.WithLabelValues("series").Observe(float64(store.Index.returnedSeries))
+		p.metrics.RequestsPoints.WithLabelValues("series").Observe(float64(store.Reader.returnedPoints))
+	}()
+
+	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}
@@ -509,6 +548,12 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 }
 
 func (p *PromQL) labelNames(r *http.Request) apiFuncResult {
+	t0 := time.Now()
+
+	defer func() {
+		p.metrics.RequestsSeconds.WithLabelValues("labelNames").Observe(time.Since(t0).Seconds())
+	}()
+
 	start, err := parseTimeParam(r, "start", minTime)
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'start': %w", err)}, nil, nil}
@@ -519,7 +564,14 @@ func (p *PromQL) labelNames(r *http.Request) apiFuncResult {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
 	}
 
-	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	store := p.queryable(r)
+
+	defer func() {
+		p.metrics.RequestsSeries.WithLabelValues("labelNames").Observe(float64(store.Index.returnedSeries))
+		p.metrics.RequestsPoints.WithLabelValues("labelNames").Observe(float64(store.Reader.returnedPoints))
+	}()
+
+	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}
@@ -538,6 +590,12 @@ func (p *PromQL) labelNames(r *http.Request) apiFuncResult {
 }
 
 func (p *PromQL) labelValues(r *http.Request) (result apiFuncResult) {
+	t0 := time.Now()
+
+	defer func() {
+		p.metrics.RequestsSeconds.WithLabelValues("labelValues").Observe(time.Since(t0).Seconds())
+	}()
+
 	ctx := r.Context()
 	name := route.Param(ctx, "name")
 
@@ -555,7 +613,14 @@ func (p *PromQL) labelValues(r *http.Request) (result apiFuncResult) {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
 	}
 
-	q, err := p.queryable(r).Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	store := p.queryable(r)
+
+	defer func() {
+		p.metrics.RequestsSeries.WithLabelValues("labelValues").Observe(float64(store.Index.returnedSeries))
+		p.metrics.RequestsPoints.WithLabelValues("labelValues").Observe(float64(store.Reader.returnedPoints))
+	}()
+
+	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}

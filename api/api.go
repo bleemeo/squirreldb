@@ -65,6 +65,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		Reader:             a.Reader,
 		MaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
 		MaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
+		MetricRegisty:      a.MetricRegisty,
 	}
 	remote := remotestorage.RemoteStorage{
 		Index:                    a.Index,

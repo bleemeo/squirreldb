@@ -32,7 +32,7 @@ func (idx *limitingIndex) Search(ctx context.Context, start time.Time, end time.
 	}
 
 	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(r.Count()))
-	if totalSeries > idx.maxTotalSeries {
+	if idx.maxTotalSeries != 0 && totalSeries > idx.maxTotalSeries {
 		return &dummy.MetricsLabel{}, errors.New("too many series evaluated by this PromQL")
 	}
 

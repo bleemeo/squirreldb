@@ -31,7 +31,7 @@ type limitDataSet struct {
 }
 
 func (d limitDataSet) Next() bool {
-	if atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
+	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
 		return false
 	}
 
@@ -41,7 +41,9 @@ func (d limitDataSet) Next() bool {
 
 	count := len(d.set.At().Points)
 
-	return atomic.AddUint64(&d.rdr.returnedPoints, uint64(count)) <= d.rdr.maxTotalPoints
+	newSize := atomic.AddUint64(&d.rdr.returnedPoints, uint64(count))
+
+	return d.rdr.maxTotalPoints == 0 || newSize <= d.rdr.maxTotalPoints
 }
 
 func (d limitDataSet) At() types.MetricData {
@@ -49,7 +51,7 @@ func (d limitDataSet) At() types.MetricData {
 }
 
 func (d limitDataSet) Err() error {
-	if atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
+	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
 		return errors.New("too many points evaluated by this PromQL")
 	}
 
