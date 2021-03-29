@@ -12,9 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"squirreldb/types"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -63,13 +61,16 @@ const (
 	errorNotFound errorType = "not_found"
 )
 
+type QueryableWithStats interface {
+	storage.Queryable
+	PointsRead() float64
+	SeriesReturned() float64
+}
+
 type PromQL struct {
-	CORSOrigin         *regexp.Regexp
-	Index              types.Index
-	Reader             types.MetricReader
-	MaxEvaluatedSeries uint32
-	MaxEvaluatedPoints uint64
-	MetricRegisty      prometheus.Registerer
+	CORSOrigin       *regexp.Regexp
+	QueryableFactory func(ctx context.Context, r *http.Request) QueryableWithStats
+	MetricRegisty    prometheus.Registerer
 
 	logger      log.Logger
 	metrics     *metrics
@@ -137,74 +138,6 @@ func (p *PromQL) init() {
 		LookbackDelta:      5 * time.Minute,
 	}
 	p.queryEngine = promql.NewEngine(opts)
-}
-
-func (p *PromQL) queryable(r *http.Request) Store {
-	idx := p.Index
-	reader := p.Reader
-
-	st := Store{}
-
-	value := r.Header.Get("X-PromQL-Forced-Matcher")
-	if value != "" {
-		part := strings.SplitN(value, "=", 2)
-		if len(part) != 2 {
-			st.Err = fmt.Errorf("Invalid matcher \"%s\", require labelName=labelValue", value)
-
-			return st
-		}
-
-		idx = filteringIndex{
-			index: idx,
-			matcher: labels.MustNewMatcher(
-				labels.MatchEqual,
-				part[0],
-				part[1],
-			),
-		}
-	}
-
-	maxEvaluatedSeries := p.MaxEvaluatedSeries
-
-	if maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series"); maxEvaluatedSeriesText != "" {
-		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
-		if err != nil {
-			st.Err = err
-
-			return st
-		}
-
-		if tmp > 0 && (uint32(tmp) < maxEvaluatedSeries || maxEvaluatedSeries == 0) {
-			maxEvaluatedSeries = uint32(tmp)
-		}
-	}
-
-	st.Index = &limitingIndex{
-		index:          idx,
-		maxTotalSeries: maxEvaluatedSeries,
-	}
-
-	maxEvaluatedPoints := p.MaxEvaluatedPoints
-
-	if maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points"); maxEvaluatedPointsText != "" {
-		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
-		if err != nil {
-			st.Err = err
-
-			return st
-		}
-
-		if tmp > 0 && (tmp < maxEvaluatedPoints || maxEvaluatedPoints == 0) {
-			maxEvaluatedPoints = tmp
-		}
-	}
-
-	st.Reader = &limitingReader{
-		reader:         reader,
-		maxTotalPoints: maxEvaluatedPoints,
-	}
-
-	return st
 }
 
 type apiFuncResult struct {
@@ -352,11 +285,11 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	store := p.queryable(r)
+	store := p.QueryableFactory(ctx, r)
 
 	defer func() {
-		p.metrics.RequestsSeries.WithLabelValues("query_range").Observe(float64(store.Index.returnedSeries))
-		p.metrics.RequestsPoints.WithLabelValues("query_range").Observe(float64(store.Reader.returnedPoints))
+		p.metrics.RequestsSeries.WithLabelValues("query_range").Observe(store.SeriesReturned())
+		p.metrics.RequestsPoints.WithLabelValues("query_range").Observe(store.PointsRead())
 	}()
 
 	qry, err := p.queryEngine.NewRangeQuery(store, r.FormValue("query"), start, end, step)
@@ -420,11 +353,11 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 		defer cancel()
 	}
 
-	store := p.queryable(r)
+	store := p.QueryableFactory(ctx, r)
 
 	defer func() {
-		p.metrics.RequestsSeries.WithLabelValues("query").Observe(float64(store.Index.returnedSeries))
-		p.metrics.RequestsPoints.WithLabelValues("query").Observe(float64(store.Reader.returnedPoints))
+		p.metrics.RequestsSeries.WithLabelValues("query").Observe(store.SeriesReturned())
+		p.metrics.RequestsPoints.WithLabelValues("query").Observe(store.PointsRead())
 	}()
 
 	qry, err := p.queryEngine.NewInstantQuery(store, r.FormValue("query"), ts)
@@ -498,14 +431,14 @@ func (p *PromQL) series(r *http.Request) (result apiFuncResult) {
 		matcherSets = append(matcherSets, matchers)
 	}
 
-	store := p.queryable(r)
+	ctx := r.Context()
+	store := p.QueryableFactory(ctx, r)
 
 	defer func() {
-		p.metrics.RequestsSeries.WithLabelValues("series").Observe(float64(store.Index.returnedSeries))
-		p.metrics.RequestsPoints.WithLabelValues("series").Observe(float64(store.Reader.returnedPoints))
+		p.metrics.RequestsSeries.WithLabelValues("series").Observe(store.SeriesReturned())
 	}()
 
-	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	q, err := store.Querier(ctx, timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}
@@ -564,14 +497,14 @@ func (p *PromQL) labelNames(r *http.Request) apiFuncResult {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
 	}
 
-	store := p.queryable(r)
+	ctx := r.Context()
+	store := p.QueryableFactory(ctx, r)
 
 	defer func() {
-		p.metrics.RequestsSeries.WithLabelValues("labelNames").Observe(float64(store.Index.returnedSeries))
-		p.metrics.RequestsPoints.WithLabelValues("labelNames").Observe(float64(store.Reader.returnedPoints))
+		p.metrics.RequestsSeries.WithLabelValues("labelNames").Observe(store.SeriesReturned())
 	}()
 
-	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))
+	q, err := store.Querier(ctx, timestamp.FromTime(start), timestamp.FromTime(end))
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorExec, err}, nil, nil}
 	}
@@ -613,11 +546,10 @@ func (p *PromQL) labelValues(r *http.Request) (result apiFuncResult) {
 		return apiFuncResult{nil, &apiError{errorBadData, fmt.Errorf("invalid parameter 'end': %w", err)}, nil, nil}
 	}
 
-	store := p.queryable(r)
+	store := p.QueryableFactory(ctx, r)
 
 	defer func() {
-		p.metrics.RequestsSeries.WithLabelValues("labelValues").Observe(float64(store.Index.returnedSeries))
-		p.metrics.RequestsPoints.WithLabelValues("labelValues").Observe(float64(store.Reader.returnedPoints))
+		p.metrics.RequestsSeries.WithLabelValues("labelValues").Observe(store.SeriesReturned())
 	}()
 
 	q, err := store.Querier(r.Context(), timestamp.FromTime(start), timestamp.FromTime(end))

@@ -286,7 +286,7 @@ func TestPromQL_queryable(t *testing.T) {
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Series": "5",
+				"X-PromQL-Max-Evaluated-Series": "3",
 				"X-PromQL-Max-Evaluated-Points": "500",
 				"X-PromQL-Forced-Matcher":       "__account_id=1234",
 			},
@@ -307,6 +307,12 @@ func TestPromQL_queryable(t *testing.T) {
 					matchers: []*labels.Matcher{
 						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
 					},
+					wantCount: 1,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
 					wantErr: true,
 				},
 			},
@@ -314,19 +320,20 @@ func TestPromQL_queryable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &PromQL{
-				Index:              tt.fields.Index,
-				Reader:             tt.fields.Reader,
-				MaxEvaluatedPoints: tt.fields.MaxEvaluatedPoints,
-				MaxEvaluatedSeries: tt.fields.MaxEvaluatedSeries,
+			qf := QueryableFactory{
+				Index:                     tt.fields.Index,
+				Reader:                    tt.fields.Reader,
+				DefaultMaxEvaluatedPoints: tt.fields.MaxEvaluatedPoints,
+				DefaultMaxEvaluatedSeries: tt.fields.MaxEvaluatedSeries,
 			}
+
 			r := httptest.NewRequest("", "/", nil)
 
 			for k, v := range tt.reqHeader {
 				r.Header.Add(k, v)
 			}
 
-			queryable := p.queryable(r)
+			queryable := qf.Queryable(context.Background(), r)
 
 			queryier, err := queryable.Querier(context.Background(), 0, 0)
 			if err != nil {

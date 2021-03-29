@@ -61,11 +61,13 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 
 	promql := promql.PromQL{
-		Index:              a.Index,
-		Reader:             a.Reader,
-		MaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
-		MaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
-		MetricRegisty:      a.MetricRegisty,
+		QueryableFactory: promql.QueryableFactory{
+			Index:                     a.Index,
+			Reader:                    a.Reader,
+			DefaultMaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
+			DefaultMaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
+		}.Queryable,
+		MetricRegisty: a.MetricRegisty,
 	}
 	remote := remotestorage.RemoteStorage{
 		Index:                    a.Index,
