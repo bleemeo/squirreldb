@@ -130,6 +130,33 @@ func Test_gorillaEncode2(t *testing.T) {
 			},
 		},
 		{
+			name: "two-points",
+			args: args{
+				baseTimestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2020, 3, 4, 0, 0, 10, 0, time.UTC).UnixNano() / 1000000,
+				points: []types.MetricPoint{
+					{Timestamp: time.Date(2020, 3, 4, 0, 0, 10, 0, time.UTC).UnixNano() / 1000000, Value: 1},
+					{Timestamp: time.Date(2020, 3, 4, 0, 0, 20, 0, time.UTC).UnixNano() / 1000000, Value: 2},
+				},
+			},
+		},
+		{
+			// This case test something that should NOT happen... but aggregation does it :(
+			// We should normally don't use gorrilaEncode with t0 == baseTimestamp, but preaggregation did it.
+			// Hopefully the issue seems only when there is only ONE point, which don't happen to much with aggregated data.
+			// We need to add test for this and "support" it until a way to update aggregated data (including migrating
+			// existing data) is found.
+			name: "two-points-t0==base timestamp",
+			args: args{
+				baseTimestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				t0:            time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
+				points: []types.MetricPoint{
+					{Timestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000, Value: 1},
+					{Timestamp: time.Date(2020, 3, 4, 0, 0, 10, 0, time.UTC).UnixNano() / 1000000, Value: 2},
+				},
+			},
+		},
+		{
 			name: "one-point-t0-changed",
 			args: args{
 				baseTimestamp: time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
