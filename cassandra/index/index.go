@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -1684,6 +1685,10 @@ func freeFreeID(bitmap *roaring.Bitmap) uint64 {
 
 	results := freemap.SliceRange(lowIdx, highIdx+1)
 	if len(results) == 0 {
+		if max < math.MaxUint64 {
+			return max + 1
+		}
+
 		return 0
 	}
 
