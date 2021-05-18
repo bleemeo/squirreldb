@@ -1649,7 +1649,7 @@ func (c *CassandraIndex) refreshExpiration(ctx context.Context, id types.MetricI
 }
 
 // Search a free ID using dichotomy.
-func freeFreeID(bitmap *roaring.Bitmap) uint64 {
+func findFreeID(bitmap *roaring.Bitmap) uint64 {
 	card := bitmap.Count()
 	if card == 0 {
 		return 1
@@ -1771,7 +1771,7 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
 		default:
-			newID = types.MetricID(freeFreeID(allPosting))
+			newID = types.MetricID(findFreeID(allPosting))
 		}
 
 		if newID == 0 {

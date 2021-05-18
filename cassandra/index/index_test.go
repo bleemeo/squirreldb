@@ -3600,7 +3600,7 @@ func Test_freeFreeID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := freeFreeID(tt.bitmap); got != tt.want {
+			if got := findFreeID(tt.bitmap); got != tt.want {
 				t.Errorf("freeFreeID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -3705,7 +3705,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
-				_ = freeFreeID(tt.bitmap)
+				_ = findFreeID(tt.bitmap)
 			}
 		})
 	}
