@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"reflect"
 	"sort"
 	"squirreldb/dummy"
@@ -3488,6 +3489,41 @@ func Test_PilosaBugs(t *testing.T) {
 	}
 }
 
+func Test_PilosaBugs2(t *testing.T) {
+	b1 := roaring.NewBTreeBitmap()
+	b2 := roaring.NewBTreeBitmap()
+
+	// Flip is broken... this is likely because Flip use NewBitmap which is
+	// known to be broken.
+	b1 = b1.Flip(1, 3)
+
+	// serialization/deserialization fix it
+	buffer := bytes.NewBuffer(nil)
+	if _, err := b1.WriteTo(buffer); err != nil {
+		t.Fatal(err)
+	}
+
+	b1 = roaring.NewBTreeBitmap()
+	if err := b1.UnmarshalBinary(buffer.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alternative to Flip
+	b2.Add(1, 2, 3)
+
+	for _, bitmap := range []*roaring.Bitmap{b1, b2} {
+		tmp := roaring.NewBTreeBitmap()
+
+		_ = tmp.Xor(bitmap)
+
+		bitmap.Add(5)
+		bitmap.Add(6)
+		if !bitmap.Contains(5) {
+			t.Error("pilosa bug...")
+		}
+	}
+}
+
 func Test_PilosaSerialization(t *testing.T) {
 	want := roaring.NewBTreeBitmap()
 	want = want.Flip(1, 36183)
@@ -3572,6 +3608,15 @@ func Test_freeFreeID(t *testing.T) {
 		}
 	}
 
+	freeAtSplit1 := compactLarge.Clone()
+	freeAtSplit1.Remove(50000)
+
+	freeAtSplit2 := compactLarge.Clone()
+	freeAtSplit2.Remove(50001)
+
+	freeAtSplit3 := compactLarge.Clone()
+	freeAtSplit3.Remove(49999)
+
 	// test bug that occured with all IDs assigned between 1 to 36183 (included)
 	// but 31436 and 31437.
 	// This is actually a bug in pilosa :(
@@ -3587,82 +3632,6 @@ func Test_freeFreeID(t *testing.T) {
 		return
 	}
 
-	tests := []struct {
-		name   string
-		bitmap *roaring.Bitmap
-		want   uint64
-	}{
-		{
-			name:   "empty",
-			bitmap: roaring.NewBTreeBitmap(),
-			want:   1,
-		},
-		{
-			name:   "compact",
-			bitmap: compact,
-			want:   5001,
-		},
-		{
-			name:   "spare",
-			bitmap: spare,
-			want:   42,
-		},
-		{
-			name:   "compactLarge",
-			bitmap: compactLarge,
-			want:   1e5 + 1,
-		},
-		{
-			name:   "spareLarge",
-			bitmap: spareLarge,
-			want:   65539,
-		},
-		{
-			name:   "spareZone",
-			bitmap: spareZone,
-			want:   200,
-		},
-		{
-			name:   "startAndEnd",
-			bitmap: startAndEnd,
-			want:   10001,
-		},
-		{
-			name:   "bug1",
-			bitmap: bug1,
-			want:   31436,
-		},
-		{
-			name:   "bug2",
-			bitmap: bug2,
-			want:   179940,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := findFreeID(tt.bitmap); got != tt.want {
-				t.Errorf("freeFreeID() = %v, want %v", got, tt.want)
-
-				if tt.bitmap.Contains(tt.want) {
-					t.Errorf("but this looks like a test bug, because %d is present in bitmap", tt.want)
-				}
-			}
-		})
-	}
-}
-
-func Test_freeFreeID_sequence(t *testing.T) {
-	compact := roaring.NewBTreeBitmap()
-	compact = compact.Flip(1, 5000)
-
-	spare := compact.Clone()
-	spare.Remove(42)
-	spare.Remove(1337)
-	spare.Remove(44)
-
-	compactLarge := roaring.NewBTreeBitmap()
-	compactLarge = compactLarge.Flip(1, 1e5)
-
 	compactFile, err := loadBitmap("testdata/compact-small.hex")
 	if err != nil {
 		t.Error(err)
@@ -3670,68 +3639,149 @@ func Test_freeFreeID_sequence(t *testing.T) {
 		return
 	}
 
-	spareZone := compactLarge.Clone()
-	spareZone = spareZone.Flip(200, 500)
-	spareZone = spareZone.Flip(1e4, 2e4)
-
-	bug1 := roaring.NewBTreeBitmap()
-	bug1 = bug1.Flip(1, 36183)
-	_, _ = bug1.Remove(31436, 31437)
-	bug1.Optimize()
-
-	bug2, err := loadBitmap("testdata/large.hex")
-	if err != nil {
-		t.Error(err)
-
-		return
-	}
-
-	tests := []struct {
+	type testStruct struct {
 		name       string
 		bitmap     *roaring.Bitmap
+		wants      []uint64
 		numberHole int // number of hole == free slot before max+1
-	}{
+		maxIter    int
+	}
+
+	tests := []testStruct{
 		{
 			name:       "empty",
 			bitmap:     roaring.NewBTreeBitmap(),
+			wants:      []uint64{1, 2, 3, 4},
 			numberHole: 0,
 		},
 		{
 			name:       "compact",
 			bitmap:     compact,
+			wants:      []uint64{5001, 5002, 5003, 5004},
 			numberHole: 0,
 		},
 		{
 			name:       "spare",
 			bitmap:     spare,
+			wants:      []uint64{42, 44, 1337, 5001},
 			numberHole: 3,
 		},
 		{
 			name:       "compactLarge",
 			bitmap:     compactLarge,
+			wants:      []uint64{1e5 + 1, 1e5 + 2, 1e5 + 3},
 			numberHole: 0,
+		},
+		{
+			name:       "spareLarge",
+			bitmap:     spareLarge,
+			wants:      []uint64{65539, 65540, 70000, 1e5 + 1},
+			numberHole: 3,
 		},
 		{
 			name:       "spareZone",
 			bitmap:     spareZone,
-			numberHole: 10300,
+			wants:      []uint64{200, 201, 202, 203},
+			numberHole: 10302,
+			maxIter:    2000,
 		},
 		{
-			name:       "compact-file",
-			bitmap:     compactFile,
-			numberHole: 0,
+			name:       "startAndEnd",
+			bitmap:     startAndEnd,
+			wants:      []uint64{10001, 10002, 10003, 10004},
+			numberHole: -1, // special value to tell test case to do NOT attempt to fill hole
+			maxIter:    2000,
 		},
 		{
 			name:       "bug1",
 			bitmap:     bug1,
+			wants:      []uint64{31436, 31437, 36184, 36185},
 			numberHole: 2,
 		},
 		{
 			name:       "bug2",
 			bitmap:     bug2,
+			wants:      []uint64{179940, 215223, 215673, 215692},
 			numberHole: 1376,
 		},
+		{
+			name:       "compact-file",
+			bitmap:     compactFile,
+			wants:      []uint64{180120, 180121, 180122, 180123},
+			numberHole: 0,
+		},
+		{
+			name:       "freeAtSplit1",
+			bitmap:     freeAtSplit1,
+			wants:      []uint64{50000, 1e5 + 1},
+			numberHole: 1,
+		},
+		{
+			name:       "freeAtSplit2",
+			bitmap:     freeAtSplit2,
+			wants:      []uint64{50001, 1e5 + 1},
+			numberHole: 1,
+		},
+		{
+			name:       "freeAtSplit3",
+			bitmap:     freeAtSplit3,
+			wants:      []uint64{49999, 1e5 + 1},
+			numberHole: 1,
+		},
 	}
+
+	// Create 12 random bitmap, each with 1e6 metrics and 10, 100 and 1000 random hole
+	rnd := rand.New(rand.NewSource(42))
+	for n := 0; n < 12; n++ {
+		var holdCount int
+
+		switch n % 3 {
+		case 0:
+			holdCount = 10
+		case 1:
+			holdCount = 100
+		case 2:
+			holdCount = 1000
+		}
+
+		bitmap := roaring.NewBTreeBitmap()
+		bitmap = bitmap.Flip(1, 1e6)
+		// After using Flip, the bitmap is broken. Reload it from bytes
+
+		tmp := bytes.NewBuffer(nil)
+		if _, err := bitmap.WriteTo(tmp); err != nil {
+			t.Fatal(err)
+		}
+
+		bitmap = roaring.NewBTreeBitmap()
+		if err := bitmap.UnmarshalBinary(tmp.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+
+		holdsInt := rnd.Perm(1e6)[:holdCount]
+		for _, v := range holdsInt {
+			bitmap.Remove(uint64(v))
+		}
+
+		sort.Ints(holdsInt)
+
+		holds := make([]uint64, 0, len(holdsInt)+1)
+
+		for _, v := range holdsInt {
+			holds = append(holds, uint64(v))
+		}
+
+		holds = append(holds, 1e6+1)
+
+		tests = append(tests, testStruct{
+			name:       fmt.Sprintf("random-%d", n),
+			bitmap:     bitmap,
+			wants:      holds,
+			numberHole: holdCount,
+			maxIter:    1100,
+		})
+	}
+
 	for _, tt := range tests {
 		buffer := bytes.NewBuffer(nil)
 		_, err := tt.bitmap.WriteTo(buffer)
@@ -3741,95 +3791,93 @@ func Test_freeFreeID_sequence(t *testing.T) {
 			return
 		}
 
-		t.Run(tt.name, func(t *testing.T) {
-			max := tt.bitmap.Max()
-
-			for n := 0; n < 3000; n++ {
-				newID := findFreeID(tt.bitmap)
-
-				if newID == 0 {
-					t.Errorf("unable to find newID after %d loop", n)
-
-					break
-				}
-
-				if n < tt.numberHole && newID == max+1 {
-					t.Errorf("on loop %d loop, had to use workaround but allPosting should have free hole", n)
-
-					break
-				}
-
-				if tt.bitmap.Contains(newID) {
-					t.Errorf("newID = %d isn't free", newID)
-
-					break
-				}
-
-				_, err = tt.bitmap.Add(uint64(newID))
+		for i, saveEvery := range []int{0, 0, 1000, 2} {
+			allPosting := tt.bitmap
+			if i > 0 {
+				// unless first test, reload bitmap from bytes
+				allPosting = roaring.NewBTreeBitmap()
+				err = allPosting.UnmarshalBinary(buffer.Bytes())
 				if err != nil {
 					t.Error(err)
+
+					return
 				}
 			}
-		})
 
-		t.Run(tt.name+"save/load", func(t *testing.T) {
-			allPosting := roaring.NewBTreeBitmap()
-			err = allPosting.UnmarshalBinary(buffer.Bytes())
-			if err != nil {
-				t.Error(err)
+			t.Run(fmt.Sprintf("%s-%d-%d", tt.name, i, saveEvery), func(t *testing.T) {
+				max := allPosting.Max()
+				count := allPosting.Count()
 
-				return
-			}
-
-			max := allPosting.Max()
-
-			for n := 0; n < 3000; n++ {
-				newID := findFreeID(allPosting)
-
-				if newID == 0 {
-					t.Errorf("unable to find newID after %d loop", n)
-
-					break
+				if max-count != uint64(tt.numberHole) && tt.numberHole != -1 {
+					t.Errorf("Had %d hole, want %d", max-count, tt.numberHole)
 				}
 
-				if n < tt.numberHole && newID == max+1 {
-					t.Errorf("on loop %d loop, had to use workaround but allPosting should have free hole", n)
-
-					break
+				iterCount := 1000
+				if iterCount < 2*saveEvery {
+					iterCount = 2 * saveEvery
 				}
 
-				if allPosting.Contains(newID) {
-					t.Errorf("newID = %d isn't free", newID)
-
-					break
+				if iterCount < tt.numberHole+10 {
+					iterCount = tt.numberHole + 10
 				}
 
-				_, err = allPosting.Add(uint64(newID))
-				if err != nil {
-					t.Error(err)
+				if tt.maxIter > 0 && iterCount > tt.maxIter {
+					iterCount = tt.maxIter
 				}
 
-				if n%250 == 0 {
-					buffer.Reset()
+				for n := 0; n < iterCount; n++ {
+					newID := findFreeID(allPosting)
 
-					_, err = allPosting.WriteTo(buffer)
-					if err != nil {
-						t.Error(err)
-
-						return
+					if newID == 0 {
+						t.Errorf("unable to find newID after %d loop", n)
 					}
 
-					allPosting = roaring.NewBTreeBitmap()
+					if len(tt.wants) > n && newID != tt.wants[n] {
+						t.Errorf("loop %d: newID = %d, want %d", n, newID, tt.wants[n])
+					}
 
-					err = allPosting.UnmarshalBinary(buffer.Bytes())
+					if n < tt.numberHole && newID == max+1 {
+						t.Errorf("on loop %d, had to use workaround but allPosting should have free hole", n)
+					}
+
+					if allPosting.Contains(newID) {
+						t.Errorf("newID = %d isn't free", newID)
+					}
+
+					_, err = allPosting.Add(uint64(newID))
 					if err != nil {
 						t.Error(err)
+					}
 
-						return
+					if n == tt.numberHole {
+						gotHole := allPosting.Max() - allPosting.Count()
+						if gotHole != 0 {
+							t.Errorf("on loop %d, expected a compact bitmap, still had %d hole (last ID %d)", n, gotHole, newID)
+						}
+					}
+
+					if saveEvery > 0 && n%saveEvery == 0 {
+						tmp := bytes.NewBuffer(nil)
+
+						_, err = allPosting.WriteTo(tmp)
+						if err != nil {
+							t.Error(err)
+
+							return
+						}
+
+						allPosting = roaring.NewBTreeBitmap()
+
+						err = allPosting.UnmarshalBinary(tmp.Bytes())
+						if err != nil {
+							t.Error(err)
+
+							return
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
