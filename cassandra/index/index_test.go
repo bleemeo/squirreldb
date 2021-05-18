@@ -3,8 +3,10 @@ package index
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"reflect"
 	"sort"
@@ -3511,6 +3513,32 @@ func Test_PilosaSerialization(t *testing.T) {
 	}
 }
 
+func loadBitmap(filename string) (*roaring.Bitmap, error) {
+	tmp := roaring.NewBTreeBitmap()
+
+	bufferHex, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return tmp, err
+	}
+
+	// remove all new-line
+	bufferHex = bytes.ReplaceAll(bufferHex, []byte("\n"), nil)
+
+	buffer := make([]byte, hex.DecodedLen(len(bufferHex)))
+
+	_, err = hex.Decode(buffer, bufferHex)
+	if err != nil {
+		return tmp, err
+	}
+
+	err = tmp.UnmarshalBinary(buffer)
+	if err != nil {
+		return tmp, err
+	}
+
+	return tmp, nil
+}
+
 func Test_freeFreeID(t *testing.T) {
 	compact := roaring.NewBTreeBitmap()
 	compact = compact.Flip(1, 5000)
@@ -3551,6 +3579,13 @@ func Test_freeFreeID(t *testing.T) {
 	bug1 = bug1.Flip(1, 36183)
 	_, _ = bug1.Remove(31436, 31437)
 	bug1.Optimize()
+
+	bug2, err := loadBitmap("testdata/large.hex")
+	if err != nil {
+		t.Error(err)
+
+		return
+	}
 
 	tests := []struct {
 		name   string
@@ -3597,11 +3632,202 @@ func Test_freeFreeID(t *testing.T) {
 			bitmap: bug1,
 			want:   31436,
 		},
+		{
+			name:   "bug2",
+			bitmap: bug2,
+			want:   179940,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := findFreeID(tt.bitmap); got != tt.want {
 				t.Errorf("freeFreeID() = %v, want %v", got, tt.want)
+
+				if tt.bitmap.Contains(tt.want) {
+					t.Errorf("but this looks like a test bug, because %d is present in bitmap", tt.want)
+				}
+			}
+		})
+	}
+}
+
+func Test_freeFreeID_sequence(t *testing.T) {
+	compact := roaring.NewBTreeBitmap()
+	compact = compact.Flip(1, 5000)
+
+	spare := compact.Clone()
+	spare.Remove(42)
+	spare.Remove(1337)
+	spare.Remove(44)
+
+	compactLarge := roaring.NewBTreeBitmap()
+	compactLarge = compactLarge.Flip(1, 1e5)
+
+	compactFile, err := loadBitmap("testdata/compact-small.hex")
+	if err != nil {
+		t.Error(err)
+
+		return
+	}
+
+	spareZone := compactLarge.Clone()
+	spareZone = spareZone.Flip(200, 500)
+	spareZone = spareZone.Flip(1e4, 2e4)
+
+	bug1 := roaring.NewBTreeBitmap()
+	bug1 = bug1.Flip(1, 36183)
+	_, _ = bug1.Remove(31436, 31437)
+	bug1.Optimize()
+
+	bug2, err := loadBitmap("testdata/large.hex")
+	if err != nil {
+		t.Error(err)
+
+		return
+	}
+
+	tests := []struct {
+		name       string
+		bitmap     *roaring.Bitmap
+		numberHole int // number of hole == free slot before max+1
+	}{
+		{
+			name:       "empty",
+			bitmap:     roaring.NewBTreeBitmap(),
+			numberHole: 0,
+		},
+		{
+			name:       "compact",
+			bitmap:     compact,
+			numberHole: 0,
+		},
+		{
+			name:       "spare",
+			bitmap:     spare,
+			numberHole: 3,
+		},
+		{
+			name:       "compactLarge",
+			bitmap:     compactLarge,
+			numberHole: 0,
+		},
+		{
+			name:       "spareZone",
+			bitmap:     spareZone,
+			numberHole: 10300,
+		},
+		{
+			name:       "compact-file",
+			bitmap:     compactFile,
+			numberHole: 0,
+		},
+		{
+			name:       "bug1",
+			bitmap:     bug1,
+			numberHole: 2,
+		},
+		{
+			name:       "bug2",
+			bitmap:     bug2,
+			numberHole: 1376,
+		},
+	}
+	for _, tt := range tests {
+		buffer := bytes.NewBuffer(nil)
+		_, err := tt.bitmap.WriteTo(buffer)
+		if err != nil {
+			t.Error(err)
+
+			return
+		}
+
+		t.Run(tt.name, func(t *testing.T) {
+			max := tt.bitmap.Max()
+
+			for n := 0; n < 3000; n++ {
+				newID := findFreeID(tt.bitmap)
+
+				if newID == 0 {
+					t.Errorf("unable to find newID after %d loop", n)
+
+					break
+				}
+
+				if n < tt.numberHole && newID == max+1 {
+					t.Errorf("on loop %d loop, had to use workaround but allPosting should have free hole", n)
+
+					break
+				}
+
+				if tt.bitmap.Contains(newID) {
+					t.Errorf("newID = %d isn't free", newID)
+
+					break
+				}
+
+				_, err = tt.bitmap.Add(uint64(newID))
+				if err != nil {
+					t.Error(err)
+				}
+			}
+		})
+
+		t.Run(tt.name+"save/load", func(t *testing.T) {
+			allPosting := roaring.NewBTreeBitmap()
+			err = allPosting.UnmarshalBinary(buffer.Bytes())
+			if err != nil {
+				t.Error(err)
+
+				return
+			}
+
+			max := allPosting.Max()
+
+			for n := 0; n < 3000; n++ {
+				newID := findFreeID(allPosting)
+
+				if newID == 0 {
+					t.Errorf("unable to find newID after %d loop", n)
+
+					break
+				}
+
+				if n < tt.numberHole && newID == max+1 {
+					t.Errorf("on loop %d loop, had to use workaround but allPosting should have free hole", n)
+
+					break
+				}
+
+				if allPosting.Contains(newID) {
+					t.Errorf("newID = %d isn't free", newID)
+
+					break
+				}
+
+				_, err = allPosting.Add(uint64(newID))
+				if err != nil {
+					t.Error(err)
+				}
+
+				if n%250 == 0 {
+					buffer.Reset()
+
+					_, err = allPosting.WriteTo(buffer)
+					if err != nil {
+						t.Error(err)
+
+						return
+					}
+
+					allPosting = roaring.NewBTreeBitmap()
+
+					err = allPosting.UnmarshalBinary(buffer.Bytes())
+					if err != nil {
+						t.Error(err)
+
+						return
+					}
+				}
 			}
 		})
 	}
