@@ -1666,25 +1666,28 @@ func findFreeID(bitmap *roaring.Bitmap) uint64 {
 	}
 
 	lowIdx := uint64(1)
-	highIdx := max
+	highIdx := max + 1
 
 	for highIdx-lowIdx > 32768 {
 		pivot := lowIdx + (highIdx-lowIdx)/2
 
 		countIfFull := pivot - lowIdx
 		if bitmap.CountRange(lowIdx, pivot) >= countIfFull {
-			lowIdx = pivot + 1
+			lowIdx = pivot
 		} else {
 			highIdx = pivot
 		}
 	}
 
 	freemap := roaring.NewBTreeBitmap()
-	freemap = freemap.Flip(lowIdx, highIdx+1)
+	freemap = freemap.Flip(lowIdx, highIdx)
 	freemap = freemap.Xor(bitmap)
 
-	results := freemap.SliceRange(lowIdx, highIdx+1)
-	if len(results) == 0 {
+	results := freemap.SliceRange(lowIdx, highIdx)
+
+	// becaus Flip produce a broken NewBitmap which is known to have bugs (on update only it seems)
+	// So we will double-check that the result is indeed unused to catch possible bugs
+	if len(results) == 0 || bitmap.Contains(results[0]) {
 		if max < math.MaxUint64 {
 			return max + 1
 		}
