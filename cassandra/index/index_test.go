@@ -3783,6 +3783,7 @@ func Test_freeFreeID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		buffer := bytes.NewBuffer(nil)
 		_, err := tt.bitmap.WriteTo(buffer)
 		if err != nil {
@@ -3792,6 +3793,8 @@ func Test_freeFreeID(t *testing.T) {
 		}
 
 		for i, saveEvery := range []int{0, 0, 1000, 2} {
+			saveEvery := saveEvery
+
 			allPosting := tt.bitmap
 			if i > 0 {
 				// unless first test, reload bitmap from bytes
@@ -3805,6 +3808,8 @@ func Test_freeFreeID(t *testing.T) {
 			}
 
 			t.Run(fmt.Sprintf("%s-%d-%d", tt.name, i, saveEvery), func(t *testing.T) {
+				t.Parallel()
+
 				max := allPosting.Max()
 				count := allPosting.Count()
 
