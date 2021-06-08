@@ -55,17 +55,17 @@ func (c *Client) Pipeline(ctx context.Context) (goredis.Pipeliner, error) {
 	return c.singleClient.Pipeline(), nil
 }
 
-// Scan dispatch Scan to either cluster of single instance client.
-func (c *Client) Scan(ctx context.Context, cursor uint64, match string, count int64) (*goredis.ScanCmd, error) {
+// ForEachMaster dispatch ForEachMaster to either all master of the cluster or single instance client.
+func (c *Client) ForEachMaster(ctx context.Context, fn func(ctx context.Context, client *goredis.Client) error) error {
 	if err := c.fixClient(ctx); err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.clusterClient != nil {
-		return c.clusterClient.Scan(ctx, cursor, match, count), nil
+		return c.clusterClient.ForEachMaster(ctx, fn)
 	}
 
-	return c.singleClient.Scan(ctx, cursor, match, count), nil
+	return fn(ctx, c.singleClient)
 }
 
 // Publish dispatch Publish to either cluster of single instance client.

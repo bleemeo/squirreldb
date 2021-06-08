@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -281,55 +282,52 @@ func (s *SquirrelDB) DropTemporaryStore(ctx context.Context, forceNonTestKeyspac
 		return nil
 	}
 
-	client := &client.Client{
+	wrappedClient := &client.Client{
 		Addresses: redisAddresses,
 	}
 
-	defer client.Close()
+	defer wrappedClient.Close()
 
-	scan, err := client.Scan(ctx, 0, prefix+"*", 100)
-	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
-	}
+	err := wrappedClient.ForEachMaster(ctx, func(ctx context.Context, client *redis.Client) error {
+		scan := client.Scan(ctx, 0, prefix+"*", 100)
+		it := scan.Iterator()
+		keys := make([]string, 0, 100)
 
-	keys := make([]string, 0, 100)
-	it := scan.Iterator()
+		for {
+			keys = keys[:0]
 
-	for {
-		keys = keys[:0]
+			for it.Next(ctx) {
+				keys = append(keys, it.Val())
 
-		for it.Next(ctx) {
-			keys = append(keys, it.Val())
+				if len(keys) >= 100 {
+					break
+				}
+			}
 
-			if len(keys) >= 100 {
+			if len(keys) == 0 {
 				break
+			}
+
+			pipeline := client.Pipeline()
+
+			for _, k := range keys {
+				pipeline.Del(ctx, k)
+			}
+
+			_, err := pipeline.Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("del failed: %w", err)
 			}
 		}
 
-		if len(keys) == 0 {
-			break
+		if err := it.Err(); err != nil {
+			return fmt.Errorf("scan failed: %w", err)
 		}
 
-		pipeline, err := client.Pipeline(ctx)
-		if err != nil {
-			return fmt.Errorf("del failed: %w", err)
-		}
+		return nil
+	})
 
-		for _, k := range keys {
-			pipeline.Del(ctx, k)
-		}
-
-		_, err = pipeline.Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("del failed: %w", err)
-		}
-	}
-
-	if err := it.Err(); err != nil {
-		return fmt.Errorf("scan failed: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 // SetTestEnvironment configure few environment variable used in testing.
