@@ -26,7 +26,7 @@ if [ -e .build-cache ]; then
 fi
 
 
-GORELEASER_VERSION="v0.157.0"
+GORELEASER_VERSION="v0.169.0"
 
 docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \

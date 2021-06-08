@@ -82,15 +82,13 @@ mkdir -p .build-cache  # enable cache and speed-up build/lint run
 
 SquirrelDB has some tests that run using a real Cassandra (not like Go test which
 mock Cassandra). A helper shell script will start a Cassandra (using Docker) and run
-those tests:
+those tests.
+The script had option to run on cluster, run longer test and with race detector. Option could be summed
+or all absent:
 ```
-./run-tests.sh
-```
-
-Finally there is also a version of run-test which use clustered Cassandra and Redis,
-and also run longer tests:
-```
-./run-tests-cluster.sh
+./run-tests.sh race
+./run-tests.sh cluster long
+# all combinaison are possible, including no-option.
 ```
 
 ### Note on VS code
