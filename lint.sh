@@ -12,7 +12,7 @@ fi
 
 docker run --rm -v $(pwd):/app -u $UID ${GO_MOUNT_CACHE} -e HOME=/go/pkg \
     -w /app golangci/golangci-lint:${LINTER_VERSION} \
-    sh -c 'go test ./... && go test -race ./...'
+    sh -c 'go test ./... && go test -short -race ./...'
 
 docker run --rm -v $(pwd):/app -u $UID ${GO_MOUNT_CACHE} -e HOME=/go/pkg \
     -e GOOS=linux -e GOARCH=amd64 -w /app golangci/golangci-lint:${LINTER_VERSION} \

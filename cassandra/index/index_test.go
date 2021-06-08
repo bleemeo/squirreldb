@@ -3735,6 +3735,11 @@ func Test_freeFreeID(t *testing.T) {
 	for n := 0; n < 12; n++ {
 		var holdCount int
 
+		// When using short, only add one random bitmap
+		if testing.Short() && n > 1 {
+			continue
+		}
+
 		switch n % 3 {
 		case 0:
 			holdCount = 10
@@ -3783,6 +3788,10 @@ func Test_freeFreeID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		if testing.Short() && (tt.name == "startAndEnd" || tt.name == "spareZone") {
+			t.Skip()
+		}
+
 		tt := tt
 		buffer := bytes.NewBuffer(nil)
 		_, err := tt.bitmap.WriteTo(buffer)
@@ -3792,7 +3801,12 @@ func Test_freeFreeID(t *testing.T) {
 			return
 		}
 
-		for i, saveEvery := range []int{0, 0, 1000, 2} {
+		saveEveryList := []int{0, 0, 1000, 2}
+		if testing.Short() {
+			saveEveryList = []int{0, 1000}
+		}
+
+		for i, saveEvery := range saveEveryList {
 			saveEvery := saveEvery
 
 			allPosting := tt.bitmap
@@ -3849,7 +3863,7 @@ func Test_freeFreeID(t *testing.T) {
 						t.Errorf("newID = %d isn't free", newID)
 					}
 
-					_, err = allPosting.Add(uint64(newID))
+					_, err := allPosting.Add(uint64(newID))
 					if err != nil {
 						t.Error(err)
 					}
