@@ -15,14 +15,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		MetricsTotal: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Namespace: "squirreldb",
 			Subsystem: "memorystore",
-			Name:      "metrics_total",
-			Help:      "Total metrics known by the memory store",
+			Name:      "metrics",
+			Help:      "Count of metrics known by the memory store",
 		}),
 		PointsTotal: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Namespace: "squirreldb",
 			Subsystem: "memorystore",
-			Name:      "points_total",
-			Help:      "Total points stored by the memory store",
+			Name:      "points",
+			Help:      "Count of points stored by the memory store",
 		}),
 	}
 }

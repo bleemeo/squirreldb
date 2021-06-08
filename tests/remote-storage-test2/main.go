@@ -326,10 +326,8 @@ func (s *Simulator) readProducer(ctx context.Context, ch chan prompb.ReadRequest
 		case <-time.After(*readDelay):
 		}
 
-		writerTerminated := false
-
 		s.l.Lock()
-		writerTerminated = s.writerTerminated
+		writerTerminated := s.writerTerminated
 		s.l.Unlock()
 
 		missingAgent := s.missingAgents()

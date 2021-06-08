@@ -65,7 +65,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		NonOwnerWrite: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Namespace: "squirreldb",
 			Subsystem: "batch",
-			Name:      "non_owner_write",
+			Name:      "non_owner_write_total",
 			Help:      "Total number of metrics wrote to TSBD by a SquirrelDB not owner of it. This happen when lots of points got wrote on the metrics (e.g. backlog catch-up of Prometheus)",
 		}),
 		NewPointsDuringFlush: promauto.With(reg).NewCounter(prometheus.CounterOpts{

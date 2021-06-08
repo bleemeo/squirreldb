@@ -16,14 +16,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		RequestsPoints: promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "squirreldb",
 			Subsystem: "promql",
-			Name:      "requests_points_total",
+			Name:      "requests_points",
 			Help:      "Total points processed by SquirrelDB PromQL",
 			Buckets:   []float64{0, 1, 5, 10, 100, 1000, 10000, 100000, 1000000},
 		}, []string{"operation"}),
 		RequestsSeries: promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "squirreldb",
 			Subsystem: "promql",
-			Name:      "series_evaluated_total",
+			Name:      "series_evaluated",
 			Help:      "Total series evaludated by SquirrelDB PromQL",
 			Buckets:   []float64{0, 1, 5, 10, 100, 1000, 10000},
 		}, []string{"operation"}),

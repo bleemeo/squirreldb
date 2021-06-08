@@ -13,5 +13,10 @@ linters:
     - exhaustivestruct # This linter is meant to be used only for special cases. It is not recommended to use it for all files in a project.
     - ifshort # Too many false positive.
     - gci # Conflict with gofumpt
+    # disable deprecated & replaced linter
+    - maligned
+    - golint
+    - interfacer
+    - scopelint
 run:
   tests: false

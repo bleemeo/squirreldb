@@ -104,14 +104,21 @@ func (r *Redis) initPool() {
 }
 
 func (r *Redis) getBuffer() *bytes.Buffer {
-	result := r.bufferPool.Get().(*bytes.Buffer)
+	result, ok := r.bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		return new(bytes.Buffer)
+	}
+
 	result.Reset()
 
 	return result
 }
 
 func (r *Redis) getSerializedPoints() []serializedPoints {
-	result := r.serializedPointsPool.Get().([]serializedPoints)
+	result, ok := r.serializedPointsPool.Get().([]serializedPoints)
+	if !ok {
+		return nil
+	}
 
 	return result
 }

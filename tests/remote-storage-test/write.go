@@ -205,5 +205,5 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 		response.Body.Close()
 	}
 
-	return nil
+	return ctx.Err()
 }

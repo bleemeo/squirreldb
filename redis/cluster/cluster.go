@@ -22,6 +22,7 @@ import (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[redis-cluster] ", log.LstdFlags)
 
+// errors about topic name.
 var (
 	ErrTopicTooLong = errors.New("topic name is too long, maximum length is 255")
 	ErrReadTooShort = errors.New("read is too short")

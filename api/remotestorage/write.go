@@ -22,6 +22,8 @@ func (e errBadRequest) Error() string {
 	return fmt.Sprintf("bad request: %v", e.err)
 }
 
+var errTypeAssertion = errors.New("type assertion failed")
+
 type writeMetrics struct {
 	index    types.Index
 	writer   types.MetricWriter
@@ -86,7 +88,10 @@ func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
 		return errBadRequest{err: fmt.Errorf("can't decode request: %w", err)}
 	}
 
-	writeRequest := reqCtx.pb.(*prompb.WriteRequest)
+	writeRequest, ok := reqCtx.pb.(*prompb.WriteRequest)
+	if !ok {
+		return errTypeAssertion
+	}
 
 	metrics, totalPoints, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
 	if err != nil && ctx.Err() == nil {
