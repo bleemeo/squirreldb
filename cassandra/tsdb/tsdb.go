@@ -14,6 +14,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
 
 const (
@@ -25,6 +26,15 @@ const (
 
 const (
 	retryMaxDelay = 30 * time.Second
+	// Format write in Cassandra changed from this date.
+	// Only the first timestamp count (base_ts + offset_ts).
+	// All SquirrelDB must be updated before this date.
+	newFormatFrom = "2021-06-15T09:00:00Z"
+)
+
+var (
+	errPointsEmptyValues = errors.New("empty points values")
+	errUnsupportedFormat = errors.New("unsupporter format version")
 )
 
 //nolint: gochecknoglobals
@@ -54,13 +64,21 @@ type CassandraTSDB struct {
 	index            types.Index
 	lockFactory      lockFactory
 	state            types.State
+	newFormatCutoff  int64
 	pointsBufferPool sync.Pool
+	bytesPool        sync.Pool
+	xorChunkPool     chunkenc.Pool
 }
 
 // New created a new CassandraTSDB object.
 func New(reg prometheus.Registerer, session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
+
+	newFormatCutoff, err := time.Parse(time.RFC3339, newFormatFrom)
+	if err != nil {
+		return nil, fmt.Errorf("invalid newFormatFrom: %w", err)
+	}
 
 	dataTableCreateQuery := dataTableCreateQuery(session, options.DefaultTimeToLive)
 	dataTableCreateQuery.Consistency(gocql.All)
@@ -88,6 +106,13 @@ func New(reg prometheus.Registerer, session *gocql.Session, options Options, ind
 				return make([]types.MetricPoint, 15)
 			},
 		},
+		bytesPool: sync.Pool{
+			New: func() interface{} {
+				return make([]byte, 15)
+			},
+		},
+		xorChunkPool:    chunkenc.NewPool(),
+		newFormatCutoff: newFormatCutoff.Unix(),
 	}
 
 	return tsdb, nil

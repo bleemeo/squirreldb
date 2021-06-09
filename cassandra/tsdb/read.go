@@ -13,6 +13,7 @@ import (
 
 	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
 
 type readIter struct {
@@ -183,11 +184,11 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		tmp, err = gorillaDecodeAggregate(values, baseTimestamp, function, tmp, aggregateResolution.Milliseconds())
+		tmp, err = c.decodeAggregatedPoints(values, baseTimestamp, offsetSecond*1000, function, tmp[:0])
 		if err != nil {
 			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "aggregated").Observe(queryDuration.Seconds())
 
-			return tmp, fmt.Errorf("gorillaDecodeAggregate: %w", err)
+			return tmp, fmt.Errorf("decodeAggregatedPoints: %w", err)
 		}
 
 		points := filterPoints(tmp, fromTimestamp, toTimestamp)
@@ -262,12 +263,12 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 	for tableSelectDataIter.Scan(&offsetMs, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		tmp, err = gorillaDecode(values, baseTimestamp-1, tmp, 1)
+		tmp, err = c.decodePoints(values, baseTimestamp, offsetMs, tmp)
 
 		if err != nil {
 			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "raw").Observe(queryDuration.Seconds())
 
-			return tmp, fmt.Errorf("gorillaDecode: %w", err)
+			return tmp, fmt.Errorf("decodePoints: %w", err)
 		}
 
 		points := filterPoints(tmp, fromTimestamp, toTimestamp)
@@ -310,13 +311,29 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, f
 	return iter
 }
 
+func (c *CassandraTSDB) decodePoints(values []byte, baseTimestamp int64, offset int64, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	if baseTimestamp+offset < c.newFormatCutoff*1000 {
+		return gorillaDecode(values, baseTimestamp-1, result[:0], 1)
+	}
+
+	// The new format use the first byte as version.
+	if len(values) == 0 {
+		return nil, errPointsEmptyValues
+	}
+
+	switch values[0] {
+	case 0:
+		return c.xorChunkDecode(values[1:], result[:0])
+	default:
+		return nil, fmt.Errorf("%w: version=%d", errUnsupportedFormat, values[0])
+	}
+}
+
 func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
 	i, err := tsz.NewIterator(values)
 	if err != nil {
 		return nil, fmt.Errorf("read TSZ value: %w", err)
 	}
-
-	result = result[:0]
 
 	for i.Next() {
 		t, v := i.Values()
@@ -327,10 +344,34 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 		})
 	}
 
-	return result, i.Err()
+	err = i.Err()
+	if err != nil {
+		return result, fmt.Errorf("tsz Iterator(): %w", err)
+	}
+
+	return result, nil
 }
 
-func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
+func (c *CassandraTSDB) decodeAggregatedPoints(values []byte, baseTimestamp int64, offset int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	if baseTimestamp+offset < c.newFormatCutoff*1000 {
+		return gorillaDecodeAggregate(values, baseTimestamp, function, result[:0])
+	}
+
+	// The new format use the first byte as version.
+	if len(values) == 0 {
+		return nil, errPointsEmptyValues
+	}
+
+	switch values[0] {
+	case 0:
+		return c.xorChunkDecodeAggregate(values[1:], function, result[:0])
+	default:
+		return nil, fmt.Errorf("%w: version=%d", errUnsupportedFormat, values[0])
+	}
+}
+
+// demuxAggregate return the sub-slice that match the given aggregation function.
+func demuxAggregate(values []byte, function string) ([]byte, error) {
 	var streamNumber int
 
 	reader := bytes.NewReader(values)
@@ -372,7 +413,51 @@ func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string,
 		return nil, errors.New("corrupted values, stored length larged than actual length")
 	}
 
-	return gorillaDecode(values[int(startIndex):endIndex], baseTimestamp, result, scale)
+	return values[int(startIndex):endIndex], nil
+}
+
+func (c *CassandraTSDB) xorChunkDecodeAggregate(values []byte, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	subValues, err := demuxAggregate(values, function)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.xorChunkDecode(subValues, result)
+}
+
+func (c *CassandraTSDB) xorChunkDecode(values []byte, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	chunk, err := c.xorChunkPool.Get(chunkenc.EncXOR, values)
+	if err != nil {
+		return nil, fmt.Errorf("Get() from pool: %w", err)
+	}
+
+	defer c.xorChunkPool.Put(chunk) // nolint: errcheck
+
+	it := chunk.Iterator(nil)
+	for it.Next() {
+		t, v := it.At()
+
+		result = append(result, types.MetricPoint{
+			Timestamp: t,
+			Value:     v,
+		})
+	}
+
+	err = it.Err()
+	if err != nil {
+		return result, fmt.Errorf("Iterator() fail: %w", err)
+	}
+
+	return result, nil
+}
+
+func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	subValues, err := demuxAggregate(values, function)
+	if err != nil {
+		return nil, err
+	}
+
+	return gorillaDecode(subValues, baseTimestamp, result, aggregateResolution.Milliseconds())
 }
 
 func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp int64) []types.MetricPoint {

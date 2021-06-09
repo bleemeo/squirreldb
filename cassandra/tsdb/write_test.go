@@ -6,8 +6,11 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
 
 // bitStringToByte convert a bitstring to []byte
@@ -78,13 +81,13 @@ func Test_gorillaEncode(t *testing.T) {
 			Value:     24.0,
 		},
 	}
-	got := gorillaEncode(points, t0, 0)
+	got := gorillaEncode(points, uint32(t0), 0)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("gorillaEncode(...) = %v, want %v", got, want)
 	}
 }
 
-func Test_gorillaEncode2(t *testing.T) {
+func Test_PointsEncode(t *testing.T) {
 	type args struct {
 		points        []types.MetricPoint
 		t0            int64
@@ -232,20 +235,56 @@ func Test_gorillaEncode2(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			buffer := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
-			got, err := gorillaDecode(buffer, tt.args.baseTimestamp, nil, 1)
-			if err != nil {
-				t.Errorf("gorillaDecode() failed: %v", err)
+		tt := tt
+		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
+
+		for _, timestamp := range []int64{0, future.Unix()} {
+			timestamp := timestamp
+			name := tt.name + "-new"
+			if timestamp != 0 {
+				name = tt.name + "-tsz"
 			}
-			if !reflect.DeepEqual(got, tt.args.points) {
-				t.Errorf("gorillaDecode(gorillaEncode() = %v, want %v", got, tt.args.points)
-			}
-		})
+
+			t.Run(name, func(t *testing.T) {
+				c := CassandraTSDB{
+					bytesPool: sync.Pool{
+						New: func() interface{} {
+							return make([]byte, 15)
+						},
+					},
+					xorChunkPool:    chunkenc.NewPool(),
+					newFormatCutoff: timestamp,
+				}
+
+				buffer, err := c.encodePoints(tt.args.points, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+				if err != nil {
+					t.Errorf("encodePoints failed: %v", err)
+				}
+
+				// Run test at least twice... tsz MUTATE data on *READ* !! :(
+				for n := 0; n < 2; n++ {
+					buffer := buffer
+					if timestamp != 0 {
+						//  because tsz mutate data... we must copy the initial buffer before.
+						tmp := make([]byte, len(buffer))
+						copy(tmp, buffer)
+						buffer = tmp
+					}
+
+					got, err := c.decodePoints(buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, nil)
+					if err != nil {
+						t.Errorf("decodePoints() failed: %v", err)
+					}
+					if !reflect.DeepEqual(got, tt.args.points) {
+						t.Errorf("decodePoints(encodePoints() = %v, want %v", got, tt.args.points)
+					}
+				}
+			})
+		}
 	}
 }
 
-func Benchmark_gorillaEncode(b *testing.B) {
+func Benchmark_pointsEncode(b *testing.B) {
 	type args struct {
 		points        []types.MetricPoint
 		t0            int64
@@ -300,15 +339,38 @@ func Benchmark_gorillaEncode(b *testing.B) {
 		},
 	}
 	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
-				_ = gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
+		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
+
+		for _, timestamp := range []int64{0, future.Unix()} {
+			timestamp := timestamp
+			name := tt.name + "-new"
+			if timestamp != 0 {
+				name = tt.name + "-tsz"
 			}
-		})
+
+			b.Run(name, func(b *testing.B) {
+				c := CassandraTSDB{
+					bytesPool: sync.Pool{
+						New: func() interface{} {
+							return make([]byte, 15)
+						},
+					},
+					xorChunkPool:    chunkenc.NewPool(),
+					newFormatCutoff: timestamp,
+				}
+
+				for n := 0; n < b.N; n++ {
+					_, err := c.encodePoints(tt.args.points, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+					if err != nil {
+						b.Error(err)
+					}
+				}
+			})
+		}
 	}
 }
 
-func Benchmark_gorillaDecode(b *testing.B) {
+func Benchmark_pointsDecode(b *testing.B) {
 	type args struct {
 		points        []types.MetricPoint
 		t0            int64
@@ -363,26 +425,62 @@ func Benchmark_gorillaDecode(b *testing.B) {
 		},
 	}
 	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			data := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
-			b.ResetTimer()
-			for n := 0; n < b.N; n++ {
-				_, _ = gorillaDecode(data, tt.args.baseTimestamp, nil, 1)
+		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
+
+		for _, timestamp := range []int64{0, future.Unix()} {
+			timestamp := timestamp
+			name := tt.name + "-new"
+			if timestamp != 0 {
+				name = tt.name + "-tsz"
 			}
-		})
-		b.Run(tt.name+"-reuse", func(b *testing.B) {
-			data := gorillaEncode(tt.args.points, tt.args.t0, tt.args.baseTimestamp)
-			var tmp []types.MetricPoint
-			b.ResetTimer()
-			for n := 0; n < b.N; n++ {
-				tmp, _ = gorillaDecode(data, tt.args.baseTimestamp, tmp, 1)
+
+			for _, reuse := range []bool{false, true} {
+				if reuse {
+					name = name + "-reuse"
+				}
+
+				b.Run(name, func(b *testing.B) {
+					c := CassandraTSDB{
+						bytesPool: sync.Pool{
+							New: func() interface{} {
+								return make([]byte, 15)
+							},
+						},
+						xorChunkPool:    chunkenc.NewPool(),
+						newFormatCutoff: timestamp,
+					}
+
+					data, err := c.encodePoints(tt.args.points, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+					if err != nil {
+						b.Error(err)
+					}
+
+					data2 := make([]byte, len(data))
+
+					var tmp []types.MetricPoint
+					b.ResetTimer()
+					for n := 0; n < b.N; n++ {
+						if !reuse {
+							tmp = nil
+						}
+
+						// TSZ force use to copy data buffer, because tsz mutate it...
+						// To be fair between TSZ and new format, do the copy always
+						copy(data2, data)
+
+						tmp, err = c.decodePoints(data2, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, tmp)
+						if err != nil {
+							b.Error(err)
+						}
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
-func Test_gorillaEncodeAggregate(t *testing.T) {
-	const resolution = 300000
+func Test_EncodeAggregate(t *testing.T) {
+	resolution := aggregateResolution.Milliseconds()
 
 	metricHunderdHours := types.MetricData{
 		ID:         types.MetricID(100),
@@ -500,38 +598,62 @@ func Test_gorillaEncodeAggregate(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testedFun := []string{"min", "max", "avg", "count"}
-			buffer := gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp, resolution)
+		tt := tt
+		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
-			for _, function := range testedFun {
-				want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
-				got, err := gorillaDecodeAggregate(buffer, tt.args.baseTimestamp, function, nil, resolution)
-				for i, p := range tt.args.aggregatedPoints {
-					want[i].Timestamp = p.Timestamp
-					switch function {
-					case "min":
-						want[i].Value = p.Min
-					case "max":
-						want[i].Value = p.Max
-					case "avg":
-						want[i].Value = p.Average
-					case "count":
-						want[i].Value = p.Count
+		for _, timestamp := range []int64{0, future.Unix()} {
+			timestamp := timestamp
+			name := tt.name + "-new"
+			if timestamp != 0 {
+				name = tt.name + "-tsz"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				c := CassandraTSDB{
+					bytesPool: sync.Pool{
+						New: func() interface{} {
+							return make([]byte, 15)
+						},
+					},
+					xorChunkPool:    chunkenc.NewPool(),
+					newFormatCutoff: timestamp,
+				}
+
+				testedFun := []string{"min", "max", "avg", "count"}
+				buffer, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+				if err != nil {
+					t.Errorf("encodeAggregatedPoints failed: %v", err)
+				}
+
+				for _, function := range testedFun {
+					want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
+					got, err := c.decodeAggregatedPoints(buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil)
+					for i, p := range tt.args.aggregatedPoints {
+						want[i].Timestamp = p.Timestamp
+						switch function {
+						case "min":
+							want[i].Value = p.Min
+						case "max":
+							want[i].Value = p.Max
+						case "avg":
+							want[i].Value = p.Average
+						case "count":
+							want[i].Value = p.Count
+						}
+					}
+					if err != nil {
+						t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") failed: %v", function, err)
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") = %v, want = %v", function, got, want)
 					}
 				}
-				if err != nil {
-					t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") failed: %v", function, err)
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") = %v, want = %v", function, got, want)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
-func Benchmark_gorillaEncodeAggregate(b *testing.B) {
+func Benchmark_EncodeAggregate(b *testing.B) {
 	const resolution = 300000
 
 	metricOneHour := types.MetricData{
@@ -618,10 +740,34 @@ func Benchmark_gorillaEncodeAggregate(b *testing.B) {
 		},
 	}
 	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
-				_ = gorillaEncodeAggregate(tt.args.aggregatedPoints, tt.args.t0, tt.args.baseTimestamp, resolution)
+		tt := tt
+		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
+
+		for _, timestamp := range []int64{0, future.Unix()} {
+			timestamp := timestamp
+			name := tt.name + "-new"
+			if timestamp != 0 {
+				name = tt.name + "-tsz"
 			}
-		})
+
+			b.Run(name, func(b *testing.B) {
+				c := CassandraTSDB{
+					bytesPool: sync.Pool{
+						New: func() interface{} {
+							return make([]byte, 15)
+						},
+					},
+					xorChunkPool:    chunkenc.NewPool(),
+					newFormatCutoff: timestamp,
+				}
+
+				for n := 0; n < b.N; n++ {
+					_, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+					if err != nil {
+						b.Errorf("encodeAggregatedPoints failed: %v", err)
+					}
+				}
+			})
+		}
 	}
 }
