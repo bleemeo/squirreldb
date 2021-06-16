@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
+
 	"squirreldb/api"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
@@ -20,10 +22,12 @@ import (
 	"squirreldb/debug"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
+	"squirreldb/facts"
 	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
-	redisTemporarystore "squirreldb/redis/temporarystore"
+	"squirreldb/redis/temporarystore"
 	"squirreldb/retry"
+	"squirreldb/telemetry"
 	"squirreldb/types"
 	"sync"
 	"syscall"
@@ -70,6 +74,7 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
+	facts                    *facts.FactProvider
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -475,6 +480,30 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Run(ctx, readiness)
 }
 
+func (s *SquirrelDB) sendToTelemetry(ctx context.Context) error {
+	if s.Config.Bool("telemetry.enabled") {
+		select {
+		case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
+		case <-ctx.Done():
+			return nil
+		}
+
+		for {
+			tlm := telemetry.GetIdFromFile()
+
+			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), s.facts)
+
+			select {
+			case <-time.After(24 * time.Hour):
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
 // run start SquirrelDB.
 func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	tasks := []namedTasks{
@@ -485,6 +514,10 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 		{
 			Name: "API",
 			Task: types.TaskFun(s.apiTask),
+		},
+		{
+			Name: "Telemetry",
+			Task: types.TaskFun(s.sendToTelemetry),
 		},
 	}
 

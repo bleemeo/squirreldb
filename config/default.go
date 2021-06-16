@@ -22,5 +22,7 @@ var defaults = map[string]interface{}{
 	"internal.locks":                        "cassandra",
 	"internal.states":                       "cassandra",
 	"internal.store":                        "batcher",
+	"telemetry.address":                     "https://telemetry.bleemeo.com/v1/telemetry/",
+	"telemetry.enabled":                     true,
 	"internal.redis_keyspace":               "",
 }
