@@ -20,13 +20,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+//nolint: gochecknoglobals
+var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 type Telemetry struct {
 	ID string
@@ -55,14 +59,14 @@ func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[st
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
-		"installation_format": facts["installation_format"],
+		"installation_format": facts["installation_format"], //TBD
 		"kernel_version":      facts["kernel_major_version"],
 		"memory":              facts["memory"],
 		"product":             "Squirreldb",
 		"os_type":             facts["os_name"],
 		"os_version":          facts["os_version"],
 		"system_architecture": facts["architecture"],
-		"version":             facts["glouton_version"],
+		"version":             facts["squirreldb_version"],
 	})
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))
@@ -75,11 +79,11 @@ func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[st
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
 
 	if err != nil {
-		fmt.Printf("failed when we post on telemetry: %v", err)
+		logger.Printf("failed when we post on telemetry: %v", err)
 	}
 
 	if resp != nil {
-		fmt.Printf("telemetry response Satus: %s", resp.Status)
+		logger.Printf("telemetry response Satus: %s", resp.Status)
 		defer resp.Body.Close()
 	}
 }

@@ -25,7 +25,7 @@ import (
 	"squirreldb/facts"
 	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
-	"squirreldb/redis/temporarystore"
+	redisTemporarystore "squirreldb/redis/temporarystore"
 	"squirreldb/retry"
 	"squirreldb/telemetry"
 	"squirreldb/types"
@@ -480,28 +480,35 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Run(ctx, readiness)
 }
 
-func (s *SquirrelDB) sendToTelemetry(ctx context.Context) error {
+func (s *SquirrelDB) sendToTelemetry(ctx context.Context, readiness chan error) {
 	if s.Config.Bool("telemetry.enabled") {
 		select {
 		case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
 		case <-ctx.Done():
-			return nil
+			return
 		}
 
 		for {
-			tlm := telemetry.GetIdFromFile()
+			facts, err := s.facts.Facts(ctx, time.Hour)
+			if err != nil {
+				logger.Printf("error facts load %v", err)
+				continue
+			}
 
-			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), s.facts)
+			var tlm telemetry.Telemetry
+
+			tlm.GetIdFromFile()
+			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), facts)
 
 			select {
 			case <-time.After(24 * time.Hour):
 			case <-ctx.Done():
-				return nil
+				return
 			}
 		}
 	}
 
-	return nil
+	return
 }
 
 // run start SquirrelDB.
