@@ -33,21 +33,26 @@ import (
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 type Telemetry struct {
-	ID string
+	ID string `json:"id"`
 }
 
 func (t Telemetry) GetIdFromFile() {
+	if _, err := os.Stat("telemetry.json"); os.IsNotExist(err) {
+		t.setIdToFile()
+	}
+
 	file, _ := ioutil.ReadFile("telemetry.json")
 
 	_ = json.Unmarshal([]byte(file), &t)
 
 	if t.ID == "" {
-		t.ID = uuid.New().String()
 		t.setIdToFile()
 	}
 }
 
 func (t Telemetry) setIdToFile() {
+	t.ID = uuid.New().String()
+
 	file, _ := json.MarshalIndent(t, "", " ")
 
 	_ = ioutil.WriteFile("telemetry.json", file, 0644)
