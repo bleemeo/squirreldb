@@ -74,7 +74,6 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-	facts                    *facts.FactProvider
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -489,16 +488,10 @@ func (s *SquirrelDB) sendToTelemetry(ctx context.Context, readiness chan error) 
 		}
 
 		for {
-			facts, err := s.facts.Facts(ctx, time.Hour)
-			if err != nil {
-				logger.Printf("error facts load %v", err)
-				continue
-			}
-
 			var tlm telemetry.Telemetry
 
 			tlm.GetIDFromFile()
-			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), facts)
+			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), facts.Facts(ctx))
 
 			select {
 			case <-time.After(24 * time.Hour):

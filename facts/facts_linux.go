@@ -56,22 +56,20 @@ func decodeOsRelease(data string) (map[string]string, error) {
 	return result, nil
 }
 
-func (f *FactProvider) platformFacts() map[string]string {
+func platformFacts() map[string]string {
 	facts := make(map[string]string)
 
-	if f.hostRootPath != "" {
-		osReleasePath := filepath.Join(f.hostRootPath, "etc/os-release")
-		if osReleaseData, err := ioutil.ReadFile(osReleasePath); err != nil {
-			logger.Printf("unable to read os-release file: %v", err)
-		} else {
-			osRelease, err := decodeOsRelease(string(osReleaseData))
-			if err != nil {
-				logger.Printf("os-release file is invalid: %v", err)
-			}
-
-			facts["os_name"] = osRelease["NAME"]
-			facts["os_version"] = osRelease["VERSION_ID"]
+	osReleasePath := filepath.Join("/", "etc/os-release")
+	if osReleaseData, err := ioutil.ReadFile(osReleasePath); err != nil {
+		logger.Printf("unable to read os-release file: %v", err)
+	} else {
+		osRelease, err := decodeOsRelease(string(osReleaseData))
+		if err != nil {
+			logger.Printf("os-release file is invalid: %v", err)
 		}
+
+		facts["os_name"] = osRelease["NAME"]
+		facts["os_version"] = osRelease["VERSION_ID"]
 	}
 
 	var utsName unix.Utsname

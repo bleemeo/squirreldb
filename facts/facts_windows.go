@@ -94,7 +94,7 @@ func getWindowsVersionName(major uint64, minor uint64, isServer bool, servicePac
 	return res
 }
 
-func (f *FactProvider) platformFacts() map[string]string {
+func platformFacts() map[string]string {
 	facts := make(map[string]string)
 
 	facts["os_name"] = "Windows"
