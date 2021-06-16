@@ -497,7 +497,7 @@ func (s *SquirrelDB) sendToTelemetry(ctx context.Context, readiness chan error) 
 
 			var tlm telemetry.Telemetry
 
-			tlm.GetIdFromFile()
+			tlm.GetIDFromFile()
 			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), facts)
 
 			select {
@@ -507,8 +507,6 @@ func (s *SquirrelDB) sendToTelemetry(ctx context.Context, readiness chan error) 
 			}
 		}
 	}
-
-	return
 }
 
 // run start SquirrelDB.

@@ -36,26 +36,26 @@ type Telemetry struct {
 	ID string `json:"id"`
 }
 
-func (t Telemetry) GetIdFromFile() {
+func (t Telemetry) GetIDFromFile() {
 	if _, err := os.Stat("telemetry.json"); os.IsNotExist(err) {
-		t.setIdToFile()
+		t.setIDToFile()
 	}
 
 	file, _ := ioutil.ReadFile("telemetry.json")
 
-	_ = json.Unmarshal([]byte(file), &t)
+	_ = json.Unmarshal(file, &t)
 
 	if t.ID == "" {
-		t.setIdToFile()
+		t.setIDToFile()
 	}
 }
 
-func (t Telemetry) setIdToFile() {
+func (t Telemetry) setIDToFile() {
 	t.ID = uuid.New().String()
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
-	_ = ioutil.WriteFile("telemetry.json", file, 0644)
+	_ = ioutil.WriteFile("telemetry.json", file, 0600)
 }
 
 func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[string]string) {
@@ -64,7 +64,7 @@ func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[st
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
-		"installation_format": facts["installation_format"], //TBD
+		"installation_format": facts["installation_format"], // TBD
 		"kernel_version":      facts["kernel_major_version"],
 		"memory":              facts["memory"],
 		"product":             "Squirreldb",

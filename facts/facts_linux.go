@@ -25,8 +25,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const dmiDir = "/sys/devices/virtual/dmi/id/"
-
 func decodeOsRelease(data string) (map[string]string, error) {
 	result := make(map[string]string)
 
