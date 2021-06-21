@@ -38,16 +38,14 @@ type telemetry struct {
 	ID string `json:"id"`
 }
 
-/*
-** We need to change "/" by a string variable because we can't use this if we are in a container.
-** We need to change into "/var/liv/squirreldb" in first time, after that we need the kept the ID in State.
- */
+var pathTelemetryFile = "/" // if it's in container "/var/lib/squirreldb/"
+
 func (t telemetry) getIDFromFile() {
-	if _, err := os.Stat("/" + "telemetry.json"); os.IsNotExist(err) {
+	if _, err := os.Stat(pathTelemetryFile + "telemetry.json"); os.IsNotExist(err) {
 		t.setIDToFile()
 	}
 
-	file, _ := ioutil.ReadFile("/" + "telemetry.json")
+	file, _ := ioutil.ReadFile(pathTelemetryFile + "telemetry.json")
 
 	_ = json.Unmarshal(file, &t)
 
@@ -61,7 +59,7 @@ func (t telemetry) setIDToFile() {
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
-	_ = ioutil.WriteFile("/"+"telemetry.json", file, 0600)
+	_ = ioutil.WriteFile(pathTelemetryFile + "telemetry.json", file, 0600)
 }
 
 func (t telemetry) postInformation(ctx context.Context, url string, cluster_id string) {
