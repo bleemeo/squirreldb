@@ -22,8 +22,10 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"squirreldb/facts"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,16 +34,20 @@ import (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
-type Telemetry struct {
+type telemetry struct {
 	ID string `json:"id"`
 }
 
-func (t Telemetry) GetIDFromFile() {
-	if _, err := os.Stat("telemetry.json"); os.IsNotExist(err) {
+/*
+** We need to change "/" by a string variable because we can't use this if we are in a container.
+** We need to change into "/var/liv/squirreldb" in first time, after that we need the kept the ID in State.
+ */
+func (t telemetry) getIDFromFile() {
+	if _, err := os.Stat("/" + "telemetry.json"); os.IsNotExist(err) {
 		t.setIDToFile()
 	}
 
-	file, _ := ioutil.ReadFile("telemetry.json")
+	file, _ := ioutil.ReadFile("/" + "telemetry.json")
 
 	_ = json.Unmarshal(file, &t)
 
@@ -50,17 +56,19 @@ func (t Telemetry) GetIDFromFile() {
 	}
 }
 
-func (t Telemetry) setIDToFile() {
+func (t telemetry) setIDToFile() {
 	t.ID = uuid.New().String()
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
-	_ = ioutil.WriteFile("telemetry.json", file, 0600)
+	_ = ioutil.WriteFile("/"+"telemetry.json", file, 0600)
 }
 
-func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[string]string) {
+func (t telemetry) postInformation(ctx context.Context, url string, cluster_id string) {
+	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{
 		"id":                  t.ID,
+		"cluster_id":          cluster_id,
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
@@ -90,5 +98,25 @@ func (t Telemetry) PostInformation(ctx context.Context, url string, facts map[st
 	if resp != nil {
 		logger.Printf("telemetry response Satus: %s", resp.Status)
 		defer resp.Body.Close()
+	}
+}
+
+func Run(ctx context.Context, url string, cluster_id string) error {
+	select {
+	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
+	case <-ctx.Done():
+		return nil
+	}
+
+	for {
+		var tlm telemetry
+
+		tlm.postInformation(ctx, url, cluster_id)
+
+		select {
+		case <-time.After(24 * time.Hour):
+		case <-ctx.Done():
+			return nil
+		}
 	}
 }

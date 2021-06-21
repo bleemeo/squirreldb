@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
@@ -22,7 +21,6 @@ import (
 	"squirreldb/debug"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
-	"squirreldb/facts"
 	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
@@ -35,6 +33,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -99,6 +98,11 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 	}
 
 	_, err = s.TSDB(ctx, true)
+	if err != nil {
+		return err
+	}
+
+	err = s.Telemetry(ctx)
 	if err != nil {
 		return err
 	}
@@ -397,6 +401,11 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 		s.cassandraSession = session
 		s.cassandraKeyspaceCreated = keyspaceCreated
 	}
+	state, _ := s.states.Read("cluster_id", "")
+
+	if !state {
+		s.states.Write("cluster_id", uuid.New().String())
+	}
 
 	return s.cassandraSession, nil
 }
@@ -479,29 +488,6 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Run(ctx, readiness)
 }
 
-func (s *SquirrelDB) sendToTelemetry(ctx context.Context, readiness chan error) {
-	if s.Config.Bool("telemetry.enabled") {
-		select {
-		case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
-		case <-ctx.Done():
-			return
-		}
-
-		for {
-			var tlm telemetry.Telemetry
-
-			tlm.GetIDFromFile()
-			tlm.PostInformation(ctx, s.Config.String("telemetry.address"), facts.Facts(ctx))
-
-			select {
-			case <-time.After(24 * time.Hour):
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-}
-
 // run start SquirrelDB.
 func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	tasks := []namedTasks{
@@ -512,10 +498,6 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 		{
 			Name: "API",
 			Task: types.TaskFun(s.apiTask),
-		},
-		{
-			Name: "Telemetry",
-			Task: types.TaskFun(s.sendToTelemetry),
 		},
 	}
 
@@ -727,6 +709,16 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 	}
 
 	return s.persistentStore, nil
+}
+
+func (s *SquirrelDB) Telemetry(ctx context.Context) error {
+	if s.Config.Bool("telemetry.enabled") {
+		var cluster_id string
+		s.states.Read("cluster_id", &cluster_id)
+		return telemetry.Run(ctx, s.Config.String("telemetry.address"), cluster_id)
+	}
+
+	return nil
 }
 
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
