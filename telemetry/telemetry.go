@@ -38,11 +38,15 @@ type telemetry struct {
 	ID string `json:"id"`
 }
 
-var pathTelemetryFile = "/" // if it's in container "/var/lib/squirreldb/"
+func (t telemetry) getIDFromFile(format string) {
+	pathTelemetryFile := "/"
 
-func (t telemetry) getIDFromFile() {
+	if format == "Docker" {
+		pathTelemetryFile = "/var/lib/squirreldb/"
+	}
+
 	if _, err := os.Stat(pathTelemetryFile + "telemetry.json"); os.IsNotExist(err) {
-		t.setIDToFile()
+		t.setIDToFile(pathTelemetryFile)
 	}
 
 	file, _ := ioutil.ReadFile(pathTelemetryFile + "telemetry.json")
@@ -50,27 +54,27 @@ func (t telemetry) getIDFromFile() {
 	_ = json.Unmarshal(file, &t)
 
 	if t.ID == "" {
-		t.setIDToFile()
+		t.setIDToFile(pathTelemetryFile)
 	}
 }
 
-func (t telemetry) setIDToFile() {
+func (t telemetry) setIDToFile(pathTelemetryFile string) {
 	t.ID = uuid.New().String()
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
-	_ = ioutil.WriteFile(pathTelemetryFile + "telemetry.json", file, 0600)
+	_ = ioutil.WriteFile(pathTelemetryFile+"telemetry.json", file, 0600)
 }
 
-func (t telemetry) postInformation(ctx context.Context, url string, cluster_id string) {
+func (t telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
 	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{
 		"id":                  t.ID,
-		"cluster_id":          cluster_id,
+		"cluster_id":          newFacts["cluster_id"],
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
-		"installation_format": facts["installation_format"], // TBD
+		"installation_format": newFacts["installation_format"],
 		"kernel_version":      facts["kernel_major_version"],
 		"memory":              facts["memory"],
 		"product":             "Squirreldb",
@@ -99,7 +103,7 @@ func (t telemetry) postInformation(ctx context.Context, url string, cluster_id s
 	}
 }
 
-func Run(ctx context.Context, url string, cluster_id string) error {
+func Run(ctx context.Context, newFacts map[string]string, url string) error {
 	select {
 	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
 	case <-ctx.Done():
@@ -109,7 +113,8 @@ func Run(ctx context.Context, url string, cluster_id string) error {
 	for {
 		var tlm telemetry
 
-		tlm.postInformation(ctx, url, cluster_id)
+		tlm.getIDFromFile(newFacts["installation_format"])
+		tlm.postInformation(ctx, newFacts, url)
 
 		select {
 		case <-time.After(24 * time.Hour):

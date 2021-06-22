@@ -9,6 +9,9 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
+	"syscall"
+	"time"
 
 	"squirreldb/api"
 	"squirreldb/batch"
@@ -27,9 +30,6 @@ import (
 	"squirreldb/retry"
 	"squirreldb/telemetry"
 	"squirreldb/types"
-	"sync"
-	"syscall"
-	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
@@ -401,6 +401,7 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 		s.cassandraSession = session
 		s.cassandraKeyspaceCreated = keyspaceCreated
 	}
+
 	state, _ := s.states.Read("cluster_id", "")
 
 	if !state {
@@ -713,9 +714,19 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	if s.Config.Bool("telemetry.enabled") {
-		var cluster_id string
-		s.states.Read("cluster_id", &cluster_id)
-		return telemetry.Run(ctx, s.Config.String("telemetry.address"), cluster_id)
+		var clusterID string
+		_, err := s.states.Read("cluster_id", &clusterID)
+
+		if err != nil {
+			clusterID = ""
+		}
+
+		addFacts := map[string]string{
+			"installation_format": s.Config.String("telemetry.installation.format"),
+			"cluster_id":          clusterID,
+		}
+
+		return telemetry.Run(ctx, addFacts, s.Config.String("telemetry.address"))
 	}
 
 	return nil

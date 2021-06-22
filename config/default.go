@@ -17,7 +17,7 @@ var defaults = map[string]interface{}{
 	"internal.index":                        "cassandra",
 	"internal.index_dummy_check_conflict":   true,
 	"internal.index_dummy_fixed_id":         0,
-	"internal.installation_format":          "manual",
+	"internal.installation.format":          "Manual",
 	"internal.tsdb":                         "cassandra",
 	"internal.temporary_store":              "redis",
 	"internal.locks":                        "cassandra",
