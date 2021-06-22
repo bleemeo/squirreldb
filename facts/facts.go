@@ -14,7 +14,6 @@ import (
 
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/mem"
-	"honnef.co/go/tools/version"
 )
 
 //nolint: gochecknoglobals
@@ -33,7 +32,6 @@ func Facts(ctx context.Context) map[string]string {
 		newFacts["timezone"] = strings.TrimSpace(string(v))
 	}
 
-	newFacts["squirreldb_version"] = version.Version
 	newFacts["fact_updated_at"] = time.Now().UTC().Format(time.RFC3339)
 
 	cpu, err := cpu.Info()

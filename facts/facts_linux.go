@@ -19,6 +19,7 @@ package facts
 import (
 	"io/ioutil"
 	"path/filepath"
+	"squirreldb/debug"
 	"strconv"
 	"strings"
 
@@ -65,7 +66,7 @@ func platformFacts() map[string]string {
 	} else {
 		osRelease, err := decodeOsRelease(string(osReleaseData))
 		if err != nil {
-			logger.Printf("os-release file is invalid: %v", err)
+			debug.Print(1, logger, "os-release file is invalid: %v", err)
 		}
 
 		facts["os_name"] = osRelease["NAME"]

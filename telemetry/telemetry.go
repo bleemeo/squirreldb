@@ -75,7 +75,7 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 		"os_type":             facts["os_name"],
 		"os_version":          facts["os_version"],
 		"system_architecture": facts["architecture"],
-		"version":             facts["squirreldb_version"],
+		"version":             newFacts["version"],
 	})
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))

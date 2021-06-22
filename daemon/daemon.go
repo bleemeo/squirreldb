@@ -727,6 +727,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			"installation_format": s.Config.String("telemetry.installation.format"),
 			"filepath":            s.Config.String("telemetry.id.path"),
 			"cluster_id":          clusterID,
+			"version":             Version,
 		}
 
 		return telemetry.Run(ctx, addFacts, s.Config.String("telemetry.address"))
