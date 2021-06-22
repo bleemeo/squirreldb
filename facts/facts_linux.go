@@ -62,11 +62,11 @@ func platformFacts() map[string]string {
 
 	osReleasePath := filepath.Join("/", "etc/os-release")
 	if osReleaseData, err := ioutil.ReadFile(osReleasePath); err != nil {
-		logger.Printf("unable to read os-release file: %v", err)
+		debug.Print(1, logger, "unable to read os-release file: %v", err)
 	} else {
 		osRelease, err := decodeOsRelease(string(osReleaseData))
 		if err != nil {
-			debug.Print(1, logger, "os-release file is invalid: %v", err)
+			logger.Printf("os-release file is invalid: %v", err)
 		}
 
 		facts["os_name"] = osRelease["NAME"]
