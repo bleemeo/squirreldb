@@ -26,4 +26,5 @@ var defaults = map[string]interface{}{
 	"internal.redis_keyspace":               "",
 	"telemetry.address":                     "https://telemetry.bleemeo.com/v1/telemetry/",
 	"telemetry.enabled":                     true,
+	"telemetry.id.path":                     "./telemetry.json",
 }

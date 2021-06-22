@@ -402,9 +402,10 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 		s.cassandraKeyspaceCreated = keyspaceCreated
 	}
 
-	state, _ := s.states.Read("cluster_id", "")
+	state, _ := s.States()
+	stateBool, _ := state.Read("cluster_id", "")
 
-	if !state {
+	if !stateBool {
 		s.states.Write("cluster_id", uuid.New().String())
 	}
 
@@ -715,14 +716,16 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	if s.Config.Bool("telemetry.enabled") {
 		var clusterID string
-		_, err := s.states.Read("cluster_id", &clusterID)
+		state, _ := s.States()
+		stateBool, err := state.Read("cluster_id", &clusterID)
 
-		if err != nil {
+		if err != nil || stateBool == false {
 			clusterID = ""
 		}
 
 		addFacts := map[string]string{
 			"installation_format": s.Config.String("telemetry.installation.format"),
+			"filepath":            s.Config.String("telemetry.id.path"),
 			"cluster_id":          clusterID,
 		}
 

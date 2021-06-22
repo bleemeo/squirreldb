@@ -38,32 +38,26 @@ type telemetry struct {
 	ID string `json:"id"`
 }
 
-func (t telemetry) getIDFromFile(format string) {
-	pathTelemetryFile := "/"
-
-	if format == "Docker" {
-		pathTelemetryFile = "/var/lib/squirreldb/"
+func (t telemetry) getIDFromFile(filepath string) {
+	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+		t.setIDToFile(filepath)
 	}
 
-	if _, err := os.Stat(pathTelemetryFile + "telemetry.json"); os.IsNotExist(err) {
-		t.setIDToFile(pathTelemetryFile)
-	}
-
-	file, _ := ioutil.ReadFile(pathTelemetryFile + "telemetry.json")
+	file, _ := ioutil.ReadFile(filepath)
 
 	_ = json.Unmarshal(file, &t)
 
 	if t.ID == "" {
-		t.setIDToFile(pathTelemetryFile)
+		t.setIDToFile(filepath)
 	}
 }
 
-func (t telemetry) setIDToFile(pathTelemetryFile string) {
+func (t telemetry) setIDToFile(filepath string) {
 	t.ID = uuid.New().String()
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
-	_ = ioutil.WriteFile(pathTelemetryFile+"telemetry.json", file, 0600)
+	_ = ioutil.WriteFile(filepath, file, 0600)
 }
 
 func (t telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
@@ -95,12 +89,13 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 
 	if err != nil {
 		logger.Printf("failed when we post on telemetry: %v", err)
+		return
 	}
 
 	if resp != nil {
 		logger.Printf("telemetry response Satus: %s", resp.Status)
-		defer resp.Body.Close()
 	}
+	defer resp.Body.Close()
 }
 
 func Run(ctx context.Context, newFacts map[string]string, url string) error {
@@ -113,7 +108,7 @@ func Run(ctx context.Context, newFacts map[string]string, url string) error {
 	for {
 		var tlm telemetry
 
-		tlm.getIDFromFile(newFacts["installation_format"])
+		tlm.getIDFromFile(newFacts["filepath"])
 		tlm.postInformation(ctx, newFacts, url)
 
 		select {
