@@ -39,7 +39,7 @@ type telemetry struct {
 	ID string `json:"id"`
 }
 
-func (t telemetry) getIDFromFile(filepath string) {
+func (t telemetry) getIDFromFile(filepath string) telemetry {
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		t.setIDToFile(filepath)
 	}
@@ -49,16 +49,20 @@ func (t telemetry) getIDFromFile(filepath string) {
 	_ = json.Unmarshal(file, &t)
 
 	if t.ID == "" {
-		t.setIDToFile(filepath)
+		return t.setIDToFile(filepath)
 	}
+
+	return t
 }
 
-func (t telemetry) setIDToFile(filepath string) {
+func (t telemetry) setIDToFile(filepath string) telemetry {
 	t.ID = uuid.New().String()
 
 	file, _ := json.MarshalIndent(t, "", " ")
 
 	_ = ioutil.WriteFile(filepath, file, 0600)
+
+	return t
 }
 
 func (t telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
@@ -70,7 +74,7 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
 		"installation_format": newFacts["installation_format"],
-		"kernel_version":      facts["kernel_major_version"],
+		"kernel_version":      facts["kernel_version"],
 		"memory":              facts["memory"],
 		"product":             "Squirreldb",
 		"os_type":             facts["os_name"],
@@ -110,7 +114,7 @@ func Run(ctx context.Context, newFacts map[string]string, runOption map[string]s
 
 	var tlm telemetry
 
-	tlm.getIDFromFile(runOption["filepath"])
+	tlm = tlm.getIDFromFile(runOption["filepath"])
 
 	for {
 		tlm.postInformation(ctx, newFacts, runOption["url"])

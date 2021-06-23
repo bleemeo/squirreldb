@@ -17,6 +17,7 @@
 package facts
 
 import (
+	"bytes"
 	"io/ioutil"
 	"path/filepath"
 	"squirreldb/debug"
@@ -57,6 +58,11 @@ func decodeOsRelease(data string) (map[string]string, error) {
 	return result, nil
 }
 
+func bytesToString(buffer []byte) string {
+	n := bytes.IndexByte(buffer, 0)
+	return string(buffer[:n])
+}
+
 func platformFacts() map[string]string {
 	facts := make(map[string]string)
 
@@ -77,7 +83,7 @@ func platformFacts() map[string]string {
 
 	err := unix.Uname(&utsName)
 	if err == nil {
-		l := strings.SplitN(facts["kernel_release"], "-", 2)
+		l := strings.SplitN(bytesToString(utsName.Release[:]), "-", 2)
 		facts["kernel_version"] = l[0]
 	}
 

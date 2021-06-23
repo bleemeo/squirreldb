@@ -709,7 +709,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	if s.Config.Bool("telemetry.enabled") {
 		var clusterID string
 
-		lock := s.lockFactory.CreateLock("create cluster id", 60)
+		lock := s.lockFactory.CreateLock("create cluster id", time.Duration(5)*time.Second)
 		lock.Lock()
 
 		state, _ := s.States()
@@ -726,7 +726,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		lock.Unlock()
 
 		addFacts := map[string]string{
-			"installation_format": s.Config.String("telemetry.installation.format"),
+			"installation_format": s.Config.String("internal.installation.format"),
 			"cluster_id":          clusterID,
 			"version":             Version,
 		}
