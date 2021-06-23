@@ -9,10 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
-	"syscall"
-	"time"
-
 	"squirreldb/api"
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
@@ -30,6 +26,9 @@ import (
 	"squirreldb/retry"
 	"squirreldb/telemetry"
 	"squirreldb/types"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"

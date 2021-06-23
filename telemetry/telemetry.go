@@ -19,10 +19,11 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"os"
 	"squirreldb/facts"
@@ -86,7 +87,6 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 	defer cancel()
 
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
-
 	if err != nil {
 		logger.Printf("failed when we post on telemetry: %v", err)
 		return
@@ -97,8 +97,13 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 }
 
 func Run(ctx context.Context, newFacts map[string]string, runOption map[string]string) error {
+	n, err := rand.Int(rand.Reader, big.NewInt(5))
+	if err != nil {
+		logger.Printf("Waring: can't create a random int%v", err)
+	}
+
 	select {
-	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
+	case <-time.After(2*time.Minute + time.Duration(n.Int64())*time.Minute):
 	case <-ctx.Done():
 		return nil
 	}
