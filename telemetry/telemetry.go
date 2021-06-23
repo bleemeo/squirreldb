@@ -92,24 +92,23 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 		return
 	}
 
-	if resp != nil {
-		logger.Printf("telemetry response Satus: %s", resp.Status)
-	}
+	logger.Printf("telemetry response Satus: %s", resp.Status)
 	defer resp.Body.Close()
 }
 
-func Run(ctx context.Context, newFacts map[string]string, url string) error {
+func Run(ctx context.Context, newFacts map[string]string, runOption map[string]string) error {
 	select {
 	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute):
 	case <-ctx.Done():
 		return nil
 	}
 
-	for {
-		var tlm telemetry
+	var tlm telemetry
 
-		tlm.getIDFromFile(newFacts["filepath"])
-		tlm.postInformation(ctx, newFacts, url)
+	tlm.getIDFromFile(runOption["filepath"])
+
+	for {
+		tlm.postInformation(ctx, newFacts, runOption["url"])
 
 		select {
 		case <-time.After(24 * time.Hour):

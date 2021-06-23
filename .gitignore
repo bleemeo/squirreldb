@@ -6,3 +6,5 @@
 .vscode
 *.*.swp
 .build-cache
+
+telemetry.json

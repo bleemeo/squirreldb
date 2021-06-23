@@ -402,13 +402,6 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 		s.cassandraKeyspaceCreated = keyspaceCreated
 	}
 
-	state, _ := s.States()
-	stateBool, _ := state.Read("cluster_id", "")
-
-	if !stateBool {
-		state.Write("cluster_id", uuid.New().String())
-	}
-
 	return s.cassandraSession, nil
 }
 
@@ -721,17 +714,23 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		stateBool, err := state.Read("cluster_id", &clusterID)
 
 		if err != nil || !stateBool {
-			clusterID = ""
+			clusterID = uuid.New().String()
+			s.states.Write("cluster_id", clusterID)
+			s.lockFactory.CreateLock("create cluster id", 60)
 		}
 
 		addFacts := map[string]string{
 			"installation_format": s.Config.String("telemetry.installation.format"),
-			"filepath":            s.Config.String("telemetry.id.path"),
 			"cluster_id":          clusterID,
 			"version":             Version,
 		}
 
-		return telemetry.Run(ctx, addFacts, s.Config.String("telemetry.address"))
+		runOption := map[string]string{
+			"filepath": s.Config.String("telemetry.id.path"),
+			"url":      s.Config.String("telemetry.address"),
+		}
+
+		return telemetry.Run(ctx, addFacts, runOption)
 	}
 
 	return nil
