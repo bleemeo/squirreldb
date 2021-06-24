@@ -36,18 +36,27 @@ import (
 //nolint: gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
-type telemetry struct {
+type Telemetry struct {
+	ID        string
+	newFacts  map[string]string
+	runOption map[string]string
+}
+
+type telemetryJSONID struct {
 	ID string `json:"id"`
 }
 
-func (t telemetry) getIDFromFile(filepath string) telemetry {
+func (t Telemetry) getIDFromFile(filepath string) Telemetry {
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		t.setIDToFile(filepath)
 	}
 
 	file, _ := ioutil.ReadFile(filepath)
 
-	_ = json.Unmarshal(file, &t)
+	var tlm telemetryJSONID
+
+	_ = json.Unmarshal(file, &tlm)
+	t.ID = tlm.ID
 
 	if t.ID == "" {
 		return t.setIDToFile(filepath)
@@ -56,17 +65,20 @@ func (t telemetry) getIDFromFile(filepath string) telemetry {
 	return t
 }
 
-func (t telemetry) setIDToFile(filepath string) telemetry {
-	t.ID = uuid.New().String()
+func (t Telemetry) setIDToFile(filepath string) Telemetry {
+	var tlm telemetryJSONID
 
-	file, _ := json.MarshalIndent(t, "", " ")
+	t.ID = uuid.New().String()
+	tlm.ID = t.ID
+
+	file, _ := json.MarshalIndent(tlm, "", " ")
 
 	_ = ioutil.WriteFile(filepath, file, 0600)
 
 	return t
 }
 
-func (t telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
+func (t Telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
 	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{
 		"id":                  t.ID,
@@ -97,7 +109,7 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 		return
 	}
 
-	logger.Printf("telemetry response Satus: %s", resp.Status)
+	logger.Printf("Telemetry response Satus: %s", resp.Status)
 
 	defer func() {
 		// Ensure we read the whole response to avoid "Connection reset by peer" on server
@@ -107,7 +119,7 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 	}()
 }
 
-func Run(ctx context.Context, newFacts map[string]string, runOption map[string]string) error {
+func (t Telemetry) run(ctx context.Context) {
 	n, err := rand.Int(rand.Reader, big.NewInt(5))
 	if err != nil {
 		logger.Printf("Waring: can't create a random int%v", err)
@@ -116,20 +128,36 @@ func Run(ctx context.Context, newFacts map[string]string, runOption map[string]s
 	select {
 	case <-time.After(2*time.Minute + time.Duration(n.Int64())*time.Minute):
 	case <-ctx.Done():
-		return nil
+		return
 	}
 
-	var tlm telemetry
+	var tlm Telemetry
 
-	tlm = tlm.getIDFromFile(runOption["filepath"])
+	tlm = tlm.getIDFromFile(t.runOption["filepath"])
 
 	for {
-		tlm.postInformation(ctx, newFacts, runOption["url"])
+		tlm.postInformation(ctx, t.newFacts, t.runOption["url"])
 
 		select {
 		case <-time.After(24 * time.Hour):
 		case <-ctx.Done():
-			return nil
+			return
 		}
 	}
+}
+
+func New(newFacts map[string]string, runOption map[string]string) Telemetry {
+	var tlm Telemetry
+
+	tlm.newFacts = newFacts
+	tlm.runOption = runOption
+
+	return tlm
+}
+
+func (t Telemetry) Start(ctx context.Context) {
+	go t.run(ctx)
+}
+
+func (t Telemetry) Stop() {
 }

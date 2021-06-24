@@ -736,7 +736,8 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			"url":      s.Config.String("telemetry.address"),
 		}
 
-		return telemetry.Run(ctx, addFacts, runOption)
+		tlm := telemetry.New(addFacts, runOption)
+		tlm.Start(ctx)
 	}
 
 	return nil
