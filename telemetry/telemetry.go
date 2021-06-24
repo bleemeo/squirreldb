@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -76,7 +77,7 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 		"installation_format": newFacts["installation_format"],
 		"kernel_version":      facts["kernel_version"],
 		"memory":              facts["memory"],
-		"product":             "Squirreldb",
+		"product":             "SquirrelDB",
 		"os_type":             facts["os_name"],
 		"os_version":          facts["os_version"],
 		"system_architecture": facts["architecture"],
@@ -97,7 +98,13 @@ func (t telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 	}
 
 	logger.Printf("telemetry response Satus: %s", resp.Status)
-	defer resp.Body.Close()
+
+	defer func() {
+		// Ensure we read the whole response to avoid "Connection reset by peer" on server
+		// and ensure HTTP connection can be resused
+		_, _ = io.Copy(ioutil.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 }
 
 func Run(ctx context.Context, newFacts map[string]string, runOption map[string]string) error {
