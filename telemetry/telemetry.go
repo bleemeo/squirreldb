@@ -19,12 +19,11 @@ package telemetry
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"io"
 	"io/ioutil"
 	"log"
-	"math/big"
+	"math/rand"
 	"net/http"
 	"os"
 	"squirreldb/facts"
@@ -46,7 +45,8 @@ type telemetryJSONID struct {
 	ID string `json:"id"`
 }
 
-func (t Telemetry) getIDFromFile(filepath string) Telemetry {
+func (t *Telemetry) getIDFromFile() {
+	filepath := t.runOption["filepath"]
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		t.setIDToFile(filepath)
 	}
@@ -59,13 +59,11 @@ func (t Telemetry) getIDFromFile(filepath string) Telemetry {
 	t.ID = tlm.ID
 
 	if t.ID == "" {
-		return t.setIDToFile(filepath)
+		t.setIDToFile(filepath)
 	}
-
-	return t
 }
 
-func (t Telemetry) setIDToFile(filepath string) Telemetry {
+func (t *Telemetry) setIDToFile(filepath string) {
 	var tlm telemetryJSONID
 
 	t.ID = uuid.New().String()
@@ -74,29 +72,27 @@ func (t Telemetry) setIDToFile(filepath string) Telemetry {
 	file, _ := json.MarshalIndent(tlm, "", " ")
 
 	_ = ioutil.WriteFile(filepath, file, 0600)
-
-	return t
 }
 
-func (t Telemetry) postInformation(ctx context.Context, newFacts map[string]string, url string) {
+func (t Telemetry) postInformation(ctx context.Context) {
 	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{
 		"id":                  t.ID,
-		"cluster_id":          newFacts["cluster_id"],
+		"cluster_id":          t.newFacts["cluster_id"],
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
-		"installation_format": newFacts["installation_format"],
+		"installation_format": t.newFacts["installation_format"],
 		"kernel_version":      facts["kernel_version"],
 		"memory":              facts["memory"],
 		"product":             "SquirrelDB",
 		"os_type":             facts["os_name"],
 		"os_version":          facts["os_version"],
 		"system_architecture": facts["architecture"],
-		"version":             newFacts["version"],
+		"version":             t.newFacts["version"],
 	})
 
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", t.runOption["url"], bytes.NewBuffer(body))
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -120,23 +116,16 @@ func (t Telemetry) postInformation(ctx context.Context, newFacts map[string]stri
 }
 
 func (t Telemetry) run(ctx context.Context) {
-	n, err := rand.Int(rand.Reader, big.NewInt(5))
-	if err != nil {
-		logger.Printf("Waring: can't create a random int%v", err)
-	}
-
 	select {
-	case <-time.After(2*time.Minute + time.Duration(n.Int64())*time.Minute):
+	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): // nolint: gosec
 	case <-ctx.Done():
 		return
 	}
 
-	var tlm Telemetry
-
-	tlm = tlm.getIDFromFile(t.runOption["filepath"])
+	t.getIDFromFile()
 
 	for {
-		tlm.postInformation(ctx, t.newFacts, t.runOption["url"])
+		t.postInformation(ctx)
 
 		select {
 		case <-time.After(24 * time.Hour):

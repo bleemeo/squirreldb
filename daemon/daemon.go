@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
@@ -711,18 +712,26 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 
 		lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
 		if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-			state, _ := s.States()
-			stateBool, err := state.Read("cluster_id", &clusterID)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 
-			if err != nil || !stateBool {
-				clusterID = uuid.New().String()
+			return errors.New("newMetricLock is not acquired")
+		}
 
-				err := s.states.Write("cluster_id", clusterID)
-				if err != nil {
-					logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
-				}
+		state, _ := s.States()
+		stateBool, err := state.Read("cluster_id", &clusterID)
+
+		if err != nil || !stateBool {
+			clusterID = uuid.New().String()
+
+			err := s.states.Write("cluster_id", clusterID)
+			if err != nil {
+				logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
 			}
 		}
+
+		defer lock.Unlock()
 
 		addFacts := map[string]string{
 			"installation_format": s.Config.String("internal.installation.format"),
@@ -734,6 +743,8 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			"filepath": s.Config.String("telemetry.id.path"),
 			"url":      s.Config.String("telemetry.address"),
 		}
+
+		rand.Seed(time.Now().UnixNano())
 
 		tlm := telemetry.New(addFacts, runOption)
 		tlm.Start(ctx)
