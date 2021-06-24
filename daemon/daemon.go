@@ -709,21 +709,20 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	if s.Config.Bool("telemetry.enabled") {
 		var clusterID string
 
-		lock := s.lockFactory.CreateLock("create cluster id", time.Duration(5)*time.Second)
-		lock.Lock()
+		lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
+		if ok := lock.TryLock(ctx, 10*time.Second); !ok {
+			state, _ := s.States()
+			stateBool, err := state.Read("cluster_id", &clusterID)
 
-		state, _ := s.States()
-		stateBool, err := state.Read("cluster_id", &clusterID)
+			if err != nil || !stateBool {
+				clusterID = uuid.New().String()
 
-		if err != nil || !stateBool {
-			clusterID = uuid.New().String()
-
-			err := s.states.Write("cluster_id", clusterID)
-			if err != nil {
-				logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+				err := s.states.Write("cluster_id", clusterID)
+				if err != nil {
+					logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+				}
 			}
 		}
-		lock.Unlock()
 
 		addFacts := map[string]string{
 			"installation_format": s.Config.String("internal.installation.format"),
