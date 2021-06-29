@@ -2,6 +2,7 @@ package dummy
 
 import (
 	"context"
+	"sort"
 	"squirreldb/types"
 	"sync"
 )
@@ -53,6 +54,24 @@ type readIter struct {
 	offset  int
 	db      *MemoryTSDB
 	current types.MetricData
+}
+
+// DumpData dump to content of the TSDB. Result is ordered by MetricID.
+func (db *MemoryTSDB) DumpData() []types.MetricData {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	result := make([]types.MetricData, 0, len(db.Data))
+
+	for _, v := range db.Data {
+		result = append(result, v)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID < result[j].ID
+	})
+
+	return result
 }
 
 // ReadIter return an empty result.
