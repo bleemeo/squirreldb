@@ -45,8 +45,11 @@ func (r emptyResult) Err() error {
 
 // MemoryTSDB store all value in memory. Only useful in unittest.
 type MemoryTSDB struct {
-	mutex sync.Mutex
-	Data  map[types.MetricID]types.MetricData
+	mutex      sync.Mutex
+	Data       map[types.MetricID]types.MetricData
+	LogRequest bool
+	Reads      []types.MetricRequest
+	Writes     [][]types.MetricData
 }
 
 type readIter struct {
@@ -76,6 +79,13 @@ func (db *MemoryTSDB) DumpData() []types.MetricData {
 
 // ReadIter return an empty result.
 func (db *MemoryTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	if db.LogRequest {
+		db.Reads = append(db.Reads, request)
+	}
+
 	return &readIter{
 		request: request,
 		db:      db,
@@ -86,6 +96,10 @@ func (db *MemoryTSDB) ReadIter(ctx context.Context, request types.MetricRequest)
 func (db *MemoryTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
+
+	if db.LogRequest {
+		db.Writes = append(db.Writes, metrics)
+	}
 
 	if db.Data == nil {
 		db.Data = make(map[types.MetricID]types.MetricData)

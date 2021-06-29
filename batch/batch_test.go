@@ -85,7 +85,9 @@ func dataEqual(orderMatter bool, a, b []types.MetricData) bool {
 }
 
 func newPersistentStore(initialData []types.MetricData) *dummy.MemoryTSDB {
-	db := &dummy.MemoryTSDB{}
+	db := &dummy.MemoryTSDB{
+		LogRequest: true,
+	}
 	err := db.Write(context.Background(), initialData)
 	if err != nil {
 		panic(err)
@@ -107,21 +109,21 @@ func iterToList(i types.MetricDataSet) ([]types.MetricData, error) {
 
 func TestBatch_read(t *testing.T) {
 	type fields struct {
-		batchSize   time.Duration
-		states      map[types.MetricID]stateData
-		memoryStore TemporaryStore
-		reader      types.MetricReader
-		writer      types.MetricWriter
+		batchSize       time.Duration
+		states          map[types.MetricID]stateData
+		memoryStore     TemporaryStore
+		persistentStore *dummy.MemoryTSDB
 	}
 	type args struct {
 		request types.MetricRequest
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    []types.MetricData
-		wantErr bool
+		name                   string
+		fields                 fields
+		args                   args
+		want                   []types.MetricData
+		mustSkipPersitentReads bool
+		wantErr                bool
 	}{
 		{
 			name: "temporary_filled_persistent_filled",
@@ -156,7 +158,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				}),
-				reader: newPersistentStore([]types.MetricData{
+				persistentStore: newPersistentStore([]types.MetricData{
 					{
 						ID: MetricIDTest1,
 						Points: []types.MetricPoint{
@@ -207,9 +209,7 @@ func TestBatch_read(t *testing.T) {
 							},
 						},
 					},
-				},
-				),
-				writer: nil,
+				}),
 			},
 			args: args{
 				request: types.MetricRequest{
@@ -326,8 +326,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				}),
-				reader: newPersistentStore(nil),
-				writer: nil,
+				persistentStore: newPersistentStore(nil),
 			},
 			args: args{
 				request: types.MetricRequest{
@@ -377,7 +376,7 @@ func TestBatch_read(t *testing.T) {
 				batchSize:   50 * time.Second,
 				states:      nil,
 				memoryStore: newMemoryStore(nil),
-				reader: newPersistentStore([]types.MetricData{
+				persistentStore: newPersistentStore([]types.MetricData{
 					{
 						ID: MetricIDTest1,
 						Points: []types.MetricPoint{
@@ -428,9 +427,7 @@ func TestBatch_read(t *testing.T) {
 							},
 						},
 					},
-				},
-				),
-				writer: nil,
+				}),
 			},
 			args: args{
 				request: types.MetricRequest{
@@ -501,11 +498,10 @@ func TestBatch_read(t *testing.T) {
 		{
 			name: "temporary_empty_persistent_empty",
 			fields: fields{
-				batchSize:   50 * time.Second,
-				states:      nil,
-				memoryStore: newMemoryStore(nil),
-				reader:      newPersistentStore(nil),
-				writer:      nil,
+				batchSize:       50 * time.Second,
+				states:          nil,
+				memoryStore:     newMemoryStore(nil),
+				persistentStore: newPersistentStore(nil),
 			},
 			args: args{
 				request: types.MetricRequest{
@@ -554,7 +550,7 @@ func TestBatch_read(t *testing.T) {
 						},
 					},
 				}),
-				reader: newPersistentStore([]types.MetricData{
+				persistentStore: newPersistentStore([]types.MetricData{
 					{
 						ID: MetricIDTest1,
 						Points: []types.MetricPoint{
@@ -580,9 +576,7 @@ func TestBatch_read(t *testing.T) {
 							},
 						},
 					},
-				},
-				),
-				writer: nil,
+				}),
 			},
 			args: args{
 				request: types.MetricRequest{
@@ -622,7 +616,116 @@ func TestBatch_read(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
+			mustSkipPersitentReads: true,
+			wantErr:                false,
+		},
+		{
+			name: "temporary_has_all_points_offset",
+			fields: fields{
+				batchSize: 50 * time.Second,
+				states:    nil,
+				memoryStore: newMemoryStore([]types.MetricData{
+					{
+						ID: MetricIDTest1,
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     10,
+							},
+							{
+								Timestamp: 10000,
+								Value:     20,
+							},
+							{
+								Timestamp: 20000,
+								Value:     30,
+							},
+							{
+								Timestamp: 30000,
+								Value:     40,
+							},
+							{
+								Timestamp: 40000,
+								Value:     50,
+							},
+						},
+					},
+				}),
+				persistentStore: newPersistentStore(nil), // content does matter
+			},
+			args: args{
+				request: types.MetricRequest{
+					IDs: []types.MetricID{
+						MetricIDTest1,
+					},
+					FromTimestamp: 1000,
+					ToTimestamp:   110000,
+					StepMs:        0,
+					Function:      "",
+				},
+			},
+			want: []types.MetricData{
+				{
+					ID: MetricIDTest1,
+					Points: []types.MetricPoint{
+						{
+							Timestamp: 10000,
+							Value:     20,
+						},
+						{
+							Timestamp: 20000,
+							Value:     30,
+						},
+						{
+							Timestamp: 30000,
+							Value:     40,
+						},
+						{
+							Timestamp: 40000,
+							Value:     50,
+						},
+					},
+				},
+			},
+			mustSkipPersitentReads: true,
+			wantErr:                false,
+		},
+		{
+			name: "temporary_has_all_points_metric_disapear",
+			fields: fields{
+				batchSize: 50 * time.Second,
+				states:    nil,
+				memoryStore: newMemoryStore([]types.MetricData{
+					{
+						ID: MetricIDTest1,
+						Points: []types.MetricPoint{
+							{
+								Timestamp: 0,
+								Value:     10,
+							},
+							{
+								Timestamp: 10000,
+								Value:     20,
+							},
+						},
+					},
+				}),
+				persistentStore: newPersistentStore(nil), // content does matter
+			},
+			args: args{
+				request: types.MetricRequest{
+					IDs: []types.MetricID{
+						MetricIDTest1,
+					},
+					FromTimestamp: 20000,
+					ToTimestamp:   110000,
+					StepMs:        0,
+					Function:      "",
+				},
+			},
+			want:                   []types.MetricData{},
+			mustSkipPersitentReads: true,
+			wantErr:                false,
 		},
 	}
 	for _, tt := range tests {
@@ -631,8 +734,8 @@ func TestBatch_read(t *testing.T) {
 				batchSize:   tt.fields.batchSize,
 				states:      tt.fields.states,
 				memoryStore: tt.fields.memoryStore,
-				reader:      tt.fields.reader,
-				writer:      tt.fields.writer,
+				reader:      tt.fields.persistentStore,
+				writer:      tt.fields.persistentStore,
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 			got, err := b.ReadIter(context.Background(), tt.args.request)
@@ -649,6 +752,10 @@ func TestBatch_read(t *testing.T) {
 
 			if !dataEqual(true, gotList, tt.want) {
 				t.Errorf("read() got = %v, want %v", gotList, tt.want)
+			}
+
+			if tt.mustSkipPersitentReads && len(tt.fields.persistentStore.Reads) > 0 {
+				t.Errorf("Had reads = %v, want none", tt.fields.persistentStore.Reads)
 			}
 		})
 	}

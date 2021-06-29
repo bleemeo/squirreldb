@@ -51,6 +51,10 @@ const (
 	takeoverSleepDelay = 500 * time.Millisecond
 
 	overdueThreshold = 5 * time.Minute
+
+	// over-read from memory store of this amount. This is done to skip trying read from persitent
+	// store if point timestamp and request timestamp aren't aligned.
+	memoryOverreadMs = 60000
 )
 
 const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
@@ -698,77 +702,95 @@ func (i *readIter) At() types.MetricData {
 }
 
 func (i *readIter) Next() bool {
+	start := time.Now()
+
+	defer func() {
+		i.b.metrics.RequestsSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
+	}()
+
 	for {
 		if i.offset >= len(i.request.IDs) || i.ctx.Err() != nil {
+			return false
+		}
+
+		if i.err != nil {
 			return false
 		}
 
 		id := i.request.IDs[i.offset]
 		i.offset++
 
-		start := time.Now()
-
-		defer func() {
-			i.b.metrics.RequestsSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
-		}()
-
-		idRequest := types.MetricRequest{
-			IDs:           []types.MetricID{id},
-			FromTimestamp: i.request.FromTimestamp,
-			ToTimestamp:   i.request.ToTimestamp,
-			StepMs:        i.request.StepMs,
-			Function:      i.request.Function,
+		hasNext := i.tryNext(id)
+		if hasNext {
+			return true
 		}
+	}
+}
 
-		temporaryMetrics, err := i.b.readTemporary(i.ctx, []types.MetricID{id}, i.request.FromTimestamp, i.request.ToTimestamp)
+func (i *readIter) tryNext(id types.MetricID) bool {
+	idRequest := types.MetricRequest{
+		IDs:           []types.MetricID{id},
+		FromTimestamp: i.request.FromTimestamp,
+		ToTimestamp:   i.request.ToTimestamp,
+		StepMs:        i.request.StepMs,
+		Function:      i.request.Function,
+	}
+
+	temporaryMetrics, err := i.b.readTemporary(i.ctx, []types.MetricID{id}, i.request.FromTimestamp-memoryOverreadMs, i.request.ToTimestamp)
+	if err != nil {
+		i.err = err
+
+		return false
+	}
+
+	data := types.MetricData{
+		ID: id,
+	}
+
+	if len(temporaryMetrics) > 0 && len(temporaryMetrics[0].Points) > 0 {
+		temporaryData := temporaryMetrics[0]
+		idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
+
+		// because we over-read, we need to filter first point. They are sorted which make it simple
+		data.Points = temporaryData.Points
+		for len(data.Points) > 0 && data.Points[0].Timestamp < idRequest.FromTimestamp {
+			data.Points = data.Points[1:]
+		}
+	}
+
+	if idRequest.FromTimestamp <= idRequest.ToTimestamp {
+		persistentMetrics, err := i.b.reader.ReadIter(i.ctx, idRequest)
 		if err != nil {
 			i.err = err
 
 			return false
 		}
 
-		data := types.MetricData{
-			ID: id,
-		}
+		for persistentMetrics.Next() {
+			persistentData := persistentMetrics.At()
+			if persistentData.ID == id {
+				data.Points = append(persistentData.Points, data.Points...)
 
-		if len(temporaryMetrics) > 0 && len(temporaryMetrics[0].Points) > 0 {
-			temporaryData := temporaryMetrics[0]
-			idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
-			data.Points = temporaryData.Points
-		}
-
-		if idRequest.FromTimestamp <= idRequest.ToTimestamp {
-			persistentMetrics, err := i.b.reader.ReadIter(i.ctx, idRequest)
-			if err != nil {
-				i.err = err
-
-				return false
-			}
-
-			for persistentMetrics.Next() {
-				persistentData := persistentMetrics.At()
-				if persistentData.ID == id {
-					data.Points = append(persistentData.Points, data.Points...)
-
-					break
-				}
-			}
-
-			err = persistentMetrics.Err()
-			if err != nil {
-				i.err = err
-
-				return false
+				break
 			}
 		}
 
-		if len(data.Points) > 0 {
-			i.current = data
-			i.b.metrics.RequestsPoints.WithLabelValues("read").Add(float64(len(data.Points)))
+		err = persistentMetrics.Err()
+		if err != nil {
+			i.err = err
 
-			return true
+			return false
 		}
 	}
+
+	if len(data.Points) > 0 {
+		i.current = data
+		i.b.metrics.RequestsPoints.WithLabelValues("read").Add(float64(len(data.Points)))
+
+		return true
+	}
+
+	return false
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request.
