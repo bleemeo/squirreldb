@@ -24,8 +24,8 @@ func initAPI(url string) v1.API {
 }
 
 // Evaluates a query at a single point in time.
-func query(api v1.API, query string, ts time.Time) (model.Value, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func query(ctx context.Context, api v1.API, query string, ts time.Time) (model.Value, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	result, warnings, err := api.Query(ctx, query, ts)
@@ -36,34 +36,65 @@ func query(api v1.API, query string, ts time.Time) (model.Value, error) {
 	return result, err
 }
 
-// Run a query a maximum number of times during the given time.
-func testQuery(api v1.API, c chan int, q string, duration time.Duration) {
-	nbQueries := 0
-	t1 := time.Now()
-	t2 := t1
+// Evaluates a query at a single point in time.
+func queryRange(ctx context.Context, api v1.API, query string, queryRange v1.Range) (model.Value, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-	for t2.Sub(t1) < duration {
-		res, err := query(api, q, time.Now())
+	result, warnings, err := api.QueryRange(ctx, query, queryRange)
+	if len(warnings) > 0 {
+		log.Printf("Warnings: %v\n", warnings)
+	}
+
+	return result, err
+}
+
+// Run a query a maximum number of times during the given time.
+func testQuery(ctx context.Context, api v1.API, c chan int, q string, rangeDuration time.Duration, rangeStep time.Duration, allowEmpty bool) {
+	nbQueries := 0
+
+	var (
+		res model.Value
+		err error
+	)
+
+	for ctx.Err() == nil {
+		if rangeStep == 0 {
+			res, err = query(ctx, api, q, time.Now())
+		} else {
+			res, err = queryRange(ctx, api, q, v1.Range{
+				Start: time.Now().Add(-rangeDuration),
+				End:   time.Now(),
+				Step:  rangeStep,
+			})
+		}
+
+		if ctx.Err() != nil {
+			break
+		}
+
 		if err != nil {
 			log.Fatalf("Failed to run the query: %v\n", err)
-		} else if res.String() == "" {
+		} else if !allowEmpty && res.String() == "" {
 			log.Fatalln("Query returned no output")
 		}
-		nbQueries++
 
-		t2 = time.Now()
+		nbQueries++
 	}
 
 	c <- nbQueries
 }
 
 // Run testQuery in parallel.
-func testQueryParallel(api v1.API, query string, parallelQueries int, duration time.Duration) {
+func testQueryParallel(api v1.API, query string, parallelQueries int, duration time.Duration, queryRange time.Duration, stepRange time.Duration, allowEmpty bool) {
 	log.Printf("Executing query %v with %v goroutines during %v\n", query, parallelQueries, duration)
+
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
 
 	resultsChan := make(chan int)
 	for i := 0; i < parallelQueries; i++ {
-		go testQuery(api, resultsChan, query, duration)
+		go testQuery(ctx, api, resultsChan, query, queryRange, stepRange, allowEmpty)
 	}
 
 	nbQueries := 0
@@ -79,8 +110,11 @@ func main() {
 	query := flag.String("query", "node_load5", "Query to benchmark")
 	parallelQueries := flag.Int("parallel", 10, "Number of concurrent queries")
 	runDuration := flag.Duration("run-time", 10*time.Second, "Duration of the benchmark")
+	queryRange := flag.Duration("query-range", time.Hour, "Query range duraton. Only used if query-step is non-zero")
+	queryStep := flag.Duration("query-step", 0, "Query step. If zero, query is used and not query_range")
+	allowEmpty := flag.Bool("allow-empty-response", false, "Allow empty reply. By default it's a fatal error to have an empty response")
 	flag.Parse()
 
 	API := initAPI(*urlAPI)
-	testQueryParallel(API, *query, *parallelQueries, *runDuration)
+	testQueryParallel(API, *query, *parallelQueries, *runDuration, *queryRange, *queryStep, *allowEmpty)
 }
