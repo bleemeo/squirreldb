@@ -4,6 +4,9 @@ set -e
 
 UID=$(id -u)
 
+# Should be the same as run-tests.sh
+GORELEASER_VERSION="v0.173.1"
+
 case "$1" in
    "")
       ;;
@@ -24,9 +27,6 @@ esac
 if [ -e .build-cache ]; then
    GO_MOUNT_CACHE="-v $(pwd)/.build-cache:/go/pkg"
 fi
-
-
-GORELEASER_VERSION="v0.169.0"
 
 docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
