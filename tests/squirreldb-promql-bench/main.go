@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -11,13 +12,28 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+type headerClient struct {
+	api.Client
+	PromQLForcedMatcherHeader string
+}
+
+func (hc headerClient) Do(ctx context.Context, req *http.Request) (*http.Response, []byte, error) {
+	req.Header.Set("X-PromQL-Forced-Matcher", hc.PromQLForcedMatcherHeader)
+
+	return hc.Client.Do(ctx, req)
+}
+
 // Returns the API.
-func initAPI(url string) v1.API {
+func initAPI(url string, promQLForcedMatcherHeader string) v1.API {
 	client, err := api.NewClient(api.Config{
 		Address: url,
 	})
 	if err != nil {
 		log.Fatalf("Error creating client: %v\n", err)
+	}
+
+	if promQLForcedMatcherHeader != "" {
+		client = headerClient{Client: client, PromQLForcedMatcherHeader: promQLForcedMatcherHeader}
 	}
 
 	return v1.NewAPI(client)
@@ -113,8 +129,9 @@ func main() {
 	queryRange := flag.Duration("query-range", time.Hour, "Query range duraton. Only used if query-step is non-zero")
 	queryStep := flag.Duration("query-step", 0, "Query step. If zero, query is used and not query_range")
 	allowEmpty := flag.Bool("allow-empty-response", false, "Allow empty reply. By default it's a fatal error to have an empty response")
+	forcedMatcher := flag.String("forced-matcher", "", "SquirrelDB forced matcher header (e.g. __account_id__=1234)")
 	flag.Parse()
 
-	API := initAPI(*urlAPI)
+	API := initAPI(*urlAPI, *forcedMatcher)
 	testQueryParallel(API, *query, *parallelQueries, *runDuration, *queryRange, *queryStep, *allowEmpty)
 }
