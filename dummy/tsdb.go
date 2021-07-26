@@ -2,6 +2,7 @@ package dummy
 
 import (
 	"context"
+	"sort"
 	"squirreldb/types"
 	"sync"
 )
@@ -44,8 +45,11 @@ func (r emptyResult) Err() error {
 
 // MemoryTSDB store all value in memory. Only useful in unittest.
 type MemoryTSDB struct {
-	mutex sync.Mutex
-	Data  map[types.MetricID]types.MetricData
+	mutex      sync.Mutex
+	Data       map[types.MetricID]types.MetricData
+	LogRequest bool
+	Reads      []types.MetricRequest
+	Writes     [][]types.MetricData
 }
 
 type readIter struct {
@@ -55,8 +59,33 @@ type readIter struct {
 	current types.MetricData
 }
 
+// DumpData dump to content of the TSDB. Result is ordered by MetricID.
+func (db *MemoryTSDB) DumpData() []types.MetricData {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	result := make([]types.MetricData, 0, len(db.Data))
+
+	for _, v := range db.Data {
+		result = append(result, v)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID < result[j].ID
+	})
+
+	return result
+}
+
 // ReadIter return an empty result.
 func (db *MemoryTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	if db.LogRequest {
+		db.Reads = append(db.Reads, request)
+	}
+
 	return &readIter{
 		request: request,
 		db:      db,
@@ -67,6 +96,10 @@ func (db *MemoryTSDB) ReadIter(ctx context.Context, request types.MetricRequest)
 func (db *MemoryTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
+
+	if db.LogRequest {
+		db.Writes = append(db.Writes, metrics)
+	}
 
 	if db.Data == nil {
 		db.Data = make(map[types.MetricID]types.MetricData)

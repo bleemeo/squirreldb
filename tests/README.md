@@ -9,6 +9,7 @@ Tests:
 * squirreldb-cassandra-lock-bench: Ensure validity of locks using Cassandra and
   benchmark performance achived with them.
 * squirreldb-cluster-redis: Test the cluster pub/sub.
+* squirreldb-promql-bench: Benchmark PromQL queries.
 * remote-storage-test: simple write then read using the Prometheus remote storage.
   It ensure data wrote can be re-read.
 
@@ -98,6 +99,14 @@ The first command will:
 * The second will update metric, and keep only 1/2 to expire. The other will get the expiration date updated.
   Then run the expiration which should only delete 15k metrics
 
+# squirreldb-promql-bench
+
+This test benchmarks a PromQL query against SquirrelDB. You can change the number of concurrent queries with the `-parallel` flag.
+
+Run it with:
+```
+go run ./tests/squirreldb-promql-bench/ -url http://localhost:9201 -run-time 10s -parallel 10 -query node_load5
+```
 
 # remote-storage-test
 
