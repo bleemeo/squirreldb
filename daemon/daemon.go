@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
@@ -24,6 +25,7 @@ import (
 	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
 	"squirreldb/retry"
+	"squirreldb/telemetry"
 	"squirreldb/types"
 	"sync"
 	"syscall"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -95,6 +98,11 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 	}
 
 	_, err = s.TSDB(ctx, true)
+	if err != nil {
+		return err
+	}
+
+	err = s.Telemetry(ctx)
 	if err != nil {
 		return err
 	}
@@ -696,6 +704,53 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 	}
 
 	return s.persistentStore, nil
+}
+
+func (s *SquirrelDB) Telemetry(ctx context.Context) error {
+	if s.Config.Bool("telemetry.enabled") {
+		var clusterID string
+
+		lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
+		if ok := lock.TryLock(ctx, 10*time.Second); !ok {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			return errors.New("newMetricLock is not acquired")
+		}
+
+		state, _ := s.States()
+		stateBool, err := state.Read("cluster_id", &clusterID)
+
+		if err != nil || !stateBool {
+			clusterID = uuid.New().String()
+
+			err := s.states.Write("cluster_id", clusterID)
+			if err != nil {
+				logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+			}
+		}
+
+		defer lock.Unlock()
+
+		addFacts := map[string]string{
+			"installation_format": s.Config.String("internal.installation.format"),
+			"cluster_id":          clusterID,
+			"version":             Version,
+		}
+
+		runOption := map[string]string{
+			"filepath": s.Config.String("telemetry.id.path"),
+			"url":      s.Config.String("telemetry.address"),
+		}
+
+		rand.Seed(time.Now().UnixNano())
+
+		tlm := telemetry.New(addFacts, runOption)
+		tlm.Start(ctx)
+	}
+
+	return nil
 }
 
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
