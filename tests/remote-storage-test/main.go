@@ -43,7 +43,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context) error { //nolint:gocyclo,cyclop
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err

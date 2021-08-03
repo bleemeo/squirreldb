@@ -420,7 +420,7 @@ func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, ac
 	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
 }
 
-func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { //nolint: gocognit
+func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { //nolint:gocyclo,cyclop,gocognit
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -524,7 +524,7 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 
 // verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { //nolint: gocognit
+func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { //nolint:gocyclo,cyclop,gocognit
 	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 	if err != nil {
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
@@ -604,7 +604,7 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { //nolint: gocognit
+func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { //nolint:gocyclo,cyclop,gocognit
 	id2Labels, id2expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
@@ -749,7 +749,7 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 }
 
 // check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { //nolint: gocognit,gocyclo
+func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { //nolint:gocognit,gocyclo,cyclop
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
 
@@ -1152,7 +1152,7 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 
 // postings return ids matching give Label name & value
 // If value is the empty string, it match any values (but the label must be set).
-func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name string, value string, useCache bool) (*roaring.Bitmap, error) { // nolint: gocognit
+func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name string, value string, useCache bool) (*roaring.Bitmap, error) { //nolint:gocyclo,cyclop,gocognit
 	if name == allPostingLabel {
 		value = allPostingLabel
 	}
@@ -1385,7 +1385,7 @@ func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupR
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint: gocognit
+func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint:gocyclo,cyclop,gocognit
 	start := time.Now()
 
 	defer func() {
@@ -1735,7 +1735,7 @@ type lookupEntry struct {
 // * If expired, delete entry for this metric from the index (the opposite of creation)
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pending []lookupEntry, allowForcingIDAndExpiration bool) ([]lookupEntry, error) { //nolint: gocognit
+func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pending []lookupEntry, allowForcingIDAndExpiration bool) ([]lookupEntry, error) { //nolint:gocyclo,cyclop,gocognit
 	start := time.Now()
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 
@@ -1885,9 +1885,9 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 // This insertion order all to recover some failure:
 // * No write will happen because ID is inserted to the presence list. Meaning
 //   reads won't get inconsistent result.
-//   It also means that retry of write will fix the issue
+//   It also means that retry of write will fix the issue,
 // * The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
-func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []lookupEntry, updateCache bool) error { //nolint: gocognit
+func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []lookupEntry, updateCache bool) error { //nolint:gocyclo,cyclop,gocognit
 	start := time.Now()
 
 	defer func() {
@@ -2069,7 +2069,7 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 	})
 }
 
-func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePresent map[int32]postingUpdateRequest, updates []postingUpdateRequest, precense map[int32]postingUpdateRequest) error {
+func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePresent map[int32]postingUpdateRequest, updates []postingUpdateRequest, precense map[int32]postingUpdateRequest) error { //nolint:gocyclo,cyclop
 	newShard := make([]uint64, 0, len(maybePresent))
 
 	for shard := range maybePresent {
@@ -2505,7 +2505,7 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 }
 
 // cassandraExpire remove all entry in Cassandra that have expired.
-func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) bool {
+func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) bool { //nolint:gocyclo,cyclop
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
 	if acquired := lock.TryLock(context.Background(), 0); !acquired {
 		return false
@@ -2879,7 +2879,7 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is inspired from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { //nolint: gocognit,gocyclo
+func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { //nolint:gocognit,gocyclo,cyclop
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for _, m := range matchers {

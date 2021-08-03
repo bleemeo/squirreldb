@@ -7,7 +7,6 @@ linters:
     - testpackage # Require to review all our tests. Should be done
     - wrapcheck # too many error. Partially done and should be completed
     - nlreturn # too many error. Partially done and should be completed
-    - cyclop # too many error. Should be done
     - goerr113 # Require to refactor how we return error. But would be useful
     - nestif # Too many error for now, which would require significant refactor.
     - exhaustivestruct # This linter is meant to be used only for special cases. It is not recommended to use it for all files in a project.
@@ -18,5 +17,12 @@ linters:
     - golint
     - interfacer
     - scopelint
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  cyclop:
+    max-complexity: 15 # to be consistent with gocyclo
+
 run:
   tests: false

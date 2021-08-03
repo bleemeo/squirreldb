@@ -79,7 +79,7 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint: gocognit
+func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint:gocyclo,cyclop,gocognit
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())

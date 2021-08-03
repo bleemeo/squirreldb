@@ -338,7 +338,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
-func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) ([]bool, error) { //nolint: gocognit
+func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) ([]bool, error) { //nolint:gocyclo,cyclop,gocognit
 	var currentMetrics []types.MetricData
 
 	err := retry.Print(func() error {
@@ -476,7 +476,7 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 // * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore).
-func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, shutdown bool) error {
+func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, shutdown bool) error { //nolint:gocyclo,cyclop
 	states := make([]stateData, len(ids))
 
 	b.mutex.Lock()
@@ -840,7 +840,7 @@ func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTim
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached.
 // If this is the case, the state is added to the list of states to flush.
-func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.Time) error { //nolint: gocognit
+func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.Time) error { //nolint:gocyclo,cyclop,gocognit
 	start := time.Now()
 
 	defer func() {
