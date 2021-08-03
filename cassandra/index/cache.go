@@ -72,7 +72,12 @@ func (c *labelsLookupCache) MGet(now time.Time, ids []types.MetricID) []labels.L
 }
 
 // Set add entry to the cache. Return the current cache size.
-func (c *labelsLookupCache) Set(now time.Time, id types.MetricID, value labels.Labels, cassandraExpiration time.Time) int {
+func (c *labelsLookupCache) Set(
+	now time.Time,
+	id types.MetricID,
+	value labels.Labels,
+	cassandraExpiration time.Time,
+) int {
 	c.l.Lock()
 	defer c.l.Unlock()
 

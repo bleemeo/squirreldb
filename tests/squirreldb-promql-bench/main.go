@@ -66,7 +66,15 @@ func queryRange(ctx context.Context, api v1.API, query string, queryRange v1.Ran
 }
 
 // Run a query a maximum number of times during the given time.
-func testQuery(ctx context.Context, api v1.API, c chan int, q string, rangeDuration time.Duration, rangeStep time.Duration, allowEmpty bool) {
+func testQuery(
+	ctx context.Context,
+	api v1.API,
+	c chan int,
+	q string,
+	rangeDuration time.Duration,
+	rangeStep time.Duration,
+	allowEmpty bool,
+) {
 	nbQueries := 0
 
 	var (
@@ -102,7 +110,15 @@ func testQuery(ctx context.Context, api v1.API, c chan int, q string, rangeDurat
 }
 
 // Run testQuery in parallel.
-func testQueryParallel(api v1.API, query string, parallelQueries int, duration time.Duration, queryRange time.Duration, stepRange time.Duration, allowEmpty bool) {
+func testQueryParallel(
+	api v1.API,
+	query string,
+	parallelQueries int,
+	duration time.Duration,
+	queryRange time.Duration,
+	stepRange time.Duration,
+	allowEmpty bool,
+) {
 	log.Printf("Executing query %v with %v goroutines during %v\n", query, parallelQueries, duration)
 
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
@@ -128,7 +144,11 @@ func main() {
 	runDuration := flag.Duration("run-time", 10*time.Second, "Duration of the benchmark")
 	queryRange := flag.Duration("query-range", time.Hour, "Query range duraton. Only used if query-step is non-zero")
 	queryStep := flag.Duration("query-step", 0, "Query step. If zero, query is used and not query_range")
-	allowEmpty := flag.Bool("allow-empty-response", false, "Allow empty reply. By default it's a fatal error to have an empty response")
+	allowEmpty := flag.Bool(
+		"allow-empty-response",
+		false,
+		"Allow empty reply. By default it's a fatal error to have an empty response",
+	)
 	forcedMatcher := flag.String("forced-matcher", "", "SquirrelDB forced matcher header (e.g. __account_id__=1234)")
 	flag.Parse()
 

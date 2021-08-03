@@ -15,7 +15,7 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-//nolint: gochecknoglobals
+//nolint:lll,gochecknoglobals
 var (
 	remoteWrite = flag.String("write-url", "", "URL of remote write (if both url are unset, start a built-in SquirrelDB and use it)")
 	remoteRead  = flag.String("read-url", "", "URL of read write (if both url are unset, start a built-in SquirrelDB and use it)")
@@ -112,7 +112,13 @@ func time2Millisecond(t time.Time) int64 {
 	return t.Unix()*1000 + (t.UnixNano()%1e9)/1e6
 }
 
-func makeSample(fromTime time.Time, stepTime time.Duration, fromValue float64, stepValue float64, count int) []prompb.Sample {
+func makeSample(
+	fromTime time.Time,
+	stepTime time.Duration,
+	fromValue float64,
+	stepValue float64,
+	count int,
+) []prompb.Sample {
 	result := make([]prompb.Sample, count)
 
 	for i := range result {

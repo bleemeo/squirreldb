@@ -16,7 +16,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
-//nolint: gochecknoglobals
+//nolint:lll,gochecknoglobals
 var (
 	runExpiration     = flag.Bool("bench.expiration", false, "Run the expiration (should delete 1/2 of metrics")
 	expiredFaction    = flag.Int("expired-fraction", 2, "one part over N of the metric will be expired")

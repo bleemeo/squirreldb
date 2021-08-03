@@ -55,6 +55,7 @@ var (
 		"node_vmstat_pgpgout",
 	}
 
+	//nolint:lll
 	helps = []string{
 		"node_filesystem_size_bytes Filesystem size in bytes.",
 		"go_memstats_gc_cpu_fraction The fraction of this program's available CPU time used by the GC since the program started.",
@@ -173,7 +174,8 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 		close(resultChan)
 
 		if *shardSize > 0 && shardCount > 0 {
-			log.Printf("Average insert for %d shards took %v/query", shardCount, (time.Since(start) / time.Duration(*shardSize*shardCount)).Round(time.Microsecond))
+			queryDur := (time.Since(start) / time.Duration(*shardSize*shardCount)).Round(time.Microsecond)
+			log.Printf("Average insert for %d shards took %v/query", shardCount, queryDur)
 		}
 	}
 
@@ -184,7 +186,8 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 		return fmt.Errorf("AllIDs() failed: %w", err)
 	}
 
-	log.Printf("There is %d entry in the index (%d added). AllIDs took %v", len(ids), len(ids)-metricsBefore, time.Since(start))
+	nbAdded := len(ids) - metricsBefore
+	log.Printf("There is %d entry in the index (%d added). AllIDs took %v", len(ids), nbAdded, time.Since(start))
 
 	queries := []struct {
 		Name string
@@ -320,7 +323,13 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 	return nil
 }
 
-func sentInsertRequest(now time.Time, rnd *rand.Rand, proc procfs.Proc, workChannel chan []types.LookupRequest, resultChan chan int) int { //nolint: gocognit
+func sentInsertRequest( //nolint: gocognit
+	now time.Time,
+	rnd *rand.Rand,
+	proc procfs.Proc,
+	workChannel chan []types.LookupRequest,
+	resultChan chan int,
+) int {
 	shardCount := *shardEnd - *shardStart + 1
 	instantStart := time.Now()
 	instantCount := 0
@@ -508,7 +517,13 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	return metrics
 }
 
-func runQuery(ctx context.Context, now time.Time, name string, cassandraIndex types.Index, fun func(i int) []*labels.Matcher) (queryResult, error) {
+func runQuery(
+	ctx context.Context,
+	now time.Time,
+	name string,
+	cassandraIndex types.Index,
+	fun func(i int) []*labels.Matcher,
+) (queryResult, error) {
 	start := time.Now()
 	count := 0
 

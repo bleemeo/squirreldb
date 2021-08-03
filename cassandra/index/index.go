@@ -137,7 +137,10 @@ func (c *CassandraIndex) setIDData(key uint64, value idData) {
 type storeImpl interface {
 	Init(ctx context.Context) error
 	SelectLabelsList2ID(ctx context.Context, sortedLabelsListString []string) (map[string]types.MetricID, error)
-	SelectIDS2LabelsAndExpiration(ctx context.Context, id []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error)
+	SelectIDS2LabelsAndExpiration(
+		ctx context.Context,
+		id []types.MetricID,
+	) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error)
 	SelectExpiration(ctx context.Context, day time.Time) ([]byte, error)
 	// SelectPostingByName return  label value with the associated postings in sorted order
 	SelectPostingByName(ctx context.Context, shard int32, name string) postingIter
@@ -157,10 +160,11 @@ type storeImpl interface {
 const (
 	globalAllPostingLabel = "__global__all|metrics__" // we use the "|" since it's invalid for prometheus label name
 	allPostingLabel       = "__all|metrics__"
-	postinglabelName      = "__label|names__"   // kept known labels name as label value
-	maybePostingLabel     = "__maybe|metrics__" // ID are added in two-phase in postings. This one is updated first. See updatePostings
-	existingShardsLabel   = "__shard|exists__"  // We store existings shards in postings
-	postingShardSize      = 7 * 24 * time.Hour
+	postinglabelName      = "__label|names__" // kept known labels name as label value
+	// ID are added in two-phase in postings. This one is updated first. See updatePostings.
+	maybePostingLabel   = "__maybe|metrics__"
+	existingShardsLabel = "__shard|exists__" // We store existings shards in postings
+	postingShardSize    = 7 * 24 * time.Hour
 	// Index is shard by time for postings. The shard number (an int32) is the
 	// rounded to postingShardSize number of hours since epoc (1970).
 	// The globalShardNumber value is an impossible value for normal shard,
@@ -170,7 +174,12 @@ const (
 )
 
 // New creates a new CassandraIndex object.
-func New(ctx context.Context, reg prometheus.Registerer, session *gocql.Session, options Options) (*CassandraIndex, error) {
+func New(
+	ctx context.Context,
+	reg prometheus.Registerer,
+	session *gocql.Session,
+	options Options,
+) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
 
 	return initialize(
@@ -416,11 +425,22 @@ func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []type
 }
 
 // Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) {
+func (c *CassandraIndex) Verify(
+	ctx context.Context,
+	w io.Writer,
+	doFix bool,
+	acquireLock bool,
+) (hadIssue bool, err error) {
 	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
 }
 
-func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) verify( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	now time.Time,
+	w io.Writer,
+	doFix bool,
+	acquireLock bool,
+) (hadIssue bool, err error) {
 	bulkDeleter := newBulkDeleter(c)
 
 	if doFix && !acquireLock {
@@ -524,7 +544,11 @@ func (c *CassandraIndex) verify(ctx context.Context, now time.Time, w io.Writer,
 
 // verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, doFix bool) (errorCount int, shards *roaring.Bitmap, err error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) verifyMissingShard( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	w io.Writer,
+	doFix bool,
+) (errorCount int, shards *roaring.Bitmap, err error) {
 	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 	if err != nil {
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
@@ -604,7 +628,16 @@ func (c *CassandraIndex) verifyMissingShard(ctx context.Context, w io.Writer, do
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Writer, doFix bool, ids []types.MetricID, bulkDeleter *deleter, allPosting *roaring.Bitmap, allGoodIds *roaring.Bitmap) (err error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) verifyBulk( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	now time.Time,
+	w io.Writer,
+	doFix bool,
+	ids []types.MetricID,
+	bulkDeleter *deleter,
+	allPosting *roaring.Bitmap,
+	allGoodIds *roaring.Bitmap,
+) (err error) {
 	id2Labels, id2expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
@@ -628,7 +661,9 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 
 		_, ok = id2expiration[id]
 		if !ok {
-			return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id, lbls.String())
+			msg := "ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify"
+
+			return fmt.Errorf(msg, id, lbls.String())
 		}
 	}
 
@@ -677,7 +712,9 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 			expiration2, ok := tmp2[id2]
 
 			if !ok && lbls2 != nil {
-				return fmt.Errorf("ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify", id2, lbls2.String())
+				msg := "ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify"
+
+				return fmt.Errorf(msg, id2, lbls2.String())
 			}
 
 			switch {
@@ -749,7 +786,13 @@ func (c *CassandraIndex) verifyBulk(ctx context.Context, now time.Time, w io.Wri
 }
 
 // check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard(ctx context.Context, w io.Writer, doFix bool, shard int32, allGoodIds *roaring.Bitmap) (hadIssue bool, err error) { //nolint:gocognit,gocyclo,cyclop
+func (c *CassandraIndex) verifyShard( //nolint:gocognit,gocyclo,cyclop
+	ctx context.Context,
+	w io.Writer,
+	doFix bool,
+	shard int32,
+	allGoodIds *roaring.Bitmap,
+) (hadIssue bool, err error) {
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
 
@@ -1152,7 +1195,13 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 
 // postings return ids matching give Label name & value
 // If value is the empty string, it match any values (but the label must be set).
-func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name string, value string, useCache bool) (*roaring.Bitmap, error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) postings( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	shards []int32,
+	name string,
+	value string,
+	useCache bool,
+) (*roaring.Bitmap, error) {
 	if name == allPostingLabel {
 		value = allPostingLabel
 	}
@@ -1224,7 +1273,11 @@ func (c *CassandraIndex) postings(ctx context.Context, shards []int32, name stri
 	return result, nil
 }
 
-func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID, now time.Time) ([]labels.Labels, error) {
+func (c *CassandraIndex) lookupLabels(
+	ctx context.Context,
+	ids []types.MetricID,
+	now time.Time,
+) ([]labels.Labels, error) {
 	start := time.Now()
 
 	miss := make([]bool, len(ids))
@@ -1274,7 +1327,12 @@ func (c *CassandraIndex) lookupLabels(ctx context.Context, ids []types.MetricID,
 // one metrics matching matchers.
 // Typical matchers will filter by tenant ID, to get all values for one tenant.
 // It is not safe to use the strings beyond the lifefime of the querier.
-func (c *CassandraIndex) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (c *CassandraIndex) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	if name == "" || strings.Contains(name, "|") {
 		return nil, fmt.Errorf("invalid label name \"%s\"", name)
 	}
@@ -1284,11 +1342,20 @@ func (c *CassandraIndex) LabelValues(ctx context.Context, start, end time.Time, 
 
 // LabelNames returns the unique label names for metrics matching matchers in sorted order.
 // Typical matchers will filter by tenant ID, to get all values for one tenant.
-func (c *CassandraIndex) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+func (c *CassandraIndex) LabelNames(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	return c.labelValues(ctx, start, end, postinglabelName, matchers)
 }
 
-func (c *CassandraIndex) labelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (c *CassandraIndex) labelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	shards, err := c.getTimeShards(ctx, start, end, false)
 	if err != nil {
 		return nil, err
@@ -1382,11 +1449,18 @@ func mergeSorted(left, right []string) (result []string) {
 // It also return the metric TTLs
 // The result list will be the same length as input lists and using the same order.
 // The input may be mutated (the labels list), so reusing it would be avoided.
-func (c *CassandraIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
+func (c *CassandraIndex) LookupIDs(
+	ctx context.Context,
+	requests []types.LookupRequest,
+) ([]types.MetricID, []int64, error) {
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupRequest, now time.Time) ([]types.MetricID, []int64, error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) lookupIDs( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	requests []types.LookupRequest,
+	now time.Time,
+) ([]types.MetricID, []int64, error) {
 	start := time.Now()
 
 	defer func() {
@@ -1527,10 +1601,12 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 
 		wantedEntryExpiration := now.Add(time.Duration(entry.ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
+		jitterDur := time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second //nolint: gosec
+		cassandraExpiration = cassandraExpiration.Add(jitterDur)
 		// The 3*backgroundCheckInterval is to be slightly larger than 2*backgroundCheckInterval used in lookupIDsFromCache.
 		// It ensure that live metrics stay in cache.
-		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration) || entry.idData.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
+		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration) ||
+			entry.idData.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
 
 		if needTTLUpdate {
 			if err := c.refreshExpiration(ctx, entry.id, entry.cassandraEntryExpiration, cassandraExpiration); err != nil {
@@ -1547,7 +1623,11 @@ func (c *CassandraIndex) lookupIDs(ctx context.Context, requests []types.LookupR
 	return ids, ttls, nil
 }
 
-func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, requests []types.LookupRequest) (entries []lookupEntry, labelsToIndices map[string][]int, err error) {
+func (c *CassandraIndex) lookupIDsFromCache(
+	ctx context.Context,
+	now time.Time,
+	requests []types.LookupRequest,
+) (entries []lookupEntry, labelsToIndices map[string][]int, err error) {
 	entries = make([]lookupEntry, len(requests))
 	labelsToIndices = make(map[string][]int)
 	possibleInvalidIDs := make([]uint64, 0)
@@ -1569,7 +1649,9 @@ func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, 
 			// and then refresh entry from Cassandra (ignore the cache).
 			wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
 			cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-			cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
+			cassandraExpiration = cassandraExpiration.Add(
+				time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second, //nolint: gosec
+			)
 
 			if err := c.refreshExpiration(ctx, data.id, data.cassandraEntryExpiration, cassandraExpiration); err != nil {
 				c.lookupIDMutex.Unlock()
@@ -1619,7 +1701,11 @@ func (c *CassandraIndex) lookupIDsFromCache(ctx context.Context, now time.Time, 
 	return entries, labelsToIndices, nil
 }
 
-func (c *CassandraIndex) refreshExpiration(ctx context.Context, id types.MetricID, oldExpiration time.Time, newExpiration time.Time) error {
+func (c *CassandraIndex) refreshExpiration(
+	ctx context.Context,
+	id types.MetricID,
+	oldExpiration, newExpiration time.Time,
+) error {
 	c.metrics.LookupIDRefresh.Inc()
 
 	err := c.store.UpdateID2LabelsExpiration(ctx, id, newExpiration)
@@ -1715,28 +1801,37 @@ type lookupEntry struct {
 // * To avoid race-condition, redo a check that metrics is not yet registered now that lock is acquired
 // * Read the all-metric postings. From there we find a free ID
 // * Update Cassandra tables to store this new metrics. The insertion is done in the following order:
-//   * First an entry is added to the expiration table. This ensure that in case of crash in this process, the ID will eventually be freed.
+//   * First an entry is added to the expiration table. This ensure that in case of crash in this process,
+//     the ID will eventually be freed.
 //   * Then it update:
 //     * the all-metric postings. This effectively reseve the ID.
 //     * the id2labels tables (it give informations needed to cleanup other postings)
-//   * finally insert in labels2id, which is done as last because it's this table that determine that a metrics didn't exists
+//   * finally insert in labels2id, which is done as last because it's this table that determine that
+//     a metrics didn't exists
 //
 // If the above process crash and partially write some value, it still in a good state because:
-// * For the insertion, it's the last entry (in labels2id) that matter. The the creation will be retried when point is retried
-// * For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen), since no data points could be wrote
-//   and empty result are stipped, they won't be in results
-// * For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels... BUT to have the metric ID, client must
-//   first do a succesfull read to get the ID. So this shouldn't happen.
+// * For the insertion, it's the last entry (in labels2id) that matter.
+//   The creation will be retried when point is retried
+// * For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen),
+//   since no data points could be wrote and empty result are stipped, they won't be in results
+// * For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels...
+//   BUT to have the metric ID, client must first do a succesfull read to get the ID. So this shouldn't happen.
 //
-// The expiration tables is used to known which metrics are likely to expire on a give date. They are grouped by day (that is, the tables contains on
-// row per day, each row being the day and the list of metric IDs that may expire on this day).
+// The expiration tables is used to known which metrics are likely to expire on a give date.
+// They are grouped by day (that is, the tables contains on row per day, each row being the day
+// and the list of metric IDs that may expire on this day).
 // A background process will process each past day from this tables and for each metrics:
-// * Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points. It does this check using
-//   a field of the table id2labels which is refreshed.
+// * Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points.
+//   It does this check using a field of the table id2labels which is refreshed.
 // * If expired, delete entry for this metric from the index (the opposite of creation)
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pending []lookupEntry, allowForcingIDAndExpiration bool) ([]lookupEntry, error) { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) createMetrics( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	now time.Time,
+	pending []lookupEntry,
+	allowForcingIDAndExpiration bool,
+) ([]lookupEntry, error) {
 	start := time.Now()
 	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
 
@@ -1789,7 +1884,9 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 
 		wantedEntryExpiration := now.Add(time.Duration(entry.ttl) * time.Second)
 		cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
-		cassandraExpiration = cassandraExpiration.Add(time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second) //nolint: gosec
+		cassandraExpiration = cassandraExpiration.Add(
+			time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second, //nolint: gosec
+		)
 
 		if !pending[i].cassandraEntryExpiration.IsZero() && allowForcingIDAndExpiration {
 			cassandraExpiration = pending[i].cassandraEntryExpiration
@@ -1876,7 +1973,8 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 // updatePostingShards update sharded-posting.
 //
 // It works with the following way:
-// * if updateCache is true, gather all shard impacted and refresh the idInShard cache (avoid re-use issue after metric creation)
+// * if updateCache is true, gather all shard impacted and refresh the idInShard cache
+//   (avoid re-use issue after metric creation)
 // * For each update in a shard, if the ID is already present, skip it
 // * Then update list of existings shards
 // * Add ID to maybe-present posting list (this is used in cleanup)
@@ -1888,7 +1986,11 @@ func (c *CassandraIndex) createMetrics(ctx context.Context, now time.Time, pendi
 //   reads won't get inconsistent result.
 //   It also means that retry of write will fix the issue,
 // * The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
-func (c *CassandraIndex) updatePostingShards(ctx context.Context, pending []lookupEntry, updateCache bool) error { //nolint:gocyclo,cyclop,gocognit
+func (c *CassandraIndex) updatePostingShards( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	pending []lookupEntry,
+	updateCache bool,
+) error {
 	start := time.Now()
 
 	defer func() {
@@ -2068,7 +2170,12 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 	})
 }
 
-func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePresent map[int32]postingUpdateRequest, updates []postingUpdateRequest, precense map[int32]postingUpdateRequest) error { //nolint:gocyclo,cyclop
+func (c *CassandraIndex) applyUpdatePostingShards( //nolint:gocyclo,cyclop
+	ctx context.Context,
+	maybePresent map[int32]postingUpdateRequest,
+	updates []postingUpdateRequest,
+	precense map[int32]postingUpdateRequest,
+) error {
 	newShard := make([]uint64, 0, len(maybePresent))
 
 	for shard := range maybePresent {
@@ -2188,15 +2295,20 @@ func (c *CassandraIndex) applyUpdatePostingShards(ctx context.Context, maybePres
 //
 // There is still two additional special case: when label should be defined (regardless of the value, e.g. name!="") or
 // when the label should NOT be defined (e.g. name="").
-// In those case, it use the ability of our posting table to query for metric ID that has a LabelName regardless of the values.
-// * For label must be defined, it increament the number of Matcher satified if the metric has the label. In the principe it's the
-//   same as if it expanded it to all possible values (e.g. with name!="" it avoid expanding to name="memory" || name="disk" and directly
-//   ask for name=*)
-// * For label must NOT be defined, it query for all metric IDs that has this label, then increament the number of Matcher satified if
-//   currently found metrics are not in the list of metrics having this label.
-//   Note: this means that it must already have found some metrics (and that this filter is applied at the end) but PromQL forbid to only
-//   have label-not-defined matcher, so some other matcher must exists.
-func (c *CassandraIndex) Search(ctx context.Context, queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+// In those case, it use the ability of our posting table to query for metric ID that has a LabelName regardless of
+// the values.
+// * For label must be defined, it increament the number of Matcher satified if the metric has the label.
+//   In principle it's the same as if it expanded it to all possible values (e.g. with name!="" it avoids expanding
+//   to name="memory" || name="disk" and directly ask for name=*)
+// * For label must NOT be defined, it query for all metric IDs that has this label, then increments the number of
+//   Matcher satified if currently found metrics are not in the list of metrics having this label.
+//   Note: this means that it must already have found some metrics (and that this filter is applied at the end)
+//   but PromQL forbid to only have label-not-defined matcher, so some other matcher must exists.
+func (c *CassandraIndex) Search(
+	ctx context.Context,
+	queryStart, queryEnd time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	start := time.Now()
 
 	shards, err := c.getTimeShards(ctx, queryStart, queryEnd, false)
@@ -2368,7 +2480,12 @@ func InternalMaxTTLUpdateDelay() time.Duration {
 // Each element in the list match:
 // * labels[0] is the labels for ids[0].
 // * shards[0] is the list of shards ids[0] is present.
-func (c *CassandraIndex) InternalUpdatePostingShards(ctx context.Context, ids []types.MetricID, labelsList []labels.Labels, shards [][]int32) error {
+func (c *CassandraIndex) InternalUpdatePostingShards(
+	ctx context.Context,
+	ids []types.MetricID,
+	labelsList []labels.Labels,
+	shards [][]int32,
+) error {
 	reqs := make([]lookupEntry, len(ids))
 
 	for i, id := range ids {
@@ -2397,7 +2514,14 @@ func (c *CassandraIndex) InternalUpdatePostingShards(ctx context.Context, ids []
 // points for each shards. This case is mostly useful to pre-create metrics in bulk.
 //
 // The metrics will be added in all shards between start & end.
-func (c *CassandraIndex) InternalCreateMetric(ctx context.Context, start time.Time, end time.Time, metrics []labels.Labels, ids []types.MetricID, expirations []time.Time, skipPostings bool) ([]types.MetricID, error) {
+func (c *CassandraIndex) InternalCreateMetric(
+	ctx context.Context,
+	start, end time.Time,
+	metrics []labels.Labels,
+	ids []types.MetricID,
+	expirations []time.Time,
+	skipPostings bool,
+) ([]types.MetricID, error) {
 	requests := make([]lookupEntry, len(metrics))
 
 	shards, err := c.getTimeShards(ctx, start, end, true)
@@ -2727,7 +2851,10 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 // Run tasks concurrently with at most concurrency task in parralle.
 // The queryGenerator must stop sending to the channel as soon as ctx is terminated.
-func (c *CassandraIndex) concurrentTasks(ctx context.Context, queryGenerator func(ctx context.Context, c chan<- func() error) error) error {
+func (c *CassandraIndex) concurrentTasks(
+	ctx context.Context,
+	queryGenerator func(ctx context.Context, c chan<- func() error) error,
+) error {
 	group, ctx := errgroup.WithContext(ctx)
 	work := make(chan func() error)
 
@@ -2850,7 +2977,12 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 
 // idsForMatcher return metric IDs matching given matchers.
 // It's a wrapper around postingsForMatchers.
-func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (ids []types.MetricID, labelsList []labels.Labels, err error) {
+func (c *CassandraIndex) idsForMatchers(
+	ctx context.Context,
+	shards []int32,
+	matchers []*labels.Matcher,
+	directCheckThreshold int,
+) (ids []types.MetricID, labelsList []labels.Labels, err error) {
 	results, checkMatches, err := c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
 	if err != nil {
 		return nil, nil, err
@@ -2889,7 +3021,12 @@ func (c *CassandraIndex) idsForMatchers(ctx context.Context, shards []int32, mat
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is inspired from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32, matchers []*labels.Matcher, directCheckThreshold int) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) { //nolint:gocognit,gocyclo,cyclop
+func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit,gocyclo,cyclop
+	ctx context.Context,
+	shards []int32,
+	matchers []*labels.Matcher,
+	directCheckThreshold int,
+) (bitmap *roaring.Bitmap, needCheckMatches bool, err error) {
 	labelMustBeSet := make(map[string]bool, len(matchers))
 
 	for _, m := range matchers {
@@ -3023,7 +3160,11 @@ func (c *CassandraIndex) postingsForMatchers(ctx context.Context, shards []int32
 
 // postingsForMatcher return id that match one matcher.
 // This method will not return postings for missing labels.
-func (c *CassandraIndex) postingsForMatcher(ctx context.Context, shards []int32, m *labels.Matcher) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) postingsForMatcher(
+	ctx context.Context,
+	shards []int32,
+	m *labels.Matcher,
+) (*roaring.Bitmap, error) {
 	if m.Type == labels.MatchEqual {
 		return c.postings(ctx, shards, m.Name, m.Value, true)
 	}
@@ -3069,7 +3210,11 @@ func (c *CassandraIndex) postingsForMatcher(ctx context.Context, shards []int32,
 	return it, nil
 }
 
-func (c *CassandraIndex) inversePostingsForMatcher(ctx context.Context, shards []int32, m *labels.Matcher) (*roaring.Bitmap, error) {
+func (c *CassandraIndex) inversePostingsForMatcher(
+	ctx context.Context,
+	shards []int32,
+	m *labels.Matcher,
+) (*roaring.Bitmap, error) {
 	if m.Type == labels.MatchNotEqual && m.Value != "" {
 		inverse, err := m.Inverse()
 		if err != nil {
@@ -3139,7 +3284,7 @@ func ShardForTime(ts int64) int32 {
 	return (int32(ts/3600) / shardSize) * shardSize
 }
 
-func (c *CassandraIndex) getTimeShards(ctx context.Context, start time.Time, end time.Time, returnAll bool) ([]int32, error) {
+func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time, returnAll bool) ([]int32, error) {
 	shardSize := int32(postingShardSize.Hours())
 	startShard := ShardForTime(start.Unix())
 	endShard := ShardForTime(end.Unix())
@@ -3337,7 +3482,13 @@ func InternalDropTables(ctx context.Context, session *gocql.Session) error {
 	return nil
 }
 
-func (s cassandraStore) InsertPostings(ctx context.Context, shard int32, name string, value string, bitset []byte) error {
+func (s cassandraStore) InsertPostings(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+	bitset []byte,
+) error {
 	start := time.Now()
 
 	defer func() {
@@ -3350,7 +3501,12 @@ func (s cassandraStore) InsertPostings(ctx context.Context, shard int32, name st
 	).WithContext(ctx).Exec()
 }
 
-func (s cassandraStore) InsertID2Labels(ctx context.Context, id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
+func (s cassandraStore) InsertID2Labels(
+	ctx context.Context,
+	id types.MetricID,
+	sortedLabels labels.Labels,
+	expiration time.Time,
+) error {
 	start := time.Now()
 
 	defer func() {
@@ -3441,7 +3597,10 @@ func (s cassandraStore) InsertExpiration(ctx context.Context, day time.Time, bit
 	).WithContext(ctx).Exec()
 }
 
-func (s cassandraStore) SelectLabelsList2ID(ctx context.Context, sortedLabelsListString []string) (map[string]types.MetricID, error) {
+func (s cassandraStore) SelectLabelsList2ID(
+	ctx context.Context,
+	sortedLabelsListString []string,
+) (map[string]types.MetricID, error) {
 	start := time.Now()
 
 	defer func() {
@@ -3469,7 +3628,10 @@ func (s cassandraStore) SelectLabelsList2ID(ctx context.Context, sortedLabelsLis
 	return result, err
 }
 
-func (s cassandraStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
+func (s cassandraStore) SelectIDS2LabelsAndExpiration(
+	ctx context.Context,
+	ids []types.MetricID,
+) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {
@@ -3551,7 +3713,12 @@ func (s cassandraStore) SelectPostingByName(ctx context.Context, shard int32, na
 	}
 }
 
-func (s cassandraStore) SelectPostingByNameValue(ctx context.Context, shard int32, name string, value string) (buffer []byte, err error) {
+func (s cassandraStore) SelectPostingByNameValue(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+) (buffer []byte, err error) {
 	start := time.Now()
 
 	defer func() {

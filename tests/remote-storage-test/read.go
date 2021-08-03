@@ -481,7 +481,8 @@ func sortTimeseries(v []*prompb.TimeSeries) []*prompb.TimeSeries {
 func equal(name string, got, want prompb.ReadResponse) (err error) {
 	for i, gotResult := range got.Results {
 		if i >= len(want.Results) {
-			err = fmt.Errorf("%s: got more result than expected. Extra result labels of 1st timeseries: %v", name, gotResult.Timeseries[0].Labels)
+			msg := "%s: got more result than expected. Extra result labels of 1st timeseries: %v"
+			err = fmt.Errorf(msg, name, gotResult.Timeseries[0].Labels)
 
 			log.Println(err)
 
@@ -492,7 +493,8 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 
 		for j, gotTS := range sortedTimeseries {
 			if j >= len(want.Results[i].Timeseries) {
-				err = fmt.Errorf("%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v", name, gotTS.Labels)
+				msg := "%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v"
+				err = fmt.Errorf(msg, name, gotTS.Labels)
 
 				log.Println(err)
 
@@ -515,7 +517,8 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 		}
 
 		if len(want.Results[i].Timeseries) > len(gotResult.Timeseries) {
-			err = fmt.Errorf("%s: want %d more TS in Results[%d]", name, len(want.Results[i].Timeseries)-len(gotResult.Timeseries), i)
+			lenDiff := len(want.Results[i].Timeseries) - len(gotResult.Timeseries)
+			err = fmt.Errorf("%s: want %d more TS in Results[%d]", name, lenDiff, i)
 
 			log.Println(err)
 		}

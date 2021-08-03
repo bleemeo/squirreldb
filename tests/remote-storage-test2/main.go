@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-//nolint: gochecknoglobals
+//nolint:lll,gochecknoglobals
 var (
 	remoteWrite       = flag.String("write-urls", "", "URL of remote write (if both url are unset, start a built-in SquirrelDB and use it)")
 	remoteRead        = flag.String("read-urls", "", "URL of read write (if both url are unset, start a built-in SquirrelDB and use it)")

@@ -454,7 +454,9 @@ func (s *SquirrelDB) States() (types.State, error) {
 
 			s.states = states
 		case backendDummy:
-			logger.Println("Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)")
+			logger.Println(
+				"Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
+			)
 
 			s.states = &dummy.States{}
 		default:

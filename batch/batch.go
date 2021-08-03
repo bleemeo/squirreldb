@@ -64,7 +64,8 @@ var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 // TemporaryStore is an interface to the temporary points associated to metrics.
 type TemporaryStore interface {
-	// Append add points to the in-memory store and return the number of points in the store (after append) for each metrics
+	// Append add points to the in-memory store and return the number of points in the store (after append)
+	// for each metrics.
 	Append(ctx context.Context, points []types.MetricData) ([]int, error)
 
 	// GetSetPointsAndOffset do an atomic read-and-set on the metric points (atomic per-metric).
@@ -116,7 +117,13 @@ type Batch struct {
 }
 
 // New creates a new Batch object.
-func New(reg prometheus.Registerer, batchSize time.Duration, memoryStore TemporaryStore, reader types.MetricReader, writer types.MetricWriter) *Batch {
+func New(
+	reg prometheus.Registerer,
+	batchSize time.Duration,
+	memoryStore TemporaryStore,
+	reader types.MetricReader,
+	writer types.MetricWriter,
+) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
 		states:      make(map[types.MetricID]stateData),
@@ -138,7 +145,8 @@ type readIter struct {
 	offset  int
 }
 
-// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage according to the request.
+// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage
+// according to the request.
 func (b *Batch) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	return &readIter{
 		b:       b,
@@ -338,7 +346,13 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
-func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.MetricData, setMetrics []types.MetricData, offsets []int, deep int) ([]bool, error) { //nolint:gocyclo,cyclop,gocognit
+func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	previousMetrics []types.MetricData,
+	setMetrics []types.MetricData,
+	offsets []int,
+	deep int,
+) ([]bool, error) {
 	var currentMetrics []types.MetricData
 
 	err := retry.Print(func() error {
@@ -473,10 +487,16 @@ func (b *Batch) setPointsAndOffset(ctx context.Context, previousMetrics []types.
 // It does the following:
 // * Read points & write offset from memoryStore (excepted for new metric for which we just become owner)
 // * Send all points after write offset to TSDB (excepted for new metrics, we write nothing)
-// * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points that come from states)
+// * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points
+//   that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore).
-func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, shutdown bool) error { //nolint:gocyclo,cyclop
+func (b *Batch) flush( //nolint:gocyclo,cyclop
+	ctx context.Context,
+	ids []types.MetricID,
+	now time.Time,
+	shutdown bool,
+) error {
 	states := make([]stateData, len(ids))
 
 	b.mutex.Lock()
@@ -513,7 +533,8 @@ func (b *Batch) flush(ctx context.Context, ids []types.MetricID, now time.Time, 
 		offset := offsets[i]
 
 		if offset > len(storeData.Points) {
-			logger.Printf("Batch.flush(): unexpected offset == %d is too big for metric ID %d (only %d points)", offset, data.ID, len(data.Points))
+			msg := "Batch.flush(): unexpected offset == %d is too big for metric ID %d (only %d points)"
+			logger.Printf(msg, offset, data.ID, len(data.Points))
 			offset = len(storeData.Points)
 		}
 
@@ -736,7 +757,9 @@ func (i *readIter) tryNext(id types.MetricID) bool {
 		Function:      i.request.Function,
 	}
 
-	temporaryMetrics, err := i.b.readTemporary(i.ctx, []types.MetricID{id}, i.request.FromTimestamp-memoryOverreadMs, i.request.ToTimestamp)
+	temporaryMetrics, err := i.b.readTemporary(
+		i.ctx, []types.MetricID{id}, i.request.FromTimestamp-memoryOverreadMs, i.request.ToTimestamp,
+	)
 	if err != nil {
 		i.err = err
 
@@ -794,7 +817,11 @@ func (i *readIter) tryNext(id types.MetricID) bool {
 }
 
 // Returns the deduplicated and sorted points read from the temporary storage according to the request.
-func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTimestamp int64, toTimestamp int64) ([]types.MetricData, error) {
+func (b *Batch) readTemporary(
+	ctx context.Context,
+	ids []types.MetricID,
+	fromTimestamp, toTimestamp int64,
+) ([]types.MetricData, error) {
 	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("store read fail: %w", err)
@@ -840,7 +867,11 @@ func (b *Batch) readTemporary(ctx context.Context, ids []types.MetricID, fromTim
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached.
 // If this is the case, the state is added to the list of states to flush.
-func (b *Batch) write(ctx context.Context, metrics []types.MetricData, now time.Time) error { //nolint:gocyclo,cyclop,gocognit
+func (b *Batch) write( //nolint:gocyclo,cyclop,gocognit
+	ctx context.Context,
+	metrics []types.MetricData,
+	now time.Time,
+) error {
 	start := time.Now()
 
 	defer func() {

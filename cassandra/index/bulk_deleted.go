@@ -84,7 +84,8 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 //
 // Deletion is performed in reverse order of the creation of metrics:
 // * First we delete from labels2id (this cause any new write to create a new metrics)
-// * drop id from every sharded postings (TODO: during those deletes, Search() may wrongly return the metric ID in cause of negative search.)
+// * drop id from every sharded postings (TODO: during those deletes, Search() may wrongly
+//   return the metric ID in cause of negative search.)
 // * drop the id2labels (at this points, Search() can elimitate wrong metric ID)
 // * the remote the id from all postings, making the ID free
 //

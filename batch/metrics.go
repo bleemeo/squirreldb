@@ -19,6 +19,7 @@ type metrics struct {
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
+	//nolint:lll
 	return &metrics{
 		RequestsPoints: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Namespace: "squirreldb",

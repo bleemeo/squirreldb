@@ -71,7 +71,14 @@ type CassandraTSDB struct {
 }
 
 // New created a new CassandraTSDB object.
-func New(reg prometheus.Registerer, session *gocql.Session, options Options, index types.Index, lockFactory lockFactory, state types.State) (*CassandraTSDB, error) {
+func New(
+	reg prometheus.Registerer,
+	session *gocql.Session,
+	options Options,
+	index types.Index,
+	lockFactory lockFactory,
+	state types.State,
+) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
 
