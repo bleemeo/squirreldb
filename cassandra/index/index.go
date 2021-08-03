@@ -702,7 +702,7 @@ func (c *CassandraIndex) verifyBulk( //nolint:gocyclo,cyclop,gocognit
 			continue
 		}
 
-		if id != id2 {
+		if id != id2 { //nolint:nestif
 			tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
 			if err != nil {
 				return fmt.Errorf("get labels from store: %w", err)
@@ -1000,7 +1000,7 @@ func (c *CassandraIndex) verifyShard( //nolint:gocognit,gocyclo,cyclop
 			}
 
 			wanted := wantedPostings[lbl]
-			if wanted == nil {
+			if wanted == nil { //nolint:nestif
 				hadIssue = true
 
 				fmt.Fprintf(
@@ -1533,7 +1533,7 @@ func (c *CassandraIndex) lookupIDs( //nolint:gocyclo,cyclop,gocognit
 
 	c.metrics.LookupIDNew.Add(float64(notFoundCount))
 
-	if notFoundCount > 0 {
+	if notFoundCount > 0 { //nolint:nestif
 		indicies := make([]int, 0, len(labelsToIndices))
 		pending := make([]lookupEntry, len(labelsToIndices))
 
@@ -3057,7 +3057,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit,gocyclo,cyclop
 			break
 		}
 
-		if labelMustBeSet[m.Name] {
+		if labelMustBeSet[m.Name] { //nolint:nestif
 			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 
@@ -3106,7 +3106,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit,gocyclo,cyclop
 			break
 		}
 
-		if labelMustBeSet[m.Name] {
+		if labelMustBeSet[m.Name] { //nolint:nestif
 			matchesEmpty := m.Matches("")
 			isNot := m.Type == labels.MatchNotEqual || m.Type == labels.MatchNotRegexp
 

@@ -410,7 +410,7 @@ func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
 			}
 		}
 
-		if len(newPoints) > 0 {
+		if len(newPoints) > 0 { //nolint:nestif
 			countNewPoint += len(newPoints)
 
 			if needOffsetFix && deep < 3 {

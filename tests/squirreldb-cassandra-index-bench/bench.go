@@ -114,7 +114,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 	metricsBefore := len(ids)
 	shardCount := *shardEnd - *shardStart + 1
 
-	if !*skipWrite {
+	if !*skipWrite { //nolint:nestif
 		var wg sync.WaitGroup
 
 		workChannel := make(chan []types.LookupRequest)

@@ -66,7 +66,7 @@ func run(ctx context.Context) error { //nolint:gocyclo,cyclop,gocognit
 	readURLs := strings.Split(*remoteRead, ",")
 	writeURLs := strings.Split(*remoteWrite, ",")
 
-	if readURLs[0] == "" && writeURLs[0] == "" {
+	if readURLs[0] == "" && writeURLs[0] == "" { //nolint:nestif
 		readURLs = nil
 		writeURLs = nil
 
