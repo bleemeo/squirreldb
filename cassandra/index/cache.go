@@ -155,6 +155,7 @@ func (c *postingsCache) Invalidate(entries []postingsCacheKey) int {
 // Set add an entry. Return the cache size.
 func (c *postingsCache) Set(shard int32, name string, value string, bitmap *roaring.Bitmap) int {
 	now := time.Now()
+
 	return c.set(now, shard, name, value, bitmap)
 }
 

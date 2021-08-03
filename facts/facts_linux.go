@@ -60,6 +60,7 @@ func decodeOsRelease(data string) (map[string]string, error) {
 
 func bytesToString(buffer []byte) string {
 	n := bytes.IndexByte(buffer, 0)
+
 	return string(buffer[:n])
 }
 

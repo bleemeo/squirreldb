@@ -1359,6 +1359,7 @@ func mergeSorted(left, right []string) (result []string) {
 			right = right[1:]
 		default:
 			right = right[1:]
+
 			continue
 		}
 		i++
@@ -2543,6 +2544,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 		err := c.options.States.Write(expireMetricStateName, lastProcessedDay.Format(time.RFC3339))
 		if err != nil {
 			logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
+
 			return false
 		}
 	}
@@ -2558,6 +2560,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 	bitmap, err := c.cassandraGetExpirationList(ctx, candidateDay)
 	if err != nil {
 		logger.Printf("Waring: unable to get list of metrics to check for expiration: %v", err)
+
 		return false
 	}
 
@@ -2585,12 +2588,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 		if err := c.cassandraCheckExpire(ctx, results, now); err != nil {
 			logger.Printf("Waring: unable to perform expiration check of metrics: %v", err)
+
 			return false
 		}
 
 		_, err = bitmap.Remove(results...)
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+
 			return false
 		}
 
@@ -2603,12 +2608,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 		_, err = bitmap.WriteTo(&buffer)
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+
 			return false
 		}
 
 		err = c.store.InsertExpiration(ctx, candidateDay, buffer.Bytes())
 		if err != nil {
 			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+
 			return false
 		}
 	}
@@ -2616,12 +2623,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 	err = c.store.DeleteExpiration(ctx, candidateDay)
 	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 		logger.Printf("Waring: unable to remove processed list of metrics to check for expiration: %v", err)
+
 		return false
 	}
 
 	err = c.options.States.Write(expireMetricStateName, candidateDay.Format(time.RFC3339))
 	if err != nil {
 		logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
+
 		return false
 	}
 
@@ -2703,6 +2712,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 				return ctx.Err()
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -2725,6 +2735,7 @@ func (c *CassandraIndex) concurrentTasks(ctx context.Context, queryGenerator fun
 
 	group.Go(func() error {
 		defer close(work)
+
 		return queryGenerator(ctx, work)
 	})
 
@@ -2739,6 +2750,7 @@ func (c *CassandraIndex) concurrentTasks(ctx context.Context, queryGenerator fun
 					return ctx.Err()
 				}
 			}
+
 			return nil
 		})
 	}
@@ -3125,6 +3137,7 @@ func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day tim
 // The shard number should only be useful for debugging or InternalUpdatePostingShards.
 func ShardForTime(ts int64) int32 {
 	shardSize := int32(postingShardSize.Hours())
+
 	return (int32(ts/3600) / shardSize) * shardSize
 }
 
@@ -3173,6 +3186,7 @@ func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
 		if label.Name == key {
 			*labels = append((*labels)[:i], (*labels)[i+1:]...)
+
 			return label.Value, true
 		}
 	}
@@ -3200,6 +3214,7 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 
 		if err != nil {
 			logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+
 			return 0
 		}
 	}

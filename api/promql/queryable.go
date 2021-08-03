@@ -121,11 +121,13 @@ func (s store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 
 func (s store) PointsRead() float64 {
 	v := atomic.LoadUint64(&s.Reader.returnedPoints)
+
 	return float64(v)
 }
 
 func (s store) SeriesReturned() float64 {
 	v := atomic.LoadUint32(&s.Index.returnedSeries)
+
 	return float64(v)
 }
 

@@ -198,6 +198,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 		select {
 		case err := <-runTerminated:
 			cancel()
+
 			return err
 		case <-signalChan:
 			if firstStop {
