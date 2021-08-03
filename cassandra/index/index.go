@@ -2017,9 +2017,8 @@ func (c *CassandraIndex) invalidatePostingsListenner(message []byte) {
 	var keys []postingsCacheKey
 
 	dec := gob.NewDecoder(bytes.NewReader(message))
-	err := dec.Decode(&keys)
 
-	if err != nil {
+	if err := dec.Decode(&keys); err != nil {
 		logger.Printf("unable to deserialize new metrics message. Search cache may be wrong: %v", err)
 	} else {
 		size := c.postingsCache.Invalidate(keys)
@@ -2030,9 +2029,8 @@ func (c *CassandraIndex) invalidatePostingsListenner(message []byte) {
 func (c *CassandraIndex) invalidatePostings(ctx context.Context, entries []postingsCacheKey) {
 	buffer := bytes.NewBuffer(nil)
 	enc := gob.NewEncoder(buffer)
-	err := enc.Encode(entries)
 
-	if err != nil {
+	if err := enc.Encode(entries); err != nil {
 		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
 	} else {
 		err := c.options.Cluster.Publish(ctx, clusterChannelPostingInvalidate, buffer.Bytes())

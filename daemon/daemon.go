@@ -161,8 +161,7 @@ func (s *SquirrelDB) Init() error {
 }
 
 func (s *SquirrelDB) Run(ctx context.Context) error {
-	err := s.Start(ctx)
-	if err != nil {
+	if err := s.Start(ctx); err != nil {
 		return err
 	}
 

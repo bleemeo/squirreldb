@@ -307,7 +307,7 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
-	res := qry.Exec(ctx)
+	res := qry.Exec(ctx) //nolint:ifshort // false positive
 	if res.Err != nil {
 		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
 	}
@@ -377,7 +377,7 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
-	res := qry.Exec(ctx)
+	res := qry.Exec(ctx) //nolint:ifshort // false positive
 	if res.Err != nil {
 		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
 	}

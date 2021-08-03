@@ -82,8 +82,7 @@ func platformFacts() map[string]string {
 
 	var utsName unix.Utsname
 
-	err := unix.Uname(&utsName)
-	if err == nil {
+	if err := unix.Uname(&utsName); err == nil {
 		l := strings.SplitN(bytesToString(utsName.Release[:]), "-", 2)
 		facts["kernel_version"] = l[0]
 	}
