@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-//nolint: gochecknoglobals
+//nolint:lll,gochecknoglobals
 var (
 	remoteWrite       = flag.String("write-urls", "", "URL of remote write (if both url are unset, start a built-in SquirrelDB and use it)")
 	remoteRead        = flag.String("read-urls", "", "URL of read write (if both url are unset, start a built-in SquirrelDB and use it)")
@@ -57,7 +57,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error { // nolint: gocognit
+func run(ctx context.Context) error { //nolint:gocyclo,cyclop,gocognit
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func run(ctx context.Context) error { // nolint: gocognit
 	readURLs := strings.Split(*remoteRead, ",")
 	writeURLs := strings.Split(*remoteWrite, ",")
 
-	if readURLs[0] == "" && writeURLs[0] == "" {
+	if readURLs[0] == "" && writeURLs[0] == "" { //nolint:nestif
 		readURLs = nil
 		writeURLs = nil
 

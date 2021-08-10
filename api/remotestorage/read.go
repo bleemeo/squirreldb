@@ -102,7 +102,12 @@ func (r *readMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 }
 
 // Returns a MetricRequest generated from a Query.
-func requestFromPromQuery(ctx context.Context, promQuery *prompb.Query, index types.Index, id2labels map[types.MetricID]labels.Labels) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
+func requestFromPromQuery(
+	ctx context.Context,
+	promQuery *prompb.Query,
+	index types.Index,
+	id2labels map[types.MetricID]labels.Labels,
+) (map[types.MetricID]labels.Labels, types.MetricRequest, error) {
 	matchers, err := fromLabelMatchers(promQuery.Matchers)
 	if err != nil {
 		return nil, types.MetricRequest{}, fmt.Errorf("read matchers failed: %w", err)
@@ -143,7 +148,11 @@ func requestFromPromQuery(ctx context.Context, promQuery *prompb.Query, index ty
 }
 
 // Returns a MetricRequest list generated from a ReadRequest.
-func requestsFromPromReadRequest(ctx context.Context, promReadRequest *prompb.ReadRequest, index types.Index) ([]types.MetricRequest, map[types.MetricID]labels.Labels, error) {
+func requestsFromPromReadRequest(
+	ctx context.Context,
+	promReadRequest *prompb.ReadRequest,
+	index types.Index,
+) ([]types.MetricRequest, map[types.MetricID]labels.Labels, error) {
 	if len(promReadRequest.Queries) == 0 {
 		return nil, nil, nil
 	}
@@ -189,7 +198,11 @@ func promSamplesFromPoints(points []types.MetricPoint) []prompb.Sample {
 }
 
 // Returns a pointer of a TimeSeries generated from a ID and a MetricData.
-func promSeriesFromMetric(id types.MetricID, data types.MetricData, id2labels map[types.MetricID]labels.Labels) (*prompb.TimeSeries, error) {
+func promSeriesFromMetric(
+	id types.MetricID,
+	data types.MetricData,
+	id2labels map[types.MetricID]labels.Labels,
+) (*prompb.TimeSeries, error) {
 	labels, ok := id2labels[id]
 	if !ok {
 		return nil, fmt.Errorf("metric with ID %d not found", id)
@@ -206,7 +219,11 @@ func promSeriesFromMetric(id types.MetricID, data types.MetricData, id2labels ma
 }
 
 // Returns a TimeSeries pointer list generated from a metric list.
-func promTimeseriesFromMetrics(metrics types.MetricDataSet, id2labels map[types.MetricID]labels.Labels, sizeHint int) ([]*prompb.TimeSeries, int, error) {
+func promTimeseriesFromMetrics(
+	metrics types.MetricDataSet,
+	id2labels map[types.MetricID]labels.Labels,
+	sizeHint int,
+) ([]*prompb.TimeSeries, int, error) {
 	totalPoints := 0
 
 	promTimeseries := make([]*prompb.TimeSeries, 0, sizeHint)

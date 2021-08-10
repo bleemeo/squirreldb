@@ -98,7 +98,8 @@ func NewIndex(metrics []types.MetricLabel) *Index {
 	return idx
 }
 
-// AllIDs does not store IDs in any persistent store. So this is lost after every restart. It may even not store them at all!
+// AllIDs does not store IDs in any persistent store.
+// So this is lost after every restart. It may even not store them at all!
 func (idx *Index) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
 	return nil, ctx.Err()
 }
@@ -171,7 +172,12 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 }
 
 // Search only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) Search(ctx context.Context, queryStart time.Time, queryEnd time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (idx *Index) Search(
+	ctx context.Context,
+	queryStart time.Time,
+	queryEnd time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	ids := make([]types.MetricID, 0)
 
 	idx.mutex.Lock()
@@ -207,7 +213,12 @@ outer:
 }
 
 // LabelValues only works when StoreMetricIDInMemory is enabled.
-func (idx *Index) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx *Index) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	if name == "" || strings.Contains(name, "|") {
 		return nil, fmt.Errorf("invalid label name \"%s\"", name)
 	}

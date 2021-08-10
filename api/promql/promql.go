@@ -264,7 +264,9 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 	// For safety, limit the number of returned points per timeseries.
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if end.Sub(start)/step > 11000 {
-		err := errors.New("exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")
+		err := errors.New(
+			"exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)",
+		)
 
 		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
@@ -307,7 +309,7 @@ func (p *PromQL) queryRange(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
-	res := qry.Exec(ctx)
+	res := qry.Exec(ctx) //nolint:ifshort // false positive
 	if res.Err != nil {
 		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
 	}
@@ -377,7 +379,7 @@ func (p *PromQL) query(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
-	res := qry.Exec(ctx)
+	res := qry.Exec(ctx) //nolint:ifshort // false positive
 	if res.Err != nil {
 		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
 	}

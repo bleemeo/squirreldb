@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
-//nolint: gochecknoglobals
+//nolint:lll,gochecknoglobals
 var (
 	seed            = flag.Int64("seed", 42, "Seed used in random generator")
 	runDuration     = flag.Duration("run-time", 10*time.Second, "Duration of the bench")
@@ -147,9 +147,21 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	log.Printf("Worked %.2f %% of time (%v)", globalResult.WorkTotalTime.Seconds()/duration.Seconds()*100, globalResult.WorkTotalTime)
-	log.Printf("In %v acquired %d locks + failed %d + timeout %d", duration, globalResult.LockAcquired, globalResult.LockFail, globalResult.LockTimeOut)
-	log.Printf("This result in %.2f lock acquired/s and %.2f lock fail/s (+ %.2f timeout/s)", float64(globalResult.LockAcquired)/duration.Seconds(), float64(globalResult.LockFail)/duration.Seconds(), float64(globalResult.LockTimeOut)/duration.Seconds())
+	workPercent := globalResult.WorkTotalTime.Seconds() / duration.Seconds() * 100
+	log.Printf("Worked %.2f %% of time (%v)", workPercent, globalResult.WorkTotalTime)
+
+	log.Printf("In %v acquired %d locks + failed %d + timeout %d",
+		duration,
+		globalResult.LockAcquired,
+		globalResult.LockFail,
+		globalResult.LockTimeOut,
+	)
+
+	log.Printf("This result in %.2f lock acquired/s and %.2f lock fail/s (+ %.2f timeout/s)",
+		float64(globalResult.LockAcquired)/duration.Seconds(),
+		float64(globalResult.LockFail)/duration.Seconds(),
+		float64(globalResult.LockTimeOut)/duration.Seconds(),
+	)
 
 	if globalResult.LockFail > 0 {
 		log.Printf(
@@ -180,7 +192,16 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func worker(ctx context.Context, p int, t int, workerSeed int64, jobRunning *int32, lockFactory daemon.LockFactory, subLockName string, lock types.TryLocker) result {
+func worker(
+	ctx context.Context,
+	p int,
+	t int,
+	workerSeed int64,
+	jobRunning *int32,
+	lockFactory daemon.LockFactory,
+	subLockName string,
+	lock types.TryLocker,
+) result {
 	rnd := rand.New(rand.NewSource(workerSeed)) //nolint: gosec
 	r := result{}
 

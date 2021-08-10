@@ -34,7 +34,8 @@ func run(ctx context.Context) error {
 
 	replication := cfg.Int("cassandra.replication_factor")
 
-	log.Printf("Using Cassandra at %v with RF=%d. Redis at %v", cfg.Strings("cassandra.addresses"), replication, cfg.Strings("redis.addresses"))
+	msg := "Using Cassandra at %v with RF=%d. Redis at %v"
+	log.Printf(msg, cfg.Strings("cassandra.addresses"), replication, cfg.Strings("redis.addresses"))
 
 	firstLoop := true
 

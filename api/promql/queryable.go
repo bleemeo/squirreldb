@@ -121,17 +121,21 @@ func (s store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 
 func (s store) PointsRead() float64 {
 	v := atomic.LoadUint64(&s.Reader.returnedPoints)
+
 	return float64(v)
 }
 
 func (s store) SeriesReturned() float64 {
 	v := atomic.LoadUint32(&s.Index.returnedSeries)
+
 	return float64(v)
 }
 
 // Select returns a set of series that matches the given label matchers.
-// Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
-// It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
+// Caller can specify if it requires returned series to be sorted.
+// Prefer not requiring sorting for better performance.
+// It allows passing hints that can help in optimising select,
+// but it's up to implementation how this is used if used at all.
 func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)

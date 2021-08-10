@@ -161,8 +161,7 @@ func (s *SquirrelDB) Init() error {
 }
 
 func (s *SquirrelDB) Run(ctx context.Context) error {
-	err := s.Start(ctx)
-	if err != nil {
+	if err := s.Start(ctx); err != nil {
 		return err
 	}
 
@@ -198,6 +197,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 		select {
 		case err := <-runTerminated:
 			cancel()
+
 			return err
 		case <-signalChan:
 			if firstStop {
@@ -454,7 +454,9 @@ func (s *SquirrelDB) States() (types.State, error) {
 
 			s.states = states
 		case backendDummy:
-			logger.Println("Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)")
+			logger.Println(
+				"Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
+			)
 
 			s.states = &dummy.States{}
 		default:
@@ -585,7 +587,7 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 
 // Index return an Index. If started is true the index is started.
 func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
-	if s.index == nil {
+	if s.index == nil { //nolint:nestif
 		switch s.Config.String("internal.index") {
 		case backendCassandra:
 			session, err := s.CassandraSession()
@@ -646,7 +648,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 
 // TSDB return the metric persistent store. If started is true the tsdb is started.
 func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (MetricReadWriter, error) {
-	if s.persistentStore == nil {
+	if s.persistentStore == nil { //nolint:nestif
 		switch s.Config.String("internal.tsdb") {
 		case backendCassandra:
 			session, err := s.CassandraSession()
@@ -707,48 +709,50 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 }
 
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {
-	if s.Config.Bool("telemetry.enabled") {
-		var clusterID string
-
-		lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
-		if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			return errors.New("newMetricLock is not acquired")
-		}
-
-		state, _ := s.States()
-		stateBool, err := state.Read("cluster_id", &clusterID)
-
-		if err != nil || !stateBool {
-			clusterID = uuid.New().String()
-
-			err := s.states.Write("cluster_id", clusterID)
-			if err != nil {
-				logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
-			}
-		}
-
-		defer lock.Unlock()
-
-		addFacts := map[string]string{
-			"installation_format": s.Config.String("internal.installation.format"),
-			"cluster_id":          clusterID,
-			"version":             Version,
-		}
-
-		runOption := map[string]string{
-			"filepath": s.Config.String("telemetry.id.path"),
-			"url":      s.Config.String("telemetry.address"),
-		}
-
-		rand.Seed(time.Now().UnixNano())
-
-		tlm := telemetry.New(addFacts, runOption)
-		tlm.Start(ctx)
+	if !s.Config.Bool("telemetry.enabled") {
+		return nil
 	}
+
+	var clusterID string
+
+	lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
+	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		return errors.New("newMetricLock is not acquired")
+	}
+
+	state, _ := s.States()
+	stateBool, err := state.Read("cluster_id", &clusterID)
+
+	if err != nil || !stateBool {
+		clusterID = uuid.New().String()
+
+		err := s.states.Write("cluster_id", clusterID)
+		if err != nil {
+			logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+		}
+	}
+
+	defer lock.Unlock()
+
+	addFacts := map[string]string{
+		"installation_format": s.Config.String("internal.installation.format"),
+		"cluster_id":          clusterID,
+		"version":             Version,
+	}
+
+	runOption := map[string]string{
+		"filepath": s.Config.String("telemetry.id.path"),
+		"url":      s.Config.String("telemetry.address"),
+	}
+
+	rand.Seed(time.Now().UnixNano())
+
+	tlm := telemetry.New(addFacts, runOption)
+	tlm.Start(ctx)
 
 	return nil
 }

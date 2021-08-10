@@ -204,7 +204,11 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 }
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.MetricData, offsets []int) ([]types.MetricData, error) {
+func (r *Redis) GetSetPointsAndOffset( //nolint:gocyclo,cyclop
+	ctx context.Context,
+	points []types.MetricData,
+	offsets []int,
+) ([]types.MetricData, error) {
 	start := time.Now()
 
 	defer func() {
@@ -216,7 +220,9 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 	}
 
 	if len(points) != len(offsets) {
-		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
+		msg := "GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d"
+
+		return nil, fmt.Errorf(msg, len(points), len(offsets))
 	}
 
 	pipe, err := r.client.Pipeline(ctx)
@@ -290,7 +296,10 @@ func (r *Redis) GetSetPointsAndOffset(ctx context.Context, points []types.Metric
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) {
+func (r *Redis) ReadPointsAndOffset( //nolint:gocyclo,cyclop
+	ctx context.Context,
+	ids []types.MetricID,
+) ([]types.MetricData, []int, error) {
 	start := time.Now()
 
 	defer func() {
@@ -415,7 +424,10 @@ func (r *Redis) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
-func (r *Redis) GetSetFlushDeadline(ctx context.Context, deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
+func (r *Redis) GetSetFlushDeadline(
+	ctx context.Context,
+	deadlines map[types.MetricID]time.Time,
+) (map[types.MetricID]time.Time, error) {
 	start := time.Now()
 
 	defer func() {

@@ -102,6 +102,7 @@ func (t Telemetry) postInformation(ctx context.Context) {
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
 	if err != nil {
 		logger.Printf("failed when we post on telemetry: %v", err)
+
 		return
 	}
 

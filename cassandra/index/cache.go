@@ -72,7 +72,12 @@ func (c *labelsLookupCache) MGet(now time.Time, ids []types.MetricID) []labels.L
 }
 
 // Set add entry to the cache. Return the current cache size.
-func (c *labelsLookupCache) Set(now time.Time, id types.MetricID, value labels.Labels, cassandraExpiration time.Time) int {
+func (c *labelsLookupCache) Set(
+	now time.Time,
+	id types.MetricID,
+	value labels.Labels,
+	cassandraExpiration time.Time,
+) int {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -155,6 +160,7 @@ func (c *postingsCache) Invalidate(entries []postingsCacheKey) int {
 // Set add an entry. Return the cache size.
 func (c *postingsCache) Set(shard int32, name string, value string, bitmap *roaring.Bitmap) int {
 	now := time.Now()
+
 	return c.set(now, shard, name, value, bitmap)
 }
 
