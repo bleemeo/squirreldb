@@ -200,7 +200,10 @@ func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (ma
 	return results, ctx.Err()
 }
 
-func (s *mockStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
+func (s *mockStore) SelectIDS2LabelsAndExpiration(
+	ctx context.Context,
+	ids []types.MetricID,
+) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -319,7 +322,12 @@ func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name s
 	}
 }
 
-func (s *mockStore) SelectPostingByNameValue(ctx context.Context, shard int32, name string, value string) ([]byte, error) {
+func (s *mockStore) SelectPostingByNameValue(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -405,7 +413,12 @@ func (s *mockStore) InsertPostings(ctx context.Context, shard int32, name string
 	return ctx.Err()
 }
 
-func (s *mockStore) InsertID2Labels(ctx context.Context, id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
+func (s *mockStore) InsertID2Labels(
+	ctx context.Context,
+	id types.MetricID,
+	sortedLabels labels.Labels,
+	expiration time.Time,
+) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -571,7 +584,10 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	return results
 }
 
-func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.MetricID]map[string]string) *CassandraIndex {
+func mockIndexFromMetrics(
+	start, end time.Time,
+	metrics map[types.MetricID]map[string]string,
+) *CassandraIndex {
 	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
@@ -1822,6 +1838,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1830,6 +1847,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -1843,6 +1861,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1851,6 +1870,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -1869,6 +1889,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1877,6 +1898,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3336,6 +3358,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3344,6 +3367,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3357,6 +3381,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3365,6 +3390,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3378,6 +3404,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3386,6 +3413,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3399,6 +3427,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3407,6 +3436,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3425,6 +3455,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3433,6 +3464,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3567,7 +3599,9 @@ func Test_PilosaSerialization(t *testing.T) {
 		fmt.Println(buffer.Bytes())
 	*/
 
-	gotBinary := []byte{60, 48, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 84, 141, 24, 0, 0, 0, 2, 0, 1, 0, 203, 122, 206, 122, 87, 141}
+	gotBinary := []byte{
+		60, 48, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 84, 141, 24, 0, 0, 0, 2, 0, 1, 0, 203, 122, 206, 122, 87, 141,
+	}
 	got := roaring.NewBTreeBitmap()
 
 	err := got.UnmarshalBinary(gotBinary)
@@ -4747,6 +4781,7 @@ func Test_expiration(t *testing.T) {
 	ids, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList[0:1], t2), t2)
 	if err != nil {
 		t.Error(err)
+
 		return // can't continue, lock make be hold
 	}
 
@@ -5241,7 +5276,9 @@ func Test_FilteredLabelValues(t *testing.T) {
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+			want: []string{
+				"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint",
+			},
 		},
 		{
 			name:  "names-account3-t1",
@@ -5256,7 +5293,10 @@ func Test_FilteredLabelValues(t *testing.T) {
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+			want: []string{
+				"__name__", "account_id", "cpu", "device", "environment",
+				"fstype", "instance", "job", "mode", "mountpoint",
+			},
 		},
 		{
 			name:  "names-account3-t2",
@@ -5295,7 +5335,10 @@ func Test_FilteredLabelValues(t *testing.T) {
 			end:       t3,
 			matchers:  nil,
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint", "secret_name", "userID"},
+			want: []string{
+				"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype",
+				"instance", "job", "mode", "mountpoint", "secret_name", "userID",
+			},
 		},
 		{
 			name:      "value-__name__-all",
@@ -5373,6 +5416,7 @@ func Test_FilteredLabelValues(t *testing.T) {
 			got, err := tt.index.labelValues(context.Background(), tt.start, tt.end, tt.labelName, tt.matchers)
 			if err != nil {
 				t.Errorf("labelValues() error = %v", err)
+
 				return
 			}
 

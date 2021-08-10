@@ -121,7 +121,11 @@ type mockIndex struct {
 	lookupMap   map[types.MetricID]labels.Labels
 }
 
-func (idx mockIndex) Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (idx mockIndex) Search(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	return &dummy.MetricsLabel{List: idx.searchReply}, nil
 }
 
@@ -133,11 +137,19 @@ func (idx mockIndex) LookupIDs(ctx context.Context, request []types.LookupReques
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+func (idx mockIndex) LabelNames(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx mockIndex) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string, matchers []*labels.Matcher,
+) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 

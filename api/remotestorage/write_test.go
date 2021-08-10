@@ -35,7 +35,11 @@ func (i mockIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest
 	return []types.MetricID{i.fixedLookupID}, []int64{defaultTTL}, nil
 }
 
-func (i mockIndex) Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (i mockIndex) Search(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	return &dummy.MetricsLabel{
 		List: []types.MetricLabel{{ID: i.fixedSearchID, Labels: i.fixedLabels}},
 	}, nil
@@ -45,7 +49,11 @@ func (i mockIndex) LabelNames(ctx context.Context, start, end time.Time, matcher
 	return nil, errors.New("not implemented")
 }
 
-func (i mockIndex) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (i mockIndex) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string, matchers []*labels.Matcher,
+) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 

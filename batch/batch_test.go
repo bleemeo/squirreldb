@@ -744,12 +744,14 @@ func TestBatch_read(t *testing.T) {
 			got, err := b.ReadIter(context.Background(), tt.args.request)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 
 			gotList, err := iterToList(got)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 
@@ -894,6 +896,7 @@ func TestBatch_readTemporary(t *testing.T) {
 			got, err := b.readTemporary(context.Background(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readTemporary() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !dataEqual(true, got, tt.want) {
@@ -1910,6 +1913,7 @@ func TestBatch_write(t *testing.T) {
 			if tt.write1 != nil {
 				if err := batch1.write(context.Background(), tt.write1, tt.nowWrite1); err != nil {
 					t.Errorf("batch1.write: %v", err)
+
 					return
 				}
 			}
@@ -1917,6 +1921,7 @@ func TestBatch_write(t *testing.T) {
 			if tt.write2 != nil {
 				if err := batch2.write(context.Background(), tt.write2, tt.nowWrite2); err != nil {
 					t.Errorf("batch2.write: %v", err)
+
 					return
 				}
 			}

@@ -346,6 +346,7 @@ func TestPromQL_queryable(t *testing.T) {
 
 				if (err != nil) != query.wantErr {
 					t.Errorf("PromQL.queryable.Select(#%d) error = %v, wantErr %v", i, err, query.wantErr)
+
 					return
 				} else if count != query.wantCount {
 					t.Errorf("len(PromQL.queryable.Select(#%d)) = %d, want %d", i, count, query.wantCount)

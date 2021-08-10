@@ -660,6 +660,7 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 			got, gotOffset, err := s.ReadPointsAndOffset(context.Background(), tt.args.ids)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadPointsAndOffset() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -1250,6 +1251,7 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 			got, err := s.GetSetFlushDeadline(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetSetFlushDeadline() error = %v", err)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -1361,6 +1363,7 @@ func TestStore_GetTransfert(t *testing.T) {
 			got, err := s.GetTransfert(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetTransfert() error = %v", err)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {

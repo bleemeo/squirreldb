@@ -170,6 +170,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 				got, err := idx.Search(context.Background(), now, now, query.matchers)
 				if (err != nil) != query.wantErr {
 					t.Fatalf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
+
 					return
 				}
 

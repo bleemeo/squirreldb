@@ -149,6 +149,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 				points, err := countPoints(got)
 				if (err != nil) != r.wantErr {
 					t.Errorf("limitingReader.ReadIter(#%d) error = %v, wantErr %v", i, err, r.wantErr)
+
 					return
 				} else if points != r.countPoint {
 					t.Errorf("limitingReader.ReadIter(#%d) return %d points, want %d", i, points, r.countPoint)

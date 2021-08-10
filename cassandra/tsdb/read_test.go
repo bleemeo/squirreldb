@@ -174,7 +174,8 @@ func Test_filterPoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := filterPoints(tt.args.points, tt.args.fromTimestamp, tt.args.toTimestamp); !reflect.DeepEqual(got, tt.want) {
+			got := filterPoints(tt.args.points, tt.args.fromTimestamp, tt.args.toTimestamp)
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("filterPoints() = %v, want %v", got, tt.want)
 			}
 		})

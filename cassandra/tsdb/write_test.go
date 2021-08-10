@@ -218,8 +218,10 @@ func Test_PointsEncode(t *testing.T) {
 				baseTimestamp: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
 				t0:            time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC).UnixNano() / 1000000,
 				points: []types.MetricPoint{
-					{Timestamp: time.Date(2020, 1, 1, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 0},  // delta with t0 and first point must fit in 14-bits
-					{Timestamp: time.Date(2020, 2, 19, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 1}, // first point +49 days
+					// delta with t0 and first point must fit in 14-bits
+					{Timestamp: time.Date(2020, 1, 1, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 0},
+					// first point +49 days
+					{Timestamp: time.Date(2020, 2, 19, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 1},
 				},
 			},
 		},
@@ -637,14 +639,18 @@ func Test_EncodeAggregate(t *testing.T) {
 				}
 
 				testedFun := []string{"min", "max", "avg", "count"}
-				buffer, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+				buffer, err := c.encodeAggregatedPoints(
+					tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
+				)
 				if err != nil {
 					t.Errorf("encodeAggregatedPoints failed: %v", err)
 				}
 
 				for _, function := range testedFun {
 					want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
-					got, err := c.decodeAggregatedPoints(buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil)
+					got, err := c.decodeAggregatedPoints(
+						buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil,
+					)
 					for i, p := range tt.args.aggregatedPoints {
 						want[i].Timestamp = p.Timestamp
 						switch function {
@@ -782,7 +788,9 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 				}
 
 				for n := 0; n < b.N; n++ {
-					_, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+					_, err := c.encodeAggregatedPoints(
+						tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
+					)
 					if err != nil {
 						b.Errorf("encodeAggregatedPoints failed: %v", err)
 					}
