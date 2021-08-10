@@ -86,7 +86,9 @@ func (i *readIter) Next() bool {
 	fromTimestamp := i.request.FromTimestamp
 
 	if readAggregate {
-		newData, newTmp, err := i.c.readAggregateData(id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function)
+		newData, newTmp, err := i.c.readAggregateData(
+			id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function,
+		)
 
 		i.tmp = newTmp
 		data = newData
@@ -132,15 +134,21 @@ func (i *readIter) Next() bool {
 }
 
 // Returns aggregated data between the specified timestamps of the requested metric. Return points in descending order.
-func (c *CassandraTSDB) readAggregateData(id types.MetricID, buffer types.MetricData, fromTimestamp, toTimestamp int64, tmp []types.MetricPoint, function string) (aggrData types.MetricData, newTmp []types.MetricPoint, err error) {
+func (c *CassandraTSDB) readAggregateData(
+	id types.MetricID,
+	buffer types.MetricData,
+	fromTimestamp, toTimestamp int64,
+	tmp []types.MetricPoint,
+	function string,
+) (aggrData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % aggregatePartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % aggregatePartitionSize.Milliseconds())
 	buffer.ID = id
 
-	for baseTimestamp := toBaseTimestamp; baseTimestamp >= fromBaseTimestamp; baseTimestamp -= aggregatePartitionSize.Milliseconds() {
-		tmp, err = c.readAggregatePartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp, function)
+	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= aggregatePartitionSize.Milliseconds() {
+		tmp, err = c.readAggregatePartitionData(&buffer, fromTimestamp, toTimestamp, baseTS, tmp, function)
 
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "aggregated").Observe(time.Since(start).Seconds())
@@ -157,7 +165,12 @@ func (c *CassandraTSDB) readAggregateData(id types.MetricID, buffer types.Metric
 }
 
 // Returns aggregated partition data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, tmp []types.MetricPoint, function string) (newTmp []types.MetricPoint, err error) {
+func (c *CassandraTSDB) readAggregatePartitionData(
+	aggregateData *types.MetricData,
+	fromTimestamp, toTimestamp, baseTimestamp int64,
+	tmp []types.MetricPoint,
+	function string,
+) (newTmp []types.MetricPoint, err error) {
 	fromOffset := fromTimestamp - baseTimestamp - aggregatePartitionSize.Milliseconds()
 	toOffset := toTimestamp - baseTimestamp
 
@@ -211,15 +224,20 @@ func (c *CassandraTSDB) readAggregatePartitionData(aggregateData *types.MetricDa
 }
 
 // Returns raw data between the specified timestamps of the requested metric. Return points in descending order.
-func (c *CassandraTSDB) readRawData(id types.MetricID, buffer types.MetricData, fromTimestamp, toTimestamp int64, tmp []types.MetricPoint) (rawData types.MetricData, newTmp []types.MetricPoint, err error) {
+func (c *CassandraTSDB) readRawData(
+	id types.MetricID,
+	buffer types.MetricData,
+	fromTimestamp, toTimestamp int64,
+	tmp []types.MetricPoint,
+) (rawData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize.Milliseconds())
 	buffer.ID = id
 
-	for baseTimestamp := toBaseTimestamp; baseTimestamp >= fromBaseTimestamp; baseTimestamp -= rawPartitionSize.Milliseconds() {
-		tmp, err = c.readRawPartitionData(&buffer, fromTimestamp, toTimestamp, baseTimestamp, tmp)
+	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= rawPartitionSize.Milliseconds() {
+		tmp, err = c.readRawPartitionData(&buffer, fromTimestamp, toTimestamp, baseTS, tmp)
 
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
@@ -236,7 +254,11 @@ func (c *CassandraTSDB) readRawData(id types.MetricID, buffer types.MetricData, 
 }
 
 // readRawPartitionData add to rawData data between the specified timestamps of the requested metric.
-func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTimestamp, toTimestamp, baseTimestamp int64, tmp []types.MetricPoint) (newTmp []types.MetricPoint, err error) {
+func (c *CassandraTSDB) readRawPartitionData(
+	rawData *types.MetricData,
+	fromTimestamp, toTimestamp, baseTimestamp int64,
+	tmp []types.MetricPoint,
+) (newTmp []types.MetricPoint, err error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - rawPartitionSize.Milliseconds()
 	toOffsetTimestamp := toTimestamp - baseTimestamp
 
@@ -248,7 +270,9 @@ func (c *CassandraTSDB) readRawPartitionData(rawData *types.MetricData, fromTime
 
 	start := time.Now()
 
-	tableSelectDataIter := c.rawTableSelectDataIter(int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp)
+	tableSelectDataIter := c.rawTableSelectDataIter(
+		int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp,
+	)
 
 	queryDuration := time.Since(start)
 
@@ -311,7 +335,12 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, f
 	return iter
 }
 
-func (c *CassandraTSDB) decodePoints(values []byte, baseTimestamp int64, offset int64, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func (c *CassandraTSDB) decodePoints(
+	values []byte,
+	baseTimestamp int64,
+	offset int64,
+	result []types.MetricPoint,
+) ([]types.MetricPoint, error) {
 	if baseTimestamp+offset < c.newFormatCutoff*1000 {
 		return gorillaDecode(values, baseTimestamp-1, result[:0], 1)
 	}
@@ -329,7 +358,12 @@ func (c *CassandraTSDB) decodePoints(values []byte, baseTimestamp int64, offset 
 	}
 }
 
-func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoint, scale int64) ([]types.MetricPoint, error) {
+func gorillaDecode(
+	values []byte,
+	baseTimestamp int64,
+	result []types.MetricPoint,
+	scale int64,
+) ([]types.MetricPoint, error) {
 	i, err := tsz.NewIterator(values)
 	if err != nil {
 		return nil, fmt.Errorf("read TSZ value: %w", err)
@@ -352,7 +386,12 @@ func gorillaDecode(values []byte, baseTimestamp int64, result []types.MetricPoin
 	return result, nil
 }
 
-func (c *CassandraTSDB) decodeAggregatedPoints(values []byte, baseTimestamp int64, offset int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func (c *CassandraTSDB) decodeAggregatedPoints(
+	values []byte,
+	baseTimestamp int64,
+	offset int64,
+	function string, result []types.MetricPoint,
+) ([]types.MetricPoint, error) {
 	if baseTimestamp+offset < c.newFormatCutoff*1000 {
 		return gorillaDecodeAggregate(values, baseTimestamp, function, result[:0])
 	}
@@ -417,7 +456,11 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 	return values[int(startIndex):endIndex], nil
 }
 
-func (c *CassandraTSDB) xorChunkDecodeAggregate(values []byte, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func (c *CassandraTSDB) xorChunkDecodeAggregate(
+	values []byte,
+	function string,
+	result []types.MetricPoint,
+) ([]types.MetricPoint, error) {
 	subValues, err := demuxAggregate(values, function)
 	if err != nil {
 		return nil, err
@@ -452,7 +495,12 @@ func (c *CassandraTSDB) xorChunkDecode(values []byte, result []types.MetricPoint
 	return result, nil
 }
 
-func gorillaDecodeAggregate(values []byte, baseTimestamp int64, function string, result []types.MetricPoint) ([]types.MetricPoint, error) {
+func gorillaDecodeAggregate(
+	values []byte,
+	baseTimestamp int64,
+	function string,
+	result []types.MetricPoint,
+) ([]types.MetricPoint, error) {
 	subValues, err := demuxAggregate(values, function)
 	if err != nil {
 		return nil, err

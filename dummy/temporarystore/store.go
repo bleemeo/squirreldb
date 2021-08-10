@@ -77,20 +77,29 @@ func (s *Store) Append(ctx context.Context, points []types.MetricData) ([]int, e
 }
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
-func (s *Store) GetSetPointsAndOffset(ctx context.Context, points []types.MetricData, offsets []int) ([]types.MetricData, error) {
+func (s *Store) GetSetPointsAndOffset(
+	ctx context.Context,
+	points []types.MetricData,
+	offsets []int,
+) ([]types.MetricData, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	return s.getSetPointsAndOffset(points, offsets, time.Now())
 }
 
-func (s *Store) getSetPointsAndOffset(points []types.MetricData, offsets []int, now time.Time) ([]types.MetricData, error) {
+func (s *Store) getSetPointsAndOffset(
+	points []types.MetricData,
+	offsets []int, now time.Time,
+) ([]types.MetricData, error) {
 	if len(points) == 0 {
 		return nil, nil
 	}
 
 	if len(points) != len(offsets) {
-		return nil, fmt.Errorf("GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d", len(points), len(offsets))
+		msg := "GetSetPointsAndOffset: len(points) == %d must be equal to len(offsets) == %d"
+
+		return nil, fmt.Errorf(msg, len(points), len(offsets))
 	}
 
 	expirationTime := now.Add(defaultTTL)
@@ -162,7 +171,10 @@ func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.T
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
-func (s *Store) GetSetFlushDeadline(ctx context.Context, deadlines map[types.MetricID]time.Time) (map[types.MetricID]time.Time, error) {
+func (s *Store) GetSetFlushDeadline(
+	ctx context.Context,
+	deadlines map[types.MetricID]time.Time,
+) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

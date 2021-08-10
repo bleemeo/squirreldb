@@ -79,7 +79,8 @@ func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData, writingTimestam
 	}
 }
 
-// writeAggregateData writes aggregated data for one metric. It ensure that points with the same baseTimestamp are written together.
+// writeAggregateData writes aggregated data for one metric.
+// It ensure that points with the same baseTimestamp are written together.
 func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedData, writingTimestamp int64) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
@@ -101,7 +102,8 @@ func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedDa
 			TimeToLive: aggregatedData.TimeToLive,
 		}
 
-		if err := c.writeAggregateRow(aggregatedData.ID, aggregatedPartitionData, baseTimestamp, writingTimestamp); err != nil {
+		err := c.writeAggregateRow(aggregatedData.ID, aggregatedPartitionData, baseTimestamp, writingTimestamp)
+		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("write", "aggregated").Observe(time.Since(start).Seconds())
 			c.metrics.RequestsPoints.WithLabelValues("write", "aggregated").Add(float64(len(aggregatedData.Points)))
 
@@ -116,7 +118,12 @@ func (c *CassandraTSDB) writeAggregateData(aggregatedData aggregate.AggregatedDa
 }
 
 // writeAggregateRow writes one aggregated row.
-func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggregate.AggregatedData, baseTimestamp int64, writingTimestamp int64) error {
+func (c *CassandraTSDB) writeAggregateRow(
+	id types.MetricID,
+	aggregatedData aggregate.AggregatedData,
+	baseTimestamp int64,
+	writingTimestamp int64,
+) error {
 	if len(aggregatedData.Points) == 0 {
 		return nil
 	}
@@ -142,7 +149,9 @@ func (c *CassandraTSDB) writeAggregateRow(id types.MetricID, aggregatedData aggr
 		return nil
 	}
 
-	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive-age, aggregateValues, writingTimestamp)
+	tableInsertDataQuery := c.tableInsertAggregatedDataQuery(
+		int64(id), baseTimestamp, offsetMs/1000, aggregatedData.TimeToLive-age, aggregateValues, writingTimestamp,
+	)
 
 	start := time.Now()
 
@@ -203,7 +212,11 @@ func (c *CassandraTSDB) writeRawData(data types.MetricData, writingTimestamp int
 }
 
 // Write raw partition data.
-func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimestamp int64, writingTimestamp int64) error {
+func (c *CassandraTSDB) writeRawPartitionData(
+	data types.MetricData,
+	baseTimestamp int64,
+	writingTimestamp int64,
+) error {
 	if len(data.Points) == 0 {
 		return nil
 	}
@@ -228,12 +241,16 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 		return nil
 	}
 
-	tableInsertDataQuery := c.tableInsertRawDataQuery(int64(data.ID), baseTimestamp, offsetMs, data.TimeToLive-age, rawValues, writingTimestamp)
+	tableInsertDataQuery := c.tableInsertRawDataQuery(
+		int64(data.ID), baseTimestamp, offsetMs, data.TimeToLive-age, rawValues, writingTimestamp,
+	)
 
 	start := time.Now()
 
 	if err := tableInsertDataQuery.Exec(); err != nil {
-		return fmt.Errorf("unable to write raw for ID=%d, baseTimestamp=%d and offsetMs=%d: %w", data.ID, baseTimestamp, offsetMs, err)
+		msg := "unable to write raw for ID=%d, baseTimestamp=%d and offsetMs=%d: %w"
+
+		return fmt.Errorf(msg, data.ID, baseTimestamp, offsetMs, err)
 	}
 
 	c.metrics.CassandraQueriesSeconds.WithLabelValues("write", "raw").Observe(time.Since(start).Seconds())
@@ -242,7 +259,13 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 }
 
 // Returns table insert raw data Query.
-func (c *CassandraTSDB) tableInsertRawDataQuery(id int64, baseTimestamp, offsetMs, timeToLive int64, values []byte, writingTimestamp int64) *gocql.Query {
+func (c *CassandraTSDB) tableInsertRawDataQuery(
+	id int64, baseTimestamp,
+	offsetMs,
+	timeToLive int64,
+	values []byte,
+	writingTimestamp int64,
+) *gocql.Query {
 	if writingTimestamp == 0 {
 		return c.session.Query(`
 			INSERT INTO data (metric_id, base_ts, offset_ms, insert_time, values)
@@ -259,7 +282,14 @@ func (c *CassandraTSDB) tableInsertRawDataQuery(id int64, baseTimestamp, offsetM
 }
 
 // Returns table insert aggregated data Query.
-func (c *CassandraTSDB) tableInsertAggregatedDataQuery(id int64, baseTimestamp, offsetSecond, timeToLive int64, values []byte, writingTimestamp int64) *gocql.Query {
+func (c *CassandraTSDB) tableInsertAggregatedDataQuery(
+	id int64,
+	baseTimestamp,
+	offsetSecond,
+	timeToLive int64,
+	values []byte,
+	writingTimestamp int64,
+) *gocql.Query {
 	if writingTimestamp == 0 {
 		return c.session.Query(`
 			INSERT INTO data_aggregated (metric_id, base_ts, offset_second, values)
@@ -308,7 +338,11 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 	return buffer, nil
 }
 
-func (c *CassandraTSDB) encodeAggregatedPoints(points []aggregate.AggregatedPoint, baseTimestamp int64, offset int64) ([]byte, error) {
+func (c *CassandraTSDB) encodeAggregatedPoints(
+	points []aggregate.AggregatedPoint,
+	baseTimestamp int64,
+	offset int64,
+) ([]byte, error) {
 	if baseTimestamp+offset < c.newFormatCutoff*1000 {
 		return gorillaEncodeAggregate(points, uint32(offset/aggregateResolution.Milliseconds()), baseTimestamp), nil
 	}

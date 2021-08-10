@@ -14,6 +14,7 @@ require (
 	github.com/google/go-cmp v0.5.6
 	github.com/google/uuid v1.1.2
 	github.com/hashicorp/go-immutable-radix v1.3.0 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/json-iterator/go v1.1.11
 	github.com/knadh/koanf v1.1.1
 	github.com/pilosa/pilosa/v2 v2.0.0-alpha.1.0.20200910211802-052440974ac5
@@ -21,11 +22,12 @@ require (
 	github.com/prometheus/common v0.29.0
 	github.com/prometheus/procfs v0.6.0
 	github.com/prometheus/prometheus v1.8.2-0.20210701133801-b0944590a1c9 // This is 2.28.1
+	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b // indirect
 	github.com/shirou/gopsutil v3.20.11+incompatible
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
+	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
 	golang.org/x/tools v0.1.4 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

@@ -163,7 +163,8 @@ func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	fmt.Fprintf(w, "Flush points (of this SquirrelDB instance) from temporary store to TSDB done in %v\n", time.Since(start))
+	msg := "Flush points (of this SquirrelDB instance) from temporary store to TSDB done in %v\n"
+	fmt.Fprintf(w, msg, time.Since(start))
 }
 
 func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {

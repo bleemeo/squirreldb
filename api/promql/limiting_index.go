@@ -21,11 +21,18 @@ func (idx *limitingIndex) AllIDs(ctx context.Context, start time.Time, end time.
 	return nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
+func (idx *limitingIndex) LookupIDs(
+	ctx context.Context,
+	requests []types.LookupRequest,
+) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx *limitingIndex) Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (idx *limitingIndex) Search(
+	ctx context.Context,
+	start time.Time, end time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	r, err := idx.index.Search(ctx, start, end, matchers)
 	if err != nil {
 		return r, err //nolint: wrapcheck
@@ -39,10 +46,19 @@ func (idx *limitingIndex) Search(ctx context.Context, start time.Time, end time.
 	return r, nil
 }
 
-func (idx *limitingIndex) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx *limitingIndex) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	return idx.index.LabelValues(ctx, start, end, name, matchers)
 }
 
-func (idx *limitingIndex) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+func (idx *limitingIndex) LabelNames(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	return idx.index.LabelNames(ctx, start, end, matchers)
 }

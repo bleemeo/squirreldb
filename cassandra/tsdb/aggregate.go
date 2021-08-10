@@ -22,9 +22,10 @@ const (
 	lockTimeToLive = 10 * time.Minute
 )
 
-// MaxPastDelay is the maximum delay in the past a points could be write without aggregated data issue. Any point wrote with
-// a timestamp more than MaxPastDelay in the past is likely to be ignored in aggregated data.
-// This delay will also force the aggregation to run after 0h00 UTC + MaxPastDelay (since we check often, it will start at this time).
+// MaxPastDelay is the maximum delay in the past a points could be write without aggregated data issue.
+// Any point wrote with a timestamp more than MaxPastDelay in the past is likely to be ignored in aggregated data.
+// This delay will also force the aggregation to run after 0h00 UTC + MaxPastDelay
+// (since we check often, it will start at this time).
 const MaxPastDelay = 8 * time.Hour
 
 // run starts all CassandraTSDB pre-aggregations.
@@ -103,7 +104,11 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 // This will replace data for given aggregated row (based on timestamp of first time).
 // Points in each AggregatedData MUST be sorted.
 // Also if writingTimestamp is not 0, it's the timestamp used to write in Cassandra (in microseconds since epoc).
-func (c *CassandraTSDB) InternalWriteAggregated(ctx context.Context, metrics []aggregate.AggregatedData, writingTimestamp int64) error {
+func (c *CassandraTSDB) InternalWriteAggregated(
+	ctx context.Context,
+	metrics []aggregate.AggregatedData,
+	writingTimestamp int64,
+) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -201,7 +206,12 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 				retry.Print(func() error {
 					var err error
 
-					rangePointsCount, err = c.doAggregation(ids, currentFrom.UnixNano()/1000000, currentTo.UnixNano()/1000000, aggregateResolution.Milliseconds())
+					rangePointsCount, err = c.doAggregation(
+						ids,
+						currentFrom.UnixNano()/1000000,
+						currentTo.UnixNano()/1000000,
+						aggregateResolution.Milliseconds(),
+					)
 
 					return err
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
@@ -259,7 +269,11 @@ outter:
 }
 
 // aggregateShard aggregate one shard. It take the lock and run aggregation for the next period to aggregate.
-func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotifiedAggretedFrom *time.Time) (bool, time.Time) {
+func (c *CassandraTSDB) aggregateShard(
+	ctx context.Context,
+	shard int,
+	lastNotifiedAggretedFrom *time.Time,
+) (bool, time.Time) {
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
@@ -333,7 +347,9 @@ func (c *CassandraTSDB) aggregateShard(ctx context.Context, shard int, lastNotif
 
 	start := time.Now()
 
-	if count, err := c.doAggregation(shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds()); err == nil {
+	if count, err := c.doAggregation(
+		shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds(),
+	); err == nil {
 		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] and read %d points in %v",
 			shard, fromTime, toTime, count, time.Since(start))
 

@@ -133,7 +133,11 @@ func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
 }
 
 // Returns a metric list generated from a TimeSeries list.
-func metricsFromTimeseries(ctx context.Context, promTimeseries []prompb.TimeSeries, index types.Index) ([]types.MetricData, int, error) {
+func metricsFromTimeseries(
+	ctx context.Context,
+	promTimeseries []prompb.TimeSeries,
+	index types.Index,
+) ([]types.MetricData, int, error) {
 	if len(promTimeseries) == 0 {
 		return nil, 0, nil
 	}
