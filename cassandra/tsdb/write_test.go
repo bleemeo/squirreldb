@@ -29,7 +29,7 @@ func bitStringToByte(input ...string) []byte {
 		v, err := strconv.ParseUint(str[i:end], 2, 8)
 
 		if i+8-end > 0 {
-			v = v << uint(i+8-end)
+			v <<= uint(i + 8 - end)
 		}
 
 		if err != nil {
@@ -42,13 +42,12 @@ func bitStringToByte(input ...string) []byte {
 	return out
 }
 
+// Test that our encoding is Gorilla TSZ storage described in
+// https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
+//
+// Our gorillaEncode is slightly modified (to store millisecond value)
+// See docstring from gorillaEncode.
 func Test_gorillaEncode(t *testing.T) {
-	// Test that our encoding is Gorilla TSZ storage described in
-	// https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
-
-	// Our gorillaEncode is slightly modified (to store millisecond value)
-	// See docstring from gorillaEncode
-
 	// Example from the paper
 	want := bitStringToByte(
 		// go-tsz use 32-bits timestamp (while paper use 64-bits timestamp)
@@ -451,7 +450,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 
 			for _, reuse := range []bool{false, true} {
 				if reuse {
-					name = name + "-reuse"
+					name += "-reuse"
 				}
 
 				b.Run(name, func(b *testing.B) {

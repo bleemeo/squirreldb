@@ -17,6 +17,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
+
 	ids, _, err := idx.LookupIDs(
 		context.Background(),
 		[]types.LookupRequest{
