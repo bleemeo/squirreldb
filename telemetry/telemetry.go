@@ -71,7 +71,7 @@ func (t *Telemetry) setIDToFile(filepath string) {
 
 	file, _ := json.MarshalIndent(tlm, "", " ")
 
-	_ = ioutil.WriteFile(filepath, file, 0600)
+	_ = ioutil.WriteFile(filepath, file, 0o600)
 }
 
 func (t Telemetry) postInformation(ctx context.Context) {

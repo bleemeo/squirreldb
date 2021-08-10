@@ -25,7 +25,6 @@ func Test_filteringIndex_Search(t *testing.T) {
 			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
