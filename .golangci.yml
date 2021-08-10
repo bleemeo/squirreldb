@@ -13,10 +13,31 @@ linters:
     - exhaustivestruct # This linter is meant to be used only for special cases. It is not recommended to use it for all files in a project.
     - ifshort # Too many false positive.
     - gci # Conflict with gofumpt
+     # Requires to review all our tests. Should be done
+    - paralleltest
+    - tparallel
+    - testpackage
     # disable deprecated & replaced linter
     - maligned
     - golint
     - interfacer
     - scopelint
-run:
-  tests: false
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - gosec
+        - gocognit
+        - gocyclo
+        - cyclop
+  include: # the list of ids of default excludes to include
+    - EXC0005 # ineffective break statement
+    - EXC0009 # create files/directories with minimum permissions
+    # - EXC0011 # TODO: comment on exported function should be of the form | should have a package comment
+    # - EXC0012 # TODO: exported var/functions should have a comment
+    - EXC0013 # package comment should be of the form
+    - EXC0014 # comment on exported var should be of the form
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -21,23 +21,26 @@ const (
 
 func newMemoryStore(initialData []types.MetricData) *temporarystore.Store {
 	store := temporarystore.New(prometheus.NewRegistry())
-	store.Append(context.Background(), initialData)
+	_, _ = store.Append(context.Background(), initialData)
+
 	return store
 }
 
 func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *temporarystore.Store {
 	store := temporarystore.New(prometheus.NewRegistry())
-	store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
+	_, _ = store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
+
 	return store
 }
 
-func generatePoint(fromTS int, toTS int, step int) []types.MetricPoint {
+func generatePoint(fromTS int, toTS int, step int) []types.MetricPoint { //nolint:unparam
 	points := make([]types.MetricPoint, 0)
 	for ts := fromTS; ts <= toTS; ts += step {
 		points = append(points, types.MetricPoint{
 			Timestamp: int64(ts) * 1000,
 		})
 	}
+
 	return points
 }
 
@@ -51,11 +54,12 @@ func dumpMemoryStore(store TemporaryStore) []types.MetricData {
 	}
 
 	results, _, _ := store.ReadPointsAndOffset(context.Background(), ids)
+
 	return results
 }
 
 func dataEqual(orderMatter bool, a, b []types.MetricData) bool {
-	if len(a) == len(b) && len(a) == 0 {
+	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
 
@@ -64,14 +68,10 @@ func dataEqual(orderMatter bool, a, b []types.MetricData) bool {
 	}
 
 	aCopy := make([]types.MetricData, len(a))
-	for i, x := range a {
-		aCopy[i] = x
-	}
+	copy(aCopy, a)
 
 	bCopy := make([]types.MetricData, len(b))
-	for i, x := range b {
-		bCopy[i] = x
-	}
+	copy(bCopy, b)
 
 	sort.Slice(aCopy, func(i, j int) bool {
 		return aCopy[i].ID < aCopy[j].ID
@@ -88,6 +88,7 @@ func newPersistentStore(initialData []types.MetricData) *dummy.MemoryTSDB {
 	db := &dummy.MemoryTSDB{
 		LogRequest: true,
 	}
+
 	err := db.Write(context.Background(), initialData)
 	if err != nil {
 		panic(err)
@@ -114,9 +115,11 @@ func TestBatch_read(t *testing.T) {
 		memoryStore     TemporaryStore
 		persistentStore *dummy.MemoryTSDB
 	}
+
 	type args struct {
 		request types.MetricRequest
 	}
+
 	tests := []struct {
 		name                   string
 		fields                 fields
@@ -769,11 +772,13 @@ func TestBatch_readTemporary(t *testing.T) {
 		reader      types.MetricReader
 		writer      types.MetricWriter
 	}
+
 	type args struct {
 		ids           []types.MetricID
 		fromTimestamp int64
 		toTimestamp   int64
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -904,6 +909,7 @@ func Test_flushTimestamp(t *testing.T) {
 		now       time.Time
 		batchSize time.Duration
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -928,6 +934,7 @@ func Test_flushTimestamp(t *testing.T) {
 			want: time.Unix(43, 0),
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := flushTimestamp(tt.args.id, tt.args.now, tt.args.batchSize); got != tt.want {
@@ -944,11 +951,13 @@ func TestBatch_flush(t *testing.T) {
 		memoryStore TemporaryStore
 		writer      *dummy.MemoryTSDB
 	}
+
 	type args struct {
 		ids      []types.MetricID
 		now      time.Time
 		shutdown bool
 	}
+
 	tests := []struct {
 		name            string
 		fields          fields
@@ -1233,6 +1242,7 @@ func TestBatch_flush(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := &Batch{
@@ -1257,7 +1267,7 @@ func TestBatch_flush(t *testing.T) {
 }
 
 // TestBatch_write test behavior of two SquirrelDB sharing the same
-// memoryStore (e.g. Redis)
+// memoryStore (e.g. Redis).
 func TestBatch_write(t *testing.T) {
 	batchSize := 100 * time.Second
 	memoryStore := temporarystore.New(prometheus.NewRegistry())
@@ -1265,12 +1275,6 @@ func TestBatch_write(t *testing.T) {
 	writer2 := newPersistentStore(nil)
 	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
 	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
-
-	type args struct {
-		ids      []types.MetricID
-		now      time.Time
-		shutdown bool
-	}
 
 	// tests case will reuse batch1 & batch2.
 	// When write1 is not nil, sent it to batch1. Then after does the same with
@@ -1323,7 +1327,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: time.Unix(299, 0), // 200 + 100 - 1. flushTimestamp
 				},
 			},
@@ -1368,10 +1372,10 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: time.Unix(299, 0),
 				},
-				MetricIDTest2: stateData{
+				MetricIDTest2: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest2,
 						time.Unix(220, 0),
@@ -1453,14 +1457,14 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest1,
 						time.Unix(300, 0),
 						batchSize,
 					),
 				},
-				MetricIDTest2: stateData{
+				MetricIDTest2: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest2,
 						time.Unix(300, 0),
@@ -1534,14 +1538,14 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest1,
 						time.Unix(300, 0),
 						batchSize,
 					),
 				},
-				MetricIDTest2: stateData{
+				MetricIDTest2: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest2,
 						time.Unix(300, 0),
@@ -1639,7 +1643,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest1,
 						time.Unix(1000, 0),
@@ -1648,7 +1652,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState2: map[types.MetricID]stateData{
-				MetricIDTest2: stateData{
+				MetricIDTest2: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest2,
 						time.Unix(1000, 0),
@@ -1681,7 +1685,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState1: map[types.MetricID]stateData{
-				MetricIDTest1: stateData{
+				MetricIDTest1: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest1,
 						time.Unix(1100, 0),
@@ -1690,7 +1694,7 @@ func TestBatch_write(t *testing.T) {
 				},
 			},
 			wantState2: map[types.MetricID]stateData{
-				MetricIDTest2: stateData{
+				MetricIDTest2: {
 					flushDeadline: flushTimestamp(
 						MetricIDTest2,
 						time.Unix(1100, 0),
@@ -1900,6 +1904,7 @@ func TestBatch_write(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
+
 	for _, tt := range tests {
 		ok := t.Run(tt.name, func(t *testing.T) {
 			if tt.write1 != nil {
@@ -1917,11 +1922,15 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if !tt.nowCheck1.IsZero() {
-				batch1.check(ctx, tt.nowCheck1, tt.shutdown1, tt.shutdown1)
+				if err := batch1.check(ctx, tt.nowCheck1, tt.shutdown1, tt.shutdown1); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			if !tt.nowCheck2.IsZero() {
-				batch2.check(ctx, tt.nowCheck2, tt.shutdown2, tt.shutdown2)
+				if err := batch2.check(ctx, tt.nowCheck2, tt.shutdown2, tt.shutdown2); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			if tt.wantWriter1 != nil {
@@ -1975,11 +1984,13 @@ func Test_randomDuration(t *testing.T) {
 	target := 50 * time.Millisecond
 	min := 40 * time.Millisecond
 	max := 60 * time.Millisecond
+
 	for n := 0; n < 100; n++ {
 		got := randomDuration(target)
 		if got < min {
 			t.Errorf("randomDuration() = %v, want >= %v", got, min)
 		}
+
 		if max < got {
 			t.Errorf("randomDuration() = %v, want <= %v", got, max)
 		}
@@ -1995,7 +2006,7 @@ func Test_takeover(t *testing.T) {
 	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
 	ctx := context.Background()
 
-	batch1.write(
+	err := batch1.write(
 		context.Background(),
 		[]types.MetricData{
 			{
@@ -2008,7 +2019,11 @@ func Test_takeover(t *testing.T) {
 		},
 		time.Unix(10, 0),
 	)
-	batch2.write(
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = batch2.write(
 		context.Background(),
 		[]types.MetricData{
 			{
@@ -2021,7 +2036,11 @@ func Test_takeover(t *testing.T) {
 		},
 		time.Unix(12, 0),
 	)
-	batch1.write(
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = batch1.write(
 		context.Background(),
 		[]types.MetricData{
 			{
@@ -2041,6 +2060,9 @@ func Test_takeover(t *testing.T) {
 		},
 		time.Unix(20, 0),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	wantWriter1 := []types.MetricData{}
 	wantWriter2 := []types.MetricData{}
@@ -2076,15 +2098,19 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(writer1.DumpData(), wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.DumpData(), wantWriter1)
 	}
+
 	if !reflect.DeepEqual(writer2.DumpData(), wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.DumpData(), wantWriter2)
 	}
+
 	if !reflect.DeepEqual(batch1.states, wantState1) {
 		t.Errorf("batch1.states = %v, want = %v", batch1.states, wantState1)
 	}
+
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
+
 	gotMemoryStore := dumpMemoryStore(memoryStore)
 	if !dataEqual(false, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
@@ -2096,7 +2122,10 @@ func Test_takeover(t *testing.T) {
 	// No takeover yet, but batch2 will flush its metric
 	now := time.Unix(0, 0).Add(overdueThreshold)
 	batch2.checkTakeover(ctx, now)
-	batch2.check(ctx, now, false, false)
+
+	if err := batch2.check(ctx, now, false, false); err != nil {
+		t.Fatal(err)
+	}
 
 	wantWriter1 = []types.MetricData{}
 	wantWriter2 = []types.MetricData{
@@ -2124,15 +2153,19 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(writer1.DumpData(), wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.DumpData(), wantWriter1)
 	}
+
 	if !reflect.DeepEqual(writer2.DumpData(), wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.DumpData(), wantWriter2)
 	}
+
 	if !reflect.DeepEqual(batch1.states, wantState1) {
 		t.Errorf("batch1.states = %v, want = %v", batch1.states, wantState1)
 	}
+
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
+
 	gotMemoryStore = dumpMemoryStore(memoryStore)
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
@@ -2144,7 +2177,10 @@ func Test_takeover(t *testing.T) {
 	// Taking over
 	now = time.Unix(100, 0).Add(overdueThreshold)
 	batch2.checkTakeover(ctx, now)
-	batch2.check(ctx, now, false, false)
+
+	if err := batch2.check(ctx, now, false, false); err != nil {
+		t.Fatal(err)
+	}
 
 	wantWriter1 = []types.MetricData{}
 	wantWriter2 = []types.MetricData{
@@ -2162,15 +2198,19 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(writer1.DumpData(), wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.DumpData(), wantWriter1)
 	}
+
 	if !reflect.DeepEqual(writer2.DumpData(), wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.DumpData(), wantWriter2)
 	}
+
 	if !reflect.DeepEqual(batch1.states, wantState1) {
 		t.Errorf("batch1.states = %v, want = %v", batch1.states, wantState1)
 	}
+
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
+
 	gotMemoryStore = dumpMemoryStore(memoryStore)
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
@@ -2180,7 +2220,10 @@ func Test_takeover(t *testing.T) {
 	writer2.Data = nil
 
 	// batch1 will realize that a takeover happened
-	batch1.check(ctx, now, false, false)
+	if err := batch1.check(ctx, now, false, false); err != nil {
+		t.Fatal(err)
+	}
+
 	wantWriter1 = []types.MetricData{}
 	wantWriter2 = []types.MetricData{}
 	wantState1 = map[types.MetricID]stateData{}
@@ -2188,16 +2231,21 @@ func Test_takeover(t *testing.T) {
 	if !reflect.DeepEqual(writer1.DumpData(), wantWriter1) {
 		t.Errorf("writer1.metrics = %v, want %v", writer1.DumpData(), wantWriter1)
 	}
+
 	if !reflect.DeepEqual(writer2.DumpData(), wantWriter2) {
 		t.Errorf("writer2.metrics = %v, want %v", writer2.DumpData(), wantWriter2)
 	}
+
 	if !reflect.DeepEqual(batch1.states, wantState1) {
 		t.Errorf("batch1.states = %v, want = %v", batch1.states, wantState1)
 	}
+
 	if !reflect.DeepEqual(batch2.states, wantState2) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
+
 	gotMemoryStore = dumpMemoryStore(memoryStore)
+
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %#v, want = %#v", gotMemoryStore, wantMemoryStore)
 	}

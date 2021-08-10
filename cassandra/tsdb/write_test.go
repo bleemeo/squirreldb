@@ -14,7 +14,7 @@ import (
 )
 
 // bitStringToByte convert a bitstring to []byte
-// e.g. bitStringToByte("010010") == []byte{18}
+// e.g. bitStringToByte("010010") == []byte{18}.
 func bitStringToByte(input ...string) []byte {
 	var out []byte
 
@@ -25,15 +25,20 @@ func bitStringToByte(input ...string) []byte {
 		if end > len(str) {
 			end = len(str)
 		}
+
 		v, err := strconv.ParseUint(str[i:end], 2, 8)
+
 		if i+8-end > 0 {
 			v = v << uint(i+8-end)
 		}
+
 		if err != nil {
 			panic(err)
 		}
+
 		out = append(out, byte(v))
 	}
+
 	return out
 }
 
@@ -41,7 +46,7 @@ func Test_gorillaEncode(t *testing.T) {
 	// Test that our encoding is Gorilla TSZ storage described in
 	// https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
 
-	// Our gorillaEncode is slighly modified (to store millisecond value)
+	// Our gorillaEncode is slightly modified (to store millisecond value)
 	// See docstring from gorillaEncode
 
 	// Example from the paper
@@ -82,6 +87,7 @@ func Test_gorillaEncode(t *testing.T) {
 		},
 	}
 	got := gorillaEncode(points, uint32(t0), 0)
+
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("gorillaEncode(...) = %v, want %v", got, want)
 	}
@@ -93,6 +99,7 @@ func Test_PointsEncode(t *testing.T) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -234,6 +241,7 @@ func Test_PointsEncode(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -241,6 +249,7 @@ func Test_PointsEncode(t *testing.T) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -290,6 +299,7 @@ func Benchmark_pointsEncode(b *testing.B) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -338,12 +348,14 @@ func Benchmark_pointsEncode(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -376,6 +388,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -424,12 +437,14 @@ func Benchmark_pointsDecode(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -494,6 +509,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		baseTimestamp    int64
 		t0               int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -597,6 +613,7 @@ func Test_EncodeAggregate(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -604,6 +621,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -680,6 +698,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 		baseTimestamp    int64
 		t0               int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -739,6 +758,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -746,6 +766,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}

@@ -215,7 +215,7 @@ func (c *CassandraTSDB) writeRawPartitionData(data types.MetricData, baseTimesta
 		return err
 	}
 
-	defer c.bytesPool.Put(rawValues) //nolint: staticcheck
+	defer c.bytesPool.Put(rawValues)
 
 	maxTS := data.Points[len(data.Points)-1].Timestamp
 
@@ -290,7 +290,7 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 
 	result, err := c.xorChunkEncode(points, buffer[1:])
 	if err != nil {
-		c.bytesPool.Put(buffer) //nolint: staticcheck
+		c.bytesPool.Put(buffer)
 
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func (c *CassandraTSDB) encodeAggregatedPoints(points []aggregate.AggregatedPoin
 
 	result, err := c.xorChunkEncodeAggregate(points, buffer[1:1])
 	if err != nil {
-		c.bytesPool.Put(buffer) //nolint: staticcheck
+		c.bytesPool.Put(buffer)
 
 		return nil, err
 	}

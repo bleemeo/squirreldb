@@ -30,7 +30,6 @@ func (i mockIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) (
 func (i mockIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	if len(requests) != 1 {
 		return nil, nil, errors.New("not implemented for more than one metrics")
-
 	}
 
 	return []types.MetricID{i.fixedLookupID}, []int64{defaultTTL}, nil
@@ -60,6 +59,7 @@ func Benchmark_metricsFromPromSeries(b *testing.B) {
 		"testdata/write_req_backlog",
 		"testdata/write_req_large",
 	}
+
 	for _, file := range tests {
 		b.Run(file, func(b *testing.B) {
 			wr := prompb.WriteRequest{}
@@ -71,9 +71,15 @@ func Benchmark_metricsFromPromSeries(b *testing.B) {
 				b.Fatalf("unexpected error: %v", err)
 			}
 			reader := bytes.NewReader(data)
-			decodeRequest(reader, &reqCtx)
+
+			if err := decodeRequest(reader, &reqCtx); err != nil {
+				b.Fatal(err)
+			}
+
 			for n := 0; n < b.N; n++ {
-				metricsFromTimeseries(context.Background(), wr.Timeseries, dummyIndex)
+				if _, _, err := metricsFromTimeseries(context.Background(), wr.Timeseries, dummyIndex); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}
@@ -86,6 +92,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		promTimeseries []prompb.TimeSeries
 		index          types.Index
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -186,6 +193,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := metricsFromTimeseries(context.Background(), tt.args.promTimeseries, tt.args.index)
@@ -203,6 +211,7 @@ func Test_pointsFromPromSamples(t *testing.T) {
 	type args struct {
 		promSamples []prompb.Sample
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -280,6 +289,7 @@ func Test_pointsFromPromSamples(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := pointsFromPromSamples(tt.args.promSamples); !reflect.DeepEqual(got, tt.want) {

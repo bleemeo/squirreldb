@@ -42,9 +42,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -119,6 +121,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := filteringIndex{
@@ -149,10 +152,12 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		name     string
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -275,9 +280,11 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -350,6 +357,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			want: []string{"__account_id", "__name__", "mountpath"},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := filteringIndex{

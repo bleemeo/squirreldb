@@ -32,11 +32,13 @@ func Test_limitingIndex_Search(t *testing.T) {
 		index          types.Index
 		maxTotalSeries uint32
 	}
+
 	type search struct {
 		matchers  []*labels.Matcher
 		wantCount int
 		wantErr   bool
 	}
+
 	tests := []struct {
 		name     string
 		fields   fields
@@ -157,6 +159,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := limitingIndex{

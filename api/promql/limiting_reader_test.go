@@ -11,11 +11,13 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 		reader         types.MetricReader
 		maxTotalPoints uint64
 	}
+
 	type readRequest struct {
 		req        types.MetricRequest
 		countPoint uint64
 		wantErr    bool
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -130,6 +132,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rdr := &limitingReader{

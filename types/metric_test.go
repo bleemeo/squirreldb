@@ -13,6 +13,7 @@ func TestDeduplicatePoints(t *testing.T) {
 	type args struct {
 		points []MetricPoint
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -181,7 +182,7 @@ func TestDeduplicatePoints(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "duplicated_nan_never_prefered",
+			name: "duplicated_nan_never_preferred",
 			args: args{
 				points: []MetricPoint{
 					{
@@ -238,7 +239,7 @@ func TestDeduplicatePoints(t *testing.T) {
 			},
 		},
 		{
-			name: "duplicated_nan_never_prefered_unsorted",
+			name: "duplicated_nan_never_preferred_unsorted",
 			args: args{
 				points: []MetricPoint{
 					{
@@ -299,6 +300,7 @@ func TestDeduplicatePoints(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := DeduplicatePoints(tt.args.points); !reflect.DeepEqual(got, tt.want) {
@@ -312,6 +314,7 @@ func TestSortPoints(t *testing.T) {
 	type args struct {
 		points []MetricPoint
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -430,12 +433,14 @@ func TestSortPoints(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		var result []MetricPoint
 		if tt.args.points != nil {
 			result = make([]MetricPoint, len(tt.args.points))
 			copy(result, tt.args.points)
 		}
+
 		t.Run(tt.name, func(t *testing.T) {
 			sortPoints(result)
 			if !reflect.DeepEqual(result, tt.want) {
@@ -447,6 +452,7 @@ func TestSortPoints(t *testing.T) {
 
 func BenchmarkDeduplicatePoints(b *testing.B) {
 	rand.Seed(42)
+
 	tests := []struct {
 		name   string
 		points []MetricPoint
@@ -476,6 +482,7 @@ func BenchmarkDeduplicatePoints(b *testing.B) {
 			points: append(MakePointsForTest(1000), MakePointsForTest(1000)...),
 		},
 	}
+
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {

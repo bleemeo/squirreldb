@@ -44,6 +44,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 		promQuery *prompb.Query
 		index     types.Index
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -97,6 +98,7 @@ func Test_requestFromPromQuery(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, got, err := requestFromPromQuery(context.Background(), tt.args.promQuery, tt.args.index, nil)
@@ -115,6 +117,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 		promReadRequest *prompb.ReadRequest
 		index           types.Index
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -193,6 +196,7 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := requestsFromPromReadRequest(context.Background(), tt.args.promReadRequest, tt.args.index)
@@ -205,10 +209,12 @@ func Test_requestsFromPromReadRequest(t *testing.T) {
 		})
 	}
 }
+
 func Test_promSamplesFromPoints(t *testing.T) {
 	type args struct {
 		points []types.MetricPoint
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -286,6 +292,7 @@ func Test_promSamplesFromPoints(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := promSamplesFromPoints(tt.args.points); !reflect.DeepEqual(got, tt.want) {
@@ -301,6 +308,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 		data      types.MetricData
 		id2labels map[types.MetricID]labels.Labels
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -339,7 +347,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 					},
 				},
 				id2labels: map[types.MetricID]labels.Labels{
-					MetricIDTest1: labels.Labels{
+					MetricIDTest1: {
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -391,6 +399,7 @@ func Test_promSeriesFromMetric(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := promSeriesFromMetric(tt.args.id, tt.args.data, tt.args.id2labels)
@@ -409,6 +418,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 		metrics   []types.MetricData
 		id2labels map[types.MetricID]labels.Labels
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -449,7 +459,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 					},
 				},
 				id2labels: map[types.MetricID]labels.Labels{
-					MetricIDTest1: labels.Labels{
+					MetricIDTest1: {
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -519,6 +529,7 @@ func Test_promTimeseriesFromMetrics(t *testing.T) {
 			want: []*prompb.TimeSeries{},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := promTimeseriesFromMetrics(&mockIter{all: tt.args.metrics}, tt.args.id2labels, 0)

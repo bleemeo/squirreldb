@@ -1,7 +1,5 @@
 // Disable stylecheck because is complain on error message (should not be capitalized)
 // but we prefer keeping the exact message used by Prometheus.
-
-//nolint: stylecheck
 package promql
 
 import (
@@ -30,6 +28,7 @@ func TestPromQL_queryable(t *testing.T) {
 			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +43,7 @@ func TestPromQL_queryable(t *testing.T) {
 		MaxEvaluatedSeries uint32
 		MaxEvaluatedPoints uint64
 	}
+
 	type search struct {
 		matchers  []*labels.Matcher
 		wantCount int
