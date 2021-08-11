@@ -314,10 +314,10 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 	pbuffer, ok := c.bytesPool.Get().(*[]byte)
 
 	var buffer []byte
-	if !ok || len(*pbuffer) == 0 {
-		buffer = make([]byte, 15)
-	} else {
+	if ok {
 		buffer = *pbuffer
+	} else {
+		buffer = make([]byte, 15)
 	}
 
 	buffer[0] = 0 // version 1
@@ -354,10 +354,10 @@ func (c *CassandraTSDB) encodeAggregatedPoints(
 	pbuffer, ok := c.bytesPool.Get().(*[]byte)
 
 	var buffer []byte
-	if !ok || len(*pbuffer) == 0 {
-		buffer = make([]byte, 15)
-	} else {
+	if ok {
 		buffer = *pbuffer
+	} else {
+		buffer = make([]byte, 15)
 	}
 
 	buffer[0] = 0 // version 1

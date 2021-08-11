@@ -159,10 +159,10 @@ func (c *CassandraTSDB) getPointsBuffer() []types.MetricPoint {
 
 	var buffer []types.MetricPoint
 	if ok {
-		buffer = *pbuffer
+		buffer = (*pbuffer)[:0]
 	}
 
-	return buffer[:0]
+	return buffer
 }
 
 func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
