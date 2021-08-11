@@ -218,11 +218,11 @@ func (q querier) LabelValues(name string, matchers ...*labels.Matcher) ([]string
 }
 
 // LabelNames returns all the unique label names present in the block in sorted order.
-func (q querier) LabelNames() ([]string, storage.Warnings, error) {
+func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warnings, error) {
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelNames(q.ctx, minT, maxT, nil)
+	res, err := q.index.LabelNames(q.ctx, minT, maxT, matchers)
 
 	return res, nil, err
 }
