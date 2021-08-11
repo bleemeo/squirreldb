@@ -415,6 +415,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 
 	reader := bytes.NewReader(values)
 
+	//nolint:goconst
 	switch function {
 	case "min":
 		streamNumber = 0

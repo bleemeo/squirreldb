@@ -49,7 +49,6 @@ func Test_decode(t *testing.T) {
 			}
 
 			gotTopic, gotMessage, err := decode(serialized)
-
 			if err != nil {
 				t.Errorf("decode() error = %v", err)
 			}
@@ -68,7 +67,6 @@ func Test_decode(t *testing.T) {
 				}
 
 				t.Errorf("message = %v, want %v", gotMessage, tt.message)
-
 			}
 		})
 	}

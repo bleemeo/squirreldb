@@ -13,6 +13,7 @@ func Test_filterPoints(t *testing.T) {
 		fromTimestamp int64
 		toTimestamp   int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -170,9 +171,11 @@ func Test_filterPoints(t *testing.T) {
 			want: nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := filterPoints(tt.args.points, tt.args.fromTimestamp, tt.args.toTimestamp); !reflect.DeepEqual(got, tt.want) {
+			got := filterPoints(tt.args.points, tt.args.fromTimestamp, tt.args.toTimestamp)
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("filterPoints() = %v, want %v", got, tt.want)
 			}
 		})
@@ -184,6 +187,7 @@ func Test_mergePoints(t *testing.T) {
 		dst []types.MetricPoint
 		src []types.MetricPoint
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -365,6 +369,7 @@ func Test_mergePoints(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := mergePoints(tt.args.dst, tt.args.src); !reflect.DeepEqual(got, tt.want) {

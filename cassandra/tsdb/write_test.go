@@ -14,7 +14,7 @@ import (
 )
 
 // bitStringToByte convert a bitstring to []byte
-// e.g. bitStringToByte("010010") == []byte{18}
+// e.g. bitStringToByte("010010") == []byte{18}.
 func bitStringToByte(input ...string) []byte {
 	var out []byte
 
@@ -25,25 +25,29 @@ func bitStringToByte(input ...string) []byte {
 		if end > len(str) {
 			end = len(str)
 		}
+
 		v, err := strconv.ParseUint(str[i:end], 2, 8)
+
 		if i+8-end > 0 {
-			v = v << uint(i+8-end)
+			v <<= uint(i + 8 - end)
 		}
+
 		if err != nil {
 			panic(err)
 		}
+
 		out = append(out, byte(v))
 	}
+
 	return out
 }
 
+// Test that our encoding is Gorilla TSZ storage described in
+// https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
+//
+// Our gorillaEncode is slightly modified (to store millisecond value)
+// See docstring from gorillaEncode.
 func Test_gorillaEncode(t *testing.T) {
-	// Test that our encoding is Gorilla TSZ storage described in
-	// https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
-
-	// Our gorillaEncode is slighly modified (to store millisecond value)
-	// See docstring from gorillaEncode
-
 	// Example from the paper
 	want := bitStringToByte(
 		// go-tsz use 32-bits timestamp (while paper use 64-bits timestamp)
@@ -82,6 +86,7 @@ func Test_gorillaEncode(t *testing.T) {
 		},
 	}
 	got := gorillaEncode(points, uint32(t0), 0)
+
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("gorillaEncode(...) = %v, want %v", got, want)
 	}
@@ -93,6 +98,7 @@ func Test_PointsEncode(t *testing.T) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -212,8 +218,10 @@ func Test_PointsEncode(t *testing.T) {
 				baseTimestamp: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano() / 1000000,
 				t0:            time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC).UnixNano() / 1000000,
 				points: []types.MetricPoint{
-					{Timestamp: time.Date(2020, 1, 1, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 0},  // delta with t0 and first point must fit in 14-bits
-					{Timestamp: time.Date(2020, 2, 19, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 1}, // first point +49 days
+					// delta with t0 and first point must fit in 14-bits
+					{Timestamp: time.Date(2020, 1, 1, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 0},
+					// first point +49 days
+					{Timestamp: time.Date(2020, 2, 19, 0, 0, 17, 383, time.UTC).UnixNano() / 1000000, Value: 1},
 				},
 			},
 		},
@@ -234,6 +242,7 @@ func Test_PointsEncode(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -241,6 +250,7 @@ func Test_PointsEncode(t *testing.T) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -290,6 +300,7 @@ func Benchmark_pointsEncode(b *testing.B) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -338,12 +349,14 @@ func Benchmark_pointsEncode(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -376,6 +389,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 		t0            int64
 		baseTimestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -424,19 +438,21 @@ func Benchmark_pointsDecode(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
 
 			for _, reuse := range []bool{false, true} {
 				if reuse {
-					name = name + "-reuse"
+					name += "-reuse"
 				}
 
 				b.Run(name, func(b *testing.B) {
@@ -494,6 +510,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		baseTimestamp    int64
 		t0               int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -597,6 +614,7 @@ func Test_EncodeAggregate(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -604,6 +622,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -620,14 +639,18 @@ func Test_EncodeAggregate(t *testing.T) {
 				}
 
 				testedFun := []string{"min", "max", "avg", "count"}
-				buffer, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+				buffer, err := c.encodeAggregatedPoints(
+					tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
+				)
 				if err != nil {
 					t.Errorf("encodeAggregatedPoints failed: %v", err)
 				}
 
 				for _, function := range testedFun {
 					want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
-					got, err := c.decodeAggregatedPoints(buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil)
+					got, err := c.decodeAggregatedPoints(
+						buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil,
+					)
 					for i, p := range tt.args.aggregatedPoints {
 						want[i].Timestamp = p.Timestamp
 						switch function {
@@ -680,6 +703,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 		baseTimestamp    int64
 		t0               int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -739,6 +763,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
@@ -746,6 +771,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
+
 			if timestamp != 0 {
 				name = tt.name + "-tsz"
 			}
@@ -762,7 +788,9 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 				}
 
 				for n := 0; n < b.N; n++ {
-					_, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp)
+					_, err := c.encodeAggregatedPoints(
+						tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
+					)
 					if err != nil {
 						b.Errorf("encodeAggregatedPoints failed: %v", err)
 					}

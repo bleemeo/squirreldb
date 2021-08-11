@@ -164,7 +164,7 @@ func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
 		return
 	}
 
-	c.pointsBufferPool.Put(v) //nolint: staticcheck
+	c.pointsBufferPool.Put(v)
 }
 
 // Returns data table create Query.

@@ -60,6 +60,7 @@ func (m mockState) Read(name string, output interface{}) (bool, error) {
 	}
 
 	*outputStr = result
+
 	return true, nil
 }
 
@@ -74,6 +75,7 @@ func (m *mockState) Write(name string, value interface{}) error {
 	}
 
 	m.values[name] = valueStr
+
 	return nil
 }
 
@@ -129,6 +131,7 @@ func (l *mockLock) tryLock() bool {
 	}
 
 	l.acquired = true
+
 	return true
 }
 
@@ -175,6 +178,7 @@ func (s *mockStore) Init(ctx context.Context) error {
 	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
 	s.expiration = make(map[time.Time][]byte)
+
 	return ctx.Err()
 }
 
@@ -187,7 +191,6 @@ func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (ma
 	results := make(map[string]types.MetricID, len(input))
 
 	for _, sortedLabelsString := range input {
-
 		result, ok := s.labels2id[sortedLabelsString]
 		if ok {
 			results[sortedLabelsString] = result
@@ -197,7 +200,10 @@ func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (ma
 	return results, ctx.Err()
 }
 
-func (s *mockStore) SelectIDS2LabelsAndExpiration(ctx context.Context, ids []types.MetricID) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
+func (s *mockStore) SelectIDS2LabelsAndExpiration(
+	ctx context.Context,
+	ids []types.MetricID,
+) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -239,6 +245,7 @@ type valueAndByte struct {
 	value  string
 	buffer []byte
 }
+
 type mockPostingIter struct {
 	err     error
 	results []valueAndByte
@@ -250,6 +257,7 @@ func (i *mockPostingIter) HasNext() bool {
 	if i.err != nil {
 		return false
 	}
+
 	if i.idx < len(i.results) {
 		i.next = i.results[i.idx]
 
@@ -257,6 +265,7 @@ func (i *mockPostingIter) HasNext() bool {
 
 		return true
 	}
+
 	return false
 }
 
@@ -313,7 +322,12 @@ func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name s
 	}
 }
 
-func (s *mockStore) SelectPostingByNameValue(ctx context.Context, shard int32, name string, value string) ([]byte, error) {
+func (s *mockStore) SelectPostingByNameValue(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+) ([]byte, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -399,7 +413,12 @@ func (s *mockStore) InsertPostings(ctx context.Context, shard int32, name string
 	return ctx.Err()
 }
 
-func (s *mockStore) InsertID2Labels(ctx context.Context, id types.MetricID, sortedLabels labels.Labels, expiration time.Time) error {
+func (s *mockStore) InsertID2Labels(
+	ctx context.Context,
+	id types.MetricID,
+	sortedLabels labels.Labels,
+	expiration time.Time,
+) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -468,6 +487,7 @@ func (s *mockStore) DeleteID2Labels(ctx context.Context, id types.MetricID) erro
 
 	_, ok := s.id2labels[id]
 	_, ok2 := s.id2expiration[id]
+
 	if !ok && !ok2 {
 		return gocql.ErrNotFound
 	}
@@ -519,8 +539,10 @@ func (s *mockStore) DeletePostings(ctx context.Context, shard int32, name string
 	}
 
 	delete(m, value)
+
 	if len(m) == 0 {
 		delete(postings, name)
+
 		if len(postings) == 0 {
 			delete(s.postings, shard)
 		}
@@ -550,6 +572,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 		if dropSpecialLabel && (k == timeToLiveLabelName) {
 			continue
 		}
+
 		results = append(results, labels.Label{
 			Name:  k,
 			Value: v,
@@ -557,10 +580,14 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	}
 
 	sort.Sort(results)
+
 	return results
 }
 
-func mockIndexFromMetrics(start time.Time, end time.Time, metrics map[types.MetricID]map[string]string) *CassandraIndex {
+func mockIndexFromMetrics(
+	start, end time.Time,
+	metrics map[types.MetricID]map[string]string,
+) *CassandraIndex {
 	index, err := initialize(context.Background(), &mockStore{}, Options{
 		DefaultTimeToLive: 1 * time.Hour,
 		LockFactory:       &mockLockFactory{},
@@ -711,6 +738,7 @@ func Benchmark_labelsToID(b *testing.B) {
 		c := CassandraIndex{
 			labelsToID: make(map[uint64][]idData),
 		}
+
 		b.Run(tt.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				key := tt.labels.Hash()
@@ -854,6 +882,7 @@ func Test_sortLabels(t *testing.T) {
 	type args struct {
 		labels labels.Labels
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -924,6 +953,7 @@ func Test_sortLabels(t *testing.T) {
 			want: labels.Labels{},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := sortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
@@ -978,6 +1008,7 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 	for _, tt := range tests {
 		got1 := tt.input1.String()
 		got2 := tt.input2.String()
+
 		if got1 == got2 {
 			t.Errorf("StringFromLabels(%v) == StringFromLabels(%v) want not equal", tt.input1, tt.input2)
 		}
@@ -1807,6 +1838,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1815,6 +1847,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -1823,10 +1856,12 @@ func Test_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
+
 		t.Run(tt.name+" direct", func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1835,6 +1870,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -1843,8 +1879,8 @@ func Test_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
-		t.Run(tt.name+" reverse", func(t *testing.T) {
 
+		t.Run(tt.name+" reverse", func(t *testing.T) {
 			matchersReverse := make([]*labels.Matcher, len(tt.matchers))
 			for i := range matchersReverse {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
@@ -1853,6 +1889,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -1861,6 +1898,7 @@ func Test_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -2016,8 +2054,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 
 	for x := 0; x < 100; x++ {
 		var start, end time.Time
-		for y := 0; y < 100; y++ {
 
+		for y := 0; y < 100; y++ {
 			switch x % 5 {
 			case 0:
 				start = t0
@@ -3302,6 +3340,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		shards, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, false)
 		if err != nil {
@@ -3319,6 +3358,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3327,6 +3367,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3335,10 +3376,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
+
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3347,6 +3390,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3355,10 +3399,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
+
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3367,6 +3413,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3375,10 +3422,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
+
 		t.Run(tt.name+" direct", func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3387,6 +3436,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3395,8 +3445,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
 			}
 		})
-		t.Run(tt.name+" reverse", func(t *testing.T) {
 
+		t.Run(tt.name+" reverse", func(t *testing.T) {
 			matchersReverse := make([]*labels.Matcher, len(tt.matchers))
 			for i := range matchersReverse {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
@@ -3405,6 +3455,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
+
 				return
 			}
 			if tt.wantLen == 0 {
@@ -3413,6 +3464,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 			}
 			if len(got) != tt.wantLen {
 				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
+
 				return
 			}
 			got = got[:len(tt.want)]
@@ -3424,10 +3476,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	}
 
 	buffer := bytes.NewBuffer(nil)
+
 	hadIssue, err := index1.verify(context.Background(), now, buffer, false, false)
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -3436,6 +3490,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -3444,26 +3499,22 @@ func Test_sharded_postingsForMatchers(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 }
 
-func idsToBitset(ids []types.MetricID) *roaring.Bitmap {
-	result := roaring.NewBTreeBitmap()
-
-	for _, id := range ids {
-		result.Add(uint64(id))
-	}
-
-	return result
-}
-
 func Test_PilosaBugs(t *testing.T) {
 	b1 := roaring.NewBTreeBitmap()
-	b1.AddN(1, 2)
+	if _, err := b1.AddN(1, 2); err != nil {
+		t.Fatal(err)
+	}
+
 	b2 := roaring.NewBTreeBitmap()
-	b2.AddN(3)
+	if _, err := b2.AddN(3); err != nil {
+		t.Fatal(err)
+	}
 
 	// Clone() is broken.
 	// b1Bis := b1.Clone()
@@ -3471,10 +3522,12 @@ func Test_PilosaBugs(t *testing.T) {
 	// This is workaround clone
 	b1Bis := roaring.NewBTreeBitmap()
 	b1Bis.UnionInPlace(b1)
+
 	b2Bis := roaring.NewBTreeBitmap()
 	b2Bis.UnionInPlace(b2)
 
 	b1.UnionInPlace(b2)
+
 	if b1.Count() != 3 {
 		t.Errorf("b1.Count() = %d, want 3", b1.Count())
 	}
@@ -3484,6 +3537,7 @@ func Test_PilosaBugs(t *testing.T) {
 	}
 
 	b1Bis.UnionInPlace(b2Bis)
+
 	if b1Bis.Count() != 3 {
 		t.Errorf("b1.Count() = %d, want 3", b1Bis.Count())
 	}
@@ -3509,15 +3563,23 @@ func Test_PilosaBugs2(t *testing.T) {
 	}
 
 	// Alternative to Flip
-	b2.Add(1, 2, 3)
+	if _, err := b2.Add(1, 2, 3); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, bitmap := range []*roaring.Bitmap{b1, b2} {
 		tmp := roaring.NewBTreeBitmap()
 
 		_ = tmp.Xor(bitmap)
 
-		bitmap.Add(5)
-		bitmap.Add(6)
+		if _, err := bitmap.Add(5); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := bitmap.Add(6); err != nil {
+			t.Fatal(err)
+		}
+
 		if !bitmap.Contains(5) {
 			t.Error("pilosa bug...")
 		}
@@ -3537,8 +3599,11 @@ func Test_PilosaSerialization(t *testing.T) {
 		fmt.Println(buffer.Bytes())
 	*/
 
-	gotBinary := []byte{60, 48, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 84, 141, 24, 0, 0, 0, 2, 0, 1, 0, 203, 122, 206, 122, 87, 141}
+	gotBinary := []byte{
+		60, 48, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 84, 141, 24, 0, 0, 0, 2, 0, 1, 0, 203, 122, 206, 122, 87, 141,
+	}
 	got := roaring.NewBTreeBitmap()
+
 	err := got.UnmarshalBinary(gotBinary)
 	if err != nil {
 		t.Error(err)
@@ -3580,17 +3645,33 @@ func Test_freeFreeID(t *testing.T) {
 	compact = compact.Flip(1, 5000)
 
 	spare := compact.Clone()
-	spare.Remove(42)
-	spare.Remove(1337)
-	spare.Remove(44)
+	if _, err := spare.Remove(42); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := spare.Remove(1337); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := spare.Remove(44); err != nil {
+		t.Fatal(err)
+	}
 
 	compactLarge := roaring.NewBTreeBitmap()
 	compactLarge = compactLarge.Flip(1, 1e5)
 
 	spareLarge := compactLarge.Clone()
-	spareLarge.Remove(65539)
-	spareLarge.Remove(65540)
-	spareLarge.Remove(70000)
+	if _, err := spareLarge.Remove(65539); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := spareLarge.Remove(65540); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := spareLarge.Remove(70000); err != nil {
+		t.Fatal(err)
+	}
 
 	spareZone := compactLarge.Clone()
 	spareZone = spareZone.Flip(200, 500)
@@ -3602,22 +3683,31 @@ func Test_freeFreeID(t *testing.T) {
 	// startAndEnd = startAndEnd.Flip(math.MaxUint64 - 1e4, math.MaxUint64)
 	// Do Add() instead
 	for n := uint64(math.MaxUint64 - 1e4); true; n++ {
-		startAndEnd.Add(n)
+		if _, err := startAndEnd.Add(n); err != nil {
+			t.Fatal(err)
+		}
+
 		if n == math.MaxUint64 {
 			break
 		}
 	}
 
 	freeAtSplit1 := compactLarge.Clone()
-	freeAtSplit1.Remove(50000)
+	if _, err := freeAtSplit1.Remove(50000); err != nil {
+		t.Fatal(err)
+	}
 
 	freeAtSplit2 := compactLarge.Clone()
-	freeAtSplit2.Remove(50001)
+	if _, err := freeAtSplit2.Remove(50001); err != nil {
+		t.Fatal(err)
+	}
 
 	freeAtSplit3 := compactLarge.Clone()
-	freeAtSplit3.Remove(49999)
+	if _, err := freeAtSplit3.Remove(49999); err != nil {
+		t.Fatal(err)
+	}
 
-	// test bug that occured with all IDs assigned between 1 to 36183 (included)
+	// test bug that occurred with all IDs assigned between 1 to 36183 (included)
 	// but 31436 and 31437.
 	// This is actually a bug in pilosa :(
 	bug1 := roaring.NewBTreeBitmap()
@@ -3732,6 +3822,7 @@ func Test_freeFreeID(t *testing.T) {
 
 	// Create 12 random bitmap, each with 1e6 metrics and 10, 100 and 1000 random hole
 	rnd := rand.New(rand.NewSource(42))
+
 	for n := 0; n < 12; n++ {
 		var holdCount int
 
@@ -3765,7 +3856,9 @@ func Test_freeFreeID(t *testing.T) {
 
 		holdsInt := rnd.Perm(1e6)[:holdCount]
 		for _, v := range holdsInt {
-			bitmap.Remove(uint64(v))
+			if _, err := bitmap.Remove(uint64(v)); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		sort.Ints(holdsInt)
@@ -3794,6 +3887,7 @@ func Test_freeFreeID(t *testing.T) {
 
 		tt := tt
 		buffer := bytes.NewBuffer(nil)
+
 		_, err := tt.bitmap.WriteTo(buffer)
 		if err != nil {
 			t.Error(err)
@@ -3813,6 +3907,7 @@ func Test_freeFreeID(t *testing.T) {
 			if i > 0 {
 				// unless first test, reload bitmap from bytes
 				allPosting = roaring.NewBTreeBitmap()
+
 				err = allPosting.UnmarshalBinary(buffer.Bytes())
 				if err != nil {
 					t.Error(err)
@@ -3863,7 +3958,7 @@ func Test_freeFreeID(t *testing.T) {
 						t.Errorf("newID = %d isn't free", newID)
 					}
 
-					_, err := allPosting.Add(uint64(newID))
+					_, err := allPosting.Add(newID)
 					if err != nil {
 						t.Error(err)
 					}
@@ -3905,17 +4000,35 @@ func Benchmark_freeFreeID(b *testing.B) {
 	compact = compact.Flip(1, 5000)
 
 	spare := compact.Clone()
-	spare.Remove(42)
-	spare.Remove(1337)
-	spare.Remove(44)
+
+	if _, err := spare.Remove(42); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := spare.Remove(1337); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := spare.Remove(44); err != nil {
+		b.Fatal(err)
+	}
 
 	compactLarge := roaring.NewBTreeBitmap()
 	compactLarge = compactLarge.Flip(1, 5e5)
 
 	spareLarge := compactLarge.Clone()
-	spareLarge.Remove(65539)
-	spareLarge.Remove(65540)
-	spareLarge.Remove(70000)
+
+	if _, err := spareLarge.Remove(65539); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := spareLarge.Remove(65540); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := spareLarge.Remove(70000); err != nil {
+		b.Fatal(err)
+	}
 
 	spareZone := compactLarge.Clone()
 	spareZone = spareZone.Flip(200, 500)
@@ -3928,19 +4041,38 @@ func Benchmark_freeFreeID(b *testing.B) {
 	compactLargerest = compactLargerest.Flip(5e6+1, 5e7)
 
 	spareSuperLarge := compactSuperLarge.Clone()
-	spareSuperLarge.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13)
+
+	if _, err := spareSuperLarge.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
+		b.Fatal(err)
+	}
+
 	spareSuperLarge.Flip(1e2, 1e3)
-	spareSuperLarge.Remove(4242, 4299, 4288, 1e9, 2e9)
+
+	if _, err := spareSuperLarge.Remove(4242, 4299, 4288, 1e9, 2e9); err != nil {
+		b.Fatal(err)
+	}
 
 	spareLargerest := compactLargerest.Clone()
-	spareLargerest.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13)
+
+	if _, err := spareLargerest.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
+		b.Fatal(err)
+	}
+
 	spareLargerest.Flip(1e2, 1e3)
-	spareLargerest.Remove(4242, 4299, 4288, 1e9, 2e9)
+
+	if _, err := spareLargerest.Remove(4242, 4299, 4288, 1e9, 2e9); err != nil {
+		b.Fatal(err)
+	}
 
 	startAndEnd := roaring.NewBTreeBitmap()
 	startAndEnd = startAndEnd.Flip(0, 1e4)
+
 	for n := uint64(math.MaxUint64); true; n++ {
-		startAndEnd.Add(n)
+		_, err := startAndEnd.Add(n)
+		if err != nil {
+			b.Fatal(err)
+		}
+
 		if n == math.MaxUint64 {
 			break
 		}
@@ -4004,7 +4136,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	}
 }
 
-// Test_cache will run a small scenario on the index to check that in-memory cache works
+// Test_cache will run a small scenario on the index to check that in-memory cache works.
 func Test_cache(t *testing.T) {
 	defaultTTL := 365 * 24 * time.Hour
 	store := &mockStore{}
@@ -4224,6 +4356,7 @@ func Test_cluster(t *testing.T) {
 	if tmp[0] != metricsID[0] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
 	}
+
 	if tmp[1] != metricsID[1] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
 	}
@@ -4260,6 +4393,7 @@ func Test_cluster(t *testing.T) {
 	if tmp[0] != metricsID[0] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
 	}
+
 	if tmp[1] != metricsID[1] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
 	}
@@ -4285,9 +4419,11 @@ func Test_cluster(t *testing.T) {
 	if tmp[0] != metricsID[3] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[3])
 	}
+
 	if tmp[1] != metricsID[2] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[2])
 	}
+
 	if tmp[2] != metricsID[1] {
 		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[2], metricsID[1])
 	}
@@ -4411,10 +4547,12 @@ func Test_cluster(t *testing.T) {
 	}
 
 	buffer := bytes.NewBuffer(nil)
+
 	hadIssue, err := index1.verify(context.Background(), t6, buffer, false, false)
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -4423,6 +4561,7 @@ func Test_cluster(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -4437,7 +4576,7 @@ func Test_expiration(t *testing.T) {
 	longTTL := 375 * 24 * time.Hour
 	// current implementation only delete metrics expired the day before
 	implementationDelay := 24 * time.Hour
-	// updateDelay is the delay after which we are guaranted to trigger an TTL update
+	// updateDelay is the delay after which we are guaranteed to trigger an TTL update
 	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
 
 	// At t0, we will create 4 metrics: two with shortTLL, one with longTTL and without TTL (so using default TTL)
@@ -4458,23 +4597,23 @@ func Test_expiration(t *testing.T) {
 	t6 := t2.Add(updateDelay).Add(longTTL).Add(implementationDelay)
 
 	metrics := []map[string]string{
-		map[string]string{
+		{
 			"__name__":    "up",
 			"description": "The metrics without TTL that use default TTL",
 		},
-		map[string]string{
+		{
 			"__name__":    "ttl",
 			"unit":        "month",
 			"value":       "13",
 			"description": "The metrics with TTL set to 13 months",
 		},
-		map[string]string{
+		{
 			"__name__":    "ttl",
 			"unit":        "day",
 			"value":       "2",
 			"description": "The metrics with TTL set to 2 months",
 		},
-		map[string]string{
+		{
 			"__name__":    "ttl",
 			"unit":        "day",
 			"value":       "2",
@@ -4488,20 +4627,20 @@ func Test_expiration(t *testing.T) {
 		shortTTL,
 		shortTTL,
 	}
-	metricsID := make([]types.MetricID, len(metrics))
+
 	for n := 1; n < len(metrics); n++ {
 		secondTTL := int64(metricsTTL[n].Seconds())
 		metrics[n]["__ttl__"] = strconv.FormatInt(secondTTL, 10)
 	}
 
 	store := &mockStore{}
+
 	index, err := initialize(context.Background(), store, Options{
 		DefaultTimeToLive: defaultTTL,
 		LockFactory:       &mockLockFactory{},
 		States:            &mockState{},
 		Cluster:           &dummy.LocalCluster{},
 	}, newMetrics(prometheus.NewRegistry()))
-
 	if err != nil {
 		t.Error(err)
 	}
@@ -4513,7 +4652,7 @@ func Test_expiration(t *testing.T) {
 		labelsList[i] = labelsMapToList(m, false)
 	}
 
-	metricsID, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
+	metricsID, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4529,24 +4668,30 @@ func Test_expiration(t *testing.T) {
 	for n := 0; n < len(metrics); n++ {
 		labels := labelsMapToList(metrics[n], true)
 		id := metricsID[n]
+
 		if !reflect.DeepEqual(store.id2labels[id], labels) {
 			t.Errorf("id2labels[%d] = %v, want %v", id, store.id2labels[id], labels)
 		}
+
 		wantMinExpire := t0.Add(metricsTTL[n]).Add(cassandraTTLUpdateDelay)
 		wantMaxExpire := t0.Add(metricsTTL[n]).Add(updateDelay)
+
 		if store.id2expiration[id].After(wantMaxExpire) || store.id2expiration[id].Before(wantMinExpire) {
 			t.Errorf("id2expiration[%d] = %v, want between %v and %v", id, store.id2expiration[id], wantMinExpire, wantMaxExpire)
 		}
+
 		if len(store.expiration) != 3 {
 			t.Errorf("len(store.expiration) = %v, want 3", len(store.expiration))
 		}
 	}
 
 	buffer := bytes.NewBuffer(nil)
+
 	hadIssue, err := index.verify(context.Background(), t0, buffer, false, false)
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -4558,6 +4703,7 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 4 {
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
@@ -4566,19 +4712,24 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
+
 	ids, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[3:4], t1), t1)
 	if err != nil {
 		t.Error(err)
+
 		return // can't continue, lock may be hold
 	}
+
 	if ttls[0] != int64(shortTTL.Seconds()) {
 		t.Errorf("ttl = %d, want %f", ttls[0], shortTTL.Seconds())
 	}
+
 	if ids[0] != metricsID[3] {
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
 	}
@@ -4588,15 +4739,21 @@ func Test_expiration(t *testing.T) {
 	if len(store.expiration) != 4 {
 		t.Errorf("len(store.expiration) = %v, want 4", len(store.expiration))
 	}
+
 	for _, id := range []types.MetricID{metricsID[2], metricsID[3]} {
 		expire := store.id2expiration[id].Truncate(24 * time.Hour)
 		bitmap := roaring.NewBTreeBitmap()
-		bitmap.UnmarshalBinary(store.expiration[expire])
+
+		err = bitmap.UnmarshalBinary(store.expiration[expire])
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		got := bitmap.Slice()
 		want := []uint64{
 			uint64(id),
 		}
+
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("store.expiration[%v == expiration of id %d] = %v,  %v", expire, id, got, want)
 		}
@@ -4613,20 +4770,25 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 4 {
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
 	metrics[0]["__ttl__"] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
+
 	ids, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList[0:1], t2), t2)
 	if err != nil {
 		t.Error(err)
+
 		return // can't continue, lock make be hold
 	}
+
 	if ttls[0] != int64(shortTTL.Seconds()) {
 		t.Errorf("ttl = %d, want %f", ttls[0], shortTTL.Seconds())
 	}
+
 	if ids[0] != metricsID[0] {
 		t.Errorf("id = %d, want %d", ids[0], metricsID[0])
 	}
@@ -4637,6 +4799,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	index.expire(t2)
+
 	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t2)
 	}
@@ -4645,9 +4808,11 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 3 {
 		t.Errorf("len(allIds) = %d, want 3", len(allIds))
 	}
+
 	for _, id := range allIds {
 		if id == metricsID[2] {
 			t.Errorf("allIds = %v and contains %d, want not contains this value", allIds, metricsID[2])
@@ -4655,6 +4820,7 @@ func Test_expiration(t *testing.T) {
 	}
 
 	index.expire(t3)
+
 	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t3)
 	}
@@ -4663,11 +4829,13 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 2 {
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
 	labelsList = make([]labels.Labels, expireBatchSize+10)
+
 	for n := 0; n < expireBatchSize+10; n++ {
 		labels := map[string]string{
 			"__name__": "filler",
@@ -4686,11 +4854,13 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 2+expireBatchSize+10 {
 		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
 	}
 
 	index.expire(t4)
+
 	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t4)
 	}
@@ -4699,11 +4869,13 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 2+expireBatchSize+10 {
 		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
 	}
 
 	index.expire(t5)
+
 	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t5)
 	}
@@ -4712,6 +4884,7 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 2 {
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
@@ -4720,11 +4893,13 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
 	index.expire(t6)
+
 	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
 		index.cassandraExpire(context.Background(), t6)
 	}
@@ -4733,6 +4908,7 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if len(allIds) != 0 {
 		t.Errorf("allIds = %v, want []", allIds)
 	}
@@ -4741,6 +4917,7 @@ func Test_expiration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
@@ -4844,6 +5021,7 @@ func Test_getTimeShards(t *testing.T) {
 			want: []int32{0},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
@@ -4860,6 +5038,7 @@ func Test_getTimeShards(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	for i, shard := range got {
 		if shard == globalShardNumber {
 			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
@@ -5011,6 +5190,9 @@ func Test_FilteredLabelValues(t *testing.T) {
 		},
 		now,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name      string
@@ -5094,7 +5276,9 @@ func Test_FilteredLabelValues(t *testing.T) {
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+			want: []string{
+				"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint",
+			},
 		},
 		{
 			name:  "names-account3-t1",
@@ -5109,7 +5293,10 @@ func Test_FilteredLabelValues(t *testing.T) {
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint"},
+			want: []string{
+				"__name__", "account_id", "cpu", "device", "environment",
+				"fstype", "instance", "job", "mode", "mountpoint",
+			},
 		},
 		{
 			name:  "names-account3-t2",
@@ -5148,7 +5335,10 @@ func Test_FilteredLabelValues(t *testing.T) {
 			end:       t3,
 			matchers:  nil,
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint", "secret_name", "userID"},
+			want: []string{
+				"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype",
+				"instance", "job", "mode", "mountpoint", "secret_name", "userID",
+			},
 		},
 		{
 			name:      "value-__name__-all",
@@ -5220,11 +5410,13 @@ func Test_FilteredLabelValues(t *testing.T) {
 			want:      nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.index.labelValues(context.Background(), tt.start, tt.end, tt.labelName, tt.matchers)
 			if err != nil {
 				t.Errorf("labelValues() error = %v", err)
+
 				return
 			}
 

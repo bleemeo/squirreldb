@@ -18,6 +18,7 @@ const (
 	metricID3 = 858
 )
 
+//nolint:gochecknoglobals
 var (
 	labelsMetric1 = labels.Labels{
 		{
@@ -33,6 +34,7 @@ var (
 			Value: "/home",
 		},
 	}
+
 	labelsMetric2 = labels.Labels{
 		{
 			Name:  "__name__",
@@ -47,6 +49,7 @@ var (
 			Value: "5678",
 		},
 	}
+
 	labelsMetric3 = labels.Labels{
 		{
 			Name:  "__name__",
@@ -93,13 +96,13 @@ type mockStore struct {
 }
 
 func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
-
 	fakeData := make([]types.MetricData, len(req.IDs))
 
 	for i, id := range req.IDs {
 		fakeData[i].ID = id
 		fakeData[i].TimeToLive = 42
 		fakeData[i].Points = make([]types.MetricPoint, s.pointsPerSeries)
+
 		for j := range fakeData[i].Points {
 			fakeData[i].Points[j].Timestamp = int64(i * j)
 			fakeData[i].Points[j].Value = float64(i * j)
@@ -109,6 +112,7 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 	m := &mockDataSet{
 		reply: fakeData,
 	}
+
 	return m, nil
 }
 
@@ -117,7 +121,11 @@ type mockIndex struct {
 	lookupMap   map[types.MetricID]labels.Labels
 }
 
-func (idx mockIndex) Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (types.MetricsSet, error) {
+func (idx mockIndex) Search(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) (types.MetricsSet, error) {
 	return &dummy.MetricsLabel{List: idx.searchReply}, nil
 }
 
@@ -125,30 +133,23 @@ func (idx mockIndex) AllIDs(ctx context.Context, start time.Time, end time.Time)
 	return nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) lookupLabels(ids []types.MetricID) ([]labels.Labels, error) {
-	results := make([]labels.Labels, len(ids))
-
-	for i, id := range ids {
-		l, ok := idx.lookupMap[id]
-		if ok {
-			results[i] = l.Copy()
-		} else {
-			return nil, errors.New("not found")
-		}
-	}
-
-	return results, nil
-}
-
 func (idx mockIndex) LookupIDs(ctx context.Context, request []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+func (idx mockIndex) LabelNames(
+	ctx context.Context,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error) {
+func (idx mockIndex) LabelValues(
+	ctx context.Context,
+	start, end time.Time,
+	name string, matchers []*labels.Matcher,
+) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -188,11 +189,13 @@ func Test_querier_Select(t *testing.T) {
 		mint   int64
 		maxt   int64
 	}
+
 	type args struct {
 		sortSeries bool
 		hints      *storage.SelectHints
 		matchers   []*labels.Matcher
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -258,6 +261,7 @@ func Test_querier_Select(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			q := querier{
@@ -267,19 +271,22 @@ func Test_querier_Select(t *testing.T) {
 				maxt:   tt.fields.maxt,
 			}
 			got := q.Select(tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
-			if !seriesLabelsEquals(got, tt.want, t) {
+			if !seriesLabelsEquals(t, got, tt.want) {
 				return
 			}
 		})
 	}
 }
 
-func seriesLabelsEquals(a, b storage.SeriesSet, t *testing.T) bool {
+func seriesLabelsEquals(t *testing.T, a, b storage.SeriesSet) bool {
+	t.Helper()
+
 	n := 0
 	good := true
 
 	for {
 		n++
+
 		aNext := a.Next()
 		bNext := b.Next()
 

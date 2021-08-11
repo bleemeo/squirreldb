@@ -162,7 +162,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 	tmp := r.getSerializedPoints()
 
 	defer r.bufferPool.Put(buffer)
-	defer r.serializedPointsPool.Put(tmp) //nolint: staticcheck
+	defer r.serializedPointsPool.Put(tmp)
 
 	for i, data := range points {
 		addedPoints += len(data.Points)
@@ -240,7 +240,7 @@ func (r *Redis) GetSetPointsAndOffset( //nolint:gocyclo,cyclop
 	tmp := r.getSerializedPoints()
 
 	defer r.bufferPool.Put(buffer)
-	defer r.serializedPointsPool.Put(tmp) //nolint: staticcheck
+	defer r.serializedPointsPool.Put(tmp)
 
 	for i, data := range points {
 		writtenPointsCount += len(data.Points)
@@ -274,7 +274,7 @@ func (r *Redis) GetSetPointsAndOffset( //nolint:gocyclo,cyclop
 	}
 
 	workBuffer := r.getSerializedPoints()
-	defer r.serializedPointsPool.Put(workBuffer) //nolint: staticcheck
+	defer r.serializedPointsPool.Put(workBuffer)
 
 	for i, data := range points {
 		tmp, err := commands[i].Bytes()
@@ -342,7 +342,7 @@ func (r *Redis) ReadPointsAndOffset( //nolint:gocyclo,cyclop
 
 	tmp := r.getSerializedPoints()
 
-	defer r.serializedPointsPool.Put(tmp) //nolint: staticcheck
+	defer r.serializedPointsPool.Put(tmp)
 
 	for i, id := range ids {
 		values, err := metricCommands[i].Bytes()

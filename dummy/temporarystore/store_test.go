@@ -20,9 +20,11 @@ func TestAppend(t *testing.T) {
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}
+
 	type args struct {
 		points []types.MetricData
 	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -414,6 +416,7 @@ func TestAppend(t *testing.T) {
 			want:      nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -438,9 +441,11 @@ func TestStore_expire(t *testing.T) {
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}
+
 	type args struct {
 		now time.Time
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -500,6 +505,7 @@ func TestStore_expire(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -518,9 +524,11 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}
+
 	type args struct {
 		ids []types.MetricID
 	}
+
 	tests := []struct {
 		name       string
 		fields     fields
@@ -652,6 +660,7 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 			got, gotOffset, err := s.ReadPointsAndOffset(context.Background(), tt.args.ids)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadPointsAndOffset() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -668,11 +677,13 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}
+
 	type args struct {
 		points  []types.MetricData
 		offsets []int
 		now     time.Time
 	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -776,6 +787,7 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 				offsets: []int{1, 3},
 				now:     time.Unix(400, 0),
 			},
+
 			wantState: map[types.MetricID]storeData{
 				MetricIDTest1: {
 					MetricData: types.MetricData{
@@ -930,6 +942,7 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 				offsets: []int{1, 0},
 				now:     time.Unix(200, 0),
 			},
+
 			wantState: map[types.MetricID]storeData{
 				MetricIDTest1: {
 					MetricData: types.MetricData{
@@ -1087,6 +1100,7 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 			want:      nil,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -1114,6 +1128,7 @@ func TestStore_markToExpire(t *testing.T) {
 		ttl time.Duration
 		now time.Time
 	}
+
 	tests := []struct {
 		name      string
 		state     map[types.MetricID]storeData
@@ -1161,6 +1176,7 @@ func TestStore_markToExpire(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -1235,6 +1251,7 @@ func TestStore_GetSetFlushDeadline(t *testing.T) {
 			got, err := s.GetSetFlushDeadline(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetSetFlushDeadline() error = %v", err)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -1252,6 +1269,7 @@ func TestStore_GetTransfert(t *testing.T) {
 		metrics          map[types.MetricID]storeData
 		transfertMetrics []types.MetricID
 	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1334,6 +1352,7 @@ func TestStore_GetTransfert(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
@@ -1344,6 +1363,7 @@ func TestStore_GetTransfert(t *testing.T) {
 			got, err := s.GetTransfert(context.Background(), tt.args)
 			if err != nil {
 				t.Errorf("Store.GetTransfert() error = %v", err)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -1358,7 +1378,8 @@ func TestStore_GetTransfert(t *testing.T) {
 
 func TestStore_GetAllKnownMetrics(t *testing.T) {
 	store := New(prometheus.NewRegistry())
-	store.getSetPointsAndOffset(
+
+	_, err := store.getSetPointsAndOffset(
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest1,
@@ -1371,6 +1392,9 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		[]int{0},
 		time.Unix(10, 0),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	want := map[types.MetricID]time.Time{
 		MetricIDTest1: {},
@@ -1381,9 +1405,12 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
 
-	store.GetSetFlushDeadline(context.Background(), map[types.MetricID]time.Time{
+	_, err = store.GetSetFlushDeadline(context.Background(), map[types.MetricID]time.Time{
 		MetricIDTest1: time.Unix(42, 42),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	want = map[types.MetricID]time.Time{
 		MetricIDTest1: time.Unix(42, 42),
@@ -1394,11 +1421,14 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
 
-	store.markToExpire(
+	err = store.markToExpire(
 		[]types.MetricID{MetricIDTest1},
 		time.Minute,
 		time.Unix(10, 0),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	want = map[types.MetricID]time.Time{}
 

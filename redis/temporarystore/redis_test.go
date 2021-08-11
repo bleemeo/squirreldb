@@ -177,11 +177,13 @@ func Test_valuesSerialization(t *testing.T) {
 			gotBytes, err := valuesFromData(tt.data, nil, nil)
 			if err != nil {
 				t.Errorf("valuesFromData() error = %v", err)
+
 				return
 			}
 			got, err := dataFromValues(MetricIDTest1, gotBytes, nil)
 			if err != nil {
 				t.Errorf("dataFromValues() error = %v", err)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.data) {
@@ -197,11 +199,13 @@ func Test_valuesSerialization(t *testing.T) {
 				gotBytes, err := valuesFromData(tt.data, buffer, tmp)
 				if err != nil {
 					t.Errorf("valuesFromData() error = %v", err)
+
 					return
 				}
 				got, err := dataFromValues(MetricIDTest1, gotBytes, tmp2)
 				if err != nil {
 					t.Errorf("dataFromValues() error = %v", err)
+
 					return
 				}
 				if !reflect.DeepEqual(got, tt.data) {

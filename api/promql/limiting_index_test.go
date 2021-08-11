@@ -15,6 +15,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
+
 	_, _, err := idx.LookupIDs(
 		context.Background(),
 		[]types.LookupRequest{
@@ -23,7 +24,6 @@ func Test_limitingIndex_Search(t *testing.T) {
 			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,11 +32,13 @@ func Test_limitingIndex_Search(t *testing.T) {
 		index          types.Index
 		maxTotalSeries uint32
 	}
+
 	type search struct {
 		matchers  []*labels.Matcher
 		wantCount int
 		wantErr   bool
 	}
+
 	tests := []struct {
 		name     string
 		fields   fields
@@ -157,6 +159,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := limitingIndex{
@@ -167,6 +170,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 				got, err := idx.Search(context.Background(), now, now, query.matchers)
 				if (err != nil) != query.wantErr {
 					t.Fatalf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
+
 					return
 				}
 

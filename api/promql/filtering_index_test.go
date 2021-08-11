@@ -17,6 +17,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,
 	}
+
 	ids, _, err := idx.LookupIDs(
 		context.Background(),
 		[]types.LookupRequest{
@@ -25,7 +26,6 @@ func Test_filteringIndex_Search(t *testing.T) {
 			{Labels: labelsMetric3.Copy(), Start: now, End: now},
 		},
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,9 +42,11 @@ func Test_filteringIndex_Search(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -119,6 +121,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := filteringIndex{
@@ -128,6 +131,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 			got, err := idx.Search(context.Background(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.Search() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !dummy.MetricsSetEqual(got, tt.want) {
@@ -149,10 +153,12 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		name     string
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -254,6 +260,7 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 			got, err := idx.LabelValues(context.Background(), now, now, tt.args.name, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelValues() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -275,9 +282,11 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 		index   types.Index
 		matcher *labels.Matcher
 	}
+
 	type args struct {
 		matchers []*labels.Matcher
 	}
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -350,6 +359,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			want: []string{"__account_id", "__name__", "mountpath"},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := filteringIndex{
@@ -359,6 +369,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			got, err := idx.LabelNames(context.Background(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelNames() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
