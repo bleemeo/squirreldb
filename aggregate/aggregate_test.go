@@ -17,6 +17,7 @@ func Test_aggregateData(t *testing.T) {
 		data       types.MetricData
 		resolution int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -112,6 +113,7 @@ func Test_aggregateData(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Aggregate(tt.args.data, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
@@ -126,6 +128,7 @@ func Test_aggregatePoints(t *testing.T) {
 		points    []types.MetricPoint
 		timestamp int64
 	}
+
 	tests := []struct {
 		name string
 		args args
@@ -167,6 +170,7 @@ func Test_aggregatePoints(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := aggregatePoints(tt.args.points, tt.args.timestamp); !reflect.DeepEqual(got, tt.want) {

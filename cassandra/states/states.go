@@ -67,7 +67,7 @@ func (c *CassandraStates) Read(name string, value interface{}) (found bool, err 
 	return true, nil
 }
 
-// Update updates the state in the states table.
+// Write updates the state in the states table.
 func (c *CassandraStates) Write(name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
 	statesTableUpdateStateQuery := c.statesTableInsertStateQuery(name, valueString)

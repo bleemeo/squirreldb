@@ -1,7 +1,3 @@
-// Disable stylecheck because is complain on error message (should not be capitalized)
-// but we prefer keeping the exact message used by Prometheus.
-
-//nolint: stylecheck
 package promql
 
 import (
@@ -181,7 +177,9 @@ func parseTimeParam(r *http.Request, paramName string, defaultValue time.Time) (
 
 	result, err := parseTime(val)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("Invalid time value for '%s': %w", paramName, err)
+		// Disable stylecheck because is complain on error message (should not be capitalized)
+		// but we prefer keeping the exact message used by Prometheus.
+		return time.Time{}, fmt.Errorf("Invalid time value for '%s': %w", paramName, err) //nolint: stylecheck
 	}
 
 	return result, nil

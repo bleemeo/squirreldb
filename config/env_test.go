@@ -15,9 +15,11 @@ type fakeProvider struct {
 func (p fakeProvider) Read() (map[string]interface{}, error) {
 	return p.Values, nil
 }
+
 func (p fakeProvider) ReadBytes() ([]byte, error) {
 	return nil, errors.New("env provider does not support this method")
 }
+
 func (p fakeProvider) Watch(cb func(event interface{}, err error)) error {
 	return errors.New("env provider does not support this method")
 }
@@ -75,6 +77,7 @@ func Test_listEnvProvider_Read(t *testing.T) {
 			got, err := ep.Read()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("listEnvProvider.Read() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
