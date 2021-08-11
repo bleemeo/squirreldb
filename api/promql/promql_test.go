@@ -1,5 +1,3 @@
-// Disable stylecheck because is complain on error message (should not be capitalized)
-// but we prefer keeping the exact message used by Prometheus.
 package promql
 
 import (

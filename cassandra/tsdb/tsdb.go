@@ -155,7 +155,14 @@ func (c *CassandraTSDB) Stop() error {
 }
 
 func (c *CassandraTSDB) getPointsBuffer() []types.MetricPoint {
-	return c.pointsBufferPool.Get().([]types.MetricPoint)[:0]
+	pbuffer, ok := c.pointsBufferPool.Get().(*[]types.MetricPoint)
+
+	var buffer []types.MetricPoint
+	if ok {
+		buffer = (*pbuffer)[:0]
+	}
+
+	return buffer
 }
 
 func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
@@ -164,7 +171,7 @@ func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
 		return
 	}
 
-	c.pointsBufferPool.Put(v)
+	c.pointsBufferPool.Put(&v)
 }
 
 // Returns data table create Query.

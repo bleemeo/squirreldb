@@ -136,7 +136,7 @@ func (c *CassandraTSDB) writeAggregateRow(
 		return err
 	}
 
-	defer c.bytesPool.Put(aggregateValues) // nolint: staticcheck
+	defer c.bytesPool.Put(&aggregateValues)
 
 	maxTS := aggregatedData.Points[len(aggregatedData.Points)-1].Timestamp
 
@@ -228,7 +228,7 @@ func (c *CassandraTSDB) writeRawPartitionData(
 		return err
 	}
 
-	defer c.bytesPool.Put(rawValues)
+	defer c.bytesPool.Put(&rawValues)
 
 	maxTS := data.Points[len(data.Points)-1].Timestamp
 
@@ -311,8 +311,12 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 		return gorillaEncode(points, uint32(offset), baseTimestamp-1), nil
 	}
 
-	buffer, ok := c.bytesPool.Get().([]byte)
-	if !ok || len(buffer) == 0 {
+	pbuffer, ok := c.bytesPool.Get().(*[]byte)
+
+	var buffer []byte
+	if ok {
+		buffer = *pbuffer
+	} else {
 		buffer = make([]byte, 15)
 	}
 
@@ -320,7 +324,7 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 
 	result, err := c.xorChunkEncode(points, buffer[1:])
 	if err != nil {
-		c.bytesPool.Put(buffer)
+		c.bytesPool.Put(&buffer)
 
 		return nil, err
 	}
@@ -347,8 +351,12 @@ func (c *CassandraTSDB) encodeAggregatedPoints(
 		return gorillaEncodeAggregate(points, uint32(offset/aggregateResolution.Milliseconds()), baseTimestamp), nil
 	}
 
-	buffer, ok := c.bytesPool.Get().([]byte)
-	if !ok || len(buffer) == 0 {
+	pbuffer, ok := c.bytesPool.Get().(*[]byte)
+
+	var buffer []byte
+	if ok {
+		buffer = *pbuffer
+	} else {
 		buffer = make([]byte, 15)
 	}
 
@@ -356,7 +364,7 @@ func (c *CassandraTSDB) encodeAggregatedPoints(
 
 	result, err := c.xorChunkEncodeAggregate(points, buffer[1:1])
 	if err != nil {
-		c.bytesPool.Put(buffer)
+		c.bytesPool.Put(&buffer)
 
 		return nil, err
 	}
@@ -405,12 +413,16 @@ func (c *CassandraTSDB) xorChunkEncodeAggregate(points []aggregate.AggregatedPoi
 		err           error
 	)
 
-	tmp, ok := c.bytesPool.Get().([]byte)
-	if !ok {
+	ptmp, ok := c.bytesPool.Get().(*[]byte)
+
+	var tmp []byte
+	if ok {
+		tmp = *ptmp
+	} else {
 		tmp = make([]byte, 15)
 	}
 
-	defer c.bytesPool.Put(tmp) // nolint: staticcheck
+	defer c.bytesPool.Put(&tmp)
 
 	workPoint := make([]types.MetricPoint, len(points))
 
