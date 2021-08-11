@@ -214,8 +214,8 @@ func Test_valuesSerialization(t *testing.T) {
 
 				if i == 3 {
 					r.bufferPool.Put(buffer)
-					r.serializedPointsPool.Put(tmp)
-					r.serializedPointsPool.Put(tmp2)
+					r.serializedPointsPool.Put(&tmp)
+					r.serializedPointsPool.Put(&tmp2)
 
 					buffer = r.getBuffer()
 					tmp = r.getSerializedPoints()
