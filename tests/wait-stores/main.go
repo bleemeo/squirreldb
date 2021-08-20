@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	maxWaitTime = flag.Duration("max-wait-time", time.Minute, "Maximum time to wait for stores")
 )

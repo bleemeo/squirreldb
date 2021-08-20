@@ -37,7 +37,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	Version = "unset"
 	Commit  string
@@ -78,7 +78,7 @@ type SquirrelDB struct {
 	cassandraKeyspaceCreated bool
 }
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 var errBadConfig = errors.New("configuration validation failed")
@@ -216,7 +216,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 }
 
 // Config return the configuration after validation.
-//nolint: forbidigo // This function is allowed to use fmt.Print*
+//nolint:forbidigo // This function is allowed to use fmt.Print*
 func Config() (cfg *config.Config, err error) {
 	cfg, err = config.New()
 	if err != nil {

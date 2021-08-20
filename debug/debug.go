@@ -13,7 +13,7 @@ const (
 )
 
 // Level defines the debugging level
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var Level = 0
 
 // Print displays a debug message according to its level.

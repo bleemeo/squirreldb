@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type RemoteStorage struct {

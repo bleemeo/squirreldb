@@ -1,6 +1,6 @@
 package config
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var defaults = map[string]interface{}{
 	"cassandra.addresses":                   []string{"localhost:9042"},
 	"cassandra.keyspace":                    "squirreldb",
