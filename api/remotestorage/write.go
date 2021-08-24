@@ -6,12 +6,20 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/types"
 	"time"
 
 	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/prompb"
+)
+
+const labelMetricName = "__name__"
+
+var (
+	regexMetricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+	regexLabelName  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
 
 type errBadRequest struct {
@@ -91,6 +99,10 @@ func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
 	writeRequest, ok := reqCtx.pb.(*prompb.WriteRequest)
 	if !ok {
 		return errTypeAssertion
+	}
+
+	if err := validateLabels(writeRequest.Timeseries); err != nil {
+		return err
 	}
 
 	metrics, totalPoints, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
@@ -205,4 +217,25 @@ func metricsFromTimeseries(
 	}
 
 	return metrics, totalPoints, nil
+}
+
+// Check if the labels of a list of timeseries are valid.
+func validateLabels(series []prompb.TimeSeries) error {
+	for _, s := range series {
+		for _, l := range s.GetLabels() {
+			if l.Name == labelMetricName {
+				if !regexMetricName.MatchString(l.Value) {
+					return errBadRequest{
+						err: fmt.Errorf("invalid metric name %s should match %s", l.Value, regexMetricName.String()),
+					}
+				}
+			} else if !regexLabelName.MatchString(l.Name) {
+				return errBadRequest{
+					fmt.Errorf("invalid label name %s should match %s", l.Value, regexLabelName.String()),
+				}
+			}
+		}
+	}
+
+	return nil
 }
