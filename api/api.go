@@ -9,6 +9,7 @@ import (
 	"net/http"
 	_ "net/http/pprof" //nolint: gosec, gci
 	"os"
+	"regexp"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
 	"squirreldb/types"
@@ -21,6 +22,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
+	"github.com/prometheus/prometheus/config"
+	ppromql "github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
 const (
@@ -40,10 +45,101 @@ type API struct {
 	MetricRegisty            prometheus.Registerer
 	PromQLMaxEvaluatedSeries uint32
 
+	api        *v1.API
 	ready      int32
 	logger     log.Logger
 	router     http.Handler
 	listenPort int
+}
+
+// newAPI returns a new initialized Prometheus web API.
+func newAPI(
+	index types.Index,
+	reader types.MetricReader,
+	promQLMaxEvaluatedPoints uint64,
+	promQLMaxEvaluatedSeries uint32,
+	metricRegistry prometheus.Registerer,
+) *v1.API {
+	const (
+		// TODO: better defaults?
+		remoteReadSampleLimit      = 0 // No limit
+		remoteReadConcurrencyLimit = 20
+		remoteReadMaxBytesInFrame  = 10000000
+	)
+
+	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+
+	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
+		Logger:             log.With(stderrLogger, "component", "query engine"),
+		Reg:                metricRegistry,
+		MaxSamples:         50000000,
+		Timeout:            2 * time.Minute,
+		ActiveQueryTracker: nil,
+		LookbackDelta:      5 * time.Minute,
+	})
+
+	queryable := promql.Store{
+		Index:                     index,
+		Reader:                    reader,
+		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
+		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
+	}
+
+	// TODO: Should we use the appendable so the v1.API can serve /write directly?
+	var appendable storage.Appendable
+
+	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
+	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
+	rulesRetrieverFunc := func(context.Context) v1.RulesRetriever { return mockRulesRetriever{} }
+
+	runtimeInfoFunc := func() (v1.RuntimeInfo, error) { return v1.RuntimeInfo{}, errNotImplemented }
+
+	configFunc := func() config.Config { return config.DefaultConfig } // Only used to read the external labels.
+
+	readyFunc := func(f http.HandlerFunc) http.HandlerFunc {
+		// Waiting for the storage to be ready is already handled by API.ServeHTTP.
+		return f
+	}
+
+	// flagsMap is only used on /status/flags, it can empty.
+	var flagsMap map[string]string
+
+	// dbDir can be empty because it's only used in mockTSDBAdminStat.Snapshot, which is not implemented.
+	dbDir := ""
+
+	// Admin endpoints are not implemented.
+	enableAdmin := false
+
+	// TODO: Should we limit the CORS origin?
+	CORSOrigin := regexp.MustCompile(".*")
+
+	api := v1.NewAPI(
+		queryEngine,
+		queryable,
+		appendable,
+		mockExemplarQueryable{},
+		targetRetrieverFunc,
+		alertmanagerRetrieverFunc,
+		configFunc,
+		flagsMap,
+		v1.GlobalURLOptions{},
+		readyFunc,
+		mockTSDBAdminStat{},
+		dbDir,
+		enableAdmin,
+		log.With(stderrLogger, "component", "api"),
+		rulesRetrieverFunc,
+		remoteReadSampleLimit,
+		remoteReadConcurrencyLimit,
+		remoteReadMaxBytesInFrame,
+		CORSOrigin,
+		runtimeInfoFunc,
+		&v1.PrometheusVersion{},
+		mockGatherer{},
+		metricRegistry,
+	)
+
+	return api
 }
 
 // Run start the HTTP api server.
@@ -57,29 +153,30 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
-
 	router.Get("/debug_preaggregate", a.aggregateHandler)
+	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+
+	a.api = newAPI(a.Index, a.Reader, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
+
+	apiRouter := route.New().WithPrefix("/api/v1")
+	a.api.Register(apiRouter)
 
 	promql := promql.PromQL{
-		QueryableFactory: promql.QueryableFactory{
-			Index:                     a.Index,
-			Reader:                    a.Reader,
-			DefaultMaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
-			DefaultMaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
-		}.Queryable,
-		MetricRegisty: a.MetricRegisty,
+		MetricRegistry: a.MetricRegisty,
+		APIRouter:      apiRouter,
 	}
+
 	remote := remotestorage.RemoteStorage{
 		Index:                    a.Index,
 		Reader:                   a.Reader,
 		Writer:                   a.Writer,
 		MaxConcurrentRemoteWrite: a.MaxConcurrentRemoteWrite,
 		MetricRegisty:            a.MetricRegisty,
+		APIRouter:                apiRouter,
 	}
 
 	promql.Register(router.WithPrefix("/api/v1"))
 	remote.Register(router)
-	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	server := &http.Server{
 		Addr:    a.ListenAddress,

@@ -318,7 +318,7 @@ func TestPromQL_queryable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			qf := QueryableFactory{
+			queryable := Store{
 				Index:                     tt.fields.Index,
 				Reader:                    tt.fields.Reader,
 				DefaultMaxEvaluatedPoints: tt.fields.MaxEvaluatedPoints,
@@ -331,9 +331,9 @@ func TestPromQL_queryable(t *testing.T) {
 				r.Header.Add(k, v)
 			}
 
-			queryable := qf.Queryable(context.Background(), r)
+			ctx := WrapContext(context.Background(), r)
 
-			queryier, err := queryable.Querier(context.Background(), 0, 0)
+			queryier, err := queryable.Querier(ctx, 0, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

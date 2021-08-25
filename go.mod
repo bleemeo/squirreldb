@@ -19,6 +19,7 @@ require (
 	github.com/knadh/koanf v1.2.1
 	github.com/pilosa/pilosa/v2 v2.0.0-alpha.1.0.20200910211802-052440974ac5
 	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.30.0
 	github.com/prometheus/procfs v0.7.2
 	github.com/prometheus/prometheus v1.8.2-0.20210811053215-a3e22d8b3f23 // This is 2.29.0

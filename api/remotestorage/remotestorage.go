@@ -20,6 +20,7 @@ type RemoteStorage struct {
 	Index                    types.Index
 	MaxConcurrentRemoteWrite int
 	MetricRegisty            prometheus.Registerer
+	APIRouter                *route.Router
 
 	metrics *metrics
 }
