@@ -45,7 +45,6 @@ type API struct {
 	MetricRegisty            prometheus.Registerer
 	PromQLMaxEvaluatedSeries uint32
 
-	api        *v1.API
 	ready      int32
 	logger     log.Logger
 	router     http.Handler
@@ -85,7 +84,7 @@ func newAPI(
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
 	}
 
-	// TODO: Should we use the appendable so the v1.API can serve /write directly?
+	// TODO: Use the appendable so the v1.API can serve /write directly.
 	var appendable storage.Appendable
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -156,10 +155,9 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	a.api = newAPI(a.Index, a.Reader, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
-
+	api := newAPI(a.Index, a.Reader, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
 	apiRouter := route.New().WithPrefix("/api/v1")
-	a.api.Register(apiRouter)
+	api.Register(apiRouter)
 
 	promql := promql.PromQL{
 		MetricRegistry: a.MetricRegisty,

@@ -3,6 +3,7 @@ package promql
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,13 +17,13 @@ type PromQL struct {
 	metrics *metrics
 }
 
-type httpRequestContextKey struct{}
+type RequestContextKey struct{}
 
 // Register the API's endpoints in the given router.
 func (p *PromQL) Register(r *route.Router) {
 	p.metrics = newMetrics(p.MetricRegistry)
 
-	// We need to apiRouterWrapper the API router to add the http request to the context so
+	// We need to wrap the API router to add the http request to the context so
 	// the querier can access the HTTP headers.
 	apiRouterWrapper := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -31,8 +32,10 @@ func (p *PromQL) Register(r *route.Router) {
 		p.APIRouter.ServeHTTP(rw, r)
 	})
 
-	// Instrument the router to get the requests durations.
+	// Instrument the router to get some metrics.
 	r = r.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
+		handlerName = strings.Trim(handlerName, "/")
+
 		h := func(rw http.ResponseWriter, r *http.Request) {
 			t0 := time.Now()
 			defer func() {
@@ -59,5 +62,5 @@ func (p *PromQL) Register(r *route.Router) {
 
 // WrapContext adds a request to the context.
 func WrapContext(ctx context.Context, r *http.Request) context.Context {
-	return context.WithValue(ctx, httpRequestContextKey{}, r)
+	return context.WithValue(ctx, RequestContextKey{}, r)
 }

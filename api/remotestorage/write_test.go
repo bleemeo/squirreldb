@@ -15,7 +15,10 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-const defaultTTL = 3600
+const (
+	MetricIDTest1 = 1
+	defaultTTL    = 3600
+)
 
 type mockIndex struct {
 	fixedLookupID types.MetricID

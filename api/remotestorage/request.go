@@ -9,18 +9,6 @@ import (
 	"github.com/golang/snappy"
 )
 
-// Returns the encoded response.
-func encodeResponse(pb proto.Marshaler) ([]byte, error) {
-	marshal, err := pb.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("marshal response: %w", err)
-	}
-
-	encodedBody := snappy.Encode(nil, marshal)
-
-	return encodedBody, nil
-}
-
 type requestContext struct {
 	buffer        bytes.Buffer
 	decodedBuffer []byte
