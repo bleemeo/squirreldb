@@ -34,12 +34,12 @@ func (p *PromQL) Register(r *route.Router) {
 
 	// Instrument the router to get some metrics.
 	r = r.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
-		handlerName = strings.Trim(handlerName, "/")
+		operation := strings.Trim(handlerName, "/")
 
 		h := func(rw http.ResponseWriter, r *http.Request) {
 			t0 := time.Now()
 			defer func() {
-				p.metrics.RequestsSeconds.WithLabelValues(handlerName).Observe(time.Since(t0).Seconds())
+				p.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
 			}()
 
 			handler(rw, r)

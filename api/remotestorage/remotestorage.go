@@ -1,6 +1,7 @@
 package remotestorage
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/storage"
 )
 
 //nolint: gochecknoglobals
@@ -47,30 +49,6 @@ func (r *RemoteStorage) Init() {
 func (r *RemoteStorage) Register(router *route.Router) {
 	r.Init()
 
-	maxConcurrent := r.MaxConcurrentRemoteWrite
-	if maxConcurrent <= 0 {
-		maxConcurrent = runtime.GOMAXPROCS(0) * 2
-	}
-
-	// readMetrics := readMetrics{
-	// 	index:   r.Index,
-	// 	reader:  r.Reader,
-	// 	metrics: r.metrics,
-	// }
-
-	writeMetrics := writeMetrics{
-		index:    r.Index,
-		writer:   r.Writer,
-		reqCtxCh: make(chan *requestContext, maxConcurrent),
-		metrics:  r.metrics,
-	}
-
-	for i := 0; i < maxConcurrent; i++ {
-		writeMetrics.reqCtxCh <- &requestContext{
-			pb: &prompb.WriteRequest{},
-		}
-	}
-
 	// We need to wrap the API router to add the http request to the context so
 	// the querier can access the HTTP headers.
 	apiRouterWrapper := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -88,20 +66,22 @@ func (r *RemoteStorage) Register(router *route.Router) {
 
 	// Instrument the router to get some metrics.
 	router = router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
-		handlerName = strings.Trim(handlerName, "/")
+		operation := strings.Trim(handlerName, "/")
 
 		h := func(rw http.ResponseWriter, req *http.Request) {
 			t0 := time.Now()
 			defer func() {
-				r.metrics.RequestsSeconds.WithLabelValues(handlerName).Observe(time.Since(t0).Seconds())
+				r.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
 			}()
 
 			lrw := newLoggingResponseWriter(rw)
 			handler(lrw, req)
 
-			if lrw.statusCode != http.StatusOK {
+			// On success, read always returns StatusOK and write returns StatusNoContent.
+			if (operation == "read" && lrw.statusCode != http.StatusOK) ||
+				(operation == "write" && lrw.statusCode != http.StatusNoContent) {
 				logger.Printf("Error: %v", http.StatusText(lrw.statusCode))
-				r.metrics.RequestsError.WithLabelValues(handlerName).Inc()
+				r.metrics.RequestsError.WithLabelValues(operation).Inc()
 			}
 		}
 
@@ -110,8 +90,8 @@ func (r *RemoteStorage) Register(router *route.Router) {
 
 	router.Post("/read", apiRouterWrapper)
 	router.Post("/api/v1/read", apiRouterWrapper)
-	router.Post("/write", writeMetrics.ServeHTTP)
-	router.Post("/api/v1/write", writeMetrics.ServeHTTP)
+	router.Post("/write", apiRouterWrapper)
+	router.Post("/api/v1/write", apiRouterWrapper)
 }
 
 // loggingResponseWriter wraps a response writer to get the response status code.
@@ -129,4 +109,26 @@ func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (r RemoteStorage) Appender(ctx context.Context) storage.Appender {
+	maxConcurrent := r.MaxConcurrentRemoteWrite
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	}
+
+	writeMetrics := &writeMetrics{
+		index:    r.Index,
+		writer:   r.Writer,
+		reqCtxCh: make(chan *requestContext, maxConcurrent),
+		metrics:  r.metrics,
+	}
+
+	for i := 0; i < maxConcurrent; i++ {
+		writeMetrics.reqCtxCh <- &requestContext{
+			pb: &prompb.WriteRequest{},
+		}
+	}
+
+	return writeMetrics
 }

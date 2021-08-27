@@ -24,7 +24,6 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
 	ppromql "github.com/prometheus/prometheus/promql"
-	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
@@ -55,6 +54,7 @@ type API struct {
 func newAPI(
 	index types.Index,
 	reader types.MetricReader,
+	writer types.MetricWriter,
 	promQLMaxEvaluatedPoints uint64,
 	promQLMaxEvaluatedSeries uint32,
 	metricRegistry prometheus.Registerer,
@@ -84,8 +84,11 @@ func newAPI(
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
 	}
 
-	// TODO: Use the appendable so the v1.API can serve /write directly.
-	var appendable storage.Appendable
+	appendable := remotestorage.RemoteStorage{
+		Reader: reader,
+		Writer: writer,
+		Index:  index,
+	}
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
@@ -155,7 +158,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	api := newAPI(a.Index, a.Reader, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
+	api := newAPI(a.Index, a.Reader, a.Writer, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
 	apiRouter := route.New().WithPrefix("/api/v1")
 	api.Register(apiRouter)
 

@@ -123,18 +123,6 @@ func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.Chun
 	return chunkquerier{querier{ctx: ctx, index: index, reader: reader, mint: mint, maxt: maxt}}, nil
 }
 
-// func (s Store) PointsRead() float64 {
-// 	v := atomic.LoadUint64(&s.reader.returnedPoints)
-
-// 	return float64(v)
-// }
-
-// func (s Store) SeriesReturned() float64 {
-// 	v := atomic.LoadUint32(&s.index.returnedSeries)
-
-// 	return float64(v)
-// }
-
 // Select returns a set of series that matches the given label matchers.
 // Caller can specify if it requires returned series to be sorted.
 // Prefer not requiring sorting for better performance.
