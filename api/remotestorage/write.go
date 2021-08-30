@@ -105,14 +105,10 @@ func metricsFromTimeseries(
 	requests := make([]types.LookupRequest, 0, len(pendingTimeSeries))
 
 	for _, promSeries := range pendingTimeSeries {
-		if len(promSeries.Samples) == 0 {
-			continue
-		}
-
 		min := int64(math.MaxInt64)
 		max := int64(math.MinInt64)
 
-		for _, s := range promSeries.Samples { // FIXME: are min and max used in LookupIDs?
+		for _, s := range promSeries.Samples {
 			if min > s.Timestamp {
 				min = s.Timestamp
 			}
