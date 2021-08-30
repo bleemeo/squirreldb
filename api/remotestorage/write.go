@@ -46,7 +46,10 @@ func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (
 			Samples: []types.MetricPoint{metricPoint},
 		}
 	} else {
-		ts.Samples = append(ts.Samples, metricPoint)
+		w.pendingTimeSeries[labelsHash] = timeSeries{
+			Labels:  ts.Labels,
+			Samples: append(ts.Samples, metricPoint),
+		}
 	}
 
 	return 0, nil
@@ -54,9 +57,16 @@ func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (
 
 // Commit submits the collected samples and purges the batch, unused.
 func (w *writeMetrics) Commit() error {
-	defer func() { w.pendingTimeSeries = nil }()
+	defer func() { w.pendingTimeSeries = make(map[uint64]timeSeries) }()
 
-	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), w.pendingTimeSeries, w.index)
+	// Convert the time series map to a slice, because metricsFromTimeseries
+	// needs to always iterate on it in the same order.
+	pendingTimeSeries := make([]timeSeries, 0, len(w.pendingTimeSeries))
+	for _, ts := range w.pendingTimeSeries {
+		pendingTimeSeries = append(pendingTimeSeries, ts)
+	}
+
+	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), pendingTimeSeries, w.index)
 	if err != nil {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
@@ -70,16 +80,17 @@ func (w *writeMetrics) Commit() error {
 	return nil
 }
 
-// Rollback rolls back all modifications made in the appender so far, unused.
-// TODO: drop pending timeseries?
+// Rollback rolls back all modifications made in the appender so far.
 func (w *writeMetrics) Rollback() error {
+	w.pendingTimeSeries = make(map[uint64]timeSeries)
+
 	return nil
 }
 
 // Returns a metric list generated from a TimeSeries list.
 func metricsFromTimeseries(
 	ctx context.Context,
-	pendingTimeSeries map[uint64]timeSeries,
+	pendingTimeSeries []timeSeries,
 	index types.Index,
 ) ([]types.MetricData, int, error) {
 	if len(pendingTimeSeries) == 0 {
@@ -127,9 +138,7 @@ func metricsFromTimeseries(
 		return nil, totalPoints, fmt.Errorf("metric ID lookup failed: %w", err)
 	}
 
-	i := 0
-
-	for _, promSeries := range pendingTimeSeries {
+	for i, promSeries := range pendingTimeSeries {
 		data := types.MetricData{
 			ID:         ids[i],
 			Points:     promSeries.Samples,
@@ -147,8 +156,6 @@ func metricsFromTimeseries(
 		}
 
 		totalPoints += len(data.Points)
-
-		i++
 	}
 
 	return metrics, totalPoints, nil
