@@ -111,19 +111,21 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
-func (r RemoteStorage) Appender(ctx context.Context) storage.Appender {
+func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	maxConcurrent := r.MaxConcurrentRemoteWrite
 	if maxConcurrent <= 0 {
 		maxConcurrent = runtime.GOMAXPROCS(0) * 2
 	}
 
 	writeMetrics := &writeMetrics{
-		index:    r.Index,
-		writer:   r.Writer,
-		reqCtxCh: make(chan *requestContext, maxConcurrent),
-		metrics:  r.metrics,
+		index:             r.Index,
+		writer:            r.Writer,
+		reqCtxCh:          make(chan *requestContext, maxConcurrent),
+		metrics:           r.metrics,
+		pendingTimeSeries: make(map[uint64]timeSeries),
 	}
 
+	// TODO: unused, implement new concurrent requests limiter.
 	for i := 0; i < maxConcurrent; i++ {
 		writeMetrics.reqCtxCh <- &requestContext{
 			pb: &prompb.WriteRequest{},

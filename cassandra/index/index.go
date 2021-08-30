@@ -2330,7 +2330,7 @@ func (c *CassandraIndex) Search(
 		found      bool
 	)
 
-	if !found {
+	if !found { // FIXME: Isn't found always false ?
 		var err error
 		ids, labelsList, err = c.idsForMatchers(ctx, shards, matchers, 3)
 
@@ -3310,7 +3310,7 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	}
 
 	if startShard > endShard {
-		return nil, nil
+		return nil, nil // FIXME: It always returns here after a few seconds.
 	}
 
 	results := make([]int32, 0, (endShard-startShard)/shardSize+1)

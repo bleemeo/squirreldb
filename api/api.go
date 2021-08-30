@@ -54,7 +54,7 @@ type API struct {
 func newAPI(
 	index types.Index,
 	reader types.MetricReader,
-	writer types.MetricWriter,
+	remoteStorage *remotestorage.RemoteStorage,
 	promQLMaxEvaluatedPoints uint64,
 	promQLMaxEvaluatedSeries uint32,
 	metricRegistry prometheus.Registerer,
@@ -82,12 +82,6 @@ func newAPI(
 		Reader:                    reader,
 		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
-	}
-
-	appendable := remotestorage.RemoteStorage{
-		Reader: reader,
-		Writer: writer,
-		Index:  index,
 	}
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -118,7 +112,7 @@ func newAPI(
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
-		appendable,
+		remoteStorage,
 		mockExemplarQueryable{},
 		targetRetrieverFunc,
 		alertmanagerRetrieverFunc,
@@ -158,9 +152,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	api := newAPI(a.Index, a.Reader, a.Writer, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty)
 	apiRouter := route.New().WithPrefix("/api/v1")
-	api.Register(apiRouter)
 
 	promql := promql.PromQL{
 		MetricRegistry: a.MetricRegisty,
@@ -176,6 +168,11 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		APIRouter:                apiRouter,
 	}
 
+	api := newAPI(
+		a.Index, a.Reader, &remote, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty,
+	)
+
+	api.Register(apiRouter)
 	promql.Register(router.WithPrefix("/api/v1"))
 	remote.Register(router)
 

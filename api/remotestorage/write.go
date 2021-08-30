@@ -3,7 +3,11 @@ package remotestorage
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
+	"squirreldb/cassandra/tsdb"
 	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/prometheus/pkg/exemplar"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -16,41 +20,138 @@ type writeMetrics struct {
 	writer   types.MetricWriter
 	reqCtxCh chan *requestContext
 	metrics  *metrics
+
+	// Map of pending timeseries indexed by their labels hash.
+	pendingTimeSeries map[uint64]timeSeries
+}
+
+// timeSeries represents samples and labels for a single time series.
+type timeSeries struct {
+	Labels  labels.Labels
+	Samples []types.MetricPoint
 }
 
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
-	request := []types.LookupRequest{{Labels: l}}
-
-	ids, ttls, err := w.index.LookupIDs(context.Background(), request)
-	if err != nil {
-		return 0, err
+	labelsHash := l.Hash()
+	metricPoint := types.MetricPoint{
+		Timestamp: t,
+		Value:     v,
 	}
 
-	metrics := []types.MetricData{
-		{
-			ID: ids[0],
-			Points: []types.MetricPoint{
-				{
-					Timestamp: t,
-					Value:     v,
-				},
-			},
-			TimeToLive: ttls[0],
-		},
+	ts, ok := w.pendingTimeSeries[labelsHash]
+	if !ok {
+		w.pendingTimeSeries[labelsHash] = timeSeries{
+			Labels:  l,
+			Samples: []types.MetricPoint{metricPoint},
+		}
+	} else {
+		ts.Samples = append(ts.Samples, metricPoint)
 	}
 
-	return 0, w.writer.Write(context.TODO(), metrics)
+	return 0, nil
 }
 
 // Commit submits the collected samples and purges the batch, unused.
 func (w *writeMetrics) Commit() error {
+	defer func() { w.pendingTimeSeries = nil }()
+
+	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), w.pendingTimeSeries, w.index)
+	if err != nil {
+		return fmt.Errorf("unable to convert metrics: %w", err)
+	}
+
+	w.metrics.RequestsPoints.WithLabelValues("write").Add(float64(totalPoints))
+
+	if err := w.writer.Write(context.Background(), metrics); err != nil {
+		return fmt.Errorf("unable to write metrics: %w", err)
+	}
+
 	return nil
 }
 
 // Rollback rolls back all modifications made in the appender so far, unused.
+// TODO: drop pending timeseries?
 func (w *writeMetrics) Rollback() error {
 	return nil
+}
+
+// Returns a metric list generated from a TimeSeries list.
+func metricsFromTimeseries(
+	ctx context.Context,
+	pendingTimeSeries map[uint64]timeSeries,
+	index types.Index,
+) ([]types.MetricData, int, error) {
+	if len(pendingTimeSeries) == 0 {
+		return nil, 0, nil
+	}
+
+	idToIndex := make(map[types.MetricID]int, len(pendingTimeSeries))
+
+	totalPoints := 0
+	metrics := make([]types.MetricData, 0, len(pendingTimeSeries))
+
+	requests := make([]types.LookupRequest, 0, len(pendingTimeSeries))
+
+	for _, promSeries := range pendingTimeSeries {
+		if len(promSeries.Samples) == 0 {
+			continue
+		}
+
+		min := int64(math.MaxInt64)
+		max := int64(math.MinInt64)
+
+		for _, s := range promSeries.Samples { // FIXME: are min and max used in LookupIDs?
+			if min > s.Timestamp {
+				min = s.Timestamp
+			}
+
+			if max < s.Timestamp {
+				max = s.Timestamp
+			}
+		}
+
+		if min < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
+			logger.Printf("warning: points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
+		}
+
+		requests = append(requests, types.LookupRequest{
+			Labels: promSeries.Labels,
+			End:    time.Unix(max/1000, max%1000),
+			Start:  time.Unix(min/1000, min%1000),
+		})
+	}
+
+	ids, ttls, err := index.LookupIDs(ctx, requests)
+	if err != nil {
+		return nil, totalPoints, fmt.Errorf("metric ID lookup failed: %w", err)
+	}
+
+	i := 0
+
+	for _, promSeries := range pendingTimeSeries {
+		data := types.MetricData{
+			ID:         ids[i],
+			Points:     promSeries.Samples,
+			TimeToLive: ttls[i],
+		}
+
+		if idx, found := idToIndex[data.ID]; found {
+			metrics[idx].Points = append(metrics[idx].Points, data.Points...)
+			if metrics[idx].TimeToLive < data.TimeToLive {
+				metrics[idx].TimeToLive = data.TimeToLive
+			}
+		} else {
+			metrics = append(metrics, data)
+			idToIndex[data.ID] = len(metrics) - 1
+		}
+
+		totalPoints += len(data.Points)
+
+		i++
+	}
+
+	return metrics, totalPoints, nil
 }
 
 // AppendExemplar adds an exemplar for the given series labels, should never be called.
