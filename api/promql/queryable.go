@@ -43,7 +43,7 @@ type querier struct {
 //   by this request.
 // A limit of 0 means unlimited.
 func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (types.Index, types.MetricReader, error) {
-	r, ok := ctx.Value(RequestContextKey{}).(*http.Request)
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
 		return nil, nil, errMissingRequest
 	}

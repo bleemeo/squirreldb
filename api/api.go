@@ -106,7 +106,7 @@ func newAPI(
 	// Admin endpoints are not implemented.
 	enableAdmin := false
 
-	// TODO: Should we limit the CORS origin?
+	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
 	CORSOrigin := regexp.MustCompile(".*")
 
 	api := v1.NewAPI(
@@ -152,35 +152,32 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	apiRouter := route.New().WithPrefix("/api/v1")
-
-	promql := promql.PromQL{
-		MetricRegistry: a.MetricRegisty,
-		APIRouter:      apiRouter,
-	}
-
-	remote := remotestorage.RemoteStorage{
-		Index:                    a.Index,
-		Reader:                   a.Reader,
-		Writer:                   a.Writer,
-		MaxConcurrentRemoteWrite: a.MaxConcurrentRemoteWrite,
-		MetricRegisty:            a.MetricRegisty,
-		APIRouter:                apiRouter,
-	}
+	remote := remotestorage.New(a.Writer, a.Index, a.MaxConcurrentRemoteWrite, a.MetricRegisty)
 
 	api := newAPI(
-		a.Index, a.Reader, &remote, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty,
+		a.Index, a.Reader, remote, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty,
 	)
 
+	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
+	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
+		h := func(rw http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			r = r.WithContext(types.WrapContext(ctx, r))
+
+			handler(rw, r)
+		}
+
+		return h
+	})
+
+	apiRouter := routerWrapper.WithPrefix("/api/v1")
 	api.Register(apiRouter)
-	promql.Register(router.WithPrefix("/api/v1"))
-	remote.Register(router)
 
 	server := &http.Server{
 		Addr:    a.ListenAddress,
 		Handler: a,
 	}
-	a.router = router
+	a.router = apiRouter
 
 	serverStopped := make(chan error)
 
@@ -238,6 +235,11 @@ func (a *API) Ready() {
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	v := atomic.LoadInt32(&a.ready)
 	if v > 0 {
+		// TODO: Remove this temporary fix to support both "∕read" and "/api/v1/read"
+		if req.URL.Path == "/read" || req.URL.Path == "/write" {
+			req.URL.Path = "/api/v1" + req.URL.Path
+		}
+
 		a.router.ServeHTTP(w, req)
 
 		return

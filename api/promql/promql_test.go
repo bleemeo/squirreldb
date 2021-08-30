@@ -331,7 +331,7 @@ func TestPromQL_queryable(t *testing.T) {
 				r.Header.Add(k, v)
 			}
 
-			ctx := WrapContext(context.Background(), r)
+			ctx := types.WrapContext(context.Background(), r)
 
 			queryier, err := queryable.Querier(ctx, 0, 0)
 			if err != nil {
