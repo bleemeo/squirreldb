@@ -72,7 +72,7 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData, writingTimestamp int64) {
 	for _, data := range metrics {
 		retry.Print(func() error {
-			return c.writeRawData(data, writingTimestamp) //nolint: scopelint
+			return c.writeRawData(data, writingTimestamp) //nolint:scopelint
 		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"write points to Cassandra",
 		)
@@ -391,7 +391,7 @@ func (c *CassandraTSDB) xorChunkEncode(points []types.MetricPoint, buffer []byte
 		return nil, err
 	}
 
-	defer c.xorChunkPool.Put(chunk) // nolint: errcheck
+	defer c.xorChunkPool.Put(chunk) //nolint:errcheck
 
 	app, err := chunk.Appender()
 	if err != nil {

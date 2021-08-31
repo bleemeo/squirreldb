@@ -34,7 +34,7 @@ const (
 	statusError   status = "error"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	minTime = time.Unix(0, 0).UTC()
 	maxTime = time.Unix(math.MaxInt32*3600, 0).UTC()
@@ -43,7 +43,7 @@ var (
 type response struct {
 	Status    status      `json:"status"`
 	Data      interface{} `json:"data,omitempty"`
-	ErrorType errorType   `json:"errorType,omitempty"`
+	ErrorType errorType   `json:"errorType,omitempty"` //nolint:tagliatelle
 	Error     string      `json:"error,omitempty"`
 	Warnings  []string    `json:"warnings,omitempty"`
 }
@@ -144,7 +144,7 @@ type apiFuncResult struct {
 }
 
 type queryData struct {
-	ResultType parser.ValueType  `json:"resultType"`
+	ResultType parser.ValueType  `json:"resultType"` //nolint:tagliatelle
 	Result     parser.Value      `json:"result"`
 	Stats      *stats.QueryStats `json:"stats,omitempty"`
 }
@@ -179,7 +179,7 @@ func parseTimeParam(r *http.Request, paramName string, defaultValue time.Time) (
 	if err != nil {
 		// Disable stylecheck because is complain on error message (should not be capitalized)
 		// but we prefer keeping the exact message used by Prometheus.
-		return time.Time{}, fmt.Errorf("Invalid time value for '%s': %w", paramName, err) //nolint: stylecheck
+		return time.Time{}, fmt.Errorf("Invalid time value for '%s': %w", paramName, err) //nolint:stylecheck
 	}
 
 	return result, nil

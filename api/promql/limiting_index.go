@@ -35,7 +35,7 @@ func (idx *limitingIndex) Search(
 ) (types.MetricsSet, error) {
 	r, err := idx.index.Search(ctx, start, end, matchers)
 	if err != nil {
-		return r, err //nolint: wrapcheck
+		return r, err //nolint:wrapcheck
 	}
 
 	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(r.Count()))

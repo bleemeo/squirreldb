@@ -99,7 +99,7 @@ func run(ctx context.Context) error {
 			lock := lockFactory.CreateLock(subLockName, *lockTTL)
 
 			for t := 0; t < *workerThreads; t++ {
-				workerSeed := rand.Int63() //nolint: gosec
+				workerSeed := rand.Int63() //nolint:gosec
 				p := p
 				t := t
 				n := n
@@ -202,7 +202,7 @@ func worker(
 	subLockName string,
 	lock types.TryLocker,
 ) result {
-	rnd := rand.New(rand.NewSource(workerSeed)) //nolint: gosec
+	rnd := rand.New(rand.NewSource(workerSeed)) //nolint:gosec
 	r := result{}
 
 	for ctx.Err() == nil {

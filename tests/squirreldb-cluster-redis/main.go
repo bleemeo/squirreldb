@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	workerThreads   = flag.Int("test.threads", 5, "Number of concurrent threads per processes")
 	workerProcesses = flag.Int("test.processes", 2, "Number of concurrent Cluster (equivalent to SquirrelDB process)")
@@ -40,7 +40,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error { //nolint:gocyclo,cyclop
+func run(ctx context.Context) error { //nolint:cyclop
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err
@@ -242,7 +242,7 @@ func (b *BenchClient) thread(ctx context.Context, deadline time.Time, processID 
 	for ctx.Err() == nil && time.Now().Before(deadline) {
 		payload := []byte(fmt.Sprintf("%d-%d-%d", processID, workerID, counter1+counter2))
 
-		if rand.Float64() < 0.5 { // nolint: gosec
+		if rand.Float64() < 0.5 { //nolint:gosec
 			err = b.cluster.Publish(ctx, "topic1", payload)
 			counter1++
 		} else {

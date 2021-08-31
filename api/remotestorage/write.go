@@ -14,11 +14,11 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
-type errBadRequest struct {
+type badRequestError struct {
 	err error
 }
 
-func (e errBadRequest) Error() string {
+func (e badRequestError) Error() string {
 	return fmt.Sprintf("bad request: %v", e.err)
 }
 
@@ -61,7 +61,7 @@ func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		switch {
 		case errors.Is(err, ctx.Err()):
 			statusCode = http.StatusRequestTimeout
-		case errors.As(err, &errBadRequest{}):
+		case errors.As(err, &badRequestError{}):
 			statusCode = http.StatusBadRequest
 		}
 
@@ -85,7 +85,7 @@ func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
 
 	err := decodeRequest(request.Body, reqCtx)
 	if err != nil {
-		return errBadRequest{err: fmt.Errorf("can't decode request: %w", err)}
+		return badRequestError{err: fmt.Errorf("can't decode request: %w", err)}
 	}
 
 	writeRequest, ok := reqCtx.pb.(*prompb.WriteRequest)
