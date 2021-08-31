@@ -33,5 +33,5 @@ func Print(o backoff.Operation, b backoff.BackOff, logger *log.Logger, action st
 		logger.Printf("Resolved %s", action)
 	}
 
-	return err //nolint: wrapcheck
+	return err //nolint:wrapcheck
 }

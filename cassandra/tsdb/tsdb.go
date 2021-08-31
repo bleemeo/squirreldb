@@ -37,7 +37,7 @@ var (
 	errUnsupportedFormat = errors.New("unsupporter format version")
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {

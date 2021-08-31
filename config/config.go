@@ -21,7 +21,7 @@ const (
 	configFile = "squirreldb.conf"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[config] ", log.LstdFlags)
 
 type Config struct {

@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 var errNoResults = errors.New("the WMI request returned 0 result")

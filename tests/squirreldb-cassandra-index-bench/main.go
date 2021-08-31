@@ -56,7 +56,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error { //nolint:gocyclo,cyclop
+func run(ctx context.Context) error { //nolint:cyclop
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func run(ctx context.Context) error { //nolint:gocyclo,cyclop
 		test(ctx, cassandraIndex2)
 	}
 
-	rnd := rand.New(rand.NewSource(*seed)) //nolint: gosec
+	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 
 	err = bench(ctx, cfg, rnd)
 	if err != nil {

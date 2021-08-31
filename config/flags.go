@@ -1,6 +1,6 @@
 package config
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var flags = []flag{
 	{
 		name:  "help",

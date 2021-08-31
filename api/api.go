@@ -7,7 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	_ "net/http/pprof" //nolint: gosec, gci
+	_ "net/http/pprof" //nolint:gosec,gci
 	"os"
 	"regexp"
 	"squirreldb/api/promql"

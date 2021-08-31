@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 // variable set by GoReleaser
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	version string
 	commit  string
