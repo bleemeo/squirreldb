@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
 )
@@ -24,13 +25,45 @@ type Store struct {
 	Reader                    types.MetricReader
 	DefaultMaxEvaluatedSeries uint32
 	DefaultMaxEvaluatedPoints uint64
+	MetricRegistry            prometheus.Registerer
+
+	metrics *metrics
 }
 
 type querier struct {
 	ctx        context.Context
-	index      types.Index
-	reader     types.MetricReader
+	index      IndexWithStats
+	reader     MetricReaderWithStats
 	mint, maxt int64
+	metrics    *metrics
+}
+
+type MetricReaderWithStats interface {
+	types.MetricReader
+	PointsRead() float64
+}
+
+type IndexWithStats interface {
+	types.Index
+	SeriesReturned() float64
+}
+
+func NewStore(
+	index types.Index,
+	reader types.MetricReader,
+	promQLMaxEvaluatedSeries uint32,
+	promQLMaxEvaluatedPoints uint64,
+	metricRegistry prometheus.Registerer,
+) Store {
+	store := Store{
+		Index:                     index,
+		Reader:                    reader,
+		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
+		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
+		metrics:                   newMetrics(metricRegistry),
+	}
+
+	return store
 }
 
 // newIndexAndReaderFromHeaders builds a new index and metric reader with limits from
@@ -42,14 +75,13 @@ type querier struct {
 // * X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
 //   by this request.
 // A limit of 0 means unlimited.
-func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (types.Index, types.MetricReader, error) {
+func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats, MetricReaderWithStats, error) {
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
 		return nil, nil, errMissingRequest
 	}
 
 	index := s.Index
-	reader := s.Reader
 
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
 	if value != "" {
@@ -79,7 +111,7 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (types.Index, t
 		maxEvaluatedSeries = uint32(tmp)
 	}
 
-	index = &limitingIndex{
+	limitIndex := &limitingIndex{
 		index:          index,
 		maxTotalSeries: maxEvaluatedSeries,
 	}
@@ -95,12 +127,12 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (types.Index, t
 		maxEvaluatedPoints = tmp
 	}
 
-	reader = &limitingReader{
-		reader:         reader,
+	reader := &limitingReader{
+		reader:         s.Reader,
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
-	return index, reader, nil
+	return limitIndex, reader, nil
 }
 
 // Querier returns a storage.Querier to read from SquirrelDB store.
@@ -110,7 +142,16 @@ func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, 
 		return querier{}, err
 	}
 
-	return querier{ctx: ctx, index: index, reader: reader, mint: mint, maxt: maxt}, nil
+	q := querier{
+		ctx:     ctx,
+		index:   index,
+		reader:  reader,
+		mint:    mint,
+		maxt:    maxt,
+		metrics: s.metrics,
+	}
+
+	return q, nil
 }
 
 // ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
@@ -120,7 +161,16 @@ func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.Chun
 		return nil, err
 	}
 
-	return chunkquerier{querier{ctx: ctx, index: index, reader: reader, mint: mint, maxt: maxt}}, nil
+	q := querier{
+		ctx:     ctx,
+		index:   index,
+		reader:  reader,
+		mint:    mint,
+		maxt:    maxt,
+		metrics: s.metrics,
+	}
+
+	return chunkquerier{q}, nil
 }
 
 // Select returns a set of series that matches the given label matchers.
@@ -221,6 +271,9 @@ func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warn
 
 // Close releases the resources of the Querier.
 func (q querier) Close() error {
+	q.metrics.RequestsSeries.Observe(q.index.SeriesReturned())
+	q.metrics.RequestsPoints.Observe(q.reader.PointsRead())
+
 	return nil
 }
 

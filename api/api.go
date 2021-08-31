@@ -14,6 +14,7 @@ import (
 	"squirreldb/api/remotestorage"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,7 @@ type API struct {
 	logger     log.Logger
 	router     http.Handler
 	listenPort int
+	metrics    *metrics
 }
 
 // newAPI returns a new initialized Prometheus web API.
@@ -77,12 +79,7 @@ func newAPI(
 		LookbackDelta:      5 * time.Minute,
 	})
 
-	queryable := promql.Store{
-		Index:                     index,
-		Reader:                    reader,
-		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
-		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
-	}
+	queryable := promql.NewStore(index, reader, promQLMaxEvaluatedSeries, promQLMaxEvaluatedPoints, metricRegistry)
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
@@ -141,6 +138,8 @@ func newAPI(
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
 	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	a.metrics = newMetrics(a.MetricRegisty)
+
 	router := route.New()
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
@@ -160,7 +159,14 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
 	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
+		operation := strings.Trim(handlerName, "/")
+
 		h := func(rw http.ResponseWriter, r *http.Request) {
+			t0 := time.Now()
+			defer func() {
+				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
+			}()
+
 			ctx := r.Context()
 			r = r.WithContext(types.WrapContext(ctx, r))
 

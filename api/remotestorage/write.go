@@ -71,7 +71,7 @@ func (w *writeMetrics) Commit() error {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
 
-	w.metrics.RequestsPoints.WithLabelValues("write").Add(float64(totalPoints))
+	w.metrics.RequestsPoints.Observe(float64(totalPoints))
 
 	if err := w.writer.Write(context.Background(), metrics); err != nil {
 		return fmt.Errorf("unable to write metrics: %w", err)
