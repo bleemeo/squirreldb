@@ -10,6 +10,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec,gci
 	"os"
 	"regexp"
+	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
 	"squirreldb/types"
@@ -30,20 +31,24 @@ import (
 
 const (
 	httpServerShutdownTimeout = 10 * time.Second
+
+	// A read sample limit is already implemented dynamically with the header X-PromQL-Max-Evaluated-Points.
+	remoteReadSampleLimit     = 0       // No limit
+	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
-	ListenAddress            string
-	Index                    types.Index
-	Reader                   types.MetricReader
-	Writer                   types.MetricWriter
-	FlushCallback            func() error
-	PreAggregateCallback     func(ctx context.Context, thread int, from, to time.Time) error
-	MaxConcurrentRemoteWrite int
-	PromQLMaxEvaluatedPoints uint64
-	MetricRegisty            prometheus.Registerer
-	PromQLMaxEvaluatedSeries uint32
+	ListenAddress               string
+	Index                       types.Index
+	Reader                      types.MetricReader
+	Writer                      types.MetricWriter
+	FlushCallback               func() error
+	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
+	MaxConcurrentRemoteRequests int
+	PromQLMaxEvaluatedPoints    uint64
+	MetricRegisty               prometheus.Registerer
+	PromQLMaxEvaluatedSeries    uint32
 
 	ready      int32
 	logger     log.Logger
@@ -56,18 +61,15 @@ type API struct {
 func newAPI(
 	index types.Index,
 	reader types.MetricReader,
-	remoteStorage *remotestorage.RemoteStorage,
+	writer types.MetricWriter,
 	promQLMaxEvaluatedPoints uint64,
 	promQLMaxEvaluatedSeries uint32,
+	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
 ) *v1.API {
-	const (
-		// A read sample limit is already implemented dynamically with the header X-PromQL-Max-Evaluated-Points.
-		remoteReadSampleLimit = 0 // No limit
-		// Keep Prometheus defaults.
-		remoteReadConcurrencyLimit = 20
-		remoteReadMaxBytesInFrame  = 1048576 // 1 MiB
-	)
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	}
 
 	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 
@@ -81,6 +83,8 @@ func newAPI(
 	})
 
 	queryable := promql.NewStore(index, reader, promQLMaxEvaluatedSeries, promQLMaxEvaluatedPoints, metricRegistry)
+
+	remoteStorage := remotestorage.New(writer, index, maxConcurrent, metricRegistry)
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
@@ -124,7 +128,7 @@ func newAPI(
 		log.With(stderrLogger, "component", "api"),
 		rulesRetrieverFunc,
 		remoteReadSampleLimit,
-		remoteReadConcurrencyLimit,
+		maxConcurrent,
 		remoteReadMaxBytesInFrame,
 		CORSOrigin,
 		runtimeInfoFunc,
@@ -152,10 +156,14 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	remote := remotestorage.New(a.Writer, a.Index, a.MaxConcurrentRemoteWrite, a.MetricRegisty)
-
 	api := newAPI(
-		a.Index, a.Reader, remote, a.PromQLMaxEvaluatedPoints, a.PromQLMaxEvaluatedSeries, a.MetricRegisty,
+		a.Index,
+		a.Reader,
+		a.Writer,
+		a.PromQLMaxEvaluatedPoints,
+		a.PromQLMaxEvaluatedSeries,
+		a.MaxConcurrentRemoteRequests,
+		a.MetricRegisty,
 	)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.

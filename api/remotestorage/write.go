@@ -16,13 +16,15 @@ import (
 var errNotImplemented = errors.New("not implemented")
 
 type writeMetrics struct {
-	index    types.Index
-	writer   types.MetricWriter
-	reqCtxCh chan *requestContext
-	metrics  *metrics
+	index   types.Index
+	writer  types.MetricWriter
+	metrics *metrics
 
 	// Map of pending timeseries indexed by their labels hash.
 	pendingTimeSeries map[uint64]timeSeries
+
+	// Release a spot in the remote write gate. Must be called.
+	done func()
 }
 
 // timeSeries represents samples and labels for a single time series.
@@ -57,7 +59,10 @@ func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (
 
 // Commit submits the collected samples and purges the batch, unused.
 func (w *writeMetrics) Commit() error {
-	defer func() { w.pendingTimeSeries = make(map[uint64]timeSeries) }()
+	defer func() {
+		w.pendingTimeSeries = make(map[uint64]timeSeries)
+		w.done()
+	}()
 
 	// Convert the time series map to a slice, because metricsFromTimeseries
 	// needs to always iterate on it in the same order.
@@ -83,6 +88,7 @@ func (w *writeMetrics) Commit() error {
 // Rollback rolls back all modifications made in the appender so far.
 func (w *writeMetrics) Rollback() error {
 	w.pendingTimeSeries = make(map[uint64]timeSeries)
+	w.done()
 
 	return nil
 }

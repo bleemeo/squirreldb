@@ -3300,7 +3300,7 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	}
 
 	if startShard > endShard {
-		return nil, nil // FIXME: It always returns here after a few seconds.
+		return nil, nil
 	}
 
 	results := make([]int32, 0, (endShard-startShard)/shardSize+1)

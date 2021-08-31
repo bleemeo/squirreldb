@@ -2,13 +2,16 @@ package remotestorage
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"squirreldb/types"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/exemplar"
+	"github.com/prometheus/prometheus/pkg/gate"
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -16,10 +19,10 @@ import (
 var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type RemoteStorage struct {
-	writer                   types.MetricWriter
-	index                    types.Index
-	maxConcurrentRemoteWrite int
-	metrics                  *metrics
+	writer          types.MetricWriter
+	index           types.Index
+	remoteWriteGate *gate.Gate
+	metrics         *metrics
 }
 
 // New returns a new initialized remote storage.
@@ -30,35 +33,42 @@ func New(
 	reg prometheus.Registerer,
 ) *RemoteStorage {
 	remoteStorage := RemoteStorage{
-		writer:                   writer,
-		index:                    index,
-		maxConcurrentRemoteWrite: maxConcurrentRemoteWrite,
-		metrics:                  newMetrics(reg),
+		writer:          writer,
+		index:           index,
+		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
+		metrics:         newMetrics(reg),
 	}
 
 	return &remoteStorage
 }
 
 func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
-	maxConcurrent := r.maxConcurrentRemoteWrite
-	if maxConcurrent <= 0 {
-		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Limit concurrent writes, block here if too many concurrent writes are running.
+	if err := r.remoteWriteGate.Start(timeoutCtx); err != nil {
+		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
 	}
 
 	writeMetrics := &writeMetrics{
 		index:             r.index,
 		writer:            r.writer,
-		reqCtxCh:          make(chan *requestContext, maxConcurrent),
 		metrics:           r.metrics,
 		pendingTimeSeries: make(map[uint64]timeSeries),
-	}
-
-	// TODO: unused, implement new concurrent requests limiter.
-	for i := 0; i < maxConcurrent; i++ {
-		writeMetrics.reqCtxCh <- &requestContext{
-			pb: &prompb.WriteRequest{},
-		}
+		done:              r.remoteWriteGate.Done,
 	}
 
 	return writeMetrics
 }
+
+type errAppender struct {
+	err error
+}
+
+func (a errAppender) Append(uint64, labels.Labels, int64, float64) (uint64, error) { return 0, a.err }
+func (a errAppender) AppendExemplar(uint64, labels.Labels, exemplar.Exemplar) (uint64, error) {
+	return 0, a.err
+}
+func (a errAppender) Commit() error   { return a.err }
+func (a errAppender) Rollback() error { return a.err }
