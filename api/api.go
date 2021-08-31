@@ -62,10 +62,11 @@ func newAPI(
 	metricRegistry prometheus.Registerer,
 ) *v1.API {
 	const (
-		// TODO: better defaults?
-		remoteReadSampleLimit      = 0 // No limit
+		// A read sample limit is already implemented dynamically with the header X-PromQL-Max-Evaluated-Points.
+		remoteReadSampleLimit = 0 // No limit
+		// Keep Prometheus defaults.
 		remoteReadConcurrencyLimit = 20
-		remoteReadMaxBytesInFrame  = 10000000
+		remoteReadMaxBytesInFrame  = 1048576 // 1 MiB
 	)
 
 	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
