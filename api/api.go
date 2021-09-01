@@ -67,10 +67,6 @@ func NewPrometheus(
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
 ) *v1.API {
-	if maxConcurrent <= 0 {
-		maxConcurrent = runtime.GOMAXPROCS(0) * 2
-	}
-
 	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 
 	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
@@ -159,12 +155,18 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		a.PromQLMaxEvaluatedPoints,
 		a.MetricRegistry,
 	)
-	appendable := remotestorage.New(a.Writer, a.Index, a.MaxConcurrentRemoteRequests, a.MetricRegistry)
+
+	maxConcurrent := a.MaxConcurrentRemoteRequests
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	}
+
+	appendable := remotestorage.New(a.Writer, a.Index, maxConcurrent, a.MetricRegistry)
 
 	api := NewPrometheus(
 		queryable,
 		appendable,
-		a.MaxConcurrentRemoteRequests,
+		maxConcurrent,
 		a.MetricRegistry,
 	)
 
