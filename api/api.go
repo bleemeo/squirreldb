@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
 	ppromql "github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
@@ -47,7 +48,7 @@ type API struct {
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
 	PromQLMaxEvaluatedPoints    uint64
-	MetricRegisty               prometheus.Registerer
+	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
 
 	ready      int32
@@ -57,13 +58,12 @@ type API struct {
 	metrics    *metrics
 }
 
-// newAPI returns a new initialized Prometheus web API.
-func newAPI(
-	index types.Index,
-	reader types.MetricReader,
-	writer types.MetricWriter,
-	promQLMaxEvaluatedPoints uint64,
-	promQLMaxEvaluatedSeries uint32,
+// NewPrometheus returns a new initialized Prometheus web API.
+// Only remote read/write and PromQL endpoints are implemented.
+// appendable can be empty if remote write is not used.
+func NewPrometheus(
+	queryable storage.SampleAndChunkQueryable,
+	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
 ) *v1.API {
@@ -81,10 +81,6 @@ func newAPI(
 		ActiveQueryTracker: nil,
 		LookbackDelta:      5 * time.Minute,
 	})
-
-	queryable := promql.NewStore(index, reader, promQLMaxEvaluatedSeries, promQLMaxEvaluatedPoints, metricRegistry)
-
-	remoteStorage := remotestorage.New(writer, index, maxConcurrent, metricRegistry)
 
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
@@ -114,7 +110,7 @@ func newAPI(
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
-		remoteStorage,
+		appendable,
 		mockExemplarQueryable{},
 		targetRetrieverFunc,
 		alertmanagerRetrieverFunc,
@@ -143,7 +139,7 @@ func newAPI(
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
 	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-	a.metrics = newMetrics(a.MetricRegisty)
+	a.metrics = newMetrics(a.MetricRegistry)
 
 	router := route.New()
 
@@ -156,14 +152,20 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
-	api := newAPI(
+	queryable := promql.NewStore(
 		a.Index,
 		a.Reader,
-		a.Writer,
-		a.PromQLMaxEvaluatedPoints,
 		a.PromQLMaxEvaluatedSeries,
+		a.PromQLMaxEvaluatedPoints,
+		a.MetricRegistry,
+	)
+	appendable := remotestorage.New(a.Writer, a.Index, a.MaxConcurrentRemoteRequests, a.MetricRegistry)
+
+	api := NewPrometheus(
+		queryable,
+		appendable,
 		a.MaxConcurrentRemoteRequests,
-		a.MetricRegisty,
+		a.MetricRegistry,
 	)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.

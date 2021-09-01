@@ -25,13 +25,13 @@ type RemoteStorage struct {
 	metrics         *metrics
 }
 
-// New returns a new initialized remote storage.
+// New returns a new initialized appendable storage.
 func New(
 	writer types.MetricWriter,
 	index types.Index,
 	maxConcurrentRemoteWrite int,
 	reg prometheus.Registerer,
-) *RemoteStorage {
+) storage.Appendable {
 	remoteStorage := RemoteStorage{
 		writer:          writer,
 		index:           index,

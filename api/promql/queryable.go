@@ -54,7 +54,7 @@ func NewStore(
 	promQLMaxEvaluatedSeries uint32,
 	promQLMaxEvaluatedPoints uint64,
 	metricRegistry prometheus.Registerer,
-) Store {
+) storage.SampleAndChunkQueryable {
 	store := Store{
 		Index:                     index,
 		Reader:                    reader,
