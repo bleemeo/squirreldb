@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"squirreldb/types"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/exemplar"
@@ -43,11 +42,8 @@ func New(
 }
 
 func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
 	// Limit concurrent writes, block here if too many concurrent writes are running.
-	if err := r.remoteWriteGate.Start(timeoutCtx); err != nil {
+	if err := r.remoteWriteGate.Start(ctx); err != nil {
 		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
 	}
 
