@@ -38,6 +38,8 @@ const (
 	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
+var regexErrInvalidMatcher = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrInvalidMatcher))
+
 // API it the SquirrelDB HTTP API server.
 type API struct {
 	ListenAddress               string
@@ -182,6 +184,13 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 			ctx := r.Context()
 			r = r.WithContext(types.WrapContext(ctx, r))
+
+			// Prometheus always returns a status 500 when write fails, but if
+			// the labels are invalid we want to return a status 400, so we use the
+			// interceptor to change the returned status in this case.
+			if operation == "write" {
+				rw = &Interceptor{origWriter: rw}
+			}
 
 			handler(rw, r)
 		}
@@ -380,4 +389,32 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
+}
+
+// Interceptor implements the http.ResponseWriter interface,
+// it allows to catch and modify the response status code.
+type Interceptor struct {
+	origWriter http.ResponseWriter
+	status     int
+}
+
+func (i *Interceptor) WriteHeader(rc int) {
+	i.status = rc
+}
+
+func (i *Interceptor) Write(b []byte) (int, error) {
+	if i.status == http.StatusInternalServerError && regexErrInvalidMatcher.Match(b) {
+		i.status = http.StatusBadRequest
+	}
+
+	// Don't write the header if the status is unset because it raises a panic.
+	if i.status != 0 {
+		i.origWriter.WriteHeader(i.status)
+	}
+
+	return i.origWriter.Write(b)
+}
+
+func (i *Interceptor) Header() http.Header {
+	return i.origWriter.Header()
 }

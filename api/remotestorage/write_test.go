@@ -181,136 +181,96 @@ func Test_metricsFromTimeseries(t *testing.T) {
 
 func Test_validateLabels(t *testing.T) {
 	tests := []struct {
-		name           string
-		promTimeseries []timeSeries
-		wantErr        bool
+		name    string
+		labels  labels.Labels
+		wantErr bool
 	}{
 		{
 			name: "validMetricName",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "up",
-						},
-					},
+					Name:  "__name__",
+					Value: "up",
 				},
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "Up",
-						},
-					},
+					Name:  "__name__",
+					Value: "Up",
 				},
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "__987daDp:fez",
-						},
-					},
+					Name:  "__name__",
+					Value: "__987daDp:fez",
 				},
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: ":8_987daDp:fez",
-						},
-					},
+					Name:  "__name__",
+					Value: ":8_987daDp:fez",
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "validLabelName",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "instance",
-							Value: "localhost:8000",
-						},
-						{
-							Name:  "__bleemeo_account__",
-							Value: "320663cd-8c99-4c6a-878a-012bebeff9b1",
-						},
-						{
-							Name:  "A1_",
-							Value: "a",
-						},
-					},
+					Name:  "instance",
+					Value: "localhost:8000",
+				},
+				{
+					Name:  "__bleemeo_account__",
+					Value: "320663cd-8c99-4c6a-878a-012bebeff9b1",
+				},
+				{
+					Name:  "A1_",
+					Value: "a",
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalidMetricNameMinus",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "TODO-if-absent-not-tsdb-points",
-						},
-					},
+					Name:  "__name__",
+					Value: "TODO-if-absent-not-tsdb-points",
 				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalidMetricNameDigit",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "0a",
-						},
-					},
+					Name:  "__name__",
+					Value: "0a",
 				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalidMetricNameEmpty",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "__name__",
-							Value: "",
-						},
-					},
+					Name:  "__name__",
+					Value: "",
 				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalidLabelNameMinus",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "TODO-if-absent-not-tsdb-points",
-							Value: "a",
-						},
-					},
+					Name:  "TODO-if-absent-not-tsdb-points",
+					Value: "a",
 				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalidLabelNameDigit",
-			promTimeseries: []timeSeries{
+			labels: []labels.Label{
 				{
-					Labels: []labels.Label{
-						{
-							Name:  "0a",
-							Value: "a",
-						},
-					},
+					Name:  "0a",
+					Value: "a",
 				},
 			},
 			wantErr: true,
@@ -319,7 +279,7 @@ func Test_validateLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := validateLabels(tt.promTimeseries); (err == nil) == tt.wantErr {
+			if err := validateLabels(tt.labels); (err == nil) == tt.wantErr {
 				t.Fatalf("Failed to validate labels: wantErr=%v, err=%v", tt.wantErr, err)
 			}
 		})

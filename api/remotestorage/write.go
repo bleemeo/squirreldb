@@ -17,11 +17,11 @@ import (
 const labelMetricName = "__name__"
 
 var (
+	ErrInvalidMatcher = errors.New("invalid labels")
+	ErrNotImplemented = errors.New("not implemented")
+
 	regexMetricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
 	regexLabelName  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-	errTypeAssertion  = errors.New("type assertion failed")
-	errNotImplemented = errors.New("not implemented")
 )
 
 type writeMetrics struct {
@@ -44,6 +44,10 @@ type timeSeries struct {
 
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+	if err := validateLabels(l); err != nil {
+		return 0, err
+	}
+
 	labelsHash := l.Hash()
 	metricPoint := types.MetricPoint{
 		Timestamp: t,
@@ -78,10 +82,6 @@ func (w *writeMetrics) Commit() error {
 	pendingTimeSeries := make([]timeSeries, 0, len(w.pendingTimeSeries))
 	for _, ts := range w.pendingTimeSeries {
 		pendingTimeSeries = append(pendingTimeSeries, ts)
-	}
-
-	if err := validateLabels(pendingTimeSeries); err != nil {
-		return err
 	}
 
 	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), pendingTimeSeries, w.index)
@@ -176,17 +176,16 @@ func metricsFromTimeseries(
 	return metrics, totalPoints, nil
 }
 
-// Check if the labels of a list of timeseries are valid.
-func validateLabels(series []timeSeries) error {
-	for _, s := range series {
-		for _, l := range s.Labels {
-			if l.Name == labelMetricName {
-				if !regexMetricName.MatchString(l.Value) {
-					return fmt.Errorf("invalid metric name %s should match %s", l.Value, regexMetricName.String())
-				}
-			} else if !regexLabelName.MatchString(l.Name) {
-				return fmt.Errorf("invalid label name %s should match %s", l.Value, regexLabelName.String())
+// validateLabels checks if the metric name and labels are valid.
+// https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
+func validateLabels(ls labels.Labels) error {
+	for _, l := range ls {
+		if l.Name == labelMetricName {
+			if !regexMetricName.MatchString(l.Value) {
+				return fmt.Errorf("%w: metric name %s should match %s", ErrInvalidMatcher, l.Value, regexMetricName.String())
 			}
+		} else if !regexLabelName.MatchString(l.Name) {
+			return fmt.Errorf("%w: label name %s should match %s", ErrInvalidMatcher, l.Value, regexLabelName.String())
 		}
 	}
 
@@ -195,5 +194,5 @@ func validateLabels(series []timeSeries) error {
 
 // AppendExemplar adds an exemplar for the given series labels, should never be called.
 func (w *writeMetrics) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
-	return 0, errNotImplemented
+	return 0, ErrNotImplemented
 }
