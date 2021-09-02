@@ -17,7 +17,10 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-var errMissingRequest = errors.New("HTTP request not found in context")
+var (
+	errMissingRequest = errors.New("HTTP request not found in context")
+	errInvalidMatcher = errors.New("invalid matcher")
+)
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
 type Store struct {
@@ -87,7 +90,7 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			return nil, nil, fmt.Errorf("invalid matcher \"%s\", require labelName=labelValue", value)
+			return nil, nil, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
 		}
 
 		index = filteringIndex{

@@ -367,3 +367,27 @@ func countSeries(iter storage.SeriesSet) (int, error) {
 
 	return count, iter.Err()
 }
+
+func TestPromQL_InvalidForcedMatcher(t *testing.T) {
+	idx := dummy.Index{
+		StoreMetricIDInMemory: true,
+	}
+
+	reader := mockStore{
+		pointsPerSeries: 100,
+	}
+
+	queryable := Store{
+		Index:  &idx,
+		Reader: reader,
+	}
+
+	r := httptest.NewRequest("", "/", nil)
+	r.Header.Add("X-PromQL-Forced-Matcher", "invalid")
+
+	ctx := types.WrapContext(context.Background(), r)
+
+	if _, err := queryable.Querier(ctx, 0, 0); !errors.Is(err, errInvalidMatcher) {
+		t.Fatalf("expected errInvalidMatcher, got %v", err)
+	}
+}
