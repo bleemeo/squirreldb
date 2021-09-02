@@ -9,10 +9,13 @@ import (
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
 	"os"
+	"regexp"
+	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
 	"squirreldb/types"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,34 +24,119 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
+	"github.com/prometheus/prometheus/config"
+	ppromql "github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
 const (
 	httpServerShutdownTimeout = 10 * time.Second
+
+	// A read sample limit is already implemented dynamically with the header X-PromQL-Max-Evaluated-Points.
+	remoteReadSampleLimit     = 0       // No limit
+	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
-	ListenAddress            string
-	Index                    types.Index
-	Reader                   types.MetricReader
-	Writer                   types.MetricWriter
-	FlushCallback            func() error
-	PreAggregateCallback     func(ctx context.Context, thread int, from, to time.Time) error
-	MaxConcurrentRemoteWrite int
-	PromQLMaxEvaluatedPoints uint64
-	MetricRegisty            prometheus.Registerer
-	PromQLMaxEvaluatedSeries uint32
+	ListenAddress               string
+	Index                       types.Index
+	Reader                      types.MetricReader
+	Writer                      types.MetricWriter
+	FlushCallback               func() error
+	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
+	MaxConcurrentRemoteRequests int
+	PromQLMaxEvaluatedPoints    uint64
+	MetricRegistry              prometheus.Registerer
+	PromQLMaxEvaluatedSeries    uint32
 
 	ready      int32
 	logger     log.Logger
 	router     http.Handler
 	listenPort int
+	metrics    *metrics
+}
+
+// NewPrometheus returns a new initialized Prometheus web API.
+// Only remote read/write and PromQL endpoints are implemented.
+// appendable can be empty if remote write is not used.
+func NewPrometheus(
+	queryable storage.SampleAndChunkQueryable,
+	appendable storage.Appendable,
+	maxConcurrent int,
+	metricRegistry prometheus.Registerer,
+) *v1.API {
+	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+
+	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
+		Logger:             log.With(stderrLogger, "component", "query engine"),
+		Reg:                metricRegistry,
+		MaxSamples:         50000000,
+		Timeout:            2 * time.Minute,
+		ActiveQueryTracker: nil,
+		LookbackDelta:      5 * time.Minute,
+	})
+
+	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
+	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
+	rulesRetrieverFunc := func(context.Context) v1.RulesRetriever { return mockRulesRetriever{} }
+
+	runtimeInfoFunc := func() (v1.RuntimeInfo, error) { return v1.RuntimeInfo{}, errNotImplemented }
+
+	configFunc := func() config.Config { return config.DefaultConfig } // Only used to read the external labels.
+
+	readyFunc := func(f http.HandlerFunc) http.HandlerFunc {
+		// Waiting for the storage to be ready is already handled by API.ServeHTTP.
+		return f
+	}
+
+	// flagsMap is only used on /status/flags, it can empty.
+	var flagsMap map[string]string
+
+	// dbDir can be empty because it's only used in mockTSDBAdminStat.Snapshot, which is not implemented.
+	dbDir := ""
+
+	// Admin endpoints are not implemented.
+	enableAdmin := false
+
+	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
+	CORSOrigin := regexp.MustCompile(".*")
+
+	api := v1.NewAPI(
+		queryEngine,
+		queryable,
+		appendable,
+		mockExemplarQueryable{},
+		targetRetrieverFunc,
+		alertmanagerRetrieverFunc,
+		configFunc,
+		flagsMap,
+		v1.GlobalURLOptions{},
+		readyFunc,
+		mockTSDBAdminStat{},
+		dbDir,
+		enableAdmin,
+		log.With(stderrLogger, "component", "api"),
+		rulesRetrieverFunc,
+		remoteReadSampleLimit,
+		maxConcurrent,
+		remoteReadMaxBytesInFrame,
+		CORSOrigin,
+		runtimeInfoFunc,
+		&v1.PrometheusVersion{},
+		mockGatherer{},
+		metricRegistry,
+	)
+
+	return api
 }
 
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
 	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	a.metrics = newMetrics(a.MetricRegistry)
+
 	router := route.New()
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
@@ -57,35 +145,58 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
-
 	router.Get("/debug_preaggregate", a.aggregateHandler)
-
-	promql := promql.PromQL{
-		QueryableFactory: promql.QueryableFactory{
-			Index:                     a.Index,
-			Reader:                    a.Reader,
-			DefaultMaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
-			DefaultMaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
-		}.Queryable,
-		MetricRegisty: a.MetricRegisty,
-	}
-	remote := remotestorage.RemoteStorage{
-		Index:                    a.Index,
-		Reader:                   a.Reader,
-		Writer:                   a.Writer,
-		MaxConcurrentRemoteWrite: a.MaxConcurrentRemoteWrite,
-		MetricRegisty:            a.MetricRegisty,
-	}
-
-	promql.Register(router.WithPrefix("/api/v1"))
-	remote.Register(router)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+
+	queryable := promql.NewStore(
+		a.Index,
+		a.Reader,
+		a.PromQLMaxEvaluatedSeries,
+		a.PromQLMaxEvaluatedPoints,
+		a.MetricRegistry,
+	)
+
+	maxConcurrent := a.MaxConcurrentRemoteRequests
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	}
+
+	appendable := remotestorage.New(a.Writer, a.Index, maxConcurrent, a.MetricRegistry)
+
+	api := NewPrometheus(
+		queryable,
+		appendable,
+		maxConcurrent,
+		a.MetricRegistry,
+	)
+
+	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
+	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
+		operation := strings.Trim(handlerName, "/")
+
+		h := func(rw http.ResponseWriter, r *http.Request) {
+			t0 := time.Now()
+			defer func() {
+				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
+			}()
+
+			ctx := r.Context()
+			r = r.WithContext(types.WrapContext(ctx, r))
+
+			handler(rw, r)
+		}
+
+		return h
+	})
+
+	apiRouter := routerWrapper.WithPrefix("/api/v1")
+	api.Register(apiRouter)
 
 	server := &http.Server{
 		Addr:    a.ListenAddress,
 		Handler: a,
 	}
-	a.router = router
+	a.router = apiRouter
 
 	serverStopped := make(chan error)
 
@@ -143,6 +254,11 @@ func (a *API) Ready() {
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	v := atomic.LoadInt32(&a.ready)
 	if v > 0 {
+		// TODO: Remove this temporary fix to support both "∕read" and "/api/v1/read"
+		if req.URL.Path == "/read" || req.URL.Path == "/write" {
+			req.URL.Path = "/api/v1" + req.URL.Path
+		}
+
 		a.router.ServeHTTP(w, req)
 
 		return

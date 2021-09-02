@@ -62,3 +62,9 @@ func (idx *limitingIndex) LabelNames(
 ) ([]string, error) {
 	return idx.index.LabelNames(ctx, start, end, matchers)
 }
+
+func (idx *limitingIndex) SeriesReturned() float64 {
+	v := atomic.LoadUint32(&idx.returnedSeries)
+
+	return float64(v)
+}

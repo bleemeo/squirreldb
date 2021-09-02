@@ -33,10 +33,10 @@ var flags = []flag{
 		usage: "Set the Redis address",
 	},
 	{
-		name:  "remote_storage.listen_address",
+		name:  "listen_address",
 		short: "",
-		value: defaults["remote_storage.listen_address"],
-		usage: "Set the remote storage listen address",
+		value: defaults["listen_address"],
+		usage: "Set the Prometheus API listen address",
 	},
 	{
 		name:  "overwite-previous-config",

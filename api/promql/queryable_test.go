@@ -116,6 +116,10 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 	return m, nil
 }
 
+func (s mockStore) PointsRead() float64 {
+	return 0
+}
+
 type mockIndex struct {
 	searchReply []types.MetricLabel
 	lookupMap   map[types.MetricID]labels.Labels
@@ -153,6 +157,10 @@ func (idx mockIndex) LabelValues(
 	return nil, errors.New("not implemented")
 }
 
+func (idx mockIndex) SeriesReturned() float64 {
+	return 0
+}
+
 type mockSeries struct {
 	reply   []series
 	current series
@@ -184,8 +192,8 @@ func (s *mockSeries) Warnings() storage.Warnings {
 
 func Test_querier_Select(t *testing.T) {
 	type fields struct {
-		index  types.Index
-		reader types.MetricReader
+		index  IndexWithStats
+		reader MetricReaderWithStats
 		mint   int64
 		maxt   int64
 	}

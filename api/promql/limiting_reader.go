@@ -25,6 +25,12 @@ func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest
 	}, nil
 }
 
+func (rdr *limitingReader) PointsRead() float64 {
+	v := atomic.LoadUint64(&rdr.returnedPoints)
+
+	return float64(v)
+}
+
 type limitDataSet struct {
 	rdr *limitingReader
 	set types.MetricDataSet

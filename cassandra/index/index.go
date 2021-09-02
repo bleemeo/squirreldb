@@ -2324,19 +2324,9 @@ func (c *CassandraIndex) Search(
 		return nil, nil
 	}
 
-	var (
-		ids        []types.MetricID
-		labelsList []labels.Labels
-		found      bool
-	)
-
-	if !found {
-		var err error
-		ids, labelsList, err = c.idsForMatchers(ctx, shards, matchers, 3)
-
-		if err != nil {
-			return nil, err
-		}
+	ids, labelsList, err := c.idsForMatchers(ctx, shards, matchers, 3)
+	if err != nil {
+		return nil, err
 	}
 
 	c.metrics.SearchMetrics.Add(float64(len(ids)))

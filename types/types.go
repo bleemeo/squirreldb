@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -92,4 +93,12 @@ type TryLocker interface {
 type State interface {
 	Read(name string, value interface{}) (bool, error)
 	Write(name string, value interface{}) error
+}
+
+// RequestContextKey is used as a key in a context to a HTTP request.
+type RequestContextKey struct{}
+
+// WrapContext adds a request to the context.
+func WrapContext(ctx context.Context, r *http.Request) context.Context {
+	return context.WithValue(ctx, RequestContextKey{}, r)
 }

@@ -1,70 +1,70 @@
 package remotestorage
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/route"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/exemplar"
+	"github.com/prometheus/prometheus/pkg/gate"
+	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/storage"
 )
 
 //nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type RemoteStorage struct {
-	Reader                   types.MetricReader
-	Writer                   types.MetricWriter
-	Index                    types.Index
-	MaxConcurrentRemoteWrite int
-	MetricRegisty            prometheus.Registerer
-
-	metrics *metrics
+	writer          types.MetricWriter
+	index           types.Index
+	remoteWriteGate *gate.Gate
+	metrics         *metrics
 }
 
-func (r *RemoteStorage) Init() {
-	if r.metrics != nil {
-		return
+// New returns a new initialized appendable storage.
+func New(
+	writer types.MetricWriter,
+	index types.Index,
+	maxConcurrentRemoteWrite int,
+	reg prometheus.Registerer,
+) storage.Appendable {
+	remoteStorage := RemoteStorage{
+		writer:          writer,
+		index:           index,
+		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
+		metrics:         newMetrics(reg),
 	}
 
-	reg := r.MetricRegisty
-
-	if reg == nil {
-		reg = prometheus.DefaultRegisterer
-	}
-
-	r.metrics = newMetrics(reg)
+	return &remoteStorage
 }
 
-// Register the remote storage endpoints in the given router.
-func (r *RemoteStorage) Register(router *route.Router) {
-	r.Init()
-
-	maxConcurrent := r.MaxConcurrentRemoteWrite
-	if maxConcurrent <= 0 {
-		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
+	// Limit concurrent writes, block here if too many concurrent writes are running.
+	if err := r.remoteWriteGate.Start(ctx); err != nil {
+		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
 	}
 
-	readMetrics := readMetrics{
-		index:   r.Index,
-		reader:  r.Reader,
-		metrics: r.metrics,
-	}
-	writeMetrics := writeMetrics{
-		index:    r.Index,
-		writer:   r.Writer,
-		reqCtxCh: make(chan *requestContext, maxConcurrent),
-		metrics:  r.metrics,
+	writeMetrics := &writeMetrics{
+		index:             r.index,
+		writer:            r.writer,
+		metrics:           r.metrics,
+		pendingTimeSeries: make(map[uint64]timeSeries),
+		done:              r.remoteWriteGate.Done,
 	}
 
-	for i := 0; i < maxConcurrent; i++ {
-		writeMetrics.reqCtxCh <- &requestContext{
-			pb: &prompb.WriteRequest{},
-		}
-	}
-
-	router.Post("/read", readMetrics.ServeHTTP)
-	router.Post("/write", writeMetrics.ServeHTTP)
+	return writeMetrics
 }
+
+type errAppender struct {
+	err error
+}
+
+func (a errAppender) Append(uint64, labels.Labels, int64, float64) (uint64, error) { return 0, a.err }
+func (a errAppender) AppendExemplar(uint64, labels.Labels, exemplar.Exemplar) (uint64, error) {
+	return 0, a.err
+}
+func (a errAppender) Commit() error   { return a.err }
+func (a errAppender) Rollback() error { return a.err }
