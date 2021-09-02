@@ -16,7 +16,7 @@ import (
 	"github.com/shirou/gopsutil/mem"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[facts] ", log.LstdFlags)
 
 func Facts(ctx context.Context) map[string]string {

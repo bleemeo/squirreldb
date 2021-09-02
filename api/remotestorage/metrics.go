@@ -6,30 +6,17 @@ import (
 )
 
 type metrics struct {
-	RequestsPoints  *prometheus.CounterVec
-	RequestsSeconds *prometheus.SummaryVec
-	RequestsError   *prometheus.CounterVec
+	RequestsPoints prometheus.Histogram
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
 	return &metrics{
-		RequestsPoints: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+		RequestsPoints: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
 			Namespace: "squirreldb",
 			Subsystem: "remote_storage",
-			Name:      "requests_points_total",
-			Help:      "Total points processed by SquirrelDB remote storage",
-		}, []string{"operation"}),
-		RequestsSeconds: promauto.With(reg).NewSummaryVec(prometheus.SummaryOpts{
-			Namespace: "squirreldb",
-			Subsystem: "remote_storage",
-			Name:      "requests_seconds",
-			Help:      "Total processing time in seconds (including sending response to client)",
-		}, []string{"operation"}),
-		RequestsError: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Namespace: "squirreldb",
-			Subsystem: "remote_storage",
-			Name:      "requests_error_total",
-			Help:      "Total number of errors while processing requests",
-		}, []string{"operation"}),
+			Name:      "write_requests_points",
+			Help:      "Total points written by SquirrelDB remote storage",
+			Buckets:   []float64{0, 1, 5, 10, 100, 1000, 10000, 100000, 1000000},
+		}),
 	}
 }

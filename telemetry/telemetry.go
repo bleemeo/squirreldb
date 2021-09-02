@@ -32,7 +32,7 @@ import (
 	"github.com/google/uuid"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 type Telemetry struct {
@@ -118,7 +118,7 @@ func (t Telemetry) postInformation(ctx context.Context) {
 
 func (t Telemetry) run(ctx context.Context) {
 	select {
-	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): // nolint: gosec
+	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): //nolint:gosec
 	case <-ctx.Done():
 		return
 	}

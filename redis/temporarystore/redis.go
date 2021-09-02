@@ -27,7 +27,7 @@ const (
 	defaultTransfertKey      = "squirreldb-transfert-metrics"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
 
 type Options struct {
@@ -206,7 +206,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 }
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) GetSetPointsAndOffset( //nolint:gocyclo,cyclop
+func (r *Redis) GetSetPointsAndOffset( //nolint:cyclop
 	ctx context.Context,
 	points []types.MetricData,
 	offsets []int,
@@ -298,7 +298,7 @@ func (r *Redis) GetSetPointsAndOffset( //nolint:gocyclo,cyclop
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) ReadPointsAndOffset( //nolint:gocyclo,cyclop
+func (r *Redis) ReadPointsAndOffset( //nolint:cyclop
 	ctx context.Context,
 	ids []types.MetricID,
 ) ([]types.MetricData, []int, error) {

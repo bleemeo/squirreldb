@@ -28,7 +28,7 @@ type queryResult struct {
 	QueryCount  int
 }
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	// Choose name that didn't conflict with test (that is name that won't
 	// match any matchers from test().
@@ -80,7 +80,7 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint:gocyclo,cyclop,gocognit
+func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint:cyclop,gocognit
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
@@ -323,7 +323,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 	return nil
 }
 
-func sentInsertRequest( //nolint: gocognit
+func sentInsertRequest( //nolint:gocognit
 	now time.Time,
 	rnd *rand.Rand,
 	proc procfs.Proc,

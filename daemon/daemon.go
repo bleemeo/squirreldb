@@ -37,7 +37,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var (
 	Version = "unset"
 	Commit  string
@@ -78,7 +78,7 @@ type SquirrelDB struct {
 	cassandraKeyspaceCreated bool
 }
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 var errBadConfig = errors.New("configuration validation failed")
@@ -216,7 +216,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 }
 
 // Config return the configuration after validation.
-//nolint: forbidigo // This function is allowed to use fmt.Print*
+//nolint:forbidigo // This function is allowed to use fmt.Print*
 func Config() (cfg *config.Config, err error) {
 	cfg, err = config.New()
 	if err != nil {
@@ -355,9 +355,9 @@ func SetTestEnvironment() {
 		os.Setenv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE", "test:")
 	}
 
-	if _, ok := os.LookupEnv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS"); !ok {
+	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
 		// If not explicitly set, use a dynamic port.
-		os.Setenv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS", "127.0.0.1:0")
+		os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
 	}
 }
 
@@ -473,14 +473,14 @@ type namedTasks struct {
 }
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
-	s.api.ListenAddress = s.Config.String("remote_storage.listen_address")
+	s.api.ListenAddress = s.Config.String("listen_address")
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
-	s.api.MaxConcurrentRemoteWrite = s.Config.Int("remote_storage.max_concurrent_write")
-	s.api.MetricRegisty = s.MetricRegistry
+	s.api.MaxConcurrentRemoteRequests = s.Config.Int("remote_storage.max_concurrent_requests")
+	s.api.MetricRegistry = s.MetricRegistry
 
 	s.api.Run(ctx, readiness)
 }

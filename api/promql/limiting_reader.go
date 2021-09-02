@@ -16,13 +16,19 @@ type limitingReader struct {
 func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
 	r, err := rdr.reader.ReadIter(ctx, req)
 	if err != nil {
-		return nil, err //nolint: wrapcheck
+		return nil, err //nolint:wrapcheck
 	}
 
 	return limitDataSet{
 		rdr: rdr,
 		set: r,
 	}, nil
+}
+
+func (rdr *limitingReader) PointsRead() float64 {
+	v := atomic.LoadUint64(&rdr.returnedPoints)
+
+	return float64(v)
 }
 
 type limitDataSet struct {

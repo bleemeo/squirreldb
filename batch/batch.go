@@ -59,7 +59,7 @@ const (
 
 const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 // TemporaryStore is an interface to the temporary points associated to metrics.
@@ -265,7 +265,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 // randomDuration return a delay with a +/- 20% jitter.
 func randomDuration(target time.Duration) time.Duration {
 	jitter := target / 5
-	jitterFactor := rand.Float64()*2 - 1 //nolint: gosec
+	jitterFactor := rand.Float64()*2 - 1 //nolint:gosec
 
 	return target + time.Duration(jitterFactor*float64(jitter))
 }
@@ -346,7 +346,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
-func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
+func (b *Batch) setPointsAndOffset( //nolint:cyclop,gocognit
 	ctx context.Context,
 	previousMetrics []types.MetricData,
 	setMetrics []types.MetricData,
@@ -360,7 +360,7 @@ func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
 
 		currentMetrics, err = b.memoryStore.GetSetPointsAndOffset(ctx, setMetrics, offsets)
 
-		return err //nolint: wrapcheck
+		return err //nolint:wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
@@ -453,7 +453,7 @@ func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
 		err := retry.Print(func() error {
 			_, err := b.memoryStore.Append(ctx, appendPoints)
 
-			return err //nolint: wrapcheck
+			return err //nolint:wrapcheck
 		},
 			retry.NewExponentialBackOff(ctx, 30*time.Second),
 			logger,
@@ -491,7 +491,7 @@ func (b *Batch) setPointsAndOffset( //nolint:gocyclo,cyclop,gocognit
 //   that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore).
-func (b *Batch) flush( //nolint:gocyclo,cyclop
+func (b *Batch) flush( //nolint:cyclop
 	ctx context.Context,
 	ids []types.MetricID,
 	now time.Time,
@@ -517,7 +517,7 @@ func (b *Batch) flush( //nolint:gocyclo,cyclop
 		var err error
 		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ctx, ids)
 
-		return err //nolint: wrapcheck
+		return err //nolint:wrapcheck
 	}, retry.NewExponentialBackOff(ctx, 30*time.Second), logger,
 		"get points from the memory store",
 	)
@@ -646,7 +646,7 @@ func (b *Batch) flush( //nolint:gocyclo,cyclop
 
 		storeDeadlines, err = b.memoryStore.GetSetFlushDeadline(ctx, newDeadlines)
 
-		return err //nolint: wrapcheck
+		return err //nolint:wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		logger,
@@ -867,7 +867,7 @@ func (b *Batch) readTemporary(
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached.
 // If this is the case, the state is added to the list of states to flush.
-func (b *Batch) write( //nolint:gocyclo,cyclop,gocognit
+func (b *Batch) write( //nolint:cyclop,gocognit
 	ctx context.Context,
 	metrics []types.MetricData,
 	now time.Time,

@@ -5,7 +5,7 @@ set -e
 UID=$(id -u)
 
 # Should be the same as run-tests.sh
-GORELEASER_VERSION="v0.173.1"
+GORELEASER_VERSION="v0.175.0"
 
 case "$1" in
    "")

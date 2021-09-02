@@ -30,7 +30,7 @@ const MaxPastDelay = 8 * time.Hour
 
 // run starts all CassandraTSDB pre-aggregations.
 func (c *CassandraTSDB) run(ctx context.Context) {
-	shard := rand.Intn(shardNumber) //nolint: gosec
+	shard := rand.Intn(shardNumber) //nolint:gosec
 	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
 	ticker := time.NewTicker(aggregateShardIntended)
 	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
@@ -132,7 +132,7 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 
 			for _, data := range metrics[startIndex:endIndex] {
 				retry.Print(func() error {
-					return c.writeAggregateData(data, writingTimestamp) //nolint: scopelint
+					return c.writeAggregateData(data, writingTimestamp) //nolint:scopelint
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 					"write aggregated points to Cassandra",
 				)
@@ -194,7 +194,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					var err error
 					ids, err = c.index.AllIDs(ctx, currentFrom, currentTo)
 
-					return err //nolint: wrapcheck
+					return err //nolint:wrapcheck
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 					"get IDs from the index",
 				)
@@ -289,7 +289,7 @@ func (c *CassandraTSDB) aggregateShard(
 		retry.Print(func() error {
 			_, err := c.state.Read(name, &fromTimeStr)
 
-			return err //nolint: wrapcheck
+			return err //nolint:wrapcheck
 		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 			"get state for shard "+name,
 		)
@@ -330,7 +330,7 @@ func (c *CassandraTSDB) aggregateShard(
 		var err error
 		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
-		return err //nolint: wrapcheck
+		return err //nolint:wrapcheck
 	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
 		"get IDs from the index",
 	)

@@ -239,7 +239,7 @@ func read(ctx context.Context, now time.Time, readURL string) error {
 			},
 		}
 
-		i := rand.Intn(6) //nolint: gosec
+		i := rand.Intn(6) //nolint:gosec
 		workChannel <- readRequest{
 			name: fmt.Sprintf("filler-batch-full-%d", n),
 			request: prompb.ReadRequest{

@@ -18,7 +18,7 @@ const expiratorInterval = 60
 
 const defaultTTL = 24 * time.Hour
 
-//nolint: gochecknoglobals
+//nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {

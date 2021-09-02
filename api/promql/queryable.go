@@ -2,6 +2,7 @@ package promql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -9,46 +10,88 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/storage"
 )
 
-// QueryableFactory build a Queryable with limit from HTTP header set.
-// header are:
-// * X-PromQL-Forced-Matcher: Add one matcher to limit series evaluated. Useful for
-//   filtering per-tenant.
-// * X-PromQL-Max-Evaluated-Series: Limit the number of series that can be evaluated
-//   by this request
-// * X-PromQL-Max-Evaluated-Points: Limit the number of poitns that can be evaluated
-//   by this request.
-// A limit of 0 means unlimited.
-type QueryableFactory struct {
+var errMissingRequest = errors.New("HTTP request not found in context")
+
+// Store implement Prometheus.Queryable and read from SquirrelDB Store.
+type Store struct {
 	Index                     types.Index
 	Reader                    types.MetricReader
 	DefaultMaxEvaluatedSeries uint32
 	DefaultMaxEvaluatedPoints uint64
+	MetricRegistry            prometheus.Registerer
+
+	metrics *metrics
 }
 
-func (f QueryableFactory) Queryable(ctx context.Context, r *http.Request) QueryableWithStats {
-	idx := f.Index
-	reader := f.Reader
+type querier struct {
+	ctx        context.Context
+	index      IndexWithStats
+	reader     MetricReaderWithStats
+	mint, maxt int64
+	metrics    *metrics
+}
 
-	st := store{}
+type MetricReaderWithStats interface {
+	types.MetricReader
+	PointsRead() float64
+}
+
+type IndexWithStats interface {
+	types.Index
+	SeriesReturned() float64
+}
+
+func NewStore(
+	index types.Index,
+	reader types.MetricReader,
+	promQLMaxEvaluatedSeries uint32,
+	promQLMaxEvaluatedPoints uint64,
+	metricRegistry prometheus.Registerer,
+) storage.SampleAndChunkQueryable {
+	store := Store{
+		Index:                     index,
+		Reader:                    reader,
+		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
+		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
+		metrics:                   newMetrics(metricRegistry),
+	}
+
+	return store
+}
+
+// newIndexAndReaderFromHeaders builds a new index and metric reader with limits from
+// the HTTP headers. Available headers are:
+// * X-PromQL-Forced-Matcher: Add one matcher to limit evaluated series. Useful for
+//   filtering per-tenant.
+// * X-PromQL-Max-Evaluated-Series: Limit the number of series that can be evaluated
+//   by this request
+// * X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
+//   by this request.
+// A limit of 0 means unlimited.
+func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats, MetricReaderWithStats, error) {
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return nil, nil, errMissingRequest
+	}
+
+	index := s.Index
 
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			st.Err = fmt.Errorf("invalid matcher \"%s\", require labelName=labelValue", value)
-
-			return st
+			return nil, nil, fmt.Errorf("invalid matcher \"%s\", require labelName=labelValue", value)
 		}
 
-		idx = filteringIndex{
-			index: idx,
+		index = filteringIndex{
+			index: index,
 			matcher: labels.MustNewMatcher(
 				labels.MatchEqual,
 				part[0],
@@ -57,78 +100,77 @@ func (f QueryableFactory) Queryable(ctx context.Context, r *http.Request) Querya
 		}
 	}
 
-	maxEvaluatedSeries := f.DefaultMaxEvaluatedSeries
+	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
 
 	if maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series"); maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
 		if err != nil {
-			st.Err = err
-
-			return st
+			return nil, nil, err
 		}
 
 		maxEvaluatedSeries = uint32(tmp)
 	}
 
-	st.Index = &limitingIndex{
-		index:          idx,
+	limitIndex := &limitingIndex{
+		index:          index,
 		maxTotalSeries: maxEvaluatedSeries,
 	}
 
-	maxEvaluatedPoints := f.DefaultMaxEvaluatedPoints
+	maxEvaluatedPoints := s.DefaultMaxEvaluatedPoints
 
 	if maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points"); maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
 		if err != nil {
-			st.Err = err
-
-			return st
+			return nil, nil, err
 		}
 
 		maxEvaluatedPoints = tmp
 	}
 
-	st.Reader = &limitingReader{
-		reader:         reader,
+	reader := &limitingReader{
+		reader:         s.Reader,
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
-	return st
-}
-
-// store implement Prometheus.Queryable and read from SquirrelDB store.
-type store struct {
-	Err    error
-	Index  *limitingIndex
-	Reader *limitingReader
-}
-
-type querier struct {
-	ctx        context.Context
-	index      types.Index
-	reader     types.MetricReader
-	mint, maxt int64
+	return limitIndex, reader, nil
 }
 
 // Querier returns a storage.Querier to read from SquirrelDB store.
-func (s store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
-	if s.Err != nil {
-		return nil, s.Err
+func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
+	index, reader, err := s.newIndexAndReaderFromHeaders(ctx)
+	if err != nil {
+		return querier{}, err
 	}
 
-	return querier{ctx: ctx, index: s.Index, reader: s.Reader, mint: mint, maxt: maxt}, nil
+	q := querier{
+		ctx:     ctx,
+		index:   index,
+		reader:  reader,
+		mint:    mint,
+		maxt:    maxt,
+		metrics: s.metrics,
+	}
+
+	return q, nil
 }
 
-func (s store) PointsRead() float64 {
-	v := atomic.LoadUint64(&s.Reader.returnedPoints)
+// ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
+func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.ChunkQuerier, error) {
+	index, reader, err := s.newIndexAndReaderFromHeaders(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	return float64(v)
-}
+	q := querier{
+		ctx:     ctx,
+		index:   index,
+		reader:  reader,
+		mint:    mint,
+		maxt:    maxt,
+		metrics: s.metrics,
+	}
 
-func (s store) SeriesReturned() float64 {
-	v := atomic.LoadUint32(&s.Index.returnedSeries)
-
-	return float64(v)
+	return chunkquerier{q}, nil
 }
 
 // Select returns a set of series that matches the given label matchers.
@@ -229,5 +271,22 @@ func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warn
 
 // Close releases the resources of the Querier.
 func (q querier) Close() error {
+	q.metrics.RequestsSeries.Observe(q.index.SeriesReturned())
+	q.metrics.RequestsPoints.Observe(q.reader.PointsRead())
+
 	return nil
+}
+
+type chunkquerier struct {
+	querier
+}
+
+func (q chunkquerier) Select(
+	sortSeries bool,
+	hints *storage.SelectHints,
+	matchers ...*labels.Matcher,
+) storage.ChunkSeriesSet {
+	sset := q.querier.Select(sortSeries, hints, matchers...)
+
+	return storage.NewSeriesSetToChunkSet(sset)
 }

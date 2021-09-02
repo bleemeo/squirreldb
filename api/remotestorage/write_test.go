@@ -1,10 +1,8 @@
 package remotestorage
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io/ioutil"
 	"reflect"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -12,10 +10,12 @@ import (
 	"time"
 
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/prompb"
 )
 
-const defaultTTL = 3600
+const (
+	defaultTTL    = 3600
+	metricIDTest1 = 1
+)
 
 type mockIndex struct {
 	fixedLookupID types.MetricID
@@ -57,47 +57,11 @@ func (i mockIndex) LabelValues(
 	return nil, errors.New("not implemented")
 }
 
-func Benchmark_metricsFromPromSeries(b *testing.B) {
-	dummyIndex := mockIndex{
-		fixedLookupID: MetricIDTest1,
-	}
-	tests := []string{
-		"testdata/write_req_empty",
-		"testdata/write_req_one",
-		"testdata/write_req_backlog",
-		"testdata/write_req_large",
-	}
-
-	for _, file := range tests {
-		b.Run(file, func(b *testing.B) {
-			wr := prompb.WriteRequest{}
-			reqCtx := requestContext{
-				pb: &wr,
-			}
-			data, err := ioutil.ReadFile(file)
-			if err != nil {
-				b.Fatalf("unexpected error: %v", err)
-			}
-			reader := bytes.NewReader(data)
-
-			if err := decodeRequest(reader, &reqCtx); err != nil {
-				b.Fatal(err)
-			}
-
-			for n := 0; n < b.N; n++ {
-				if _, _, err := metricsFromTimeseries(context.Background(), wr.Timeseries, dummyIndex); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
 func Test_metricsFromTimeseries(t *testing.T) {
 	nowTS := time.Now().Unix() * 1000
 
 	type args struct {
-		promTimeseries []prompb.TimeSeries
+		promTimeseries []timeSeries
 		index          types.Index
 	}
 
@@ -109,9 +73,9 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		{
 			name: "promTimeseries_filled",
 			args: args{
-				promTimeseries: []prompb.TimeSeries{
+				promTimeseries: []timeSeries{
 					{
-						Labels: []prompb.Label{
+						Labels: labels.Labels{
 							{
 								Name:  "__name__",
 								Value: "up",
@@ -121,7 +85,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 								Value: "codelab",
 							},
 						},
-						Samples: []prompb.Sample{
+						Samples: []types.MetricPoint{
 							{
 								Value:     10,
 								Timestamp: nowTS + 0,
@@ -149,11 +113,11 @@ func Test_metricsFromTimeseries(t *testing.T) {
 						},
 					},
 				},
-				index: mockIndex{fixedLookupID: MetricIDTest1},
+				index: mockIndex{fixedLookupID: metricIDTest1},
 			},
 			want: []types.MetricData{
 				{
-					ID: MetricIDTest1,
+					ID: metricIDTest1,
 					Points: []types.MetricPoint{
 						{
 							Timestamp: nowTS + 0,
@@ -187,7 +151,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		{
 			name: "promTimeseries_empty",
 			args: args{
-				promTimeseries: []prompb.TimeSeries{},
+				promTimeseries: []timeSeries{},
 				index:          nil,
 			},
 			want: nil,
@@ -215,109 +179,17 @@ func Test_metricsFromTimeseries(t *testing.T) {
 	}
 }
 
-func Test_pointsFromPromSamples(t *testing.T) {
-	type args struct {
-		promSamples []prompb.Sample
-	}
-
-	tests := []struct {
-		name string
-		args args
-		want []types.MetricPoint
-	}{
-		{
-			name: "samples_filled",
-			args: args{
-				promSamples: []prompb.Sample{
-					{
-						Value:     10,
-						Timestamp: 0,
-					},
-					{
-						Value:     20,
-						Timestamp: 10000,
-					},
-					{
-						Value:     30,
-						Timestamp: 20000,
-					},
-					{
-						Value:     40,
-						Timestamp: 30000,
-					},
-					{
-						Value:     50,
-						Timestamp: 40000,
-					},
-					{
-						Value:     60,
-						Timestamp: 50000,
-					},
-				},
-			},
-			want: []types.MetricPoint{
-				{
-					Timestamp: 0,
-					Value:     10,
-				},
-				{
-					Timestamp: 10000,
-					Value:     20,
-				},
-				{
-					Timestamp: 20000,
-					Value:     30,
-				},
-				{
-					Timestamp: 30000,
-					Value:     40,
-				},
-				{
-					Timestamp: 40000,
-					Value:     50,
-				},
-				{
-					Timestamp: 50000,
-					Value:     60,
-				},
-			},
-		},
-		{
-			name: "samples_empty",
-			args: args{
-				promSamples: []prompb.Sample{},
-			},
-			want: nil,
-		},
-		{
-			name: "samples_filled",
-			args: args{
-				promSamples: nil,
-			},
-			want: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := pointsFromPromSamples(tt.args.promSamples); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("pointsFromPromSamples() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_validateLabels(t *testing.T) {
 	tests := []struct {
 		name           string
-		promTimeseries []prompb.TimeSeries
+		promTimeseries []timeSeries
 		wantErr        bool
 	}{
 		{
 			name: "validMetricName",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "up",
@@ -325,7 +197,7 @@ func Test_validateLabels(t *testing.T) {
 					},
 				},
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "Up",
@@ -333,7 +205,7 @@ func Test_validateLabels(t *testing.T) {
 					},
 				},
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "__987daDp:fez",
@@ -341,7 +213,7 @@ func Test_validateLabels(t *testing.T) {
 					},
 				},
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: ":8_987daDp:fez",
@@ -353,9 +225,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "validLabelName",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "instance",
 							Value: "localhost:8000",
@@ -375,9 +247,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "invalidMetricNameMinus",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "TODO-if-absent-not-tsdb-points",
@@ -389,9 +261,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "invalidMetricNameDigit",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "0a",
@@ -403,9 +275,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "invalidMetricNameEmpty",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "__name__",
 							Value: "",
@@ -417,9 +289,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "invalidLabelNameMinus",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "TODO-if-absent-not-tsdb-points",
 							Value: "a",
@@ -431,9 +303,9 @@ func Test_validateLabels(t *testing.T) {
 		},
 		{
 			name: "invalidLabelNameDigit",
-			promTimeseries: []prompb.TimeSeries{
+			promTimeseries: []timeSeries{
 				{
-					Labels: []prompb.Label{
+					Labels: []labels.Label{
 						{
 							Name:  "0a",
 							Value: "a",

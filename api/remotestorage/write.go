@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"regexp"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/types"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/value"
-	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/pkg/exemplar"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 const labelMetricName = "__name__"
@@ -20,152 +19,111 @@ const labelMetricName = "__name__"
 var (
 	regexMetricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
 	regexLabelName  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+	errTypeAssertion  = errors.New("type assertion failed")
+	errNotImplemented = errors.New("not implemented")
 )
 
-type errBadRequest struct {
-	err error
-}
-
-func (e errBadRequest) Error() string {
-	return fmt.Sprintf("bad request: %v", e.err)
-}
-
-var errTypeAssertion = errors.New("type assertion failed")
-
 type writeMetrics struct {
-	index    types.Index
-	writer   types.MetricWriter
-	reqCtxCh chan *requestContext
-	metrics  *metrics
+	index   types.Index
+	writer  types.MetricWriter
+	metrics *metrics
+
+	// Map of pending timeseries indexed by their labels hash.
+	pendingTimeSeries map[uint64]timeSeries
+
+	// Release a spot in the remote write gate. Must be called.
+	done func()
 }
 
-func (w *writeMetrics) getRequestContext(ctx context.Context) *requestContext {
-	select {
-	case reqCtx := <-w.reqCtxCh:
-		return reqCtx
-	case <-ctx.Done():
-		return nil
-	}
+// timeSeries represents samples and labels for a single time series.
+type timeSeries struct {
+	Labels  labels.Labels
+	Samples []types.MetricPoint
 }
 
-func (w *writeMetrics) putRequestContext(reqCtx *requestContext) {
-	w.reqCtxCh <- reqCtx
-}
-
-// ServeHTTP handles writing requests.
-func (w *writeMetrics) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	start := time.Now()
-	ctx := request.Context()
-
-	err := w.do(ctx, request)
-
-	w.metrics.RequestsSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
-
-	if err != nil {
-		w.metrics.RequestsError.WithLabelValues("write").Inc()
-
-		statusCode := http.StatusInternalServerError
-
-		switch {
-		case errors.Is(err, ctx.Err()):
-			statusCode = http.StatusRequestTimeout
-		case errors.As(err, &errBadRequest{}):
-			statusCode = http.StatusBadRequest
-		}
-
-		if statusCode != http.StatusRequestTimeout {
-			logger.Printf("Error: %v", err)
-		}
-
-		http.Error(writer, err.Error(), statusCode)
-
-		return
-	}
-}
-
-func (w *writeMetrics) do(ctx context.Context, request *http.Request) error {
-	reqCtx := w.getRequestContext(ctx)
-	if ctx.Err() != nil || reqCtx == nil {
-		return fmt.Errorf("request cancelled: %w", ctx.Err())
+// Append adds a sample pair for the given series.
+func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+	labelsHash := l.Hash()
+	metricPoint := types.MetricPoint{
+		Timestamp: t,
+		Value:     v,
 	}
 
-	defer w.putRequestContext(reqCtx)
-
-	err := decodeRequest(request.Body, reqCtx)
-	if err != nil {
-		return errBadRequest{err: fmt.Errorf("can't decode request: %w", err)}
-	}
-
-	writeRequest, ok := reqCtx.pb.(*prompb.WriteRequest)
+	ts, ok := w.pendingTimeSeries[labelsHash]
 	if !ok {
-		return errTypeAssertion
+		w.pendingTimeSeries[labelsHash] = timeSeries{
+			Labels:  l,
+			Samples: []types.MetricPoint{metricPoint},
+		}
+	} else {
+		w.pendingTimeSeries[labelsHash] = timeSeries{
+			Labels:  ts.Labels,
+			Samples: append(ts.Samples, metricPoint),
+		}
 	}
 
-	if err := validateLabels(writeRequest.Timeseries); err != nil {
+	return 0, nil
+}
+
+// Commit submits the collected samples and purges the batch, unused.
+func (w *writeMetrics) Commit() error {
+	defer func() {
+		w.pendingTimeSeries = make(map[uint64]timeSeries)
+		w.done()
+	}()
+
+	// Convert the time series map to a slice, because metricsFromTimeseries
+	// needs to always iterate on it in the same order.
+	pendingTimeSeries := make([]timeSeries, 0, len(w.pendingTimeSeries))
+	for _, ts := range w.pendingTimeSeries {
+		pendingTimeSeries = append(pendingTimeSeries, ts)
+	}
+
+	if err := validateLabels(pendingTimeSeries); err != nil {
 		return err
 	}
 
-	metrics, totalPoints, err := metricsFromTimeseries(ctx, writeRequest.Timeseries, w.index)
-	if err != nil && ctx.Err() == nil {
+	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), pendingTimeSeries, w.index)
+	if err != nil {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
 
-	w.metrics.RequestsPoints.WithLabelValues("write").Add(float64(totalPoints))
+	w.metrics.RequestsPoints.Observe(float64(totalPoints))
 
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	if err := w.writer.Write(ctx, metrics); err != nil && ctx.Err() == nil {
+	if err := w.writer.Write(context.Background(), metrics); err != nil {
 		return fmt.Errorf("unable to write metrics: %w", err)
 	}
 
 	return nil
 }
 
-// Returns a MetricPoint list generated from a Sample list.
-func pointsFromPromSamples(promSamples []prompb.Sample) []types.MetricPoint {
-	if len(promSamples) == 0 {
-		return nil
-	}
+// Rollback rolls back all modifications made in the appender so far.
+func (w *writeMetrics) Rollback() error {
+	w.pendingTimeSeries = make(map[uint64]timeSeries)
+	w.done()
 
-	points := make([]types.MetricPoint, len(promSamples))
-
-	for i, promSample := range promSamples {
-		points[i].Timestamp = promSample.Timestamp
-		if math.IsNaN(promSample.Value) && !value.IsStaleNaN(promSample.Value) {
-			// Ensure canonical NaN value (but still allow StaleNaN).
-			points[i].Value = math.Float64frombits(value.NormalNaN)
-		} else {
-			points[i].Value = promSample.Value
-		}
-	}
-
-	return points
+	return nil
 }
 
 // Returns a metric list generated from a TimeSeries list.
 func metricsFromTimeseries(
 	ctx context.Context,
-	promTimeseries []prompb.TimeSeries,
+	pendingTimeSeries []timeSeries,
 	index types.Index,
 ) ([]types.MetricData, int, error) {
-	if len(promTimeseries) == 0 {
+	if len(pendingTimeSeries) == 0 {
 		return nil, 0, nil
 	}
 
-	idToIndex := make(map[types.MetricID]int, len(promTimeseries))
+	idToIndex := make(map[types.MetricID]int, len(pendingTimeSeries))
 
 	totalPoints := 0
-	metrics := make([]types.MetricData, 0, len(promTimeseries))
+	metrics := make([]types.MetricData, 0, len(pendingTimeSeries))
 
-	requests := make([]types.LookupRequest, 0, len(promTimeseries))
+	requests := make([]types.LookupRequest, 0, len(pendingTimeSeries))
 
-	for _, promSeries := range promTimeseries {
-		if len(promSeries.Samples) == 0 {
-			continue
-		}
-
+	for _, promSeries := range pendingTimeSeries {
 		min := int64(math.MaxInt64)
 		max := int64(math.MinInt64)
 
@@ -184,7 +142,7 @@ func metricsFromTimeseries(
 		}
 
 		requests = append(requests, types.LookupRequest{
-			Labels: labelProtosToLabels(promSeries.Labels),
+			Labels: promSeries.Labels,
 			End:    time.Unix(max/1000, max%1000),
 			Start:  time.Unix(min/1000, min%1000),
 		})
@@ -195,11 +153,10 @@ func metricsFromTimeseries(
 		return nil, totalPoints, fmt.Errorf("metric ID lookup failed: %w", err)
 	}
 
-	for i, promSeries := range promTimeseries {
-		points := pointsFromPromSamples(promSeries.Samples)
+	for i, promSeries := range pendingTimeSeries {
 		data := types.MetricData{
 			ID:         ids[i],
-			Points:     points,
+			Points:     promSeries.Samples,
 			TimeToLive: ttls[i],
 		}
 
@@ -220,22 +177,23 @@ func metricsFromTimeseries(
 }
 
 // Check if the labels of a list of timeseries are valid.
-func validateLabels(series []prompb.TimeSeries) error {
+func validateLabels(series []timeSeries) error {
 	for _, s := range series {
-		for _, l := range s.GetLabels() {
+		for _, l := range s.Labels {
 			if l.Name == labelMetricName {
 				if !regexMetricName.MatchString(l.Value) {
-					return errBadRequest{
-						err: fmt.Errorf("invalid metric name %s should match %s", l.Value, regexMetricName.String()),
-					}
+					return fmt.Errorf("invalid metric name %s should match %s", l.Value, regexMetricName.String())
 				}
 			} else if !regexLabelName.MatchString(l.Name) {
-				return errBadRequest{
-					fmt.Errorf("invalid label name %s should match %s", l.Value, regexLabelName.String()),
-				}
+				return fmt.Errorf("invalid label name %s should match %s", l.Value, regexLabelName.String())
 			}
 		}
 	}
 
 	return nil
+}
+
+// AppendExemplar adds an exemplar for the given series labels, should never be called.
+func (w *writeMetrics) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
+	return 0, errNotImplemented
 }
