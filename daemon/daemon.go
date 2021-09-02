@@ -473,7 +473,7 @@ type namedTasks struct {
 }
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
-	s.api.ListenAddress = s.Config.String("remote_storage.listen_address")
+	s.api.ListenAddress = s.Config.String("listen_address")
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
