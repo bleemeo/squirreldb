@@ -355,9 +355,9 @@ func SetTestEnvironment() {
 		os.Setenv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE", "test:")
 	}
 
-	if _, ok := os.LookupEnv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS"); !ok {
+	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
 		// If not explicitly set, use a dynamic port.
-		os.Setenv("SQUIRRELDB_REMOTE_STORAGE_LISTEN_ADDRESS", "127.0.0.1:0")
+		os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
 	}
 }
 
