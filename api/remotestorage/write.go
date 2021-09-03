@@ -5,23 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/types"
 	"time"
 
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/exemplar"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-const labelMetricName = "__name__"
-
 var (
 	ErrInvalidMatcher = errors.New("invalid labels")
 	ErrNotImplemented = errors.New("not implemented")
-
-	regexMetricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
-	regexLabelName  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
 
 type writeMetrics struct {
@@ -180,12 +175,12 @@ func metricsFromTimeseries(
 // https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 func validateLabels(ls labels.Labels) error {
 	for _, l := range ls {
-		if l.Name == labelMetricName {
-			if !regexMetricName.MatchString(l.Value) {
-				return fmt.Errorf("%w: metric name %s should match %s", ErrInvalidMatcher, l.Value, regexMetricName.String())
+		if l.Name == model.MetricNameLabel {
+			if !model.IsValidMetricName(model.LabelValue(l.Value)) {
+				return fmt.Errorf("%w: metric name '%s' should match %s", ErrInvalidMatcher, l.Value, model.MetricNameRE)
 			}
-		} else if !regexLabelName.MatchString(l.Name) {
-			return fmt.Errorf("%w: label name %s should match %s", ErrInvalidMatcher, l.Value, regexLabelName.String())
+		} else if !model.LabelName(l.Name).IsValid() {
+			return fmt.Errorf("%w: label name '%s' should match %s", ErrInvalidMatcher, l.Name, model.LabelNameRE)
 		}
 	}
 
