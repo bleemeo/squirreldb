@@ -16,8 +16,8 @@ func Test_filterPoints(t *testing.T) {
 
 	tests := []struct {
 		name string
-		args args
 		want []types.MetricPoint
+		args args
 	}{
 		{
 			name: "exact-fit",

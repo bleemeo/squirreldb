@@ -18,8 +18,8 @@ import (
 var logger = log.New(os.Stdout, "[session] ", log.LstdFlags)
 
 type Options struct {
-	Addresses         []string
 	Keyspace          string
+	Addresses         []string
 	ReplicationFactor int
 }
 

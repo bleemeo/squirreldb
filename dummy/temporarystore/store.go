@@ -22,10 +22,10 @@ const defaultTTL = 24 * time.Hour
 var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
-	types.MetricData
-	WriteOffset    int
 	flushDeadline  time.Time
 	expirationTime time.Time
+	types.MetricData
+	WriteOffset int
 }
 
 type Store struct {

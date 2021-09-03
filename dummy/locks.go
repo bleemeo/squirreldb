@@ -10,8 +10,8 @@ import (
 
 // Locks is a non-distributed lock factory. It should only be used for single-node.
 type Locks struct {
-	globalMutex sync.Mutex
 	locks       map[string]*tryLocker
+	globalMutex sync.Mutex
 }
 
 type tryLocker struct {

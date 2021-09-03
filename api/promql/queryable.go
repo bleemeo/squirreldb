@@ -26,19 +26,20 @@ var (
 type Store struct {
 	Index                     types.Index
 	Reader                    types.MetricReader
-	DefaultMaxEvaluatedSeries uint32
-	DefaultMaxEvaluatedPoints uint64
 	MetricRegistry            prometheus.Registerer
+	DefaultMaxEvaluatedPoints uint64
+	DefaultMaxEvaluatedSeries uint32
 
 	metrics *metrics
 }
 
 type querier struct {
-	ctx        context.Context
-	index      IndexWithStats
-	reader     MetricReaderWithStats
-	mint, maxt int64
-	metrics    *metrics
+	ctx     context.Context
+	index   IndexWithStats
+	reader  MetricReaderWithStats
+	mint    int64
+	maxt    int64
+	metrics *metrics
 }
 
 type MetricReaderWithStats interface {

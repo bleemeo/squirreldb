@@ -7,8 +7,8 @@ import (
 
 // LocalCluster implement types.Cluster but only for client sharing the same LocalCluster object.
 type LocalCluster struct {
-	l         sync.Mutex
 	listenner map[string][]func([]byte)
+	l         sync.Mutex
 }
 
 func (c *LocalCluster) Publish(ctx context.Context, topic string, message []byte) error {

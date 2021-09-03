@@ -468,8 +468,8 @@ func (s *SquirrelDB) States() (types.State, error) {
 }
 
 type namedTasks struct {
-	Name string
 	Task types.OldTask
+	Name string
 }
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
