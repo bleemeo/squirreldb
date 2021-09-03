@@ -189,7 +189,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 			// the labels are invalid we want to return a status 400, so we use the
 			// interceptor to change the returned status in this case.
 			if operation == "write" {
-				rw = &Interceptor{origWriter: rw}
+				rw = &interceptor{OrigWriter: rw}
 			}
 
 			handler(rw, r)
@@ -391,30 +391,31 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 }
 
-// Interceptor implements the http.ResponseWriter interface,
+// interceptor implements the http.ResponseWriter interface,
 // it allows to catch and modify the response status code.
-type Interceptor struct {
-	origWriter http.ResponseWriter
+type interceptor struct {
+	OrigWriter http.ResponseWriter
 	status     int
 }
 
-func (i *Interceptor) WriteHeader(rc int) {
+func (i *interceptor) WriteHeader(rc int) {
 	i.status = rc
 }
 
-func (i *Interceptor) Write(b []byte) (int, error) {
+func (i *interceptor) Write(b []byte) (int, error) {
 	if i.status == http.StatusInternalServerError && regexErrInvalidMatcher.Match(b) {
 		i.status = http.StatusBadRequest
 	}
 
 	// Don't write the header if the status is unset because it raises a panic.
 	if i.status != 0 {
-		i.origWriter.WriteHeader(i.status)
+		i.OrigWriter.WriteHeader(i.status)
+		i.status = 0
 	}
 
-	return i.origWriter.Write(b)
+	return i.OrigWriter.Write(b)
 }
 
-func (i *Interceptor) Header() http.Header {
-	return i.origWriter.Header()
+func (i *interceptor) Header() http.Header {
+	return i.OrigWriter.Header()
 }
