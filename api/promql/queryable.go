@@ -84,7 +84,11 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 		return nil, nil, errMissingRequest
 	}
 
-	index := s.Index
+	var index types.Index
+
+	index = reducedTimeRangeIndex{
+		index: s.Index,
+	}
 
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
 	if value != "" {
