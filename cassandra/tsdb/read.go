@@ -17,12 +17,12 @@ import (
 )
 
 type readIter struct {
-	c                     *CassandraTSDB
-	request               types.MetricRequest
-	tmp                   []types.MetricPoint
-	aggregatedToTimestamp int64
 	err                   error
+	c                     *CassandraTSDB
+	tmp                   []types.MetricPoint
 	current               types.MetricData
+	request               types.MetricRequest
+	aggregatedToTimestamp int64
 	offset                int
 }
 

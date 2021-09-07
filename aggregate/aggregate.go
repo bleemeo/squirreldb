@@ -14,8 +14,8 @@ type AggregatedPoint struct {
 }
 
 type AggregatedData struct {
-	ID         types.MetricID
 	Points     []AggregatedPoint
+	ID         types.MetricID
 	TimeToLive int64
 }
 

@@ -12,8 +12,8 @@ import (
 // labelsLookupCache provide cache for metricID to labels.
 // It's eviction policy is random (Golang map order).
 type labelsLookupCache struct {
-	l     sync.Mutex
 	cache map[types.MetricID]labelsEntry
+	l     sync.Mutex
 }
 
 // postingsCache provide a cache for postings queries by label=value.
@@ -28,9 +28,9 @@ type postingsCache struct {
 }
 
 type postingsCacheKey struct {
-	Shard int32
 	Name  string
 	Value string
+	Shard int32
 }
 
 type postingEntry struct {
@@ -40,8 +40,8 @@ type postingEntry struct {
 }
 
 type labelsEntry struct {
-	value           labels.Labels
 	cassandraExpire time.Time
+	value           labels.Labels
 }
 
 const (

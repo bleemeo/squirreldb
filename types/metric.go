@@ -11,8 +11,8 @@ import (
 type MetricID int64
 
 type MetricLabel struct {
-	ID     MetricID
 	Labels labels.Labels
+	ID     MetricID
 }
 
 type MetricPoint struct {
@@ -21,17 +21,17 @@ type MetricPoint struct {
 }
 
 type MetricData struct {
-	ID         MetricID
 	Points     []MetricPoint
+	ID         MetricID
 	TimeToLive int64
 }
 
 type MetricRequest struct {
+	Function      string
 	IDs           []MetricID
 	FromTimestamp int64
 	ToTimestamp   int64
 	StepMs        int64
-	Function      string
 }
 
 // CopyPoints returns a copy of points.

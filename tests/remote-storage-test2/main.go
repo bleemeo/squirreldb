@@ -188,21 +188,21 @@ func run(ctx context.Context) error { //nolint:cyclop,gocognit
 }
 
 type Simulator struct {
-	// index to next replaced agent
-	idxChurn          int
-	activeAgent       []string
 	agentFirstWrite   map[string]time.Time
 	agentFirstReceive map[string]time.Time
-	readURLs          []string
 	writeURLs         []string
-	idxRead           int
-	idxWrite          int
-	writerRunning     int
-	writerTerminated  bool
-	queryCount        int
-	pointRead         int
-	pointWrite        int
-	l                 sync.Mutex
+	activeAgent       []string
+	readURLs          []string
+	// index to next replaced agent
+	idxChurn         int
+	idxRead          int
+	idxWrite         int
+	writerRunning    int
+	pointWrite       int
+	queryCount       int
+	pointRead        int
+	l                sync.Mutex
+	writerTerminated bool
 }
 
 func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteRequest) error {

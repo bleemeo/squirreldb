@@ -37,12 +37,13 @@ type Cluster struct {
 	Addresses      []string
 	MetricRegistry prometheus.Registerer
 	Keyspace       string
-	l              sync.Mutex
-	client         *client.Client
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	listenner      map[string][]func([]byte)
-	redisChannel   string
+
+	client       *client.Client
+	cancel       context.CancelFunc
+	listenner    map[string][]func([]byte)
+	redisChannel string
+	l            sync.Mutex
+	wg           sync.WaitGroup
 
 	metrics *metrics
 }

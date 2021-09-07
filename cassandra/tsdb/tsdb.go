@@ -41,9 +41,9 @@ var (
 var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {
+	SchemaLock                sync.Locker
 	DefaultTimeToLive         time.Duration
 	AggregateIntendedDuration time.Duration
-	SchemaLock                sync.Locker
 }
 
 type lockFactory interface {

@@ -190,8 +190,8 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 	log.Printf("There is %d entry in the index (%d added). AllIDs took %v", len(ids), nbAdded, time.Since(start))
 
 	queries := []struct {
-		Name string
 		Fun  func(i int) []*labels.Matcher
+		Name string
 	}{
 		{
 			Name: "shard=N",

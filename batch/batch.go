@@ -139,9 +139,9 @@ func New(
 type readIter struct {
 	b       *Batch
 	ctx     context.Context
-	request types.MetricRequest
 	err     error
 	current types.MetricData
+	request types.MetricRequest
 	offset  int
 }
 

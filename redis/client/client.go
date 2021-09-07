@@ -18,10 +18,10 @@ import (
 type Client struct {
 	Addresses []string
 
-	l             sync.Mutex
 	lastReload    time.Time
 	singleClient  *goredis.Client
 	clusterClient *goredis.ClusterClient
+	l             sync.Mutex
 }
 
 // Close dispatch Close to either cluster of single instance client.

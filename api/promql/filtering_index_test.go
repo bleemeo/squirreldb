@@ -48,10 +48,10 @@ func Test_filteringIndex_Search(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
 		fields  fields
-		args    args
 		want    types.MetricsSet
+		name    string
+		args    args
 		wantErr bool
 	}{
 		{

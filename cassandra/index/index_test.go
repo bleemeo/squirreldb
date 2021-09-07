@@ -80,9 +80,8 @@ func (m *mockState) Write(name string, value interface{}) error {
 }
 
 type mockLockFactory struct {
-	mutex sync.Mutex
-
 	locks map[string]*mockLock
+	mutex sync.Mutex
 }
 
 func (f *mockLockFactory) CreateLock(name string, ttl time.Duration) types.TryLocker {
@@ -155,14 +154,13 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 }
 
 type mockStore struct {
-	mutex sync.Mutex
-
-	queryCount    int
+	expiration    map[time.Time][]byte
 	labels2id     map[string]types.MetricID
 	postings      map[int32]map[string]map[string][]byte
 	id2labels     map[types.MetricID]labels.Labels
 	id2expiration map[types.MetricID]time.Time
-	expiration    map[time.Time][]byte
+	queryCount    int
+	mutex         sync.Mutex
 }
 
 func (s *mockStore) Init(ctx context.Context) error {
@@ -753,8 +751,8 @@ func Test_timeToLiveFromLabels(t *testing.T) {
 	tests := []struct {
 		name       string
 		labels     labels.Labels
-		want       int64
 		wantLabels labels.Labels
+		want       int64
 	}{
 		{
 			name: "no ttl",
@@ -812,8 +810,8 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 	tests := []struct {
 		name       string
 		labels     labels.Labels
-		wantTTL    int64
 		wantLabels labels.Labels
+		wantTTL    int64
 		wantErr    bool
 	}{
 		{
@@ -1021,8 +1019,8 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 func Test_stringFromLabels(t *testing.T) {
 	tests := []struct {
 		name   string
-		labels labels.Labels
 		want   string
+		labels labels.Labels
 	}{
 		{
 			name: "simple",
@@ -4079,8 +4077,8 @@ func Benchmark_freeFreeID(b *testing.B) {
 	}
 
 	tests := []struct {
-		name   string
 		bitmap *roaring.Bitmap
+		name   string
 	}{
 		{
 			name:   "empty",

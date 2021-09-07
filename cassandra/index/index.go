@@ -74,10 +74,10 @@ var (
 var errTimeOutOfRange = errors.New("time out of range")
 
 type idData struct {
-	id                       types.MetricID
-	unsortedLabels           labels.Labels
 	cassandraEntryExpiration time.Time
 	cacheExpirationTime      time.Time
+	unsortedLabels           labels.Labels
+	id                       types.MetricID
 }
 
 type lockFactory interface {
@@ -85,11 +85,11 @@ type lockFactory interface {
 }
 
 type Options struct {
-	DefaultTimeToLive time.Duration
 	LockFactory       lockFactory
 	States            types.State
 	SchemaLock        sync.Locker
 	Cluster           types.Cluster
+	DefaultTimeToLive time.Duration
 }
 
 type CassandraIndex struct {
@@ -977,8 +977,8 @@ func (c *CassandraIndex) verifyShard( //nolint:gocognit,cyclop
 	}
 
 	references := []struct {
-		name string
 		it   *roaring.Bitmap
+		name string
 	}{
 		{name: "global all IDs", it: allGoodIds},
 		{name: "shard all IDs", it: localAll},
@@ -1794,12 +1794,12 @@ func findFreeID(bitmap *roaring.Bitmap) uint64 {
 }
 
 type lookupEntry struct {
-	idData
-	labelsKey          uint64
-	ttl                int64
 	sortedLabelsString string
 	sortedLabels       labels.Labels
 	wantedShards       []int32
+	idData
+	labelsKey uint64
+	ttl       int64
 }
 
 // createMetrics creates a new metric IDs associated with provided request
@@ -2343,12 +2343,12 @@ func (c *CassandraIndex) Search(
 }
 
 type metricsLabels struct {
-	c          *CassandraIndex
 	ctx        context.Context
+	err        error
+	c          *CassandraIndex
 	ids        []types.MetricID
 	labelsList []labels.Labels
 	next       int
-	err        error
 }
 
 func (l *metricsLabels) Next() bool {

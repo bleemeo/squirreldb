@@ -20,8 +20,8 @@ func Test_aggregateData(t *testing.T) {
 
 	tests := []struct {
 		name string
-		args args
 		want AggregatedData
+		args args
 	}{
 		{
 			name: "test",

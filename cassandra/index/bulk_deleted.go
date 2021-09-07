@@ -13,11 +13,11 @@ import (
 
 type deleter struct {
 	c                       *CassandraIndex
+	labelToPostingUpdates   map[string]map[string]int
 	deleteLabels            []string
 	deleteIDs               []uint64
 	unshardedPostingUpdates []postingUpdateRequest
 	invalidateKey           []postingsCacheKey
-	labelToPostingUpdates   map[string]map[string]int
 }
 
 func newBulkDeleter(c *CassandraIndex) *deleter {

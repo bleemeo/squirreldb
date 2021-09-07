@@ -9,8 +9,8 @@ import (
 // States is a in-memory single-node "states", that is a map :)
 // Only useful for tests.
 type States struct {
-	mutex  sync.Mutex
 	values map[string]string
+	mutex  sync.Mutex
 }
 
 func (s *States) Read(name string, value interface{}) (bool, error) {
