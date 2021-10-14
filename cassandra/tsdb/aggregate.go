@@ -401,6 +401,10 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 
 		pointsRead += len(metric.Points)
 
+		if len(aggregatedMetric.Points) == 0 {
+			continue
+		}
+
 		err := c.writeAggregateData(aggregatedMetric, 0)
 		if err != nil {
 			return pointsRead, err

@@ -1,10 +1,15 @@
 package aggregate
 
 import (
+	"math"
 	"reflect"
 	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/prometheus/prometheus/pkg/value"
 )
 
 const (
@@ -16,6 +21,20 @@ func Test_aggregateData(t *testing.T) {
 	type args struct {
 		data       types.MetricData
 		resolution int64
+	}
+
+	anotherNaN := math.Float64frombits(value.StaleNaN) + 1.0
+
+	if !math.IsNaN(anotherNaN) {
+		t.Fatalf("anotherNaN is not NaN")
+	}
+
+	if math.Float64bits(anotherNaN) == value.NormalNaN {
+		t.Fatalf("anotherNaN is exactly NormalNaN. It should be different")
+	}
+
+	if math.Float64bits(anotherNaN) == value.StaleNaN {
+		t.Fatalf("anotherNaN is exactly StaleNaN. It should be different")
 	}
 
 	tests := []struct {
@@ -112,12 +131,311 @@ func Test_aggregateData(t *testing.T) {
 				TimeToLive: 3600,
 			},
 		},
+		{
+			name: "test-min-max",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: -500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: -1000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: -1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: -2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: -2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       -2500,
+						Max:       -500,
+						Average:   -1500,
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-min-max-2",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: -2500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: -2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: -1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: -1000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: -500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       -2500,
+						Max:       -500,
+						Average:   -1500,
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-stale-nan",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       500,
+						Max:       2500,
+						Average:   1500,
+						Count:     4,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-stale-nan-2",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       1000,
+						Max:       2500,
+						Average:   1750,
+						Count:     2,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-only-stale-nan",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID:         MetricIDTest2,
+				Points:     []AggregatedPoint{},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-only-nan",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000,
+							Value:     anotherNaN, // This should normally be a NormalNaN, but it allow to ensire NaN are normalized
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.StaleNaN),
+						},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       math.Float64frombits(value.NormalNaN),
+						Max:       math.Float64frombits(value.NormalNaN),
+						Average:   math.Float64frombits(value.NormalNaN),
+						Count:     1,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-nan",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.NormalNaN),
+						},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       500,
+						Max:       2500,
+						Average:   math.Float64frombits(value.NormalNaN),
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-nan-first-and-last",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.NormalNaN),
+						},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: 1000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: 1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{
+							Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000,
+							Value:     math.Float64frombits(value.NormalNaN),
+						},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       1000,
+						Max:       2000,
+						Average:   math.Float64frombits(value.NormalNaN),
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Aggregate(tt.args.data, tt.args.resolution); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("aggregateData() = %v, want %v", got, tt.want)
+			got := Aggregate(tt.args.data, tt.args.resolution)
+			if diff := cmp.Diff(tt.want, got, cmpopts.EquateNaNs(), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("aggregateData() mismatch (-want +got):\n%s", diff)
+			}
+
+			// Check that NaN are using NormalNaN and not another kind of NaN
+			for i, pts := range got.Points {
+				if math.IsNaN(pts.Average) && math.Float64bits(pts.Average) != value.NormalNaN {
+					t.Errorf("aggregateData().Points[%d].Average = 0x%x want 0x%x", i, math.Float64bits(pts.Average), value.NormalNaN)
+				}
+
+				if math.IsNaN(pts.Max) && math.Float64bits(pts.Max) != value.NormalNaN {
+					t.Errorf("aggregateData().Points[%d].Max = 0x%x want 0x%x", i, math.Float64bits(pts.Max), value.NormalNaN)
+				}
+
+				if math.IsNaN(pts.Min) && math.Float64bits(pts.Min) != value.NormalNaN {
+					t.Errorf("aggregateData().Points[%d].Min = 0x%x want 0x%x", i, math.Float64bits(pts.Min), value.NormalNaN)
+				}
 			}
 		})
 	}
@@ -173,7 +491,7 @@ func Test_aggregatePoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := aggregatePoints(tt.args.points, tt.args.timestamp); !reflect.DeepEqual(got, tt.want) {
+			if got, _ := aggregatePoints(tt.args.points, tt.args.timestamp); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("aggregatePoints() = %v, want %v", got, tt.want)
 			}
 		})

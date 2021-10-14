@@ -3,6 +3,8 @@ package aggregate
 import (
 	"math"
 	"squirreldb/types"
+
+	"github.com/prometheus/prometheus/pkg/value"
 )
 
 type AggregatedPoint struct {
@@ -40,8 +42,11 @@ func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 		if i == 0 {
 			currentAggregatedTimestamp = aggregatedTimestamp
 		} else if currentAggregatedTimestamp != aggregatedTimestamp {
-			aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
-			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
+			aggregatedPoint, ok := aggregatePoints(workingPoints, currentAggregatedTimestamp)
+			if ok {
+				aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
+			}
+
 			workingPoints = workingPoints[:0]
 			currentAggregatedTimestamp = aggregatedTimestamp
 		}
@@ -50,31 +55,65 @@ func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 	}
 
 	if len(workingPoints) > 0 {
-		aggregatedPoint := aggregatePoints(workingPoints, currentAggregatedTimestamp)
-		aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
+		aggregatedPoint, ok := aggregatePoints(workingPoints, currentAggregatedTimestamp)
+		if ok {
+			aggregatedData.Points = append(aggregatedData.Points, aggregatedPoint)
+		}
 	}
 
 	return aggregatedData
 }
 
 // Returns an aggregated point from a point list.
-func aggregatePoints(points []types.MetricPoint, timestamp int64) AggregatedPoint {
+func aggregatePoints(points []types.MetricPoint, timestamp int64) (AggregatedPoint, bool) {
 	aggregatedPoint := AggregatedPoint{
 		Timestamp: timestamp,
 		Count:     float64(len(points)),
 	}
 
-	for i, point := range points {
-		if i == 0 {
+	count := 0
+
+	for _, point := range points {
+		if math.Float64bits(point.Value) == value.StaleNaN {
+			continue
+		}
+
+		count++
+
+		if count == 1 {
+			aggregatedPoint.Min = point.Value
+			aggregatedPoint.Max = point.Value
+		}
+
+		if point.Value < aggregatedPoint.Min || math.IsNaN(aggregatedPoint.Min) {
 			aggregatedPoint.Min = point.Value
 		}
 
-		aggregatedPoint.Min = math.Min(point.Value, aggregatedPoint.Min)
-		aggregatedPoint.Max = math.Max(point.Value, aggregatedPoint.Max)
+		if point.Value > aggregatedPoint.Max || math.IsNaN(aggregatedPoint.Max) {
+			aggregatedPoint.Max = point.Value
+		}
+
 		aggregatedPoint.Average += point.Value
 	}
 
+	if count == 0 {
+		return aggregatedPoint, false
+	}
+
+	aggregatedPoint.Count = float64(count)
 	aggregatedPoint.Average /= aggregatedPoint.Count
 
-	return aggregatedPoint
+	if math.IsNaN(aggregatedPoint.Average) {
+		aggregatedPoint.Average = math.Float64frombits(value.NormalNaN)
+	}
+
+	if math.IsNaN(aggregatedPoint.Min) {
+		aggregatedPoint.Min = math.Float64frombits(value.NormalNaN)
+	}
+
+	if math.IsNaN(aggregatedPoint.Max) {
+		aggregatedPoint.Max = math.Float64frombits(value.NormalNaN)
+	}
+
+	return aggregatedPoint, true
 }
