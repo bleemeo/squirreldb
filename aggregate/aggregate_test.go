@@ -192,6 +192,96 @@ func Test_aggregateData(t *testing.T) {
 			},
 		},
 		{
+			name: "test-+inf",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: math.Inf(1)},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: 1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       500,
+						Max:       math.Inf(1),
+						Average:   math.Inf(1),
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test--inf",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: math.Inf(-1)},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: 1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: 2000},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       math.Inf(-1),
+						Max:       2500,
+						Average:   math.Inf(-1),
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
+			name: "test-both-inf",
+			args: args{
+				data: types.MetricData{
+					ID: MetricIDTest2,
+					Points: []types.MetricPoint{
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 44, 0, time.UTC).UnixNano() / 1000000, Value: 500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 42, 54, 0, time.UTC).UnixNano() / 1000000, Value: math.Inf(-1)},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 4, 0, time.UTC).UnixNano() / 1000000, Value: 1500},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 14, 0, time.UTC).UnixNano() / 1000000, Value: math.Inf(1)},
+						{Timestamp: time.Date(2019, 9, 17, 9, 43, 34, 0, time.UTC).UnixNano() / 1000000, Value: 2500},
+					},
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID: MetricIDTest2,
+				Points: []AggregatedPoint{
+					{
+						Timestamp: time.Date(2019, 9, 17, 9, 40, 0, 0, time.UTC).UnixNano() / 1000000,
+						Min:       math.Inf(-1),
+						Max:       math.Inf(1),
+						Average:   math.NaN(),
+						Count:     5,
+					},
+				},
+				TimeToLive: 3600,
+			},
+		},
+		{
 			name: "test-stale-nan",
 			args: args{
 				data: types.MetricData{
