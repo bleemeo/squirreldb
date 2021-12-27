@@ -31,8 +31,8 @@ const (
 var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
 
 type Options struct {
-	Addresses []string
 	Keyspace  string
+	Addresses []string
 }
 
 type Redis struct {

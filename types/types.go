@@ -43,9 +43,9 @@ type Cluster interface {
 }
 
 type LookupRequest struct {
-	Labels labels.Labels
 	Start  time.Time
 	End    time.Time
+	Labels labels.Labels
 }
 
 type Index interface {

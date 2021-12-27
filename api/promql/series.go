@@ -12,9 +12,9 @@ import (
 type seriesIter struct {
 	list      types.MetricDataSet
 	index     types.Index
+	err       error
 	id2Labels map[types.MetricID]labels.Labels
 	current   series
-	err       error
 }
 
 func (i *seriesIter) Next() bool {
@@ -66,8 +66,8 @@ func (i *seriesIter) Warnings() storage.Warnings {
 }
 
 type series struct {
-	data   types.MetricData
 	labels []labels.Label
+	data   types.MetricData
 }
 
 func (s series) Labels() labels.Labels {

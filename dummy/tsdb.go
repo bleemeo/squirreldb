@@ -53,10 +53,10 @@ type MemoryTSDB struct {
 }
 
 type readIter struct {
-	request types.MetricRequest
-	offset  int
 	db      *MemoryTSDB
 	current types.MetricData
+	request types.MetricRequest
+	offset  int
 }
 
 // DumpData dump to content of the TSDB. Result is ordered by MetricID.

@@ -5,7 +5,7 @@ set -e
 UID=$(id -u)
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v0.175.0"
+GORELEASER_VERSION="v0.176.0"
 
 while [ ! -z "$1" ]; do
     case "$1" in
@@ -18,11 +18,15 @@ while [ ! -z "$1" ]; do
     "long")
         WITH_LONG=1
         ;;
+    "nostop")
+        WITH_NOSTOP=1
+        ;;
     *)
-        echo "Usage: $0 [cluster|race|long]"
+        echo "Usage: $0 [cluster|race|long|nostop]"
         echo "cluster: Run test with clustered Redis & Cassandra"
         echo "   long: Run longer test"
         echo "   race: Run test with -race"
+        echo " nostop: Do not stop Cassandra & Redis at the end"
 
         exit 1
     esac
@@ -127,3 +131,16 @@ docker run $docker_network --rm -u $UID -e HOME=/go/pkg \
 
 echo
 echo "== Success =="
+
+if [ ! "${WITH_NOSTOP}" = "1" ]; then
+    if [ "${WITH_CLUSTER}" = "1" ]; then
+        echo
+        echo "== Stopping cluster component using examples/squirreldb_ha/"
+        (cd examples/squirreldb_ha/; docker-compose down -v)
+    else
+        echo
+        echo "== Stopping Cassandra & Redis"
+        docker rm -f squirreldb-test-cassandra
+        docker rm -f squirreldb-test-redis
+    fi
+fi

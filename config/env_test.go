@@ -26,9 +26,9 @@ func (p fakeProvider) Watch(cb func(event interface{}, err error)) error {
 
 func Test_listEnvProvider_Read(t *testing.T) {
 	tests := []struct {
-		name     string
 		provider koanf.Provider
 		want     map[string]interface{}
+		name     string
 		wantErr  bool
 	}{
 		{

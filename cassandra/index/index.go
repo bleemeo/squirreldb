@@ -65,11 +65,19 @@ const (
 //nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
+//nolint:gochecknoglobals
+var (
+	minTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	maxTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
+)
+
+var errTimeOutOfRange = errors.New("time out of range")
+
 type idData struct {
-	id                       types.MetricID
-	unsortedLabels           labels.Labels
 	cassandraEntryExpiration time.Time
 	cacheExpirationTime      time.Time
+	unsortedLabels           labels.Labels
+	id                       types.MetricID
 }
 
 type lockFactory interface {
@@ -77,11 +85,11 @@ type lockFactory interface {
 }
 
 type Options struct {
-	DefaultTimeToLive time.Duration
 	LockFactory       lockFactory
 	States            types.State
 	SchemaLock        sync.Locker
 	Cluster           types.Cluster
+	DefaultTimeToLive time.Duration
 }
 
 type CassandraIndex struct {
@@ -969,8 +977,8 @@ func (c *CassandraIndex) verifyShard( //nolint:gocognit,cyclop
 	}
 
 	references := []struct {
-		name string
 		it   *roaring.Bitmap
+		name string
 	}{
 		{name: "global all IDs", it: allGoodIds},
 		{name: "shard all IDs", it: localAll},
@@ -1786,12 +1794,12 @@ func findFreeID(bitmap *roaring.Bitmap) uint64 {
 }
 
 type lookupEntry struct {
-	idData
-	labelsKey          uint64
-	ttl                int64
 	sortedLabelsString string
 	sortedLabels       labels.Labels
 	wantedShards       []int32
+	idData
+	labelsKey uint64
+	ttl       int64
 }
 
 // createMetrics creates a new metric IDs associated with provided request
@@ -2335,12 +2343,12 @@ func (c *CassandraIndex) Search(
 }
 
 type metricsLabels struct {
-	c          *CassandraIndex
 	ctx        context.Context
+	err        error
+	c          *CassandraIndex
 	ids        []types.MetricID
 	labelsList []labels.Labels
 	next       int
-	err        error
 }
 
 func (l *metricsLabels) Next() bool {
@@ -3275,6 +3283,10 @@ func ShardForTime(ts int64) int32 {
 }
 
 func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time, returnAll bool) ([]int32, error) {
+	if err := validatedTime(start, end); err != nil {
+		return nil, err
+	}
+
 	shardSize := int32(postingShardSize.Hours())
 	startShard := ShardForTime(start.Unix())
 	endShard := ShardForTime(end.Unix())
@@ -3765,4 +3777,24 @@ func matcherMatches(matchers []*labels.Matcher, lbls labels.Labels) bool {
 	}
 
 	return true
+}
+
+func validatedTime(start time.Time, end time.Time) error {
+	if start.Before(minTime) {
+		return fmt.Errorf("%w: start time is too early", errTimeOutOfRange)
+	}
+
+	if start.After(maxTime) {
+		return fmt.Errorf("%w: start time is too late", errTimeOutOfRange)
+	}
+
+	if end.Before(minTime) {
+		return fmt.Errorf("%w: end time is too early", errTimeOutOfRange)
+	}
+
+	if end.After(maxTime) {
+		return fmt.Errorf("%w: end time is too late", errTimeOutOfRange)
+	}
+
+	return nil
 }

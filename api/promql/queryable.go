@@ -17,25 +17,29 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-var errMissingRequest = errors.New("HTTP request not found in context")
+var (
+	errMissingRequest = errors.New("HTTP request not found in context")
+	errInvalidMatcher = errors.New("invalid matcher")
+)
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
 type Store struct {
 	Index                     types.Index
 	Reader                    types.MetricReader
-	DefaultMaxEvaluatedSeries uint32
-	DefaultMaxEvaluatedPoints uint64
 	MetricRegistry            prometheus.Registerer
+	DefaultMaxEvaluatedPoints uint64
+	DefaultMaxEvaluatedSeries uint32
 
 	metrics *metrics
 }
 
 type querier struct {
-	ctx        context.Context
-	index      IndexWithStats
-	reader     MetricReaderWithStats
-	mint, maxt int64
-	metrics    *metrics
+	ctx     context.Context
+	index   IndexWithStats
+	reader  MetricReaderWithStats
+	mint    int64
+	maxt    int64
+	metrics *metrics
 }
 
 type MetricReaderWithStats interface {
@@ -81,13 +85,17 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 		return nil, nil, errMissingRequest
 	}
 
-	index := s.Index
+	var index types.Index
+
+	index = reducedTimeRangeIndex{
+		index: s.Index,
+	}
 
 	value := r.Header.Get("X-PromQL-Forced-Matcher")
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			return nil, nil, fmt.Errorf("invalid matcher \"%s\", require labelName=labelValue", value)
+			return nil, nil, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
 		}
 
 		index = filteringIndex{

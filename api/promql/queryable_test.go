@@ -121,8 +121,8 @@ func (s mockStore) PointsRead() float64 {
 }
 
 type mockIndex struct {
-	searchReply []types.MetricLabel
 	lookupMap   map[types.MetricID]labels.Labels
+	searchReply []types.MetricLabel
 }
 
 func (idx mockIndex) Search(
@@ -199,16 +199,16 @@ func Test_querier_Select(t *testing.T) {
 	}
 
 	type args struct {
-		sortSeries bool
 		hints      *storage.SelectHints
 		matchers   []*labels.Matcher
+		sortSeries bool
 	}
 
 	tests := []struct {
+		want   storage.SeriesSet
 		name   string
 		fields fields
 		args   args
-		want   storage.SeriesSet
 	}{
 		{
 			name: "no-sort",

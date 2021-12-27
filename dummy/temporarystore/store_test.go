@@ -26,11 +26,11 @@ func TestAppend(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
 		fields    fields
+		wantState map[types.MetricID]storeData
+		name      string
 		args      args
 		want      []int
-		wantState map[types.MetricID]storeData
 	}{
 		{
 			name: "store_filled",
@@ -447,10 +447,10 @@ func TestStore_expire(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		fields fields
 		args   args
+		fields fields
 		want   map[types.MetricID]storeData
+		name   string
 	}{
 		{
 			name: "no_expire",
@@ -679,17 +679,17 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 	}
 
 	type args struct {
+		now     time.Time
 		points  []types.MetricData
 		offsets []int
-		now     time.Time
 	}
 
 	tests := []struct {
-		name      string
-		fields    fields
 		args      args
-		want      []types.MetricData
+		fields    fields
 		wantState map[types.MetricID]storeData
+		name      string
+		want      []types.MetricData
 	}{
 		{
 			name: "store_filled",
@@ -1124,16 +1124,16 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) {
 
 func TestStore_markToExpire(t *testing.T) {
 	type args struct {
+		now time.Time
 		ids []types.MetricID
 		ttl time.Duration
-		now time.Time
 	}
 
 	tests := []struct {
-		name      string
 		state     map[types.MetricID]storeData
-		args      args
 		wantState map[types.MetricID]storeData
+		name      string
+		args      args
 	}{
 		{
 			name: "simple",
@@ -1195,11 +1195,11 @@ func TestStore_markToExpire(t *testing.T) {
 
 func TestStore_GetSetFlushDeadline(t *testing.T) {
 	tests := []struct {
-		name      string
 		state     map[types.MetricID]storeData
 		args      map[types.MetricID]time.Time
 		want      map[types.MetricID]time.Time
 		wantState map[types.MetricID]storeData
+		name      string
 	}{
 		{
 			name: "simple",
@@ -1271,11 +1271,11 @@ func TestStore_GetTransfert(t *testing.T) {
 	}
 
 	tests := []struct {
+		want      map[types.MetricID]time.Time
 		name      string
 		fields    fields
-		args      int
-		want      map[types.MetricID]time.Time
 		wantState []types.MetricID
+		args      int
 	}{
 		{
 			name: "empty-nil",

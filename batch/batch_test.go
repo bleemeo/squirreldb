@@ -110,10 +110,10 @@ func iterToList(i types.MetricDataSet) ([]types.MetricData, error) {
 
 func TestBatch_read(t *testing.T) {
 	type fields struct {
-		batchSize       time.Duration
-		states          map[types.MetricID]stateData
 		memoryStore     TemporaryStore
+		states          map[types.MetricID]stateData
 		persistentStore *dummy.MemoryTSDB
+		batchSize       time.Duration
 	}
 
 	type args struct {
@@ -121,10 +121,10 @@ func TestBatch_read(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                   string
 		fields                 fields
-		args                   args
+		name                   string
 		want                   []types.MetricData
+		args                   args
 		mustSkipPersitentReads bool
 		wantErr                bool
 	}{
@@ -768,11 +768,11 @@ func TestBatch_read(t *testing.T) {
 
 func TestBatch_readTemporary(t *testing.T) {
 	type fields struct {
-		batchSize   time.Duration
-		states      map[types.MetricID]stateData
 		memoryStore TemporaryStore
 		reader      types.MetricReader
 		writer      types.MetricWriter
+		states      map[types.MetricID]stateData
+		batchSize   time.Duration
 	}
 
 	type args struct {
@@ -782,10 +782,10 @@ func TestBatch_readTemporary(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
 		fields  fields
-		args    args
+		name    string
 		want    []types.MetricData
+		args    args
 		wantErr bool
 	}{
 		{
@@ -908,15 +908,15 @@ func TestBatch_readTemporary(t *testing.T) {
 
 func Test_flushTimestamp(t *testing.T) {
 	type args struct {
-		id        types.MetricID
 		now       time.Time
+		id        types.MetricID
 		batchSize time.Duration
 	}
 
 	tests := []struct {
+		want time.Time
 		name string
 		args args
-		want time.Time
 	}{
 		{
 			name: "id_1",
@@ -949,24 +949,24 @@ func Test_flushTimestamp(t *testing.T) {
 
 func TestBatch_flush(t *testing.T) {
 	type fields struct {
-		batchSize   time.Duration
-		states      map[types.MetricID]stateData
 		memoryStore TemporaryStore
+		states      map[types.MetricID]stateData
 		writer      *dummy.MemoryTSDB
+		batchSize   time.Duration
 	}
 
 	type args struct {
-		ids      []types.MetricID
 		now      time.Time
+		ids      []types.MetricID
 		shutdown bool
 	}
 
 	tests := []struct {
-		name            string
 		fields          fields
-		args            args
+		name            string
 		wantWriter      []types.MetricData
 		wantMemoryStore []types.MetricData
+		args            args
 	}{
 		{
 			name: "tsdb-write-sorted",
@@ -1286,23 +1286,20 @@ func TestBatch_write(t *testing.T) {
 	// Write are done at nowWriteN timestamp.
 	// If nowCheck is not nil, do the check call (not flush owned metrics)
 	tests := []struct {
-		name string
-
-		nowWrite1 time.Time
-		nowWrite2 time.Time
-		write1    []types.MetricData
-		write2    []types.MetricData
-
-		nowCheck1 time.Time
-		nowCheck2 time.Time
-		shutdown1 bool
-		shutdown2 bool
-
+		nowCheck2       time.Time
+		nowWrite1       time.Time
+		nowWrite2       time.Time
+		nowCheck1       time.Time
+		wantState1      map[types.MetricID]stateData
+		wantState2      map[types.MetricID]stateData
+		name            string
+		write2          []types.MetricData
 		wantWriter1     []types.MetricData
 		wantWriter2     []types.MetricData
 		wantMemoryStore []types.MetricData
-		wantState1      map[types.MetricID]stateData
-		wantState2      map[types.MetricID]stateData
+		write1          []types.MetricData
+		shutdown2       bool
+		shutdown1       bool
 	}{
 		{
 			name:      "single-initial-fill",

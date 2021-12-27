@@ -134,8 +134,7 @@ func NewPrometheus(
 	return api
 }
 
-// Run start the HTTP api server.
-func (a *API) Run(ctx context.Context, readiness chan error) {
+func (a *API) init() {
 	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	a.metrics = newMetrics(a.MetricRegistry)
 
@@ -201,11 +200,17 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	apiRouter := routerWrapper.WithPrefix("/api/v1")
 	api.Register(apiRouter)
 
+	a.router = apiRouter
+}
+
+// Run start the HTTP api server.
+func (a *API) Run(ctx context.Context, readiness chan error) {
+	a.init()
+
 	server := &http.Server{
 		Addr:    a.ListenAddress,
 		Handler: a,
 	}
-	a.router = apiRouter
 
 	serverStopped := make(chan error)
 
