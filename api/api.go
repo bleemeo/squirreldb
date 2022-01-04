@@ -196,7 +196,7 @@ func (a *API) init() {
 
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
-	a.init()
+	a.init() //nolint: contextcheck
 
 	server := &http.Server{
 		Addr:    a.ListenAddress,
@@ -229,7 +229,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
 		defer cancel()
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
 			_ = a.logger.Log("msg", "Failed stop the HTTP server", "err", err)
 		}
 
@@ -259,11 +259,6 @@ func (a *API) Ready() {
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	v := atomic.LoadInt32(&a.ready)
 	if v > 0 {
-		// TODO: Remove this temporary fix to support both "∕read" and "/api/v1/read"
-		if req.URL.Path == "/read" || req.URL.Path == "/write" {
-			req.URL.Path = "/api/v1" + req.URL.Path
-		}
-
 		a.router.ServeHTTP(w, req)
 
 		return

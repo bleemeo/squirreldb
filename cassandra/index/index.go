@@ -71,7 +71,10 @@ var (
 	maxTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
-var errTimeOutOfRange = errors.New("time out of range")
+var (
+	errTimeOutOfRange = errors.New("time out of range")
+	errBitmapEmpty    = errors.New("the result bitmap is empty")
+)
 
 type idData struct {
 	cassandraEntryExpiration time.Time
@@ -238,7 +241,7 @@ func (c *CassandraIndex) Start(_ context.Context) error {
 
 	c.wg.Add(1)
 
-	go c.run(ctx)
+	go c.run(ctx) //nolint: contextcheck
 
 	return nil
 }
@@ -1166,6 +1169,10 @@ func (c *CassandraIndex) verifyShard( //nolint:gocognit,cyclop
 				req := req
 				task := func() error {
 					_, err := c.postingUpdate(ctx, req)
+
+					if errors.Is(err, errBitmapEmpty) {
+						err = nil
+					}
 
 					return err
 				}
@@ -2178,7 +2185,7 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 	})
 }
 
-func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop
+func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop,gocognit
 	ctx context.Context,
 	maybePresent map[int32]postingUpdateRequest,
 	updates []postingUpdateRequest,
@@ -2198,7 +2205,7 @@ func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop
 		},
 		AddIDs: newShard,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errBitmapEmpty) {
 		return err
 	}
 
@@ -2220,6 +2227,10 @@ func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop
 			task := func() error {
 				_, err := c.postingUpdate(ctx, req)
 
+				if errors.Is(err, errBitmapEmpty) {
+					err = nil
+				}
+
 				return err
 			}
 			select {
@@ -2240,6 +2251,10 @@ func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop
 			req := req
 			task := func() error {
 				_, err := c.postingUpdate(ctx, req)
+
+				if errors.Is(err, errBitmapEmpty) {
+					err = nil
+				}
 
 				return err
 			}
@@ -2265,6 +2280,15 @@ func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop
 					c.lookupIDMutex.Lock()
 					c.idInShard[req.Shard] = bitmap
 					c.lookupIDMutex.Unlock()
+				}
+
+				if errors.Is(err, errBitmapEmpty) {
+					c.lookupIDMutex.Lock()
+					delete(c.idInShard, req.Shard)
+					delete(c.idInShardLastAccess, req.Shard)
+					c.lookupIDMutex.Unlock()
+
+					err = nil
 				}
 
 				return err
@@ -2628,7 +2652,7 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) bool { //nolint:cyclop
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(context.Background(), 0); !acquired {
+	if acquired := lock.TryLock(ctx, 0); !acquired {
 		return false
 	}
 	defer lock.Unlock()
@@ -2909,7 +2933,7 @@ func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateReq
 			return nil, fmt.Errorf("drop posting: %w", err)
 		}
 
-		return nil, nil
+		return nil, errBitmapEmpty
 	}
 
 	var buffer bytes.Buffer

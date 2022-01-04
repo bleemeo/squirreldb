@@ -154,7 +154,7 @@ func run(ctx context.Context) error { //nolint:cyclop
 			return fmt.Errorf("can not verify, index isn't a CassandraIndex")
 		}
 
-		_, err = cassandraIndex.Verify(context.Background(), os.Stderr, false, false)
+		_, err = cassandraIndex.Verify(ctx, os.Stderr, false, false)
 
 		if err != nil {
 			return err

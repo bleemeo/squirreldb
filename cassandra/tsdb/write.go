@@ -56,7 +56,7 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 
 		go func() {
 			defer wg.Done()
-			c.writeMetrics(metrics[startIndex:endIndex], writingTimestamp)
+			c.writeMetrics(ctx, metrics[startIndex:endIndex], writingTimestamp)
 		}()
 	}
 
@@ -69,11 +69,11 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 }
 
 // Write writes all specified metrics of the slice.
-func (c *CassandraTSDB) writeMetrics(metrics []types.MetricData, writingTimestamp int64) {
+func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.MetricData, writingTimestamp int64) {
 	for _, data := range metrics {
 		retry.Print(func() error {
 			return c.writeRawData(data, writingTimestamp) //nolint:scopelint
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			"write points to Cassandra",
 		)
 	}

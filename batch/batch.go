@@ -178,7 +178,7 @@ func (b *Batch) Run(ctx context.Context) {
 		case <-tickerTakeover.C:
 			b.checkTakeover(ctx, time.Now())
 		case <-ctx.Done():
-			err := b.check(context.Background(), time.Now(), true, true)
+			err := b.check(context.Background(), time.Now(), true, true) //nolint: contextcheck
 			if err != nil {
 				logger.Printf("Unable to shutdown batch service: %v", err)
 			}

@@ -96,8 +96,8 @@ func run(ctx context.Context) error { //nolint:cyclop,gocognit
 				return err
 			}
 
-			readURLs = append(readURLs, fmt.Sprintf("http://127.0.0.1:%d/read", squirreldb.ListenPort()))
-			writeURLs = append(writeURLs, fmt.Sprintf("http://127.0.0.1:%d/write", squirreldb.ListenPort()))
+			readURLs = append(readURLs, fmt.Sprintf("http://127.0.0.1:%d/api/v1/read", squirreldb.ListenPort()))
+			writeURLs = append(writeURLs, fmt.Sprintf("http://127.0.0.1:%d/api/v1/write", squirreldb.ListenPort()))
 
 			defer squirreldb.Stop()
 		}

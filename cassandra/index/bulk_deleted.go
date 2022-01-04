@@ -180,12 +180,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
 			req := req
 			task := func() error {
 				bitmap, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
 					return err
 				}
 
 				d.c.lookupIDMutex.Lock()
-				if bitmap == nil {
+				if bitmap == nil || errors.Is(err, errBitmapEmpty) {
 					delete(d.c.idInShard, req.Shard)
 				} else {
 					d.c.idInShard[req.Shard] = bitmap
@@ -212,7 +212,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
 			req := req
 			task := func() error {
 				_, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
 					return err
 				}
 
@@ -250,12 +250,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
 			req := req
 			task := func() error {
 				it, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
 					return err
 				}
 
 				// it is nil iff it's empty (or an error occure)
-				if it == nil {
+				if it == nil || errors.Is(err, errBitmapEmpty) {
 					l.Lock()
 					shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(req.Shard))
 					l.Unlock()
@@ -278,7 +278,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
 
 	if len(shardsListUpdate.RemoveIDs) > 0 {
 		_, err := d.c.postingUpdate(ctx, shardsListUpdate)
-		if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+		if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
 			return err
 		}
 	}
@@ -307,7 +307,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
 		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errBitmapEmpty) {
 		return err
 	}
 

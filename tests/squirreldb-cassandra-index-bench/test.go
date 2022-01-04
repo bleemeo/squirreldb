@@ -224,7 +224,7 @@ func test(ctx context.Context, cassandraIndex types.Index) {
 		}
 
 		ids, ttls, err := cassandraIndex.LookupIDs(
-			context.Background(),
+			ctx,
 			[]types.LookupRequest{
 				{
 					Labels: labels.FromMap(labelsMap),

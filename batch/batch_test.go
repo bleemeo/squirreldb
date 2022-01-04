@@ -44,8 +44,8 @@ func generatePoint(fromTS int, toTS int, step int) []types.MetricPoint { //nolin
 	return points
 }
 
-func dumpMemoryStore(store TemporaryStore) []types.MetricData {
-	idsMap, _ := store.GetAllKnownMetrics(context.TODO())
+func dumpMemoryStore(ctx context.Context, store TemporaryStore) []types.MetricData {
+	idsMap, _ := store.GetAllKnownMetrics(ctx)
 
 	ids := make([]types.MetricID, 0, len(idsMap))
 
@@ -53,7 +53,7 @@ func dumpMemoryStore(store TemporaryStore) []types.MetricData {
 		ids = append(ids, id)
 	}
 
-	results, _, _ := store.ReadPointsAndOffset(context.Background(), ids)
+	results, _, _ := store.ReadPointsAndOffset(ctx, ids)
 
 	return results
 }
@@ -1261,7 +1261,7 @@ func TestBatch_flush(t *testing.T) {
 				t.Errorf("writer = %v, want = %v", tt.fields.writer.DumpData(), tt.wantWriter)
 			}
 
-			gotMemoryStore := dumpMemoryStore(tt.fields.memoryStore)
+			gotMemoryStore := dumpMemoryStore(context.Background(), tt.fields.memoryStore)
 			if !dataEqual(true, gotMemoryStore, tt.wantMemoryStore) {
 				t.Errorf("memory store = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 			}
@@ -1908,7 +1908,7 @@ func TestBatch_write(t *testing.T) {
 	for _, tt := range tests {
 		ok := t.Run(tt.name, func(t *testing.T) {
 			if tt.write1 != nil {
-				if err := batch1.write(context.Background(), tt.write1, tt.nowWrite1); err != nil {
+				if err := batch1.write(ctx, tt.write1, tt.nowWrite1); err != nil {
 					t.Errorf("batch1.write: %v", err)
 
 					return
@@ -1916,7 +1916,7 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.write2 != nil {
-				if err := batch2.write(context.Background(), tt.write2, tt.nowWrite2); err != nil {
+				if err := batch2.write(ctx, tt.write2, tt.nowWrite2); err != nil {
 					t.Errorf("batch2.write: %v", err)
 
 					return
@@ -1960,7 +1960,7 @@ func TestBatch_write(t *testing.T) {
 			}
 
 			if tt.wantMemoryStore != nil {
-				gotMemoryStore := dumpMemoryStore(memoryStore)
+				gotMemoryStore := dumpMemoryStore(ctx, memoryStore)
 				if !dataEqual(false, gotMemoryStore, tt.wantMemoryStore) {
 					t.Errorf("memory store = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 				}
@@ -2113,7 +2113,7 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
 
-	gotMemoryStore := dumpMemoryStore(memoryStore)
+	gotMemoryStore := dumpMemoryStore(ctx, memoryStore)
 	if !dataEqual(false, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
@@ -2168,7 +2168,7 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
 
-	gotMemoryStore = dumpMemoryStore(memoryStore)
+	gotMemoryStore = dumpMemoryStore(ctx, memoryStore)
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
@@ -2213,7 +2213,7 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
 
-	gotMemoryStore = dumpMemoryStore(memoryStore)
+	gotMemoryStore = dumpMemoryStore(ctx, memoryStore)
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %v, want = %v", gotMemoryStore, wantMemoryStore)
 	}
@@ -2246,7 +2246,7 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("batch2.states = %v, want = %v", batch2.states, wantState2)
 	}
 
-	gotMemoryStore = dumpMemoryStore(memoryStore)
+	gotMemoryStore = dumpMemoryStore(ctx, memoryStore)
 
 	if !dataEqual(true, gotMemoryStore, wantMemoryStore) {
 		t.Errorf("memory store = %#v, want = %#v", gotMemoryStore, wantMemoryStore)

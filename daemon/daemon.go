@@ -109,7 +109,7 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 
 	readiness := make(chan error)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint: contextcheck
 	s.cancel = cancel
 
 	s.wg.Add(1)

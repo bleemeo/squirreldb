@@ -156,9 +156,9 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 				defer wg.Done()
 
 				if *fairLB {
-					worker(localIndex, channels[p], resultChan)
+					worker(ctx, localIndex, channels[p], resultChan)
 				} else {
-					worker(localIndex, workChannel, resultChan)
+					worker(ctx, localIndex, workChannel, resultChan)
 				}
 			}()
 		}
@@ -302,7 +302,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 
 		start = time.Now()
 
-		cassandraIndex.RunOnce(context.Background(), time.Now())
+		cassandraIndex.RunOnce(ctx, time.Now())
 
 		stop := time.Now()
 
@@ -430,7 +430,7 @@ func loadBalancer(input chan []types.LookupRequest, outputs []chan []types.Looku
 }
 
 // worker is more or less equivalent to on SquirrelDB process.
-func worker(localIndex types.Index, workChanel chan []types.LookupRequest, result chan int) {
+func worker(ctx context.Context, localIndex types.Index, workChanel chan []types.LookupRequest, result chan int) {
 	token := make(chan bool, *workerThreads)
 	for n := 0; n < *workerThreads; n++ {
 		token <- true
@@ -442,7 +442,7 @@ func worker(localIndex types.Index, workChanel chan []types.LookupRequest, resul
 		<-token
 
 		go func() {
-			_, _, err := localIndex.LookupIDs(context.Background(), work)
+			_, _, err := localIndex.LookupIDs(ctx, work)
 			if err != nil {
 				log.Fatalf("LookupIDs() failed: %v", err)
 			}

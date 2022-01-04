@@ -72,8 +72,8 @@ func run(ctx context.Context) error { //nolint:cyclop
 			return err
 		}
 
-		readURL = fmt.Sprintf("http://127.0.0.1:%d/read", squirreldb.ListenPort())
-		writeURL = fmt.Sprintf("http://127.0.0.1:%d/write", squirreldb.ListenPort())
+		readURL = fmt.Sprintf("http://127.0.0.1:%d/api/v1/read", squirreldb.ListenPort())
+		writeURL = fmt.Sprintf("http://127.0.0.1:%d/api/v1/write", squirreldb.ListenPort())
 
 		defer squirreldb.Stop()
 	}

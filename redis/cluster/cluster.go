@@ -99,7 +99,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 	c.wg.Add(1)
 
-	go c.run(ctx, pubsub)
+	go c.run(ctx, pubsub) //nolint: contextcheck
 
 	return nil
 }

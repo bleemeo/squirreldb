@@ -277,7 +277,7 @@ func (c *CassandraTSDB) aggregateShard(
 	name := shardStatePrefix + strconv.Itoa(shard)
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
-	if acquired := lock.TryLock(context.Background(), 0); !acquired {
+	if acquired := lock.TryLock(ctx, 0); !acquired {
 		return false, time.Time{}
 	}
 	defer lock.Unlock()
@@ -290,9 +290,13 @@ func (c *CassandraTSDB) aggregateShard(
 			_, err := c.state.Read(name, &fromTimeStr)
 
 			return err //nolint:wrapcheck
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			"get state for shard "+name,
 		)
+
+		if ctx.Err() != nil {
+			return false, time.Time{}
+		}
 
 		if fromTimeStr != "" {
 			fromTime, _ = time.Parse(time.RFC3339, fromTimeStr)
@@ -307,9 +311,13 @@ func (c *CassandraTSDB) aggregateShard(
 
 		retry.Print(func() error {
 			return c.state.Write(name, fromTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
+	}
+
+	if ctx.Err() != nil {
+		return false, time.Time{}
 	}
 
 	toTime := fromTime.Add(aggregateSize)
@@ -331,9 +339,13 @@ func (c *CassandraTSDB) aggregateShard(
 		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
 		return err //nolint:wrapcheck
-	}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+	}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 		"get IDs from the index",
 	)
+
+	if ctx.Err() != nil {
+		return false, time.Time{}
+	}
 
 	var shardIDs []types.MetricID
 
@@ -355,7 +367,7 @@ func (c *CassandraTSDB) aggregateShard(
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
 			"update state for shard "+name,
 		)
 	} else {

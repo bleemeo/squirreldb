@@ -437,7 +437,7 @@ func (r *Redis) GetSetFlushDeadline(
 	}()
 
 	if len(deadlines) == 0 {
-		return nil, nil
+		return make(map[types.MetricID]time.Time), nil
 	}
 
 	pipe, err := r.client.Pipeline(ctx)
@@ -539,7 +539,7 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 
 func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.MetricID]time.Time, error) {
 	if len(ids) == 0 {
-		return nil, nil
+		return make(map[types.MetricID]time.Time), nil
 	}
 
 	pipe, err := r.client.Pipeline(ctx)

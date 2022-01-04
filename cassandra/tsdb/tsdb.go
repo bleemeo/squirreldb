@@ -136,7 +136,7 @@ func (c *CassandraTSDB) Start(_ context.Context) error {
 
 	c.wg.Add(1)
 
-	go c.run(ctx)
+	go c.run(ctx) //nolint: contextcheck
 
 	return nil
 }
