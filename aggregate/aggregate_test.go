@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/prometheus/prometheus/pkg/value"
+	"github.com/prometheus/prometheus/model/value"
 )
 
 const (

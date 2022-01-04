@@ -4,7 +4,7 @@ import (
 	"math"
 	"squirreldb/types"
 
-	"github.com/prometheus/prometheus/pkg/value"
+	"github.com/prometheus/prometheus/model/value"
 )
 
 type AggregatedPoint struct {

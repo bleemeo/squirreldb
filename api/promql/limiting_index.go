@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 type limitingIndex struct {

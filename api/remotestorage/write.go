@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/exemplar"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/storage"
 )
 
 var (
@@ -38,7 +39,7 @@ type timeSeries struct {
 }
 
 // Append adds a sample pair for the given series.
-func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if err := validateLabels(l); err != nil {
 		return 0, err
 	}
@@ -188,6 +189,8 @@ func validateLabels(ls labels.Labels) error {
 }
 
 // AppendExemplar adds an exemplar for the given series labels, should never be called.
-func (w *writeMetrics) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
+func (w *writeMetrics) AppendExemplar(
+	ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar,
+) (storage.SeriesRef, error) {
 	return 0, ErrNotImplemented
 }

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 const postinglabelName = "__label|names__"

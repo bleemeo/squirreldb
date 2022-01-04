@@ -7,7 +7,7 @@ import (
 	"squirreldb/types"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 func test(ctx context.Context, cassandraIndex types.Index) {

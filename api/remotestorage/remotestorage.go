@@ -8,10 +8,10 @@ import (
 	"squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/pkg/exemplar"
-	"github.com/prometheus/prometheus/pkg/gate"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/util/gate"
 )
 
 //nolint:gochecknoglobals
@@ -62,9 +62,14 @@ type errAppender struct {
 	err error
 }
 
-func (a errAppender) Append(uint64, labels.Labels, int64, float64) (uint64, error) { return 0, a.err }
-func (a errAppender) AppendExemplar(uint64, labels.Labels, exemplar.Exemplar) (uint64, error) {
+func (a errAppender) Append(storage.SeriesRef, labels.Labels, int64, float64) (storage.SeriesRef, error) {
 	return 0, a.err
 }
-func (a errAppender) Commit() error   { return a.err }
+
+func (a errAppender) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar.Exemplar) (storage.SeriesRef, error) {
+	return 0, a.err
+}
+
+func (a errAppender) Commit() error { return a.err }
+
 func (a errAppender) Rollback() error { return a.err }

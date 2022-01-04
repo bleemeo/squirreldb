@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 type MetricID int64

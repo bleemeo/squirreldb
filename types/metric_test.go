@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/prometheus/prometheus/pkg/value"
+	"github.com/prometheus/prometheus/model/value"
 )
 
 func TestDeduplicatePoints(t *testing.T) {

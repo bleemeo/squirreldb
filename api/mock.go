@@ -6,8 +6,8 @@ import (
 	"net/url"
 
 	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/prometheus/pkg/exemplar"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"

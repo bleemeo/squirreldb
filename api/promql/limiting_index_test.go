@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 func Test_limitingIndex_Search(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 type deleter struct {

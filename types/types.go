@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 // OldTask is a background worked that will be running until ctx is cancelled.

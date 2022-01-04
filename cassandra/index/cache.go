@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/pilosa/pilosa/v2/roaring"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 // labelsLookupCache provide cache for metricID to labels.

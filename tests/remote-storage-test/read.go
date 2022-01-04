@@ -14,7 +14,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"golang.org/x/sync/errgroup"
 )

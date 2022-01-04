@@ -23,7 +23,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 const (

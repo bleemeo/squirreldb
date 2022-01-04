@@ -24,7 +24,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"golang.org/x/sync/errgroup"
 )
 
