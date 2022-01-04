@@ -9,11 +9,15 @@ import (
 	"squirreldb/types"
 	"time"
 
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/exemplar"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
-var errNotImplemented = errors.New("not implemented")
+var (
+	ErrInvalidMatcher = errors.New("invalid labels")
+	ErrNotImplemented = errors.New("not implemented")
+)
 
 type writeMetrics struct {
 	index   types.Index
@@ -35,6 +39,10 @@ type timeSeries struct {
 
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+	if err := validateLabels(l); err != nil {
+		return 0, err
+	}
+
 	labelsHash := l.Hash()
 	metricPoint := types.MetricPoint{
 		Timestamp: t,
@@ -163,7 +171,23 @@ func metricsFromTimeseries(
 	return metrics, totalPoints, nil
 }
 
+// validateLabels checks if the metric name and labels are valid.
+// https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
+func validateLabels(ls labels.Labels) error {
+	for _, l := range ls {
+		if l.Name == model.MetricNameLabel {
+			if !model.IsValidMetricName(model.LabelValue(l.Value)) {
+				return fmt.Errorf("%w: metric name '%s' should match %s", ErrInvalidMatcher, l.Value, model.MetricNameRE)
+			}
+		} else if !model.LabelName(l.Name).IsValid() {
+			return fmt.Errorf("%w: label name '%s' should match %s", ErrInvalidMatcher, l.Name, model.LabelNameRE)
+		}
+	}
+
+	return nil
+}
+
 // AppendExemplar adds an exemplar for the given series labels, should never be called.
 func (w *writeMetrics) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
-	return 0, errNotImplemented
+	return 0, ErrNotImplemented
 }
