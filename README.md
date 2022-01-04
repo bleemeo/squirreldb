@@ -45,8 +45,8 @@ SquirrelDB use goreleaser and Docker to build its release, to build the release 
 and Docker images run:
 
 ```
-# Optional, to speed-up subsequent build
-mkdir -p .build-cache
+docker volume create squirreldb-buildcache  # (optional) enable cache and speed-up build/lint run
+
 ./build.sh
 ```
 
@@ -62,9 +62,10 @@ docker run -d --name squirreldb-cassandra -p 127.0.0.1:9042:9042 -e MAX_HEAP_SIZ
 ```
 
 To build binary you can use build.sh script. For example to just
-compile Go binary (skip building Docker image and Windows installer):
+compile Go binary:
 ```
-mkdir -p .build-cache
+docker volume create squirreldb-buildcache
+
 ./build.sh go
 ```
 
@@ -76,7 +77,8 @@ Then run SquirrelDB:
 
 SquirrelDB use golangci-lint as linter. You may run it with:
 ```
-mkdir -p .build-cache  # enable cache and speed-up build/lint run
+docker volume create squirreldb-buildcache
+
 ./lint.sh
 ```
 

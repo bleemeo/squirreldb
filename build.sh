@@ -2,10 +2,10 @@
 
 set -e
 
-UID=$(id -u)
+USER_UID=$(id -u)
 
 # Should be the same as run-tests.sh
-GORELEASER_VERSION="v0.176.0"
+GORELEASER_VERSION="v1.2.5"
 
 case "$1" in
    "")
@@ -24,32 +24,24 @@ case "$1" in
       exit 1
 esac
 
-if [ -e .build-cache ]; then
-   GO_MOUNT_CACHE="-v $(pwd)/.build-cache:/go/pkg"
+if docker volume ls | grep -q squirreldb-buildcache; then
+   GO_MOUNT_CACHE="-v squirreldb-buildcache:/go/pkg"
 fi
 
-docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
-      -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      --entrypoint '' \
-      goreleaser/goreleaser:${GORELEASER_VERSION} goreleaser check
-
 if [ "${ONLY_GO}" = "1" -a "${WITH_RACE}" != "1" ]; then
-   docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
+   docker run --rm -e HOME=/go/pkg -e CGO_ENABLED=0 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-      -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint '' \
-      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go build .'
+      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go build . && chown $USER_UID squirreldb"
 elif [ "${ONLY_GO}" = "1" -a "${WITH_RACE}" = "1"  ]; then
-   docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=1 \
+   docker run --rm -e HOME=/go/pkg -e CGO_ENABLED=1 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-      -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint '' \
-      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go build -ldflags="-linkmode external -extldflags=-static" -race .'
+      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go build -ldflags='-linkmode external -extldflags=-static' -race . && chown $USER_UID squirreldb"
 else
-   docker run --rm -u $UID:`getent group docker|cut -d: -f 3` -e HOME=/go/pkg -e CGO_ENABLED=0 \
+   docker run --rm -e HOME=/go/pkg -e CGO_ENABLED=0 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
       -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint '' \
-      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c 'go test ./... && goreleaser --rm-dist --snapshot --parallelism 2'
+      goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "(goreleaser check && go test ./... && goreleaser --rm-dist --snapshot --parallelism 2);result=\$?;chown -R $USER_UID dist; exit \$result"
 fi

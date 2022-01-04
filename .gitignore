@@ -8,3 +8,5 @@
 .build-cache
 
 telemetry.json
+coverage.html
+coverage.out
