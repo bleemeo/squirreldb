@@ -44,6 +44,8 @@ func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v
 		return 0, err
 	}
 
+	l = dropEmptyValue(l)
+
 	labelsHash := l.Hash()
 	metricPoint := types.MetricPoint{
 		Timestamp: t,
@@ -186,6 +188,23 @@ func validateLabels(ls labels.Labels) error {
 	}
 
 	return nil
+}
+
+func dropEmptyValue(ls labels.Labels) labels.Labels {
+	i := 0
+
+	for _, l := range ls {
+		if l.Value == "" {
+			continue
+		}
+
+		ls[i] = l
+		i++
+	}
+
+	ls = ls[:i]
+
+	return ls
 }
 
 // AppendExemplar adds an exemplar for the given series labels, should never be called.
