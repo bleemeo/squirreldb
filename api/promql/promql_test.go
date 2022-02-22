@@ -31,13 +31,9 @@ func TestPromQL_queryable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader := mockStore{
-		pointsPerSeries: 100,
-	}
-
 	type fields struct {
 		Index              types.Index
-		Reader             types.MetricReader
+		Reader             *mockStore
 		MaxEvaluatedSeries uint32
 		MaxEvaluatedPoints uint64
 	}
@@ -49,16 +45,20 @@ func TestPromQL_queryable(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		fields    fields
-		reqHeader map[string]string
-		searches  []search
+		name                  string
+		fields                fields
+		reqHeader             map[string]string
+		searches              []search
+		wantForcePreaggregate bool
+		wantForceRaw          bool
 	}{
 		{
 			name: "no-header",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{},
 			searches: []search{
@@ -81,8 +81,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "no-header-with-default",
 			fields: fields{
-				Index:              &idx,
-				Reader:             reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 				MaxEvaluatedPoints: 200,
 				MaxEvaluatedSeries: 2,
 			},
@@ -106,8 +108,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "filter-account",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Forced-Matcher": "__account_id=1234",
@@ -132,8 +136,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-series",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Max-Evaluated-Series": "2",
@@ -157,8 +163,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-series-and-filter-account",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Max-Evaluated-Series": "2",
@@ -190,8 +198,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-points",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Max-Evaluated-Points": "200",
@@ -215,8 +225,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-points-filter-account",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Max-Evaluated-Points": "200",
@@ -246,8 +258,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-points-limit-series-filter-account",
 			fields: fields{
-				Index:  &idx,
-				Reader: reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 			},
 			reqHeader: map[string]string{
 				"X-PromQL-Max-Evaluated-Series": "2",
@@ -278,8 +292,10 @@ func TestPromQL_queryable(t *testing.T) {
 		{
 			name: "limit-points-limit-series-filter-account-lower-default",
 			fields: fields{
-				Index:              &idx,
-				Reader:             reader,
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
 				MaxEvaluatedPoints: 200,
 				MaxEvaluatedSeries: 2,
 			},
@@ -306,6 +322,158 @@ func TestPromQL_queryable(t *testing.T) {
 						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
 					},
 					wantCount: 1,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
+					wantErr: true,
+				},
+			},
+		},
+		{
+			name: "header-no-force-aggregated",
+			fields: fields{
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			reqHeader: map[string]string{
+				"X-PromQL-ForcePreAggregated": "false",
+			},
+			wantForcePreaggregate: false,
+			searches: []search{
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+					},
+					wantCount: 2,
+					wantErr:   false,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
+					wantErr: true,
+				},
+			},
+		},
+		{
+			name: "header-force-aggregated",
+			fields: fields{
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			reqHeader: map[string]string{
+				"X-PromQL-ForcePreAggregated": "true",
+			},
+			wantForcePreaggregate: true,
+			searches: []search{
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+					},
+					wantCount: 2,
+					wantErr:   false,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
+					wantErr: true,
+				},
+			},
+		},
+		{
+			name: "header-no-force-raw",
+			fields: fields{
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			reqHeader: map[string]string{
+				"X-PromQL-ForceRaw": "false",
+			},
+			wantForceRaw: false,
+			searches: []search{
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+					},
+					wantCount: 2,
+					wantErr:   false,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
+					wantErr: true,
+				},
+			},
+		},
+		{
+			name: "header-force-raw",
+			fields: fields{
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			reqHeader: map[string]string{
+				"X-PromQL-ForceRaw": "true",
+			},
+			wantForceRaw: true,
+			searches: []search{
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+					},
+					wantCount: 2,
+					wantErr:   false,
+				},
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+					},
+					wantErr: true,
+				},
+			},
+		},
+		{
+			name: "header-force-both",
+			fields: fields{
+				Index: &idx,
+				Reader: &mockStore{
+					pointsPerSeries: 100,
+				},
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			reqHeader: map[string]string{
+				"X-PromQL-ForceRaw":           "true",
+				"X-PromQL-ForcePreAggregated": "true",
+			},
+			wantForceRaw:          true,
+			wantForcePreaggregate: false,
+			searches: []search{
+				{
+					matchers: []*labels.Matcher{
+						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+					},
+					wantCount: 2,
+					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
@@ -342,6 +510,12 @@ func TestPromQL_queryable(t *testing.T) {
 				got := queryier.Select(false, nil, query.matchers...)
 				count, err := countSeries(got)
 
+				for _, req := range tt.fields.Reader.readRequest {
+					if req.ForcePreAggregated != tt.wantForcePreaggregate {
+						t.Errorf("ForcePreAggregated = %v, want %v", req.ForcePreAggregated, tt.wantForcePreaggregate)
+					}
+				}
+
 				if (err != nil) != query.wantErr {
 					t.Errorf("PromQL.queryable.Select(#%d) error = %v, wantErr %v", i, err, query.wantErr)
 
@@ -373,7 +547,7 @@ func TestPromQL_InvalidForcedMatcher(t *testing.T) {
 		StoreMetricIDInMemory: true,
 	}
 
-	reader := mockStore{
+	reader := &mockStore{
 		pointsPerSeries: 100,
 	}
 

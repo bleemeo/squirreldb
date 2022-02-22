@@ -5,6 +5,7 @@ import (
 	"errors"
 	"squirreldb/dummy"
 	"squirreldb/types"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,10 +93,16 @@ func (d *mockDataSet) Err() error {
 }
 
 type mockStore struct {
+	l               sync.Mutex
 	pointsPerSeries int
+	readRequest     []types.MetricRequest
 }
 
-func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+func (s *mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+	s.l.Lock()
+	s.readRequest = append(s.readRequest, req)
+	s.l.Unlock()
+
 	fakeData := make([]types.MetricData, len(req.IDs))
 
 	for i, id := range req.IDs {
@@ -116,7 +123,7 @@ func (s mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types
 	return m, nil
 }
 
-func (s mockStore) PointsRead() float64 {
+func (s *mockStore) PointsRead() float64 {
 	return 0
 }
 
@@ -213,7 +220,7 @@ func Test_querier_Select(t *testing.T) {
 		{
 			name: "no-sort",
 			fields: fields{
-				reader: mockStore{},
+				reader: &mockStore{},
 				index: mockIndex{
 					searchReply: []types.MetricLabel{
 						{ID: metricID2, Labels: labelsMetric2},
@@ -242,7 +249,7 @@ func Test_querier_Select(t *testing.T) {
 		{
 			name: "sort",
 			fields: fields{
-				reader: mockStore{},
+				reader: &mockStore{},
 				index: mockIndex{
 					searchReply: []types.MetricLabel{
 						{ID: metricID2, Labels: labelsMetric2},

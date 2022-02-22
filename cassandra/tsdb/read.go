@@ -71,6 +71,14 @@ func (i *readIter) At() types.MetricData {
 func (i *readIter) Next() bool {
 	readAggregate := i.request.StepMs >= aggregateResolution.Milliseconds()
 
+	if i.request.ForcePreAggregated {
+		readAggregate = true
+	}
+
+	if i.request.ForceRaw {
+		readAggregate = false
+	}
+
 	if i.offset >= len(i.request.IDs) {
 		i.close()
 

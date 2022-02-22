@@ -34,12 +34,14 @@ type Store struct {
 }
 
 type querier struct {
-	ctx     context.Context
-	index   IndexWithStats
-	reader  MetricReaderWithStats
-	mint    int64
-	maxt    int64
-	metrics *metrics
+	ctx                context.Context
+	index              IndexWithStats
+	reader             MetricReaderWithStats
+	mint               int64
+	maxt               int64
+	forcePreAggregated bool
+	forceRaw           bool
+	metrics            *metrics
 }
 
 type MetricReaderWithStats interface {
@@ -78,11 +80,16 @@ func NewStore(
 //   by this request
 // * X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
 //   by this request.
+// * X-PromQL-ForcePreAggregated: Force using pre-aggregated data instead of raw points.
+//   Default for query is raw data. Default for query_range depends on step value.
+// * X-PromQL-ForceRaw: Force using raw data instead of pre-aggregated points.
+//   If both ForcePreAggregated and ForceRaw are true, ForceRaw take precedence
+//   Default for query is raw data. Default for query_range depends on step value.
 // A limit of 0 means unlimited.
-func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats, MetricReaderWithStats, error) {
+func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (querier, error) {
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
-		return nil, nil, errMissingRequest
+		return querier{}, errMissingRequest
 	}
 
 	var index types.Index
@@ -95,7 +102,7 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			return nil, nil, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
+			return querier{}, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
 		}
 
 		index = filteringIndex{
@@ -113,7 +120,7 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 	if maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series"); maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
 		if err != nil {
-			return nil, nil, err
+			return querier{}, err
 		}
 
 		maxEvaluatedSeries = uint32(tmp)
@@ -129,7 +136,7 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 	if maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points"); maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
 		if err != nil {
-			return nil, nil, err
+			return querier{}, err
 		}
 
 		maxEvaluatedPoints = tmp
@@ -140,42 +147,51 @@ func (s Store) newIndexAndReaderFromHeaders(ctx context.Context) (IndexWithStats
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
-	return limitIndex, reader, nil
-}
-
-// Querier returns a storage.Querier to read from SquirrelDB store.
-func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
-	index, reader, err := s.newIndexAndReaderFromHeaders(ctx)
-	if err != nil {
-		return querier{}, err
-	}
-
 	q := querier{
 		ctx:     ctx,
-		index:   index,
+		index:   limitIndex,
 		reader:  reader,
 		mint:    mint,
 		maxt:    maxt,
 		metrics: s.metrics,
+	}
+
+	value = r.Header.Get("X-PromQL-ForcePreAggregated")
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return querier{}, err
+		}
+
+		q.forcePreAggregated = tmp
+	}
+
+	value = r.Header.Get("X-PromQL-ForceRaw")
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return querier{}, err
+		}
+
+		q.forceRaw = tmp
+		if q.forceRaw {
+			q.forcePreAggregated = false
+		}
 	}
 
 	return q, nil
 }
 
+// Querier returns a storage.Querier to read from SquirrelDB store.
+func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
+	return s.newQuerierFromHeaders(ctx, mint, maxt)
+}
+
 // ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
 func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.ChunkQuerier, error) {
-	index, reader, err := s.newIndexAndReaderFromHeaders(ctx)
+	q, err := s.newQuerierFromHeaders(ctx, mint, maxt)
 	if err != nil {
 		return nil, err
-	}
-
-	q := querier{
-		ctx:     ctx,
-		index:   index,
-		reader:  reader,
-		mint:    mint,
-		maxt:    maxt,
-		metrics: s.metrics,
 	}
 
 	return chunkquerier{q}, nil
@@ -233,9 +249,11 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 	}
 
 	req := types.MetricRequest{
-		IDs:           ids,
-		FromTimestamp: q.mint,
-		ToTimestamp:   q.maxt,
+		IDs:                ids,
+		FromTimestamp:      q.mint,
+		ToTimestamp:        q.maxt,
+		ForcePreAggregated: q.forcePreAggregated,
+		ForceRaw:           q.forceRaw,
 	}
 
 	if hints != nil {

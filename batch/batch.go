@@ -750,11 +750,13 @@ func (i *readIter) Next() bool {
 
 func (i *readIter) tryNext(id types.MetricID) bool {
 	idRequest := types.MetricRequest{
-		IDs:           []types.MetricID{id},
-		FromTimestamp: i.request.FromTimestamp,
-		ToTimestamp:   i.request.ToTimestamp,
-		StepMs:        i.request.StepMs,
-		Function:      i.request.Function,
+		IDs:                []types.MetricID{id},
+		FromTimestamp:      i.request.FromTimestamp,
+		ToTimestamp:        i.request.ToTimestamp,
+		StepMs:             i.request.StepMs,
+		Function:           i.request.Function,
+		ForcePreAggregated: i.request.ForcePreAggregated,
+		ForceRaw:           i.request.ForceRaw,
 	}
 
 	temporaryMetrics, err := i.b.readTemporary(

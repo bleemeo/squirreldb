@@ -27,11 +27,13 @@ type MetricData struct {
 }
 
 type MetricRequest struct {
-	Function      string
-	IDs           []MetricID
-	FromTimestamp int64
-	ToTimestamp   int64
-	StepMs        int64
+	Function           string
+	IDs                []MetricID
+	FromTimestamp      int64
+	ToTimestamp        int64
+	ForcePreAggregated bool
+	ForceRaw           bool
+	StepMs             int64
 }
 
 // CopyPoints returns a copy of points.

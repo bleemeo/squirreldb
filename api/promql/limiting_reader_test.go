@@ -26,7 +26,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 		{
 			name: "high-limit",
 			fields: fields{
-				reader:         mockStore{pointsPerSeries: 100},
+				reader:         &mockStore{pointsPerSeries: 100},
 				maxTotalPoints: 500000,
 			},
 			reads: []readRequest{
@@ -53,7 +53,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 		{
 			name: "medium-limit",
 			fields: fields{
-				reader:         mockStore{pointsPerSeries: 100},
+				reader:         &mockStore{pointsPerSeries: 100},
 				maxTotalPoints: 300,
 			},
 			reads: []readRequest{
@@ -80,7 +80,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 		{
 			name: "low-limit",
 			fields: fields{
-				reader:         mockStore{pointsPerSeries: 100},
+				reader:         &mockStore{pointsPerSeries: 100},
 				maxTotalPoints: 101,
 			},
 			reads: []readRequest{
@@ -107,7 +107,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 		{
 			name: "very-low-limit",
 			fields: fields{
-				reader:         mockStore{pointsPerSeries: 100},
+				reader:         &mockStore{pointsPerSeries: 100},
 				maxTotalPoints: 99,
 			},
 			reads: []readRequest{
