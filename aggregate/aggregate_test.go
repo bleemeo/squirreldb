@@ -17,7 +17,7 @@ const (
 	MetricIDTest2 = 2
 )
 
-func Test_aggregateData(t *testing.T) {
+func Test_aggregateData(t *testing.T) { //nolint:maintidx
 	type args struct {
 		data       types.MetricData
 		resolution int64

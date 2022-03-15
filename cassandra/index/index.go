@@ -445,7 +445,7 @@ func (c *CassandraIndex) Verify(
 	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
 }
 
-func (c *CassandraIndex) verify( //nolint:cyclop,gocognit
+func (c *CassandraIndex) verify(
 	ctx context.Context,
 	now time.Time,
 	w io.Writer,
@@ -555,7 +555,7 @@ func (c *CassandraIndex) verify( //nolint:cyclop,gocognit
 
 // verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard( //nolint:cyclop,gocognit
+func (c *CassandraIndex) verifyMissingShard(
 	ctx context.Context,
 	w io.Writer,
 	doFix bool,
@@ -639,7 +639,7 @@ func (c *CassandraIndex) verifyMissingShard( //nolint:cyclop,gocognit
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk( //nolint:cyclop,gocognit
+func (c *CassandraIndex) verifyBulk(
 	ctx context.Context,
 	now time.Time,
 	w io.Writer,
@@ -797,7 +797,7 @@ func (c *CassandraIndex) verifyBulk( //nolint:cyclop,gocognit
 }
 
 // check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard( //nolint:gocognit,cyclop
+func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	ctx context.Context,
 	w io.Writer,
 	doFix bool,
@@ -1210,7 +1210,7 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 
 // postings return ids matching give Label name & value
 // If value is the empty string, it match any values (but the label must be set).
-func (c *CassandraIndex) postings( //nolint:cyclop
+func (c *CassandraIndex) postings(
 	ctx context.Context,
 	shards []int32,
 	name string,
@@ -1471,7 +1471,7 @@ func (c *CassandraIndex) LookupIDs(
 	return c.lookupIDs(ctx, requests, time.Now())
 }
 
-func (c *CassandraIndex) lookupIDs( //nolint:cyclop,gocognit
+func (c *CassandraIndex) lookupIDs(
 	ctx context.Context,
 	requests []types.LookupRequest,
 	now time.Time,
@@ -1841,7 +1841,7 @@ type lookupEntry struct {
 // * If expired, delete entry for this metric from the index (the opposite of creation)
 // * Of not expired, add the metric IDs to the new expiration day in the table.
 // * Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics( //nolint:cyclop,gocognit
+func (c *CassandraIndex) createMetrics(
 	ctx context.Context,
 	now time.Time,
 	pending []lookupEntry,
@@ -2001,7 +2001,7 @@ func (c *CassandraIndex) createMetrics( //nolint:cyclop,gocognit
 //   reads won't get inconsistent result.
 //   It also means that retry of write will fix the issue,
 // * The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
-func (c *CassandraIndex) updatePostingShards( //nolint:cyclop,gocognit
+func (c *CassandraIndex) updatePostingShards(
 	ctx context.Context,
 	pending []lookupEntry,
 	updateCache bool,
@@ -2185,7 +2185,7 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 	})
 }
 
-func (c *CassandraIndex) applyUpdatePostingShards( //nolint:cyclop,gocognit
+func (c *CassandraIndex) applyUpdatePostingShards(
 	ctx context.Context,
 	maybePresent map[int32]postingUpdateRequest,
 	updates []postingUpdateRequest,
@@ -2367,7 +2367,7 @@ func (c *CassandraIndex) Search(
 }
 
 type metricsLabels struct {
-	ctx        context.Context
+	ctx        context.Context //nolint:containedctx
 	err        error
 	c          *CassandraIndex
 	ids        []types.MetricID
@@ -2650,7 +2650,7 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 }
 
 // cassandraExpire remove all entry in Cassandra that have expired.
-func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) bool { //nolint:cyclop
+func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) bool {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
 	if acquired := lock.TryLock(ctx, 0); !acquired {
 		return false
@@ -3043,7 +3043,7 @@ func (c *CassandraIndex) idsForMatchers(
 
 // postingsForMatchers return metric IDs matching given matcher.
 // The logic is inspired from Prometheus PostingsForMatchers (in querier.go).
-func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit,cyclop
+func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 	ctx context.Context,
 	shards []int32,
 	matchers []*labels.Matcher,

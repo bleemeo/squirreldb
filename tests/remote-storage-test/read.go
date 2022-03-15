@@ -25,7 +25,7 @@ type readRequest struct {
 	response prompb.ReadResponse
 }
 
-func read(ctx context.Context, now time.Time, readURL string) error {
+func read(ctx context.Context, now time.Time, readURL string) error { //nolint:maintidx
 	log.Println("Starting read phase")
 
 	workChannel := make(chan readRequest, *threads)

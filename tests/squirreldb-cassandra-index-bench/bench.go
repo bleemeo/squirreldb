@@ -80,7 +80,7 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint:cyclop,gocognit
+func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //nolint:maintidx
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
@@ -323,7 +323,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 	return nil
 }
 
-func sentInsertRequest( //nolint:gocognit
+func sentInsertRequest(
 	now time.Time,
 	rnd *rand.Rand,
 	proc procfs.Proc,

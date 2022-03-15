@@ -34,7 +34,7 @@ type Store struct {
 }
 
 type querier struct {
-	ctx                context.Context
+	ctx                context.Context //nolint:containedctx
 	index              IndexWithStats
 	reader             MetricReaderWithStats
 	mint               int64

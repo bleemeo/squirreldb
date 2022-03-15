@@ -40,7 +40,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error { //nolint:cyclop
+func run(ctx context.Context) error {
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err

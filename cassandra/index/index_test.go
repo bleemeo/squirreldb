@@ -502,8 +502,7 @@ func (s *mockStore) DeleteExpiration(ctx context.Context, day time.Time) error {
 
 	s.queryCount++
 
-	_, ok := s.expiration[day]
-	if !ok {
+	if _, ok := s.expiration[day]; !ok {
 		return gocql.ErrNotFound
 	}
 
@@ -1128,7 +1127,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}
 }
 
-func Test_postingsForMatchers(t *testing.T) {
+func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	now := time.Now()
 	shards := []int32{ShardForTime(now.Unix())}
 	metrics1 := map[types.MetricID]map[string]string{
@@ -1908,7 +1907,7 @@ func Test_postingsForMatchers(t *testing.T) {
 	}
 }
 
-func Test_sharded_postingsForMatchers(t *testing.T) {
+func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 	t1 := t0.Add(8 * 24 * time.Hour)
 	t2 := t1.Add(8 * 24 * time.Hour)
@@ -3638,7 +3637,7 @@ func loadBitmap(filename string) (*roaring.Bitmap, error) {
 	return tmp, nil
 }
 
-func Test_freeFreeID(t *testing.T) {
+func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	compact := roaring.NewBTreeBitmap()
 	compact = compact.Flip(1, 5000)
 
@@ -4241,7 +4240,7 @@ func Test_cache(t *testing.T) {
 }
 
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
-func Test_cluster(t *testing.T) {
+func Test_cluster(t *testing.T) { //nolint:maintidx
 	defaultTTL := 365 * 24 * time.Hour
 	store := &mockStore{}
 	lock := &mockLockFactory{}
@@ -4566,7 +4565,7 @@ func Test_cluster(t *testing.T) {
 }
 
 // Test_expiration will run a small scenario on the index to check expiration.
-func Test_expiration(t *testing.T) {
+func Test_expiration(t *testing.T) { //nolint:maintidx
 	// For this test, the default TTL must be smaller than longTTL.
 	// It should be big enough to be kept until t5 (months if shortTTL & update delays are days)
 	defaultTTL := 365 * 24 * time.Hour
@@ -5044,7 +5043,7 @@ func Test_getTimeShards(t *testing.T) {
 	}
 }
 
-func Test_FilteredLabelValues(t *testing.T) {
+func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 	t1 := t0.Add(postingShardSize)
 	t2 := t1.Add(postingShardSize)

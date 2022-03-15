@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-func test(ctx context.Context, cassandraIndex types.Index) {
+func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
 		{ // index 1

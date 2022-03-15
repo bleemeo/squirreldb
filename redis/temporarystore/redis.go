@@ -206,7 +206,7 @@ func (r *Redis) Append(ctx context.Context, points []types.MetricData) ([]int, e
 }
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) GetSetPointsAndOffset( //nolint:cyclop
+func (r *Redis) GetSetPointsAndOffset(
 	ctx context.Context,
 	points []types.MetricData,
 	offsets []int,
@@ -298,7 +298,7 @@ func (r *Redis) GetSetPointsAndOffset( //nolint:cyclop
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (r *Redis) ReadPointsAndOffset( //nolint:cyclop
+func (r *Redis) ReadPointsAndOffset(
 	ctx context.Context,
 	ids []types.MetricID,
 ) ([]types.MetricData, []int, error) {

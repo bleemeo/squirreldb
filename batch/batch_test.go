@@ -108,7 +108,7 @@ func iterToList(i types.MetricDataSet) ([]types.MetricData, error) {
 	return results, i.Err()
 }
 
-func TestBatch_read(t *testing.T) {
+func TestBatch_read(t *testing.T) { //nolint:maintidx
 	type fields struct {
 		memoryStore     TemporaryStore
 		states          map[types.MetricID]stateData
@@ -947,7 +947,7 @@ func Test_flushTimestamp(t *testing.T) {
 	}
 }
 
-func TestBatch_flush(t *testing.T) {
+func TestBatch_flush(t *testing.T) { //nolint:maintidx
 	type fields struct {
 		memoryStore TemporaryStore
 		states      map[types.MetricID]stateData
@@ -1271,7 +1271,7 @@ func TestBatch_flush(t *testing.T) {
 
 // TestBatch_write test behavior of two SquirrelDB sharing the same
 // memoryStore (e.g. Redis).
-func TestBatch_write(t *testing.T) {
+func TestBatch_write(t *testing.T) { //nolint:maintidx
 	batchSize := 100 * time.Second
 	memoryStore := temporarystore.New(prometheus.NewRegistry())
 	writer1 := newPersistentStore(nil)
@@ -1999,7 +1999,7 @@ func Test_randomDuration(t *testing.T) {
 	}
 }
 
-func Test_takeover(t *testing.T) {
+func Test_takeover(t *testing.T) { //nolint:maintidx
 	batchSize := 100 * time.Second
 	memoryStore := temporarystore.New(prometheus.NewRegistry())
 	writer1 := newPersistentStore(nil)
