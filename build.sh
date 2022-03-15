@@ -43,5 +43,7 @@ else
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
       -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint '' \
+      -e GORELEASER_PREVIOUS_TAG=0.1.0 \
+      -e GORELEASER_CURRENT_TAG=0.1.1 \
       goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "(goreleaser check && go test ./... && goreleaser --rm-dist --snapshot --parallelism 2);result=\$?;chown -R $USER_UID dist; exit \$result"
 fi
