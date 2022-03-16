@@ -13,7 +13,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-func TestPromQL_queryable(t *testing.T) {
+func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 	now := time.Now()
 	idx := dummy.Index{
 		StoreMetricIDInMemory: true,

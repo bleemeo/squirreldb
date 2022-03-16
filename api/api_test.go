@@ -64,7 +64,7 @@ func getPromQLabels(t *testing.T, resp *http.Response) promQlLabels {
 	return r
 }
 
-func TestAPIRoute(t *testing.T) {
+func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	t0 := time.Now().Add(-time.Minute)
 
 	data := []struct {

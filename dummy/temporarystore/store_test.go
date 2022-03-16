@@ -16,7 +16,7 @@ const (
 	MetricIDTest3 = 3
 )
 
-func TestAppend(t *testing.T) {
+func TestAppend(t *testing.T) { //nolint:maintidx
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}
@@ -673,7 +673,7 @@ func TestStoreReadPointsAndOffset(t *testing.T) {
 	}
 }
 
-func TestStoreGetSetPointsAndOffset(t *testing.T) {
+func TestStoreGetSetPointsAndOffset(t *testing.T) { //nolint:maintidx
 	type fields struct {
 		metrics map[types.MetricID]storeData
 	}

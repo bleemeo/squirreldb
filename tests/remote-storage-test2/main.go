@@ -57,7 +57,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error { //nolint:cyclop,gocognit
+func run(ctx context.Context) error {
 	cfg, err := daemon.Config()
 	if err != nil {
 		return err
@@ -505,7 +505,7 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 	return ctx.Err()
 }
 
-func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.ReadRequest) error { //nolint:gocognit
+func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.ReadRequest) error {
 	for req := range workChannel {
 		if ctx.Err() != nil {
 			// we continue to quickly drain workChannel

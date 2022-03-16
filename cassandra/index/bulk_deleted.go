@@ -90,7 +90,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 // * the remote the id from all postings, making the ID free
 //
 // Note: it's not this function which clear the expiration table, this is done elsewhere.
-func (d *deleter) Delete(ctx context.Context) error { //nolint:gocognit,cyclop
+func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 	if len(d.deleteIDs) == 0 {
 		return nil
 	}

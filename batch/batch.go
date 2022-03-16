@@ -138,7 +138,7 @@ func New(
 
 type readIter struct {
 	b       *Batch
-	ctx     context.Context
+	ctx     context.Context //nolint:containedctx
 	err     error
 	current types.MetricData
 	request types.MetricRequest
@@ -346,7 +346,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
-func (b *Batch) setPointsAndOffset( //nolint:cyclop,gocognit
+func (b *Batch) setPointsAndOffset(
 	ctx context.Context,
 	previousMetrics []types.MetricData,
 	setMetrics []types.MetricData,
@@ -491,7 +491,7 @@ func (b *Batch) setPointsAndOffset( //nolint:cyclop,gocognit
 //   that come from states)
 // * Get + Set to memoryStore the points filtered
 // * Update states (in-memory and in temporaryStore).
-func (b *Batch) flush( //nolint:cyclop
+func (b *Batch) flush(
 	ctx context.Context,
 	ids []types.MetricID,
 	now time.Time,
@@ -869,7 +869,7 @@ func (b *Batch) readTemporary(
 // Writes metrics in the temporary storage
 // Each metric has a state, which will allow you to know if the size of a batch, or the flush date, is reached.
 // If this is the case, the state is added to the list of states to flush.
-func (b *Batch) write( //nolint:cyclop,gocognit
+func (b *Batch) write(
 	ctx context.Context,
 	metrics []types.MetricData,
 	now time.Time,

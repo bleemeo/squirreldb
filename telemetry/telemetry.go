@@ -69,14 +69,14 @@ func (t *Telemetry) setIDToFile(filepath string) {
 	t.ID = uuid.New().String()
 	tlm.ID = t.ID
 
-	file, _ := json.MarshalIndent(tlm, "", " ")
+	file, _ := json.MarshalIndent(tlm, "", " ") //nolint:errchkjson // False positive.
 
 	_ = ioutil.WriteFile(filepath, file, 0o600)
 }
 
 func (t Telemetry) postInformation(ctx context.Context) {
 	facts := facts.Facts(ctx)
-	body, _ := json.Marshal(map[string]string{
+	body, _ := json.Marshal(map[string]string{ //nolint:errchkjson // False positive.
 		"id":                  t.ID,
 		"cluster_id":          t.newFacts["cluster_id"],
 		"cpu_cores":           facts["cpu_cores"],

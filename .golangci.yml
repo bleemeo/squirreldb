@@ -1,3 +1,6 @@
+run:
+  timeout: 5m
+
 linters:
   enable-all: true
   disable:
@@ -8,7 +11,16 @@ linters:
     - gci # Conflicts with gofumpt.
     - varnamelen # I think there is too many false-positive.
     - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
-    
+    # Disable deprecated and replaced linter.
+    - maligned
+    - golint
+    - interfacer
+    - scopelint
+    # We use maintidx to lint function complexity.
+    - gocyclo
+    - cyclop
+    - gocognit
+
     # Project specific disable.
     - wrapcheck # too many error. Partially done and should be completed
     - goerr113 # Require to refactor how we return error. But would be useful
@@ -17,18 +29,7 @@ linters:
     - tparallel
     - testpackage
 
-    # Disable deprecated and replaced linter.
-    - maligned
-    - golint
-    - interfacer
-    - scopelint
-    - gocyclo
-
 linters-settings:
-  cyclop:
-    # The maximal code complexity to report.
-    max-complexity: 15
-
   nolintlint:
     # Ensure that nolint directives don't have a leading space.
     allow-leading-space: false
@@ -49,9 +50,6 @@ issues:
       linters:
         - dupl
         - gosec
-        - gocognit
-        - gocyclo
-        - cyclop
 
   include: # the list of ids of default excludes to include
     - EXC0005 # ineffective break statement
