@@ -18,21 +18,12 @@ var (
 	errInvalidMutableLabel = errors.New("invalid mutable label")
 )
 
-// labelProvider allows to get non mutable labels from a mutable label.
-type labelProvider interface {
-	Get(name, value string) (labels.Labels, bool)
-	AllValues() []string
-}
-
-type cassandraProvider struct {
-}
-
 // LabelProcessor can replace mutable labels by non mutable labels.
 type LabelProcessor struct {
-	labelProvider labelProvider
+	labelProvider LabelProvider
 }
 
-func NewLabelProcessor(provider labelProvider) *LabelProcessor {
+func NewLabelProcessor(provider LabelProvider) *LabelProcessor {
 	processor := LabelProcessor{
 		labelProvider: provider,
 	}
@@ -46,8 +37,26 @@ func NewLabelProcessor(provider labelProvider) *LabelProcessor {
 func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
 	processedMatchers := make([]*labels.Matcher, 0, len(matchers))
 
+	// Find the tenant.
+	var tenant string
+
 	for _, matcher := range matchers {
-		if !isMutableLabel(matcher.Name) {
+		if lp.labelProvider.IsTenantLabel(matcher.Name) {
+			tenant = matcher.Value
+
+			break
+		}
+	}
+
+	if tenant == "" {
+		logger.Printf("No tenant found in matchers %v", matchers)
+
+		return matchers, nil
+	}
+
+	// Search for mutable labels and replace them by non mutable labels.
+	for _, matcher := range matchers {
+		if !lp.labelProvider.IsMutableLabel(matcher.Name) {
 			processedMatchers = append(processedMatchers, matcher)
 
 			continue
@@ -59,9 +68,9 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 		)
 
 		if matcher.Type == labels.MatchRegexp || matcher.Type == labels.MatchNotRegexp {
-			newMatchers, err = lp.processMutableLabelRegex(matcher)
+			newMatchers, err = lp.processMutableLabelRegex(tenant, matcher)
 		} else {
-			newMatchers, err = lp.processMutableLabel(matcher)
+			newMatchers, err = lp.processMutableLabel(tenant, matcher)
 		}
 
 		if err != nil {
@@ -77,13 +86,10 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 }
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabel(matcher *labels.Matcher) ([]*labels.Matcher, error) {
-	ls, ok := lp.labelProvider.Get(matcher.Name, matcher.Value)
-	if !ok {
-		fmt.Printf("!!! No match found for label %s", matcher.Name)
-
-		// Don't return an error here, the label simply doesn't have a match.
-		return nil, nil
+func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Matcher) ([]*labels.Matcher, error) {
+	ls, err := lp.labelProvider.Get(tenant, matcher.Name, matcher.Value)
+	if err != nil {
+		return nil, err
 	}
 
 	newMatchers, err := mergeLabels(ls, matcher.Type)
@@ -95,17 +101,20 @@ func (lp *LabelProcessor) processMutableLabel(matcher *labels.Matcher) ([]*label
 }
 
 // processMutableLabelRegex replaces a regex mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabelRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	// Search for all matching values.
 	var matchingLabels labels.Labels
 
-	for _, value := range lp.labelProvider.AllValues() {
-		if matcher.Matches(value) {
-			ls, ok := lp.labelProvider.Get(matcher.Name, value)
-			if !ok {
-				logger.Printf("AllValues returned value '%s', but it was not found", value)
+	values, err := lp.labelProvider.AllValues(tenant, matcher.Name)
+	if err != nil {
+		return nil, err
+	}
 
-				continue
+	for _, value := range values {
+		if matcher.Matches(value) {
+			ls, err := lp.labelProvider.Get(tenant, matcher.Name, value)
+			if err != nil {
+				return nil, err
 			}
 
 			matchingLabels = append(matchingLabels, ls...)
@@ -125,12 +134,6 @@ func (lp *LabelProcessor) processMutableLabelRegex(matcher *labels.Matcher) ([]*
 	}
 
 	return newMatchers, nil
-}
-
-// isMutableLabel returns whether the label is mutable.
-func isMutableLabel(name string) bool {
-	// TODO: We should not hardcode any value here and retrieve these labels from cassandra.
-	return name == "group"
 }
 
 // mergeLabels merge the given labels in the resulting matchers.

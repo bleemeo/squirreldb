@@ -195,6 +195,13 @@ func New(
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
 
+	cassandraProvider, err := mutable.NewCassandraProvider(session)
+	if err != nil {
+		return nil, fmt.Errorf("new cassandra provider: %w", err)
+	}
+
+	labelProcessor := mutable.NewLabelProcessor(cassandraProvider)
+
 	return initialize(
 		ctx,
 		cassandraStore{
@@ -202,12 +209,19 @@ func New(
 			schemaLock: options.SchemaLock,
 			metrics:    metrics,
 		},
+		labelProcessor,
 		options,
 		metrics,
 	)
 }
 
-func initialize(ctx context.Context, store storeImpl, options Options, metrics *metrics) (*CassandraIndex, error) {
+func initialize(
+	ctx context.Context,
+	store storeImpl,
+	labelProcessor *mutable.LabelProcessor,
+	options Options,
+	metrics *metrics,
+) (*CassandraIndex, error) {
 	index := &CassandraIndex{
 		store:               store,
 		options:             options,
@@ -221,6 +235,7 @@ func initialize(ctx context.Context, store storeImpl, options Options, metrics *
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 		metrics:                  metrics,
+		labelProcessor:           labelProcessor,
 	}
 
 	if err := index.store.Init(ctx); err != nil {
