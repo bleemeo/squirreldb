@@ -98,7 +98,7 @@ func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Mat
 // processMutableLabelRegex replaces a regex mutable matcher by non mutable matchers.
 func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	// Search for all matching values.
-	var matchingLabels labels.Labels
+	var matchingLabels []labels.Label
 
 	values, err := lp.labelProvider.AllValues(tenant, matcher.Name)
 	if err != nil {
@@ -134,10 +134,10 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 // mergeLabels merge the given labels in the resulting matchers.
 // Example: mergeLabels(instance="server1", instance="server2", job="job1")
 // -> instance~="server1|server2", job="job1".
-func mergeLabels(ls labels.Labels, matchType labels.MatchType) (matchers []*labels.Matcher, err error) {
+func mergeLabels(lbls []labels.Label, matchType labels.MatchType) (matchers []*labels.Matcher, err error) {
 	labelsMap := make(map[string][]string)
 
-	for _, label := range ls {
+	for _, label := range lbls {
 		labelsMap[label.Name] = append(labelsMap[label.Name], label.Value)
 	}
 

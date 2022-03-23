@@ -12,7 +12,7 @@ var errTooManyRows = errors.New("too many rows")
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
-	Get(tenant, name, value string) (labels.Labels, error)
+	Get(tenant, name, value string) ([]labels.Label, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(name string) bool
 	IsTenantLabel(name string) bool
@@ -58,18 +58,18 @@ func (cp *cassandraProvider) createTable() error {
 }
 
 // Get returns the non mutable labels corresponding to a mutable label name and value.
-func (cp *cassandraProvider) Get(tenant, name, value string) (labels.Labels, error) {
+func (cp *cassandraProvider) Get(tenant, name, value string) ([]labels.Label, error) {
 	return cp.selectLabels(tenant, name, value)
 }
 
 // selectLbales selects the non mutable labels associated to a mutable label name and value.
-func (cp *cassandraProvider) selectLabels(tenant, name, value string) (labels.Labels, error) {
+func (cp *cassandraProvider) selectLabels(tenant, name, value string) ([]labels.Label, error) {
 	iter := cp.session.Query(`
 		SELECT labels FROM mutable_labels 
 		WHERE tenant = ? AND name = ? AND value = ?
 	`, tenant, name, value).Iter()
 
-	var lbls labels.Labels
+	var lbls []labels.Label
 
 	iter.Scan(&lbls)
 
