@@ -110,9 +110,10 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	idsToLabels   *labelsLookupCache
-	postingsCache *postingsCache
-	metrics       *metrics
+	labelProcessor *labelProcessor
+	idsToLabels    *labelsLookupCache
+	postingsCache  *postingsCache
+	metrics        *metrics
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -1208,8 +1209,8 @@ func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.T
 	return bitsetToIDs(bitmap), nil
 }
 
-// postings return ids matching give Label name & value
-// If value is the empty string, it match any values (but the label must be set).
+// postings returns the ids matching the given Label name & value.
+// If value is the empty string, it matches any values (but the label must be set).
 func (c *CassandraIndex) postings(
 	ctx context.Context,
 	shards []int32,
@@ -2311,37 +2312,44 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 
 // Search returns a list of IDs corresponding to the specified MetricLabelMatcher list
 //
-// It implement a revered index (as used in full-text search). The idea is that word
-// are a couple LabelName=LabelValue. As in a revered index, it use this "word" to
+// It implements an inverted index (as used in full-text search). The idea is that word
+// are a couple LabelName=LabelValue. As in an inverted index, it use this "word" to
 // query a posting table which return the list of document ID (metric ID here) that
 // has this "word".
 //
 // In normal full-text search, the document(s) with the most match will be return, here
-// it return the "document" (metric ID) that exactly match all matchers
+// it return the "document" (metric ID) that exactly match all matchers.
 //
 // Finally since Matcher could be other thing than LabelName=LabelValue (like not equal or using regular expression)
-// there is a fist pass that convert them to something that works with the revered index: it query all values for the
+// there is a first pass that convert them to something that works with the inverted index: it queries all values for the
 // given label name then for each value, it the value match the filter convert to an simple equal matcher. Then this
-// simple equal matcher could be used with the posting of the reversed index (e.g. name!="cpu" will be converted in
-// something like name="memory" || name="disk" || name="...")
+// simple equal matcher could be used with the posting of the inverted index (e.g. name!="cpu" will be converted in
+// something like name="memory" || name="disk" || name="...").
 //
 // There is still two additional special case: when label should be defined (regardless of the value, e.g. name!="") or
 // when the label should NOT be defined (e.g. name="").
 // In those case, it use the ability of our posting table to query for metric ID that has a LabelName regardless of
 // the values.
-// * For label must be defined, it increament the number of Matcher satified if the metric has the label.
+// * For label must be defined, it increments the number of Matcher satified if the metric has the label.
 //   In principle it's the same as if it expanded it to all possible values (e.g. with name!="" it avoids expanding
 //   to name="memory" || name="disk" and directly ask for name=*)
 // * For label must NOT be defined, it query for all metric IDs that has this label, then increments the number of
 //   Matcher satified if currently found metrics are not in the list of metrics having this label.
 //   Note: this means that it must already have found some metrics (and that this filter is applied at the end)
-//   but PromQL forbid to only have label-not-defined matcher, so some other matcher must exists.
+//   but PromQL forbids to only have label-not-defined matcher, so some other matcher must exists.
 func (c *CassandraIndex) Search(
 	ctx context.Context,
 	queryStart, queryEnd time.Time,
 	matchers []*labels.Matcher,
 ) (types.MetricsSet, error) {
 	start := time.Now()
+
+	// TODO: Initialize labelProcessor with a labelProvider.
+	// Replace mutable labels by non mutable labels.
+	matchers, err := c.labelProcessor.ProcessMutableLabels(matchers)
+	if err != nil {
+		return nil, err
+	}
 
 	shards, err := c.getTimeShards(ctx, queryStart, queryEnd, false)
 	if err != nil {
@@ -3180,7 +3188,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 	return results, needCheckMatches, nil
 }
 
-// postingsForMatcher return id that match one matcher.
+// postingsForMatcher returns the ids that match one matcher.
 // This method will not return postings for missing labels.
 func (c *CassandraIndex) postingsForMatcher(
 	ctx context.Context,
