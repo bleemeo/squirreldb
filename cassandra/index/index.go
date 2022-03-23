@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/debug"
 	"squirreldb/types"
 	"strconv"
@@ -110,7 +111,7 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	labelProcessor *labelProcessor
+	labelProcessor *mutable.LabelProcessor
 	idsToLabels    *labelsLookupCache
 	postingsCache  *postingsCache
 	metrics        *metrics

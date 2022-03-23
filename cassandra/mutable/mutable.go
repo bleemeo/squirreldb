@@ -1,27 +1,39 @@
-package index
+// Package mutable handles mutable labels.
+package mutable
 
 import (
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-var errInvalidMutableLabel = errors.New("invalid mutable label")
+var (
+	//nolint:gochecknoglobals
+	logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
 
-// labelProvider allows to get non mutable labels from a mutable label matcher.
+	errInvalidMutableLabel = errors.New("invalid mutable label")
+)
+
+// labelProvider allows to get non mutable labels from a mutable label.
 type labelProvider interface {
 	Get(name, value string) (labels.Labels, bool)
 	AllValues() []string
 }
 
-type labelProcessor struct {
+type cassandraProvider struct {
+}
+
+// LabelProcessor can replace mutable labels by non mutable labels.
+type LabelProcessor struct {
 	labelProvider labelProvider
 }
 
-func NewLabelProcessor(provider labelProvider) *labelProcessor {
-	processor := labelProcessor{
+func NewLabelProcessor(provider labelProvider) *LabelProcessor {
+	processor := LabelProcessor{
 		labelProvider: provider,
 	}
 
@@ -31,7 +43,7 @@ func NewLabelProcessor(provider labelProvider) *labelProcessor {
 // ProcessMutableLabels searches for mutable labels and replace them by non mutable labels.
 // For example if we have a mutable label group "mygroup" which contains 'server1' and 'server2',
 // the label matcher group="mygroup" becomes instance="server1|server2".
-func (lp *labelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
 	processedMatchers := make([]*labels.Matcher, 0, len(matchers))
 
 	for _, matcher := range matchers {
@@ -65,7 +77,7 @@ func (lp *labelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 }
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
-func (lp *labelProcessor) processMutableLabel(matcher *labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) processMutableLabel(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	ls, ok := lp.labelProvider.Get(matcher.Name, matcher.Value)
 	if !ok {
 		fmt.Printf("!!! No match found for label %s", matcher.Name)
@@ -83,7 +95,7 @@ func (lp *labelProcessor) processMutableLabel(matcher *labels.Matcher) ([]*label
 }
 
 // processMutableLabelRegex replaces a regex mutable matcher by non mutable matchers.
-func (lp *labelProcessor) processMutableLabelRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) processMutableLabelRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	// Search for all matching values.
 	var matchingLabels labels.Labels
 
@@ -102,6 +114,11 @@ func (lp *labelProcessor) processMutableLabelRegex(matcher *labels.Matcher) ([]*
 
 	// The returned matcher is always a MatchRegexp, even if the matcher was a MatchNotRegexp,
 	// because we searched for matching values.
+	// TODO: Doesn't work if we have labels with different names:
+	// Get(group1) -> instance="server1", instance="server2", job="job1"
+	// Get(group2) -> instance="server3"
+	// -> mergeLabels(): instance="server1|server2|server3", job="job1"
+	// -> no longer matches instance="server3" because of the job.
 	newMatchers, err := mergeLabels(matchingLabels, labels.MatchRegexp)
 	if err != nil {
 		return nil, fmt.Errorf("merge labels: %w", err)

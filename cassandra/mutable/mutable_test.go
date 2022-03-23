@@ -1,9 +1,9 @@
-package index_test
+package mutable_test
 
 import (
 	"reflect"
 	"sort"
-	"squirreldb/cassandra/index"
+	"squirreldb/cassandra/mutable"
 	"testing"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -105,7 +105,7 @@ func TestProcessMutableLabels(t *testing.T) {
 		},
 	}
 
-	lp := index.NewLabelProcessor(mockLabelProvider{})
+	lp := mutable.NewLabelProcessor(mockLabelProvider{})
 
 	for _, test := range tests {
 		test := test
