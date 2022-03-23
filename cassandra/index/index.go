@@ -2337,10 +2337,10 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 // it return the "document" (metric ID) that exactly match all matchers.
 //
 // Finally since Matcher could be other thing than LabelName=LabelValue (like not equal or using regular expression)
-// there is a first pass that convert them to something that works with the inverted index: it queries all values for the
-// given label name then for each value, it the value match the filter convert to an simple equal matcher. Then this
-// simple equal matcher could be used with the posting of the inverted index (e.g. name!="cpu" will be converted in
-// something like name="memory" || name="disk" || name="...").
+// there is a first pass that convert them to something that works with the inverted index: it queries all values
+// for the given label name then for each value, it the value match the filter convert to an simple equal matcher.
+// Then this simple equal matcher could be used with the posting of the inverted index (e.g. name!="cpu" will be
+// converted in something like name="memory" || name="disk" || name="...").
 //
 // There is still two additional special case: when label should be defined (regardless of the value, e.g. name!="") or
 // when the label should NOT be defined (e.g. name="").
@@ -2360,7 +2360,6 @@ func (c *CassandraIndex) Search(
 ) (types.MetricsSet, error) {
 	start := time.Now()
 
-	// TODO: Initialize labelProcessor with a labelProvider.
 	// Replace mutable labels by non mutable labels.
 	matchers, err := c.labelProcessor.ProcessMutableLabels(matchers)
 	if err != nil {

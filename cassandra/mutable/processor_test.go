@@ -2,73 +2,12 @@ package mutable_test
 
 import (
 	"reflect"
-	"sort"
 	"squirreldb/cassandra/mutable"
+	"squirreldb/dummy"
 	"testing"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
-
-type mockLabelProvider struct{}
-
-func (lp mockLabelProvider) mutableLabels(tenant, name string) map[string]labels.Labels {
-	type key struct {
-		tenant string
-		name   string
-	}
-
-	lbls := map[key]map[string]labels.Labels{
-		key{
-			tenant: "1234",
-			name:   "group",
-		}: {
-			"group1": {
-				{Name: "instance", Value: "server1"},
-				{Name: "instance", Value: "server2"},
-				{Name: "instance", Value: "server3"},
-			},
-			"group2": {
-				{Name: "instance", Value: "server2"},
-				{Name: "instance", Value: "server3"},
-			},
-			"group3": {
-				{Name: "instance", Value: "server4"},
-			},
-		},
-	}
-
-	return lbls[key{tenant: tenant, name: name}]
-}
-
-func (lp mockLabelProvider) Get(tenant, name, value string) (labels.Labels, error) {
-	ls := lp.mutableLabels(tenant, name)[value]
-
-	return ls, nil
-}
-
-func (lp mockLabelProvider) AllValues(tenant, name string) ([]string, error) {
-	ls := lp.mutableLabels(tenant, name)
-
-	keys := make([]string, 0, len(ls))
-	for k := range ls {
-		keys = append(keys, k)
-	}
-
-	// Always return the keys in the same orders.
-	sort.Strings(keys)
-
-	return keys, nil
-}
-
-// isMutableLabel returns whether the label is mutable.
-func (lp mockLabelProvider) IsMutableLabel(name string) bool {
-	return name == "group"
-}
-
-// IsTenantLabel returns whether this label identifies the tenant.
-func (lp mockLabelProvider) IsTenantLabel(name string) bool {
-	return name == "__account_id"
-}
 
 func TestProcessMutableLabels(t *testing.T) {
 	t.Parallel()
@@ -137,7 +76,7 @@ func TestProcessMutableLabels(t *testing.T) {
 		},
 	}
 
-	lp := mutable.NewLabelProcessor(mockLabelProvider{})
+	lp := mutable.NewLabelProcessor(dummy.NewMutableLabelProvider())
 
 	for _, test := range tests {
 		test := test

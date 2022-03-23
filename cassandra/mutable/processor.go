@@ -2,7 +2,6 @@
 package mutable
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -11,12 +10,8 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-var (
-	//nolint:gochecknoglobals
-	logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
-
-	errInvalidMutableLabel = errors.New("invalid mutable label")
-)
+//nolint:gochecknoglobals
+var logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
 
 // LabelProcessor can replace mutable labels by non mutable labels.
 type LabelProcessor struct {
@@ -138,7 +133,7 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 
 // mergeLabels merge the given labels in the resulting matchers.
 // Example: mergeLabels(instance="server1", instance="server2", job="job1")
-// -> instance~="server1|server2", job="job1"
+// -> instance~="server1|server2", job="job1".
 func mergeLabels(ls labels.Labels, matchType labels.MatchType) (matchers []*labels.Matcher, err error) {
 	labelsMap := make(map[string][]string)
 
@@ -148,6 +143,7 @@ func mergeLabels(ls labels.Labels, matchType labels.MatchType) (matchers []*labe
 
 	for name, values := range labelsMap {
 		var matchRegex strings.Builder
+
 		for i, value := range values {
 			if i > 0 {
 				matchRegex.WriteRune('|')
