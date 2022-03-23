@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	"regexp/syntax"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
@@ -142,17 +142,12 @@ func mergeLabels(ls labels.Labels, matchType labels.MatchType) (matchers []*labe
 	}
 
 	for name, values := range labelsMap {
-		var matchRegex strings.Builder
-
-		for i, value := range values {
-			if i > 0 {
-				matchRegex.WriteRune('|')
-			}
-
-			matchRegex.WriteString(value)
+		regex, err := mergeRegex(values)
+		if err != nil {
+			return nil, err
 		}
 
-		newMatcher, err := labels.NewMatcher(regexMatchType(matchType), name, matchRegex.String())
+		newMatcher, err := labels.NewMatcher(regexMatchType(matchType), name, regex)
 		if err != nil {
 			return nil, err
 		}
@@ -161,6 +156,28 @@ func mergeLabels(ls labels.Labels, matchType labels.MatchType) (matchers []*labe
 	}
 
 	return matchers, nil
+}
+
+// mergeRegex returns a regular expression matching any of the input expressions.
+func mergeRegex(input []string) (string, error) {
+	var err error
+
+	allRegex := make([]*syntax.Regexp, len(input))
+
+	for i, v := range input {
+		allRegex[i], err = syntax.Parse(v, syntax.Perl)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	re := syntax.Regexp{
+		Op:    syntax.OpAlternate,
+		Flags: syntax.Perl,
+		Sub:   allRegex,
+	}
+
+	return re.String(), nil
 }
 
 // regexMatchType returns the regex match type corresponding to the given type.
