@@ -14,6 +14,7 @@ import (
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
@@ -477,6 +478,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
+	s.api.MutableLabelWriter = mutable.NewLabelWriter(s.cassandraSession)
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
 	s.api.MaxConcurrentRemoteRequests = s.Config.Int("remote_storage.max_concurrent_requests")

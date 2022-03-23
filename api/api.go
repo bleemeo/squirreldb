@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/types"
 	"strconv"
 	"strings"
@@ -46,6 +48,7 @@ type API struct {
 	Index                       types.Index
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
+	MutableLabelWriter          mutable.LabelWriter
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
@@ -149,6 +152,7 @@ func (a *API) init() {
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+	router.Post("/mutable", a.mutableLabelHandler)
 
 	queryable := promql.NewStore(
 		a.Index,
@@ -390,6 +394,25 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
+}
+
+func (a API) mutableLabelHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var mutLabels []mutable.Label
+
+	err := decoder.Decode(&mutLabels)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	if err := a.MutableLabelWriter.WriteLabels(mutLabels); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write labels: %v", err), http.StatusInternalServerError)
+	}
+
+	fmt.Fprint(w, "ok")
 }
 
 // interceptor implements the http.ResponseWriter interface,

@@ -71,7 +71,9 @@ func (cp *cassandraProvider) selectLabels(tenant, name, value string) (labels.La
 
 	var lbls labels.Labels
 
-	if iter.Scan(&lbls) {
+	iter.Scan(&lbls)
+
+	if iter.Scan(nil) {
 		errMsg := "%w: expected a single row for tenant=%s, name=%s, value=%s"
 
 		return nil, fmt.Errorf(errMsg, errTooManyRows, tenant, name, value)
@@ -112,20 +114,6 @@ func (cp *cassandraProvider) selectValues(tenant, name string) ([]string, error)
 	return values, nil
 }
 
-// insertLabels inserts oor modifies the non mutale labels associated to a mutable label name and value.
-func (cp *cassandraProvider) insertLabels(tenant, name, value string, lbls labels.Labels) error {
-	query := cp.session.Query(`
-		INSERT INTO mutable_labels (tenant, name, value, labels)
-		VALUES (?, ?, ?, ?)
-	`, tenant, name, value, lbls)
-
-	if err := query.Exec(); err != nil {
-		return fmt.Errorf("insert labels: %w", err)
-	}
-
-	return nil
-}
-
 // isMutableLabel returns whether the label is mutable.
 func (cp *cassandraProvider) IsMutableLabel(name string) bool {
 	// TODO: We should not hardcode any value here and retrieve these labels from cassandra.
@@ -135,5 +123,5 @@ func (cp *cassandraProvider) IsMutableLabel(name string) bool {
 // IsTenantLabel returns whether this label identifies the tenant.
 func (cp *cassandraProvider) IsTenantLabel(name string) bool {
 	// TODO: Don't hardcode this value.
-	return name == "__bleemeo_account__"
+	return name == "__account_id"
 }
