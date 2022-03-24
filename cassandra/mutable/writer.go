@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/gocql/gocql"
-	"github.com/prometheus/prometheus/model/labels"
 )
 
 // LabelWriter allows writing mutable labels to Cassandra.
@@ -17,7 +16,7 @@ type Label struct {
 	Tenant string
 	Name   string
 	Value  string
-	Labels []labels.Label
+	Labels LabelValues
 }
 
 func NewLabelWriter(session *gocql.Session) LabelWriter {

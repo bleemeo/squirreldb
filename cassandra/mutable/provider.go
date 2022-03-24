@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"github.com/gocql/gocql"
-	"github.com/prometheus/prometheus/model/labels"
 )
 
 var errTooManyRows = errors.New("too many rows")
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
-	Get(tenant, name, value string) ([]labels.Label, error)
+	Get(tenant, name, value string) (LabelValues, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(name string) bool
 	IsTenantLabel(name string) bool
@@ -21,6 +20,12 @@ type LabelProvider interface {
 // cassandraProvider is a labelProvider thats gets the labels from Cassandra.
 type cassandraProvider struct {
 	session *gocql.Session
+}
+
+// LabelValues represents a list of labels with a single name.
+type LabelValues struct {
+	Name   string
+	Values []string
 }
 
 // NewCassandraProvider returns a new Cassandra mutable label provider.
@@ -43,7 +48,7 @@ func (cp *cassandraProvider) createTable() error {
 			tenant text,
 			name text,
 			value text,
-			labels frozen<list<tuple<text, text>>>,
+			labels tuple<text, frozen<list<text>>>,
 			PRIMARY KEY ((tenant, name), value)
 		)
 	`)
@@ -58,29 +63,29 @@ func (cp *cassandraProvider) createTable() error {
 }
 
 // Get returns the non mutable labels corresponding to a mutable label name and value.
-func (cp *cassandraProvider) Get(tenant, name, value string) ([]labels.Label, error) {
+func (cp *cassandraProvider) Get(tenant, name, value string) (LabelValues, error) {
 	return cp.selectLabels(tenant, name, value)
 }
 
-// selectLbales selects the non mutable labels associated to a mutable label name and value.
-func (cp *cassandraProvider) selectLabels(tenant, name, value string) ([]labels.Label, error) {
+// selectLabels selects the non mutable labels associated to a mutable label name and value.
+func (cp *cassandraProvider) selectLabels(tenant, name, value string) (LabelValues, error) {
 	iter := cp.session.Query(`
 		SELECT labels FROM mutable_labels 
 		WHERE tenant = ? AND name = ? AND value = ?
 	`, tenant, name, value).Iter()
 
-	var lbls []labels.Label
+	var lbls LabelValues
 
 	iter.Scan(&lbls)
 
 	if iter.Scan(nil) {
 		errMsg := "%w: expected a single row for tenant=%s, name=%s, value=%s"
 
-		return nil, fmt.Errorf(errMsg, errTooManyRows, tenant, name, value)
+		return LabelValues{}, fmt.Errorf(errMsg, errTooManyRows, tenant, name, value)
 	}
 
 	if err := iter.Close(); err != nil {
-		return nil, fmt.Errorf("select labels: %w", err)
+		return LabelValues{}, fmt.Errorf("select labels: %w", err)
 	}
 
 	return lbls, nil

@@ -2,8 +2,7 @@ package dummy
 
 import (
 	"sort"
-
-	"github.com/prometheus/prometheus/model/labels"
+	"squirreldb/cassandra/mutable"
 )
 
 // MockLabelProvider is a label provider which gets its labels from hardcoded values.
@@ -14,28 +13,28 @@ func NewMutableLabelProvider() MockLabelProvider {
 	return MockLabelProvider{}
 }
 
-func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string][]labels.Label {
+func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string]mutable.LabelValues {
 	type key struct {
 		tenant string
 		name   string
 	}
 
-	lbls := map[key]map[string][]labels.Label{
+	lbls := map[key]map[string]mutable.LabelValues{
 		{
 			tenant: "1234",
 			name:   "group",
 		}: {
-			"group1": {
-				{Name: "instance", Value: "server1"},
-				{Name: "instance", Value: "server2"},
-				{Name: "instance", Value: "server3"},
+			"group1": mutable.LabelValues{
+				Name:   "instance",
+				Values: []string{"server1", "server2", "server3"},
 			},
-			"group2": {
-				{Name: "instance", Value: "server2"},
-				{Name: "instance", Value: "server3"},
+			"group2": mutable.LabelValues{
+				Name:   "instance",
+				Values: []string{"server2", "server3"},
 			},
-			"group3": {
-				{Name: "instance", Value: "server4"},
+			"group3": mutable.LabelValues{
+				Name:   "instance",
+				Values: []string{"server4"},
 			},
 		},
 	}
@@ -43,7 +42,7 @@ func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string][]labe
 	return lbls[key{tenant: tenant, name: name}]
 }
 
-func (lp MockLabelProvider) Get(tenant, name, value string) ([]labels.Label, error) {
+func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.LabelValues, error) {
 	ls := lp.mutableLabels(tenant, name)[value]
 
 	return ls, nil

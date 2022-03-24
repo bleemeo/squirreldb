@@ -2,6 +2,7 @@
 package mutable
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -11,7 +12,11 @@ import (
 )
 
 //nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
+var (
+	logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
+
+	errUnsupportedOperation = errors.New("unsupported operation")
+)
 
 // LabelProcessor can replace mutable labels by non mutable labels.
 type LabelProcessor struct {
@@ -58,14 +63,14 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 		}
 
 		var (
-			newMatchers []*labels.Matcher
-			err         error
+			newMatcher *labels.Matcher
+			err        error
 		)
 
 		if matcher.Type == labels.MatchRegexp || matcher.Type == labels.MatchNotRegexp {
-			newMatchers, err = lp.processMutableLabelRegex(tenant, matcher)
+			newMatcher, err = lp.processMutableLabelRegex(tenant, matcher)
 		} else {
-			newMatchers, err = lp.processMutableLabel(tenant, matcher)
+			newMatcher, err = lp.processMutableLabel(tenant, matcher)
 		}
 
 		if err != nil {
@@ -74,31 +79,31 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 
 		// We don't need to check for collisions between the new matchers and the existing ones,
 		// Prometheus accepts queries with multiple labels with the same name.
-		processedMatchers = append(processedMatchers, newMatchers...)
+		processedMatchers = append(processedMatchers, newMatcher)
 	}
 
 	return processedMatchers, nil
 }
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Matcher) ([]*labels.Matcher, error) {
-	ls, err := lp.labelProvider.Get(tenant, matcher.Name, matcher.Value)
+func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Matcher) (*labels.Matcher, error) {
+	lbls, err := lp.labelProvider.Get(tenant, matcher.Name, matcher.Value)
 	if err != nil {
 		return nil, err
 	}
 
-	newMatchers, err := mergeLabels(ls, matcher.Type)
+	newMatcher, err := mergeLabels(lbls, matcher.Type)
 	if err != nil {
 		return nil, fmt.Errorf("merge labels: %w", err)
 	}
 
-	return newMatchers, nil
+	return newMatcher, nil
 }
 
 // processMutableLabelRegex replaces a regex mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *labels.Matcher) (*labels.Matcher, error) {
 	// Search for all matching values.
-	var matchingLabels []labels.Label
+	var matchingLabels LabelValues
 
 	values, err := lp.labelProvider.AllValues(tenant, matcher.Name)
 	if err != nil {
@@ -107,55 +112,49 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 
 	for _, value := range values {
 		if matcher.Matches(value) {
-			ls, err := lp.labelProvider.Get(tenant, matcher.Name, value)
+			lbls, err := lp.labelProvider.Get(tenant, matcher.Name, value)
 			if err != nil {
 				return nil, err
 			}
 
-			matchingLabels = append(matchingLabels, ls...)
+			// We currently only support matching on the same non mutable label name.
+			if matchingLabels.Name != "" && matchingLabels.Name != lbls.Name {
+				errMsg := "%w: mutable label regex '%s' returned two different non mutable label names: %s and %s"
+
+				return nil, fmt.Errorf(errMsg, errUnsupportedOperation, matcher.Name, matchingLabels.Name, lbls.Name)
+			}
+
+			matchingLabels = LabelValues{
+				Name:   lbls.Name,
+				Values: append(matchingLabels.Values, lbls.Values...),
+			}
 		}
 	}
 
 	// The returned matcher is always a MatchRegexp, even if the matcher was a MatchNotRegexp,
 	// because we searched for matching values.
-	// TODO: Doesn't work if we have labels with different names:
-	// Get(group1) -> instance="server1", instance="server2", job="job1"
-	// Get(group2) -> instance="server3"
-	// -> mergeLabels(): instance="server1|server2|server3", job="job1"
-	// -> no longer matches instance="server3" because of the job.
-	newMatchers, err := mergeLabels(matchingLabels, labels.MatchRegexp)
+	newMatcher, err := mergeLabels(matchingLabels, labels.MatchRegexp)
 	if err != nil {
 		return nil, fmt.Errorf("merge labels: %w", err)
 	}
 
-	return newMatchers, nil
+	return newMatcher, nil
 }
 
-// mergeLabels merge the given labels in the resulting matchers.
-// Example: mergeLabels(instance="server1", instance="server2", job="job1")
-// -> instance~="server1|server2", job="job1".
-func mergeLabels(lbls []labels.Label, matchType labels.MatchType) (matchers []*labels.Matcher, err error) {
-	labelsMap := make(map[string][]string)
-
-	for _, label := range lbls {
-		labelsMap[label.Name] = append(labelsMap[label.Name], label.Value)
+// mergeLabels merge the labels in one matcher that matches any of the input label values.
+// Example: mergeLabels(instance="server1", instance="server2") -> instance~="server1|server2".
+func mergeLabels(lbls LabelValues, matchType labels.MatchType) (matcher *labels.Matcher, err error) {
+	regex, err := mergeRegex(lbls.Values)
+	if err != nil {
+		return nil, err
 	}
 
-	for name, values := range labelsMap {
-		regex, err := mergeRegex(values)
-		if err != nil {
-			return nil, err
-		}
-
-		newMatcher, err := labels.NewMatcher(regexMatchType(matchType), name, regex)
-		if err != nil {
-			return nil, err
-		}
-
-		matchers = append(matchers, newMatcher)
+	newMatcher, err := labels.NewMatcher(regexMatchType(matchType), lbls.Name, regex)
+	if err != nil {
+		return nil, err
 	}
 
-	return matchers, nil
+	return newMatcher, nil
 }
 
 // mergeRegex returns a regular expression matching any of the input expressions.

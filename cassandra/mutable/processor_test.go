@@ -66,12 +66,25 @@ func TestProcessMutableLabels(t *testing.T) {
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__account_id", "1234"),
 				labels.MustNewMatcher(labels.MatchEqual, "group", "group1"),
-				labels.MustNewMatcher(labels.MatchEqual, "instance", "instance-unknown"),
+				labels.MustNewMatcher(labels.MatchEqual, "instance", "other-instance"),
 			},
 			wantMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(labels.MatchEqual, "__account_id", "1234"),
 				labels.MustNewMatcher(labels.MatchRegexp, "instance", "server1|server2|server3"),
-				labels.MustNewMatcher(labels.MatchEqual, "instance", "instance-unknown"),
+				labels.MustNewMatcher(labels.MatchEqual, "instance", "other-instance"),
+			},
+		},
+		{
+			name: "no-mutable-labels",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__account_id", "1234"),
+				labels.MustNewMatcher(labels.MatchEqual, "job", "job1"),
+				labels.MustNewMatcher(labels.MatchEqual, "instance", "other-instance"),
+			},
+			wantMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__account_id", "1234"),
+				labels.MustNewMatcher(labels.MatchEqual, "job", "job1"),
+				labels.MustNewMatcher(labels.MatchEqual, "instance", "other-instance"),
 			},
 		},
 	}
