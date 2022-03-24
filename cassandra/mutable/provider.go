@@ -16,7 +16,7 @@ var (
 type LabelProvider interface {
 	Get(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
-	IsMutableLabel(name string) bool
+	IsMutableLabel(name string) (bool, error)
 	IsTenantLabel(name string) bool
 }
 
@@ -189,9 +189,40 @@ func (cp *CassandraProvider) selectValues(tenant, name string) ([]string, error)
 }
 
 // IsMutableLabel returns whether the label is mutable.
-func (cp *CassandraProvider) IsMutableLabel(name string) bool {
-	// TODO: We should not hardcode any value here and retrieve these labels from cassandra.
-	return name == "group"
+func (cp *CassandraProvider) IsMutableLabel(name string) (bool, error) {
+	mutableLabelNames, err := cp.selectMutableLabelNames()
+	if err != nil {
+		return false, err
+	}
+
+	for _, mutName := range mutableLabelNames {
+		if name == mutName {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (cp *CassandraProvider) selectMutableLabelNames() ([]string, error) {
+	iter := cp.session.Query(`
+		SELECT name FROM mutable_label_names
+	`).Iter()
+
+	var (
+		names []string
+		name  string
+	)
+
+	for iter.Scan(&name) {
+		names = append(names, name)
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, fmt.Errorf("select names: %w", err)
+	}
+
+	return names, nil
 }
 
 // IsTenantLabel returns whether this label identifies the tenant.

@@ -56,16 +56,18 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 
 	// Search for mutable labels and replace them by non mutable labels.
 	for _, matcher := range matchers {
-		if !lp.labelProvider.IsMutableLabel(matcher.Name) {
+		isMutableLabel, err := lp.labelProvider.IsMutableLabel(matcher.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		if !isMutableLabel {
 			processedMatchers = append(processedMatchers, matcher)
 
 			continue
 		}
 
-		var (
-			newMatcher *labels.Matcher
-			err        error
-		)
+		var newMatcher *labels.Matcher
 
 		if matcher.Type == labels.MatchRegexp || matcher.Type == labels.MatchNotRegexp {
 			newMatcher, err = lp.processMutableLabelRegex(tenant, matcher)
