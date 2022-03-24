@@ -74,6 +74,7 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
+	mutableLabelProvider     *mutable.CassandraProvider
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -478,7 +479,6 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
-	s.api.MutableLabelWriter = mutable.NewLabelWriter(s.cassandraSession)
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
 	s.api.MaxConcurrentRemoteRequests = s.Config.Int("remote_storage.max_concurrent_requests")
@@ -620,7 +620,12 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			index, err := index.New(ctx, s.MetricRegistry, session, options)
+			mutableLabelProvider, err := s.MutableLabelProvider()
+			if err != nil {
+				return nil, err
+			}
+
+			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProvider, options)
 			if err != nil {
 				return nil, err
 			}
@@ -757,6 +762,25 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	tlm.Start(ctx)
 
 	return nil
+}
+
+func (s *SquirrelDB) MutableLabelProvider() (*mutable.CassandraProvider, error) {
+	if s.mutableLabelProvider == nil {
+		session, err := s.CassandraSession()
+		if err != nil {
+			return nil, err
+		}
+
+		labelProvider, err := mutable.NewCassandraProvider(session)
+		if err != nil {
+			return nil, err
+		}
+
+		s.mutableLabelProvider = labelProvider
+		s.api.MutableLabelWriter = labelProvider
+	}
+
+	return s.mutableLabelProvider, nil
 }
 
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {

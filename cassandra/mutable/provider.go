@@ -17,9 +17,17 @@ type LabelProvider interface {
 	IsTenantLabel(name string) bool
 }
 
-// cassandraProvider is a labelProvider thats gets the labels from Cassandra.
-type cassandraProvider struct {
+// CassandraProvider is a labelProvider thats gets the labels from Cassandra.
+type CassandraProvider struct {
 	session *gocql.Session
+}
+
+// Label represents a mutable label with its associated non mutable labels.
+type Label struct {
+	Tenant string
+	Name   string
+	Value  string
+	Labels LabelValues
 }
 
 // LabelValues represents a list of labels with a single name.
@@ -29,8 +37,8 @@ type LabelValues struct {
 }
 
 // NewCassandraProvider returns a new Cassandra mutable label provider.
-func NewCassandraProvider(session *gocql.Session) (LabelProvider, error) {
-	cp := &cassandraProvider{
+func NewCassandraProvider(session *gocql.Session) (*CassandraProvider, error) {
+	cp := &CassandraProvider{
 		session: session,
 	}
 
@@ -42,7 +50,7 @@ func NewCassandraProvider(session *gocql.Session) (LabelProvider, error) {
 }
 
 // createTable creates the mutable labels table if it doesn't exist.
-func (cp *cassandraProvider) createTable() error {
+func (cp *CassandraProvider) createTable() error {
 	query := cp.session.Query(`
 		CREATE TABLE IF NOT EXISTS mutable_labels (
 			tenant text,
@@ -63,12 +71,12 @@ func (cp *cassandraProvider) createTable() error {
 }
 
 // Get returns the non mutable labels corresponding to a mutable label name and value.
-func (cp *cassandraProvider) Get(tenant, name, value string) (LabelValues, error) {
+func (cp *CassandraProvider) Get(tenant, name, value string) (LabelValues, error) {
 	return cp.selectLabels(tenant, name, value)
 }
 
 // selectLabels selects the non mutable labels associated to a mutable label name and value.
-func (cp *cassandraProvider) selectLabels(tenant, name, value string) (LabelValues, error) {
+func (cp *CassandraProvider) selectLabels(tenant, name, value string) (LabelValues, error) {
 	iter := cp.session.Query(`
 		SELECT labels FROM mutable_labels 
 		WHERE tenant = ? AND name = ? AND value = ?
@@ -92,12 +100,12 @@ func (cp *cassandraProvider) selectLabels(tenant, name, value string) (LabelValu
 }
 
 // AllValues returns all possible mutable label values.
-func (cp *cassandraProvider) AllValues(tenant, name string) ([]string, error) {
+func (cp *CassandraProvider) AllValues(tenant, name string) ([]string, error) {
 	return cp.selectValues(tenant, name)
 }
 
 // selectValues selects all possible values for a mutable label name.
-func (cp *cassandraProvider) selectValues(tenant, name string) ([]string, error) {
+func (cp *CassandraProvider) selectValues(tenant, name string) ([]string, error) {
 	iter := cp.session.Query(`
 		SELECT value FROM mutable_labels 
 		WHERE tenant = ? AND name = ?
@@ -120,13 +128,37 @@ func (cp *cassandraProvider) selectValues(tenant, name string) ([]string, error)
 }
 
 // isMutableLabel returns whether the label is mutable.
-func (cp *cassandraProvider) IsMutableLabel(name string) bool {
+func (cp *CassandraProvider) IsMutableLabel(name string) bool {
 	// TODO: We should not hardcode any value here and retrieve these labels from cassandra.
 	return name == "group"
 }
 
 // IsTenantLabel returns whether this label identifies the tenant.
-func (cp *cassandraProvider) IsTenantLabel(name string) bool {
+func (cp *CassandraProvider) IsTenantLabel(name string) bool {
 	// TODO: Don't hardcode this value.
 	return name == "__account_id"
+}
+
+func (cp *CassandraProvider) WriteLabels(mutLabels []Label) error {
+	for _, mutLabel := range mutLabels {
+		if err := cp.insertMutableLabel(mutLabel); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// insertMutableLabel inserts or modifies the non mutable labels associated to a mutable label name and value.
+func (cp *CassandraProvider) insertMutableLabel(mutLabel Label) error {
+	query := cp.session.Query(`
+		INSERT INTO mutable_labels (tenant, name, value, labels)
+		VALUES (?, ?, ?, ?)
+	`, mutLabel.Tenant, mutLabel.Name, mutLabel.Value, mutLabel.Labels)
+
+	if err := query.Exec(); err != nil {
+		return fmt.Errorf("insert labels: %w", err)
+	}
+
+	return nil
 }

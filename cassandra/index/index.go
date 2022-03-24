@@ -191,16 +191,11 @@ func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
 	session *gocql.Session,
+	mutableLabelProvider *mutable.CassandraProvider,
 	options Options,
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
-
-	cassandraProvider, err := mutable.NewCassandraProvider(session)
-	if err != nil {
-		return nil, fmt.Errorf("new cassandra provider: %w", err)
-	}
-
-	labelProcessor := mutable.NewLabelProcessor(cassandraProvider)
+	labelProcessor := mutable.NewLabelProcessor(mutableLabelProvider)
 
 	return initialize(
 		ctx,
