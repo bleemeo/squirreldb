@@ -12,6 +12,7 @@ var defaults = map[string]interface{}{
 	"remote_storage.max_concurrent_requests": 0,
 	"promql.max_evaluated_points":            0,
 	"promql.max_evaluated_series":            0,
+	"promql.tenant_label_name":               "__account_id",
 	"batch.size":                             "15m",
 	"log.level":                              0,
 	"internal.index":                         "cassandra",

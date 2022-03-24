@@ -66,8 +66,3 @@ func (lp MockLabelProvider) AllValues(tenant, name string) ([]string, error) {
 func (lp MockLabelProvider) IsMutableLabel(name string) (bool, error) {
 	return name == "group", nil
 }
-
-// IsTenantLabel returns whether this label identifies the tenant.
-func (lp MockLabelProvider) IsTenantLabel(name string) bool {
-	return name == "__account_id"
-}

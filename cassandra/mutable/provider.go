@@ -17,7 +17,6 @@ type LabelProvider interface {
 	Get(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(name string) (bool, error)
-	IsTenantLabel(name string) bool
 }
 
 // CassandraProvider is a labelProvider thats gets the labels from Cassandra.
@@ -223,12 +222,6 @@ func (cp *CassandraProvider) selectMutableLabelNames() ([]string, error) {
 	}
 
 	return names, nil
-}
-
-// IsTenantLabel returns whether this label identifies the tenant.
-func (cp *CassandraProvider) IsTenantLabel(name string) bool {
-	// TODO: Don't hardcode this value.
-	return name == "__account_id"
 }
 
 // WriteLabelValues writes the label values to Cassandra.

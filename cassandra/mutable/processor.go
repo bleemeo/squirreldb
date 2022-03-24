@@ -20,12 +20,14 @@ var (
 
 // LabelProcessor can replace mutable labels by non mutable labels.
 type LabelProcessor struct {
-	labelProvider LabelProvider
+	labelProvider   LabelProvider
+	tenantLabelName string
 }
 
-func NewLabelProcessor(provider LabelProvider) *LabelProcessor {
+func NewLabelProcessor(provider LabelProvider, tenantLabelName string) *LabelProcessor {
 	processor := LabelProcessor{
-		labelProvider: provider,
+		labelProvider:   provider,
+		tenantLabelName: tenantLabelName,
 	}
 
 	return &processor
@@ -41,7 +43,7 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 	var tenant string
 
 	for _, matcher := range matchers {
-		if lp.labelProvider.IsTenantLabel(matcher.Name) {
+		if matcher.Name == lp.tenantLabelName {
 			tenant = matcher.Value
 
 			break

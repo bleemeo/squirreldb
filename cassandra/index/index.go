@@ -192,10 +192,11 @@ func New(
 	reg prometheus.Registerer,
 	session *gocql.Session,
 	mutableLabelProvider *mutable.CassandraProvider,
+	tenantLabelName string,
 	options Options,
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
-	labelProcessor := mutable.NewLabelProcessor(mutableLabelProvider)
+	labelProcessor := mutable.NewLabelProcessor(mutableLabelProvider, tenantLabelName)
 
 	return initialize(
 		ctx,

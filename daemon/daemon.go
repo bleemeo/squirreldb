@@ -625,7 +625,9 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				return nil, err
 			}
 
-			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProvider, options)
+			tenantLabelName := s.Config.String("promql.tenant_label_name")
+
+			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProvider, tenantLabelName, options)
 			if err != nil {
 				return nil, err
 			}
