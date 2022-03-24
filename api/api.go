@@ -64,7 +64,8 @@ type API struct {
 }
 
 type MutableLabelWriter interface {
-	WriteLabels(lbls []mutable.Label) error
+	WriteLabelValues(lbls []mutable.LabelWithValues) error
+	WriteLabelNames(lbls []mutable.LabelWithName) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -156,7 +157,8 @@ func (a *API) init() {
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
-	router.Post("/mutable", a.mutableLabelHandler)
+	router.Post("/mutable/names", a.mutableLabelNamesHandler)
+	router.Post("/mutable/values", a.mutableLabelValuesHandler)
 
 	queryable := promql.NewStore(
 		a.Index,
@@ -400,20 +402,43 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 }
 
-func (a API) mutableLabelHandler(w http.ResponseWriter, req *http.Request) {
+func (a API) mutableLabelValuesHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
-	var mutLabels []mutable.Label
+	var lbls []mutable.LabelWithValues
 
-	err := decoder.Decode(&mutLabels)
+	err := decoder.Decode(&lbls)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
 
 		return
 	}
 
-	if err := a.MutableLabelWriter.WriteLabels(mutLabels); err != nil {
-		http.Error(w, fmt.Sprintf("failed to write labels: %v", err), http.StatusInternalServerError)
+	if err := a.MutableLabelWriter.WriteLabelValues(lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write label values: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelNamesHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var lbls []mutable.LabelWithName
+
+	err := decoder.Decode(&lbls)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	if err := a.MutableLabelWriter.WriteLabelNames(lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write label names: %v", err), http.StatusInternalServerError)
+
+		return
 	}
 
 	fmt.Fprint(w, "ok")

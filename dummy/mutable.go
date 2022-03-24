@@ -13,26 +13,26 @@ func NewMutableLabelProvider() MockLabelProvider {
 	return MockLabelProvider{}
 }
 
-func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string]mutable.LabelValues {
+func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string]mutable.NonMutableLabels {
 	type key struct {
 		tenant string
 		name   string
 	}
 
-	lbls := map[key]map[string]mutable.LabelValues{
+	lbls := map[key]map[string]mutable.NonMutableLabels{
 		{
 			tenant: "1234",
 			name:   "group",
 		}: {
-			"group1": mutable.LabelValues{
+			"group1": mutable.NonMutableLabels{
 				Name:   "instance",
 				Values: []string{"server1", "server2", "server3"},
 			},
-			"group2": mutable.LabelValues{
+			"group2": mutable.NonMutableLabels{
 				Name:   "instance",
 				Values: []string{"server2", "server3"},
 			},
-			"group3": mutable.LabelValues{
+			"group3": mutable.NonMutableLabels{
 				Name:   "instance",
 				Values: []string{"server4"},
 			},
@@ -42,7 +42,7 @@ func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string]mutabl
 	return lbls[key{tenant: tenant, name: name}]
 }
 
-func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.LabelValues, error) {
+func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.NonMutableLabels, error) {
 	ls := lp.mutableLabels(tenant, name)[value]
 
 	return ls, nil

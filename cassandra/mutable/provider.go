@@ -7,11 +7,14 @@ import (
 	"github.com/gocql/gocql"
 )
 
-var errTooManyRows = errors.New("too many rows")
+var (
+	errTooManyRows  = errors.New("too many rows")
+	errNoRowMatched = errors.New("no row matched query")
+)
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
-	Get(tenant, name, value string) (LabelValues, error)
+	Get(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(name string) bool
 	IsTenantLabel(name string) bool
@@ -22,16 +25,22 @@ type CassandraProvider struct {
 	session *gocql.Session
 }
 
-// Label represents a mutable label with its associated non mutable labels.
-type Label struct {
-	Tenant string
-	Name   string
-	Value  string
-	Labels LabelValues
+// LabelWithValues represents a mutable label with its associated non mutable labels value.
+type LabelWithValues struct {
+	Tenant           string   `json:"tenant"`
+	Name             string   `json:"name"`
+	Value            string   `json:"value"`
+	AssociatedValues []string `json:"associated_values"`
 }
 
-// LabelValues represents a list of labels with a single name.
-type LabelValues struct {
+// LabelWithName represents a mutable label name with its associated non mutable label name.
+type LabelWithName struct {
+	Name           string `json:"name"`
+	AssociatedName string `json:"associated_name"`
+}
+
+// NonMutableLabels represents a list of labels with a single name.
+type NonMutableLabels struct {
 	Name   string
 	Values []string
 }
@@ -42,61 +51,113 @@ func NewCassandraProvider(session *gocql.Session) (*CassandraProvider, error) {
 		session: session,
 	}
 
-	if err := cp.createTable(); err != nil {
+	if err := cp.createTables(); err != nil {
 		return nil, err
 	}
 
 	return cp, nil
 }
 
-// createTable creates the mutable labels table if it doesn't exist.
-func (cp *CassandraProvider) createTable() error {
-	query := cp.session.Query(`
-		CREATE TABLE IF NOT EXISTS mutable_labels (
+// createTables creates the mutable labels table if it doesn't exist.
+func (cp *CassandraProvider) createTables() error {
+	queryMutableLabelValues := cp.session.Query(`
+		CREATE TABLE IF NOT EXISTS mutable_label_values (
 			tenant text,
 			name text,
 			value text,
-			labels tuple<text, frozen<list<text>>>,
+			associated_values frozen<list<text>>,
 			PRIMARY KEY ((tenant, name), value)
 		)
 	`)
 
-	query.Consistency(gocql.All)
+	queryMutableLabelNames := cp.session.Query(`
+		CREATE TABLE IF NOT EXISTS mutable_label_names (
+			name text PRIMARY KEY,
+			associated_name text,
+		)
+	`)
 
-	if err := query.Exec(); err != nil {
-		return fmt.Errorf("create tables: %w", err)
+	for _, query := range []*gocql.Query{queryMutableLabelValues, queryMutableLabelNames} {
+		query.Consistency(gocql.All)
+
+		if err := query.Exec(); err != nil {
+			return fmt.Errorf("create tables: %w", err)
+		}
 	}
 
 	return nil
 }
 
 // Get returns the non mutable labels corresponding to a mutable label name and value.
-func (cp *CassandraProvider) Get(tenant, name, value string) (LabelValues, error) {
-	return cp.selectLabels(tenant, name, value)
+func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, error) {
+	associatedName, err := cp.selectAssociatedName(name)
+	if err != nil {
+		return NonMutableLabels{}, err
+	}
+
+	associatedValues, err := cp.selectAssociatedValues(tenant, name, value)
+	if err != nil {
+		return NonMutableLabels{}, err
+	}
+
+	lbls := NonMutableLabels{
+		Name:   associatedName,
+		Values: associatedValues,
+	}
+
+	return lbls, nil
 }
 
-// selectLabels selects the non mutable labels associated to a mutable label name and value.
-func (cp *CassandraProvider) selectLabels(tenant, name, value string) (LabelValues, error) {
+// selectAssociatedValues selects the non mutable label values associated to a mutable label name and value.
+func (cp *CassandraProvider) selectAssociatedValues(tenant, name, value string) ([]string, error) {
 	iter := cp.session.Query(`
-		SELECT labels FROM mutable_labels 
+		SELECT associated_values FROM mutable_label_values 
 		WHERE tenant = ? AND name = ? AND value = ?
 	`, tenant, name, value).Iter()
 
-	var lbls LabelValues
+	var associatedValues []string
 
-	iter.Scan(&lbls)
+	if !iter.Scan(&associatedValues) {
+		errMsg := "%w: no result for tenant=%s, name=%s, value=%s"
+
+		return nil, fmt.Errorf(errMsg, errNoRowMatched, tenant, name, value)
+	}
 
 	if iter.Scan(nil) {
 		errMsg := "%w: expected a single row for tenant=%s, name=%s, value=%s"
 
-		return LabelValues{}, fmt.Errorf(errMsg, errTooManyRows, tenant, name, value)
+		return nil, fmt.Errorf(errMsg, errTooManyRows, tenant, name, value)
 	}
 
 	if err := iter.Close(); err != nil {
-		return LabelValues{}, fmt.Errorf("select labels: %w", err)
+		return nil, fmt.Errorf("select labels: %w", err)
 	}
 
-	return lbls, nil
+	return associatedValues, nil
+}
+
+// selectAssociatedName selects the non mutable label name associated to a mutable label name and value.
+func (cp *CassandraProvider) selectAssociatedName(name string) (string, error) {
+	iter := cp.session.Query(`
+		SELECT associated_name FROM mutable_label_names
+		WHERE name = ?
+	`, name).Iter()
+
+	var associatedName string
+
+	if !iter.Scan(&associatedName) {
+		return "", fmt.Errorf("%w: no result for name=%s", errNoRowMatched, name)
+	}
+
+	if iter.Scan(nil) {
+		return "", fmt.Errorf("%w: expected a single row for name=%s", errTooManyRows, name)
+	}
+
+	if err := iter.Close(); err != nil {
+		return "", fmt.Errorf("select labels: %w", err)
+	}
+
+	return associatedName, nil
 }
 
 // AllValues returns all possible mutable label values.
@@ -107,7 +168,7 @@ func (cp *CassandraProvider) AllValues(tenant, name string) ([]string, error) {
 // selectValues selects all possible values for a mutable label name.
 func (cp *CassandraProvider) selectValues(tenant, name string) ([]string, error) {
 	iter := cp.session.Query(`
-		SELECT value FROM mutable_labels 
+		SELECT value FROM mutable_label_values
 		WHERE tenant = ? AND name = ?
 	`, tenant, name).Iter()
 
@@ -127,7 +188,7 @@ func (cp *CassandraProvider) selectValues(tenant, name string) ([]string, error)
 	return values, nil
 }
 
-// isMutableLabel returns whether the label is mutable.
+// IsMutableLabel returns whether the label is mutable.
 func (cp *CassandraProvider) IsMutableLabel(name string) bool {
 	// TODO: We should not hardcode any value here and retrieve these labels from cassandra.
 	return name == "group"
@@ -139,9 +200,10 @@ func (cp *CassandraProvider) IsTenantLabel(name string) bool {
 	return name == "__account_id"
 }
 
-func (cp *CassandraProvider) WriteLabels(mutLabels []Label) error {
-	for _, mutLabel := range mutLabels {
-		if err := cp.insertMutableLabel(mutLabel); err != nil {
+// WriteLabelValues writes the label values to Cassandra.
+func (cp *CassandraProvider) WriteLabelValues(lbls []LabelWithValues) error {
+	for _, label := range lbls {
+		if err := cp.insertAssociatedValues(label); err != nil {
 			return err
 		}
 	}
@@ -149,12 +211,37 @@ func (cp *CassandraProvider) WriteLabels(mutLabels []Label) error {
 	return nil
 }
 
-// insertMutableLabel inserts or modifies the non mutable labels associated to a mutable label name and value.
-func (cp *CassandraProvider) insertMutableLabel(mutLabel Label) error {
+// insertAssociatedValues inserts or modifies the non mutable label values associated to a mutable label.
+func (cp *CassandraProvider) insertAssociatedValues(label LabelWithValues) error {
 	query := cp.session.Query(`
-		INSERT INTO mutable_labels (tenant, name, value, labels)
+		INSERT INTO mutable_label_values (tenant, name, value, associated_values)
 		VALUES (?, ?, ?, ?)
-	`, mutLabel.Tenant, mutLabel.Name, mutLabel.Value, mutLabel.Labels)
+	`, label.Tenant, label.Name, label.Value, label.AssociatedValues)
+
+	if err := query.Exec(); err != nil {
+		return fmt.Errorf("insert labels: %w", err)
+	}
+
+	return nil
+}
+
+// WriteLabelNames writes the label names to Cassandra.
+func (cp *CassandraProvider) WriteLabelNames(lbls []LabelWithName) error {
+	for _, label := range lbls {
+		if err := cp.insertAssociatedName(label); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// insertAssociatedName inserts or modifies the non mutable label name associated to a mutable label name.
+func (cp *CassandraProvider) insertAssociatedName(label LabelWithName) error {
+	query := cp.session.Query(`
+		INSERT INTO mutable_label_names (name, associated_name)
+		VALUES (?, ?)
+	`, label.Name, label.AssociatedName)
 
 	if err := query.Exec(); err != nil {
 		return fmt.Errorf("insert labels: %w", err)
