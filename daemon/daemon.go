@@ -778,7 +778,7 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (*mutable.Cassand
 			return nil, err
 		}
 
-		labelProvider, err := mutable.NewCassandraProvider(session, cluster)
+		labelProvider, err := mutable.NewCassandraProvider(ctx, session, cluster)
 		if err != nil {
 			return nil, err
 		}

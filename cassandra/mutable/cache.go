@@ -7,11 +7,15 @@ import (
 	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
+	"time"
 )
 
 const (
 	topicInvalidateAssociatedNames  = "invalidate-associated-names"
 	topicInvalidateAssociatedValues = "invalidate-associated-values"
+
+	cacheCleanupInterval = 24 * time.Hour
+	cacheExpirationDelay = time.Hour
 )
 
 type cache struct {
@@ -22,8 +26,7 @@ type cache struct {
 	// present in Cassandra. It must be reassigned entirely when modified.
 	nameCache map[string]string
 	// map[tenant, name][value] contains the non mutable associated values.
-	// The map[string][]string must always be reassigned entirely.
-	valuesCache map[cacheKey]map[string][]string
+	valuesCache map[cacheKey]cacheEntry
 }
 
 type cacheKey struct {
@@ -31,17 +34,56 @@ type cacheKey struct {
 	Name   string
 }
 
-func newCache(cluster types.Cluster) *cache {
+type cacheEntry struct {
+	lastAccess time.Time
+	// This map must always be reassigned entirely.
+	// Values() assumes it always contains all possible values.
+	associatedValues map[string][]string
+}
+
+func newCache(ctx context.Context, cluster types.Cluster) *cache {
 	c := cache{
 		cluster:     cluster,
 		nameCache:   make(map[string]string),
-		valuesCache: make(map[cacheKey]map[string][]string),
+		valuesCache: make(map[cacheKey]cacheEntry),
 	}
 
 	c.cluster.Subscribe(topicInvalidateAssociatedValues, c.invalidateAssociatedValuesListener)
 	c.cluster.Subscribe(topicInvalidateAssociatedNames, c.invalidateAssociatedNamesListener)
 
+	go c.cleanupScheduler(ctx)
+
 	return &c
+}
+
+func (c *cache) cleanupScheduler(ctx context.Context) {
+	cleanupTicker := time.NewTicker(cacheCleanupInterval)
+
+	for ctx.Err() == nil {
+		select {
+		case <-cleanupTicker.C:
+			c.cleanup()
+		case <-ctx.Done():
+			cleanupTicker.Stop()
+
+			return
+		}
+	}
+}
+
+func (c *cache) cleanup() {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	now := time.Now()
+
+	for key, entry := range c.valuesCache {
+		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
+			debug.Print(1, logger, "Deleting expired mutable cache entry %#v", key)
+
+			delete(c.valuesCache, key)
+		}
+	}
 }
 
 // SetAllAssociatedValues sets mutable label values in cache.
@@ -55,7 +97,10 @@ func (c *cache) SetAllAssociatedValues(tenant, name string, associatedValuesByVa
 		Name:   name,
 	}
 
-	c.valuesCache[key] = associatedValuesByValue
+	c.valuesCache[key] = cacheEntry{
+		lastAccess:       time.Now(),
+		associatedValues: associatedValuesByValue,
+	}
 }
 
 // AssociatedValues returns the label values associated to a mutable label name and value of a tenant.
@@ -68,12 +113,18 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 		Name:   name,
 	}
 
-	values, found := c.valuesCache[key]
+	entry, found := c.valuesCache[key]
 	if !found {
 		return nil, false
 	}
 
-	associatedValues, found = values[value]
+	// Update last access.
+	c.valuesCache[key] = cacheEntry{
+		lastAccess:       time.Now(),
+		associatedValues: entry.associatedValues,
+	}
+
+	associatedValues, found = entry.associatedValues[value]
 
 	return
 }
@@ -127,13 +178,19 @@ func (c *cache) Values(tenant, name string) (values []string, found bool) {
 		Name:   name,
 	}
 
-	valuesMap, found := c.valuesCache[key]
+	entry, found := c.valuesCache[key]
 	if !found {
 		return nil, false
 	}
 
+	// Update last access.
+	c.valuesCache[key] = cacheEntry{
+		lastAccess:       time.Now(),
+		associatedValues: entry.associatedValues,
+	}
+
 	// When not empty, the values cache for a key always contains all rows from Cassandra.
-	for value := range valuesMap {
+	for value := range entry.associatedValues {
 		values = append(values, value)
 	}
 
