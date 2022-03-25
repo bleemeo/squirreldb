@@ -36,6 +36,13 @@ type LabelWithName struct {
 	AssociatedName string `json:"associated_name"`
 }
 
+// Label represents a mutable label.
+type Label struct {
+	Tenant string `json:"tenant"`
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+}
+
 // NonMutableLabels represents a list of labels with a single name.
 type NonMutableLabels struct {
 	Name   string
@@ -161,7 +168,12 @@ func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value 
 		return nil, err
 	}
 
-	return values[value], nil
+	associatedValues, found = values[value]
+	if !found {
+		return nil, fmt.Errorf("%w: no result for tenant=%s, %s=%s", errNoRowMatched, tenant, name, value)
+	}
+
+	return associatedValues, nil
 }
 
 // AllValues returns all possible mutable label values.
@@ -239,7 +251,6 @@ func (cp *CassandraProvider) WriteLabelValues(lbls []LabelWithValues) error {
 			return err
 		}
 
-		// TODO: Notify other squirreldbs to invalidate the cache.
 		cp.cache.InvalidateAssociatedValues(label.Tenant, label.Name)
 	}
 
@@ -254,7 +265,34 @@ func (cp *CassandraProvider) insertAssociatedValues(label LabelWithValues) error
 	`, label.Tenant, label.Name, label.Value, label.AssociatedValues)
 
 	if err := query.Exec(); err != nil {
-		return fmt.Errorf("insert labels: %w", err)
+		return fmt.Errorf("insert associated values: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteLabelValues deletes label values in Cassandra.
+func (cp *CassandraProvider) DeleteLabelValues(lbls []Label) error {
+	for _, label := range lbls {
+		if err := cp.deleteAssociatedValues(label); err != nil {
+			return err
+		}
+
+		cp.cache.InvalidateAssociatedValues(label.Name, label.Tenant)
+	}
+
+	return nil
+}
+
+// deleteAssociatedValues deletes the non mutable label values associated to a mutable label.
+func (cp *CassandraProvider) deleteAssociatedValues(label Label) error {
+	query := cp.session.Query(`
+		DELETE FROM mutable_label_values
+		WHERE tenant = ? AND name = ? AND value = ?
+	`, label.Tenant, label.Name, label.Value)
+
+	if err := query.Exec(); err != nil {
+		return fmt.Errorf("delete associated values: %w", err)
 	}
 
 	return nil
@@ -268,7 +306,6 @@ func (cp *CassandraProvider) WriteLabelNames(lbls []LabelWithName) error {
 		}
 	}
 
-	// TODO: Notify other squirreldbs to invalidate the cache.
 	cp.cache.InvalidateAssociatedNames()
 
 	return nil
@@ -282,7 +319,34 @@ func (cp *CassandraProvider) insertAssociatedName(label LabelWithName) error {
 	`, label.Name, label.AssociatedName)
 
 	if err := query.Exec(); err != nil {
-		return fmt.Errorf("insert labels: %w", err)
+		return fmt.Errorf("insert associated name: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteLabelNames deletes mutable label names in Cassandra.
+func (cp *CassandraProvider) DeleteLabelNames(names []string) error {
+	for _, name := range names {
+		if err := cp.deleteAssociatedName(name); err != nil {
+			return err
+		}
+	}
+
+	cp.cache.InvalidateAssociatedNames()
+
+	return nil
+}
+
+// deleteAssociatedName deletes a mutable label name.
+func (cp *CassandraProvider) deleteAssociatedName(name string) error {
+	query := cp.session.Query(`
+		DELETE FROM mutable_label_names
+		WHERE name = ?
+	`, name)
+
+	if err := query.Exec(); err != nil {
+		return fmt.Errorf("delete associated name: %w", err)
 	}
 
 	return nil

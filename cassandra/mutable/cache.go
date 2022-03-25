@@ -70,6 +70,7 @@ func (c *cache) InvalidateAssociatedValues(tenant, name string) {
 		Name:   name,
 	}
 
+	// TODO: Notify other squirreldbs to invalidate the cache.
 	delete(c.valuesCache, key)
 }
 
@@ -105,7 +106,7 @@ func (c *cache) SetAllAssociatedNames(associatedNames map[string]string) {
 	c.nameCache = associatedNames
 }
 
-// AssociatedName return the non mutable label name associated to a name.
+// AssociatedName returns the non mutable label name associated to a name.
 func (c *cache) AssociatedName(name string) (associatedName string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
@@ -124,6 +125,7 @@ func (c *cache) InvalidateAssociatedNames() {
 	c.l.Lock()
 	defer c.l.Unlock()
 
+	// TODO: Notify other squirreldbs to invalidate the cache.
 	c.nameCache = nil
 }
 

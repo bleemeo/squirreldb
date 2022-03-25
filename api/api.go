@@ -65,7 +65,9 @@ type API struct {
 
 type MutableLabelWriter interface {
 	WriteLabelValues(lbls []mutable.LabelWithValues) error
+	DeleteLabelValues(lbls []mutable.Label) error
 	WriteLabelNames(lbls []mutable.LabelWithName) error
+	DeleteLabelNames(names []string) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -157,8 +159,11 @@ func (a *API) init() {
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
-	router.Post("/mutable/names", a.mutableLabelNamesHandler)
-	router.Post("/mutable/values", a.mutableLabelValuesHandler)
+
+	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
+	router.Del("/mutable/names", a.mutableLabelNamesDeleteHandler)
+	router.Post("/mutable/values", a.mutableLabelValuesWriteHandler)
+	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
 
 	queryable := promql.NewStore(
 		a.Index,
@@ -402,7 +407,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 }
 
-func (a API) mutableLabelValuesHandler(w http.ResponseWriter, req *http.Request) {
+func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithValues
@@ -423,7 +428,28 @@ func (a API) mutableLabelValuesHandler(w http.ResponseWriter, req *http.Request)
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesHandler(w http.ResponseWriter, req *http.Request) {
+func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var lbls []mutable.Label
+
+	err := decoder.Decode(&lbls)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	if err := a.MutableLabelWriter.DeleteLabelValues(lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithName
@@ -437,6 +463,27 @@ func (a API) mutableLabelNamesHandler(w http.ResponseWriter, req *http.Request) 
 
 	if err := a.MutableLabelWriter.WriteLabelNames(lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to write label names: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var names []string
+
+	err := decoder.Decode(&names)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	if err := a.MutableLabelWriter.DeleteLabelNames(names); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
 
 		return
 	}
