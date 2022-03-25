@@ -1,8 +1,10 @@
 package mutable
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"squirreldb/types"
 
 	"github.com/gocql/gocql"
 )
@@ -50,10 +52,10 @@ type NonMutableLabels struct {
 }
 
 // NewCassandraProvider returns a new Cassandra mutable label provider.
-func NewCassandraProvider(session *gocql.Session) (*CassandraProvider, error) {
+func NewCassandraProvider(session *gocql.Session, cluster types.Cluster) (*CassandraProvider, error) {
 	cp := &CassandraProvider{
 		session: session,
-		cache:   newCache(),
+		cache:   newCache(cluster),
 	}
 
 	if err := cp.createTables(); err != nil {
@@ -245,14 +247,18 @@ func (cp *CassandraProvider) IsMutableLabel(name string) (bool, error) {
 }
 
 // WriteLabelValues writes the label values to Cassandra.
-func (cp *CassandraProvider) WriteLabelValues(lbls []LabelWithValues) error {
+func (cp *CassandraProvider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error {
+	keys := make([]cacheKey, 0, len(lbls))
+
 	for _, label := range lbls {
 		if err := cp.insertAssociatedValues(label); err != nil {
 			return err
 		}
 
-		cp.cache.InvalidateAssociatedValues(label.Tenant, label.Name)
+		keys = append(keys, cacheKey{Tenant: label.Tenant, Name: label.Name})
 	}
+
+	cp.cache.InvalidateAssociatedValues(ctx, keys)
 
 	return nil
 }
@@ -272,14 +278,18 @@ func (cp *CassandraProvider) insertAssociatedValues(label LabelWithValues) error
 }
 
 // DeleteLabelValues deletes label values in Cassandra.
-func (cp *CassandraProvider) DeleteLabelValues(lbls []Label) error {
+func (cp *CassandraProvider) DeleteLabelValues(ctx context.Context, lbls []Label) error {
+	keys := make([]cacheKey, 0, len(lbls))
+
 	for _, label := range lbls {
 		if err := cp.deleteAssociatedValues(label); err != nil {
 			return err
 		}
 
-		cp.cache.InvalidateAssociatedValues(label.Name, label.Tenant)
+		keys = append(keys, cacheKey{Tenant: label.Tenant, Name: label.Name})
 	}
+
+	cp.cache.InvalidateAssociatedValues(ctx, keys)
 
 	return nil
 }
@@ -299,14 +309,14 @@ func (cp *CassandraProvider) deleteAssociatedValues(label Label) error {
 }
 
 // WriteLabelNames writes the label names to Cassandra.
-func (cp *CassandraProvider) WriteLabelNames(lbls []LabelWithName) error {
+func (cp *CassandraProvider) WriteLabelNames(ctx context.Context, lbls []LabelWithName) error {
 	for _, label := range lbls {
 		if err := cp.insertAssociatedName(label); err != nil {
 			return err
 		}
 	}
 
-	cp.cache.InvalidateAssociatedNames()
+	cp.cache.InvalidateAssociatedNames(ctx)
 
 	return nil
 }
@@ -326,14 +336,14 @@ func (cp *CassandraProvider) insertAssociatedName(label LabelWithName) error {
 }
 
 // DeleteLabelNames deletes mutable label names in Cassandra.
-func (cp *CassandraProvider) DeleteLabelNames(names []string) error {
+func (cp *CassandraProvider) DeleteLabelNames(ctx context.Context, names []string) error {
 	for _, name := range names {
 		if err := cp.deleteAssociatedName(name); err != nil {
 			return err
 		}
 	}
 
-	cp.cache.InvalidateAssociatedNames()
+	cp.cache.InvalidateAssociatedNames(ctx)
 
 	return nil
 }

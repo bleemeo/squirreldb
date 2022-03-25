@@ -64,10 +64,10 @@ type API struct {
 }
 
 type MutableLabelWriter interface {
-	WriteLabelValues(lbls []mutable.LabelWithValues) error
-	DeleteLabelValues(lbls []mutable.Label) error
-	WriteLabelNames(lbls []mutable.LabelWithName) error
-	DeleteLabelNames(names []string) error
+	WriteLabelValues(ctx context.Context, lbls []mutable.LabelWithValues) error
+	DeleteLabelValues(ctx context.Context, lbls []mutable.Label) error
+	WriteLabelNames(ctx context.Context, lbls []mutable.LabelWithName) error
+	DeleteLabelNames(ctx context.Context, names []string) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -419,7 +419,7 @@ func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	if err := a.MutableLabelWriter.WriteLabelValues(lbls); err != nil {
+	if err := a.MutableLabelWriter.WriteLabelValues(req.Context(), lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to write label values: %v", err), http.StatusInternalServerError)
 
 		return
@@ -440,7 +440,7 @@ func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	if err := a.MutableLabelWriter.DeleteLabelValues(lbls); err != nil {
+	if err := a.MutableLabelWriter.DeleteLabelValues(req.Context(), lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
 
 		return
@@ -461,7 +461,7 @@ func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	if err := a.MutableLabelWriter.WriteLabelNames(lbls); err != nil {
+	if err := a.MutableLabelWriter.WriteLabelNames(req.Context(), lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to write label names: %v", err), http.StatusInternalServerError)
 
 		return
@@ -482,7 +482,7 @@ func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	if err := a.MutableLabelWriter.DeleteLabelNames(names); err != nil {
+	if err := a.MutableLabelWriter.DeleteLabelNames(req.Context(), names); err != nil {
 		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
 
 		return

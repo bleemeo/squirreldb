@@ -1,8 +1,22 @@
 package mutable
 
-import "sync"
+import (
+	"bytes"
+	"context"
+	"encoding/gob"
+	"squirreldb/debug"
+	"squirreldb/types"
+	"sync"
+)
+
+const (
+	topicInvalidateAssociatedNames  = "invalidate-associated-names"
+	topicInvalidateAssociatedValues = "invalidate-associated-values"
+)
 
 type cache struct {
+	cluster types.Cluster
+
 	l sync.Mutex
 	// The name cache must always either contain no key at all, or all names
 	// present in Cassandra. It must be reassigned entirely when modified.
@@ -17,11 +31,15 @@ type cacheKey struct {
 	Name   string
 }
 
-func newCache() *cache {
+func newCache(cluster types.Cluster) *cache {
 	c := cache{
+		cluster:     cluster,
 		nameCache:   make(map[string]string),
 		valuesCache: make(map[cacheKey]map[string][]string),
 	}
+
+	c.cluster.Subscribe(topicInvalidateAssociatedValues, c.invalidateAssociatedValuesListener)
+	c.cluster.Subscribe(topicInvalidateAssociatedNames, c.invalidateAssociatedNamesListener)
 
 	return &c
 }
@@ -60,18 +78,43 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 	return
 }
 
-// InvalidateAssociatedValues invalidates the cache for a tenant and a mutable label name.
-func (c *cache) InvalidateAssociatedValues(tenant, name string) {
+// InvalidateAssociatedValues invalidates the non mutable values associated to a mutable label,
+// and tells other SquirrelDBs in the cluster to do the same.
+func (c *cache) InvalidateAssociatedValues(ctx context.Context, keys []cacheKey) {
+	// Notify the cluster, we also notify ourselves so the cache will be deleted by the listener.
+	buffer := bytes.NewBuffer(nil)
+	encoder := gob.NewEncoder(buffer)
+
+	if err := encoder.Encode(keys); err != nil {
+		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
+	}
+
+	err := c.cluster.Publish(ctx, topicInvalidateAssociatedValues, buffer.Bytes())
+	if err != nil {
+		logger.Printf("Failed to publish a message, the associated values cache won't be invalidated: %v", err)
+	}
+}
+
+// invalidateAssociatedValuesListener listens for messages from the cluster to invalidate the cache.
+func (c *cache) invalidateAssociatedValuesListener(buffer []byte) {
+	debug.Print(1, logger, "Invalidating mutable labels associated values cache")
+
+	var keys []cacheKey
+
+	decoder := gob.NewDecoder(bytes.NewReader(buffer))
+
+	if err := decoder.Decode(&keys); err != nil {
+		logger.Printf("Unable to decode associated values cache keys, the cache won't be invalidated: %v", err)
+
+		return
+	}
+
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	key := cacheKey{
-		Tenant: tenant,
-		Name:   name,
+	for _, key := range keys {
+		delete(c.valuesCache, key)
 	}
-
-	// TODO: Notify other squirreldbs to invalidate the cache.
-	delete(c.valuesCache, key)
 }
 
 // Values returns all the non mutable label values associated to a tenant and a label name.
@@ -120,12 +163,29 @@ func (c *cache) AssociatedName(name string) (associatedName string, found bool) 
 	return
 }
 
-// InvalidateAssociatedNames invalidates the associated name cache.
-func (c *cache) InvalidateAssociatedNames() {
+// InvalidateAssociatedNames invalidates the mutable labels names cache and tells other
+// SquirrelDBs in the cluster to do the same.
+func (c *cache) InvalidateAssociatedNames(ctx context.Context) {
+	// Notify the cluster, we also notify ourselves so the cache will be deleted by the listener.
+	err := c.cluster.Publish(ctx, topicInvalidateAssociatedNames, []byte("ok"))
+	if err != nil {
+		logger.Printf("Failed to publish a message, the associated names cache won't be invalidated: %v", err)
+	}
+}
+
+// invalidateAssociatedNamesListener listens for messages from the cluster to invalidate the cache.
+func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
+	debug.Print(1, logger, "Invalidating mutable labels associated names cache")
+
+	if string(buffer) != "ok" {
+		logger.Printf("Wrong message received to invalidate the associated names cache")
+
+		return
+	}
+
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	// TODO: Notify other squirreldbs to invalidate the cache.
 	c.nameCache = nil
 }
 

@@ -620,7 +620,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			mutableLabelProvider, err := s.MutableLabelProvider()
+			mutableLabelProvider, err := s.MutableLabelProvider(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -766,14 +766,19 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	return nil
 }
 
-func (s *SquirrelDB) MutableLabelProvider() (*mutable.CassandraProvider, error) {
+func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (*mutable.CassandraProvider, error) {
 	if s.mutableLabelProvider == nil {
 		session, err := s.CassandraSession()
 		if err != nil {
 			return nil, err
 		}
 
-		labelProvider, err := mutable.NewCassandraProvider(session)
+		cluster, err := s.Cluster(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		labelProvider, err := mutable.NewCassandraProvider(session, cluster)
 		if err != nil {
 			return nil, err
 		}
