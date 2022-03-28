@@ -16,6 +16,7 @@ var (
 	logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
 
 	errUnsupportedOperation = errors.New("unsupported operation")
+	ErrNoResult             = errors.New("no result")
 )
 
 // LabelProcessor can replace mutable labels by non mutable labels.
@@ -77,14 +78,6 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 			newMatcher, err = lp.processMutableLabel(tenant, matcher)
 		}
 
-		if errors.Is(err, errNoResult) {
-			// Return a matcher that matches nothing. \b is a zero-width expression that matches
-			// word boundary, it can't appear in the middle of a word, which we force it to do.
-			newMatcher, err := labels.NewMatcher(labels.MatchRegexp, "__name__", `a\bc`)
-
-			return []*labels.Matcher{newMatcher}, err
-		}
-
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +137,7 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 	}
 
 	if len(matchingLabels.Values) == 0 {
-		return nil, fmt.Errorf("%w: tenant=%s, matcher=%#v", errNoResult, tenant, matcher)
+		return nil, fmt.Errorf("%w: tenant=%s, matcher=%#v", ErrNoResult, tenant, matcher)
 	}
 
 	// The returned matcher is always a MatchRegexp, even if the matcher was a MatchNotRegexp,

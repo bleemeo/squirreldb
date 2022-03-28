@@ -2359,6 +2359,11 @@ func (c *CassandraIndex) Search(
 	// Replace mutable labels by non mutable labels.
 	matchers, err := c.labelProcessor.ProcessMutableLabels(matchers)
 	if err != nil {
+		// Return an empty metric set if the mutable matchers have no match.
+		if errors.Is(err, mutable.ErrNoResult) {
+			return &metricsLabels{c: c, ctx: ctx, ids: nil, labelsList: nil}, nil
+		}
+
 		return nil, err
 	}
 

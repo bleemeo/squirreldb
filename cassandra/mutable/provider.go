@@ -2,15 +2,12 @@ package mutable
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 )
-
-var errNoResult = errors.New("no result")
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
@@ -135,7 +132,7 @@ func (cp *CassandraProvider) associatedName(tenant, name string) (string, error)
 	associatedName, found := cp.cache.AssociatedName(tenant, name)
 	if found {
 		if associatedName == "" {
-			return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
+			return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
 		}
 
 		return associatedName, nil
@@ -149,7 +146,7 @@ func (cp *CassandraProvider) associatedName(tenant, name string) (string, error)
 
 	associatedName = associatedNames[name]
 	if associatedName == "" {
-		return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
+		return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
 	}
 
 	return associatedName, nil
@@ -185,7 +182,7 @@ func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value 
 	associatedValues, found := cp.cache.AssociatedValues(tenant, name, value)
 	if found {
 		if len(associatedValues) == 0 {
-			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
+			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", ErrNoResult, tenant, name, value)
 		}
 
 		return associatedValues, nil
@@ -198,7 +195,7 @@ func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value 
 
 	associatedValues, _ = cp.cache.AssociatedValues(tenant, name, value)
 	if len(associatedValues) == 0 {
-		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
+		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", ErrNoResult, tenant, name, value)
 	}
 
 	return associatedValues, nil
