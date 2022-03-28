@@ -393,13 +393,22 @@ func (cp *CassandraProvider) DeleteLabelNames(ctx context.Context, labelKeys []L
 
 // deleteAssociatedName deletes a mutable label name.
 func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
-	query := cp.session.Query(`
+	queryDeleteLabelNames := cp.session.Query(`
 		DELETE FROM mutable_label_names
 		WHERE tenant = ? AND name = ?
 	`, tenant, name)
 
-	if err := query.Exec(); err != nil {
-		return fmt.Errorf("delete associated name: %w", err)
+	if err := queryDeleteLabelNames.Exec(); err != nil {
+		return fmt.Errorf("delete label name from mutable_label_names: %w", err)
+	}
+
+	queryDeleteLabelValues := cp.session.Query(`
+		DELETE FROM squirreldb.mutable_label_values
+		WHERE tenant = ? AND name = ?
+	`, tenant, name)
+
+	if err := queryDeleteLabelValues.Exec(); err != nil {
+		return fmt.Errorf("delete label name from mutable_label_values: %w", err)
 	}
 
 	return nil
