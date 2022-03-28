@@ -23,7 +23,6 @@ type LabelProvider interface {
 type CassandraProvider struct {
 	session *gocql.Session
 	cache   *cache
-	metrics *metrics
 }
 
 // LabelWithValues represents a mutable label with its associated non mutable labels value.
@@ -135,6 +134,10 @@ func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, 
 func (cp *CassandraProvider) associatedName(tenant, name string) (string, error) {
 	associatedName, found := cp.cache.AssociatedName(tenant, name)
 	if found {
+		if associatedName == "" {
+			return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
+		}
+
 		return associatedName, nil
 	}
 
@@ -144,9 +147,9 @@ func (cp *CassandraProvider) associatedName(tenant, name string) (string, error)
 		return "", err
 	}
 
-	associatedName, found = associatedNames[name]
-	if !found {
-		return "", fmt.Errorf("%w: no result for name=%s", errNoResult, name)
+	associatedName = associatedNames[name]
+	if associatedName == "" {
+		return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
 	}
 
 	return associatedName, nil
@@ -181,6 +184,10 @@ func (cp *CassandraProvider) selectAssociatedNames(tenant string) (map[string]st
 func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value string) ([]string, error) {
 	associatedValues, found := cp.cache.AssociatedValues(tenant, name, value)
 	if found {
+		if len(associatedValues) == 0 {
+			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
+		}
+
 		return associatedValues, nil
 	}
 
@@ -190,6 +197,9 @@ func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value 
 	}
 
 	associatedValues, _ = cp.cache.AssociatedValues(tenant, name, value)
+	if len(associatedValues) == 0 {
+		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
+	}
 
 	return associatedValues, nil
 }

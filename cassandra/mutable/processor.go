@@ -77,6 +77,14 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 			newMatcher, err = lp.processMutableLabel(tenant, matcher)
 		}
 
+		if errors.Is(err, errNoResult) {
+			// Return a matcher that matches nothing. \b is a zero-width expression that matches
+			// word boundary, it can't appear in the middle of a word, which we force it to do.
+			newMatcher, err := labels.NewMatcher(labels.MatchRegexp, "__name__", `a\bc`)
+
+			return []*labels.Matcher{newMatcher}, err
+		}
+
 		if err != nil {
 			return nil, err
 		}

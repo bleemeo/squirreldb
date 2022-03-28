@@ -128,6 +128,8 @@ func (c *cache) SetAllAssociatedValues(tenant, name string, associatedValuesByVa
 }
 
 // AssociatedValues returns the label values associated to a mutable label name and value of a tenant.
+// It can return an empty slice if the cache is up to date butno associated values exist for this
+// tenant, name and value.
 func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
@@ -150,11 +152,12 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 	entry.lastAccess = time.Now()
 	c.valuesCache[key] = entry
 
-	associatedValues, found = entry.associatedValues[value]
+	associatedValues, _ = entry.associatedValues[value]
 
-	// TODO: Maybe we should always return true here because the cache is always in sync with Cassandra.
-	// But than means the caller must handle nil, true with the right behavior.
-	return associatedValues, found
+	// Always return true here because the cache for a tenant and label name is always in sync
+	// with Cassandra. If the associated values were not found, it means they are not present
+	// in Cassandra either, and there is no need to refresh the cache.
+	return associatedValues, true
 }
 
 // InvalidateAssociatedValues invalidates the non mutable values associated to a mutable label,
@@ -244,6 +247,8 @@ func (c *cache) SetAllAssociatedNames(tenant string, associatedNames map[string]
 }
 
 // AssociatedName returns the non mutable label name associated to a name and a tenant.
+// It can return an empty name if the cache is up to date but the associated name for this
+// tenant and name simply doesn't exist.
 func (c *cache) AssociatedName(tenant, name string) (associatedName string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
@@ -265,11 +270,12 @@ func (c *cache) AssociatedName(tenant, name string) (associatedName string, foun
 	entry.lastAccess = time.Now()
 	c.nameCache[tenant] = entry
 
-	associatedName, found = entry.associatedNames[name]
+	associatedName, _ = entry.associatedNames[name]
 
-	// TODO: Maybe we should always return true here because the cache is always in sync with Cassandra.
-	// But than means the caller must handle "", true with the right behavior.
-	return associatedName, found
+	// Always return true here because the cache for a tenant is always in sync with Cassandra.
+	// If the associated name was not found, it means it's not present in Cassandra either,
+	// and there is no need to refresh the cache.
+	return associatedName, true
 }
 
 // InvalidateAssociatedNames invalidates the mutable labels names cache and tells other
