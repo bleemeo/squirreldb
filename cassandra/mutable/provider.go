@@ -15,7 +15,7 @@ var errNoResult = errors.New("no result")
 type LabelProvider interface {
 	Get(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
-	IsMutableLabel(name string) (bool, error)
+	IsMutableLabel(tenant, name string) (bool, error)
 }
 
 // CassandraProvider is a labelProvider thats gets the labels from Cassandra.
@@ -34,8 +34,15 @@ type LabelWithValues struct {
 
 // LabelWithName represents a mutable label name with its associated non mutable label name.
 type LabelWithName struct {
+	Tenant         string `json:"tenant"`
 	Name           string `json:"name"`
 	AssociatedName string `json:"associated_name"`
+}
+
+// LabelKey is a label name and its tenant.
+type LabelKey struct {
+	Tenant string `json:"tenant"`
+	Name   string `json:"name"`
 }
 
 // Label represents a mutable label.
@@ -83,8 +90,10 @@ func (cp *CassandraProvider) createTables() error {
 
 	queryMutableLabelNames := cp.session.Query(`
 		CREATE TABLE IF NOT EXISTS mutable_label_names (
-			name text PRIMARY KEY,
+			tenant text,
+			name text,
 			associated_name text,
+			PRIMARY KEY (tenant, name)
 		)
 	`)
 
@@ -101,7 +110,7 @@ func (cp *CassandraProvider) createTables() error {
 
 // Get returns the non mutable labels corresponding to a mutable label name and value.
 func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, error) {
-	associatedName, err := cp.associatedName(name)
+	associatedName, err := cp.associatedName(tenant, name)
 	if err != nil {
 		return NonMutableLabels{}, err
 	}
@@ -120,14 +129,14 @@ func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, 
 }
 
 // associatedName returns the non mutable label name associated to a mutable label name and value.
-func (cp *CassandraProvider) associatedName(name string) (string, error) {
-	associatedName, found := cp.cache.AssociatedName(name)
+func (cp *CassandraProvider) associatedName(tenant, name string) (string, error) {
+	associatedName, found := cp.cache.AssociatedName(tenant, name)
 	if found {
 		return associatedName, nil
 	}
 
 	// List all the associated names once to set it in cache as the table only has a few rows.
-	associatedNames, err := cp.selectAssociatedNames()
+	associatedNames, err := cp.selectAssociatedNames(tenant)
 	if err != nil {
 		return "", err
 	}
@@ -141,8 +150,11 @@ func (cp *CassandraProvider) associatedName(name string) (string, error) {
 }
 
 // selectAssociatedNames returns a map of the non mutable names index by the mutable name.
-func (cp *CassandraProvider) selectAssociatedNames() (map[string]string, error) {
-	iter := cp.session.Query("SELECT name, associated_name FROM mutable_label_names").Iter()
+func (cp *CassandraProvider) selectAssociatedNames(tenant string) (map[string]string, error) {
+	iter := cp.session.Query(`
+		SELECT name, associated_name FROM mutable_label_names
+		WHERE tenant = ?
+	`, tenant).Iter()
 
 	var (
 		associatedNames = make(map[string]string)
@@ -158,7 +170,7 @@ func (cp *CassandraProvider) selectAssociatedNames() (map[string]string, error) 
 		return nil, fmt.Errorf("select labels: %w", err)
 	}
 
-	cp.cache.SetAllAssociatedNames(associatedNames)
+	cp.cache.SetAllAssociatedNames(tenant, associatedNames)
 
 	return associatedNames, nil
 }
@@ -223,10 +235,10 @@ func (cp *CassandraProvider) updateAssociatedValuesCache(tenant, name string) er
 }
 
 // IsMutableLabel returns whether the label is mutable.
-func (cp *CassandraProvider) IsMutableLabel(name string) (bool, error) {
-	mutableLabelNames, found := cp.cache.MutableLabelNames()
+func (cp *CassandraProvider) IsMutableLabel(tenant, name string) (bool, error) {
+	mutableLabelNames, found := cp.cache.MutableLabelNames(tenant)
 	if !found {
-		associatedNames, err := cp.selectAssociatedNames()
+		associatedNames, err := cp.selectAssociatedNames(tenant)
 		if err != nil {
 			return false, err
 		}
@@ -247,14 +259,20 @@ func (cp *CassandraProvider) IsMutableLabel(name string) (bool, error) {
 
 // WriteLabelValues writes the label values to Cassandra.
 func (cp *CassandraProvider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error {
-	keys := make([]cacheKey, 0, len(lbls))
+	// We use a map to to append only distinct values in the label keys.
+	used := make(map[string]struct{})
+	keys := make([]LabelKey, 0, len(lbls))
 
 	for _, label := range lbls {
 		if err := cp.insertAssociatedValues(label); err != nil {
 			return err
 		}
 
-		keys = append(keys, cacheKey{Tenant: label.Tenant, Name: label.Name})
+		if _, found := used[label.Tenant]; !found {
+			used[label.Tenant] = struct{}{}
+
+			keys = append(keys, LabelKey{Tenant: label.Tenant, Name: label.Name})
+		}
 	}
 
 	cp.cache.InvalidateAssociatedValues(ctx, keys)
@@ -278,14 +296,20 @@ func (cp *CassandraProvider) insertAssociatedValues(label LabelWithValues) error
 
 // DeleteLabelValues deletes label values in Cassandra.
 func (cp *CassandraProvider) DeleteLabelValues(ctx context.Context, lbls []Label) error {
-	keys := make([]cacheKey, 0, len(lbls))
+	// We use a map to to append only distinct values in the label keys.
+	used := make(map[string]struct{})
+	keys := make([]LabelKey, 0, len(lbls))
 
 	for _, label := range lbls {
 		if err := cp.deleteAssociatedValues(label); err != nil {
 			return err
 		}
 
-		keys = append(keys, cacheKey{Tenant: label.Tenant, Name: label.Name})
+		if _, found := used[label.Tenant]; !found {
+			used[label.Tenant] = struct{}{}
+
+			keys = append(keys, LabelKey{Tenant: label.Tenant, Name: label.Name})
+		}
 	}
 
 	cp.cache.InvalidateAssociatedValues(ctx, keys)
@@ -309,13 +333,23 @@ func (cp *CassandraProvider) deleteAssociatedValues(label Label) error {
 
 // WriteLabelNames writes the label names to Cassandra.
 func (cp *CassandraProvider) WriteLabelNames(ctx context.Context, lbls []LabelWithName) error {
+	// We use a map to to append only distinct values in the tenants.
+	used := make(map[string]struct{})
+	tenants := make([]string, 0, len(lbls))
+
 	for _, label := range lbls {
 		if err := cp.insertAssociatedName(label); err != nil {
 			return err
 		}
+
+		if _, found := used[label.Tenant]; !found {
+			used[label.Tenant] = struct{}{}
+
+			tenants = append(tenants, label.Tenant)
+		}
 	}
 
-	cp.cache.InvalidateAssociatedNames(ctx)
+	cp.cache.InvalidateAssociatedNames(ctx, tenants)
 
 	return nil
 }
@@ -323,9 +357,9 @@ func (cp *CassandraProvider) WriteLabelNames(ctx context.Context, lbls []LabelWi
 // insertAssociatedName inserts or modifies the non mutable label name associated to a mutable label name.
 func (cp *CassandraProvider) insertAssociatedName(label LabelWithName) error {
 	query := cp.session.Query(`
-		INSERT INTO mutable_label_names (name, associated_name)
-		VALUES (?, ?)
-	`, label.Name, label.AssociatedName)
+		INSERT INTO mutable_label_names (tenant, name, associated_name)
+		VALUES (?, ?, ?)
+	`, label.Tenant, label.Name, label.AssociatedName)
 
 	if err := query.Exec(); err != nil {
 		return fmt.Errorf("insert associated name: %w", err)
@@ -335,24 +369,34 @@ func (cp *CassandraProvider) insertAssociatedName(label LabelWithName) error {
 }
 
 // DeleteLabelNames deletes mutable label names in Cassandra.
-func (cp *CassandraProvider) DeleteLabelNames(ctx context.Context, names []string) error {
-	for _, name := range names {
-		if err := cp.deleteAssociatedName(name); err != nil {
+func (cp *CassandraProvider) DeleteLabelNames(ctx context.Context, labelKeys []LabelKey) error {
+	// We use a map to to append only distinct values in the tenants.
+	used := make(map[string]struct{})
+	tenants := make([]string, 0, len(labelKeys))
+
+	for _, name := range labelKeys {
+		if err := cp.deleteAssociatedName(name.Tenant, name.Name); err != nil {
 			return err
+		}
+
+		if _, found := used[name.Tenant]; !found {
+			used[name.Tenant] = struct{}{}
+
+			tenants = append(tenants, name.Tenant)
 		}
 	}
 
-	cp.cache.InvalidateAssociatedNames(ctx)
+	cp.cache.InvalidateAssociatedNames(ctx, tenants)
 
 	return nil
 }
 
 // deleteAssociatedName deletes a mutable label name.
-func (cp *CassandraProvider) deleteAssociatedName(name string) error {
+func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
 	query := cp.session.Query(`
 		DELETE FROM mutable_label_names
-		WHERE name = ?
-	`, name)
+		WHERE tenant = ? AND name = ?
+	`, tenant, name)
 
 	if err := query.Exec(); err != nil {
 		return fmt.Errorf("delete associated name: %w", err)

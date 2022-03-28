@@ -67,7 +67,7 @@ type MutableLabelWriter interface {
 	WriteLabelValues(ctx context.Context, lbls []mutable.LabelWithValues) error
 	DeleteLabelValues(ctx context.Context, lbls []mutable.Label) error
 	WriteLabelNames(ctx context.Context, lbls []mutable.LabelWithName) error
-	DeleteLabelNames(ctx context.Context, names []string) error
+	DeleteLabelNames(ctx context.Context, names []mutable.LabelKey) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -473,16 +473,16 @@ func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Requ
 func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
-	var names []string
+	var labelKeys []mutable.LabelKey
 
-	err := decoder.Decode(&names)
+	err := decoder.Decode(&labelKeys)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
 
 		return
 	}
 
-	if err := a.MutableLabelWriter.DeleteLabelNames(req.Context(), names); err != nil {
+	if err := a.MutableLabelWriter.DeleteLabelNames(req.Context(), labelKeys); err != nil {
 		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
 
 		return

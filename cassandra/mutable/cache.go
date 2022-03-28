@@ -22,30 +22,32 @@ type cache struct {
 	cluster types.Cluster
 
 	l sync.Mutex
-	// The name cache must always either contain no key at all, or all names
-	// present in Cassandra. It must be reassigned entirely when modified.
-	nameCache map[string]string
-	// map[tenant, name][value] contains the non mutable associated values.
-	valuesCache map[cacheKey]cacheEntry
+	// Name cache indexed by tenant.
+	nameCache   map[string]nameEntry
+	valuesCache map[LabelKey]valuesEntry
 }
 
-type cacheKey struct {
-	Tenant string
-	Name   string
-}
-
-type cacheEntry struct {
+type valuesEntry struct {
 	lastAccess time.Time
+	// associatedValues[value] contains the non mutable associated values.
 	// This map must always be reassigned entirely.
 	// Values() assumes it always contains all possible values.
 	associatedValues map[string][]string
 }
 
+type nameEntry struct {
+	lastAccess time.Time
+	// associatedNames[mutable name] contains the associated non mutable name.
+	// The map must always either contain no key at all, or all names
+	// present in Cassandra. It must be reassigned entirely when modified.
+	associatedNames map[string]string
+}
+
 func newCache(ctx context.Context, cluster types.Cluster) *cache {
 	c := cache{
 		cluster:     cluster,
-		nameCache:   make(map[string]string),
-		valuesCache: make(map[cacheKey]cacheEntry),
+		nameCache:   make(map[string]nameEntry),
+		valuesCache: make(map[LabelKey]valuesEntry),
 	}
 
 	c.cluster.Subscribe(topicInvalidateAssociatedValues, c.invalidateAssociatedValuesListener)
@@ -77,11 +79,21 @@ func (c *cache) cleanup() {
 
 	now := time.Now()
 
+	// Delete expired entries in values cache.
 	for key, entry := range c.valuesCache {
 		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
-			debug.Print(1, logger, "Deleting expired mutable cache entry %#v", key)
+			debug.Print(1, logger, "Deleting expired mutable values cache entry %#v", key)
 
 			delete(c.valuesCache, key)
+		}
+	}
+
+	// Delete expired entries in name cache.
+	for key, entry := range c.nameCache {
+		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
+			debug.Print(1, logger, "Deleting expired mutable name cache entry %#v", key)
+
+			delete(c.nameCache, key)
 		}
 	}
 }
@@ -92,12 +104,12 @@ func (c *cache) SetAllAssociatedValues(tenant, name string, associatedValuesByVa
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	key := cacheKey{
+	key := LabelKey{
 		Tenant: tenant,
 		Name:   name,
 	}
 
-	c.valuesCache[key] = cacheEntry{
+	c.valuesCache[key] = valuesEntry{
 		lastAccess:       time.Now(),
 		associatedValues: associatedValuesByValue,
 	}
@@ -108,7 +120,7 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	key := cacheKey{
+	key := LabelKey{
 		Tenant: tenant,
 		Name:   name,
 	}
@@ -119,10 +131,8 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 	}
 
 	// Update last access.
-	c.valuesCache[key] = cacheEntry{
-		lastAccess:       time.Now(),
-		associatedValues: entry.associatedValues,
-	}
+	entry.lastAccess = time.Now()
+	c.valuesCache[key] = entry
 
 	associatedValues, found = entry.associatedValues[value]
 
@@ -131,13 +141,13 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 
 // InvalidateAssociatedValues invalidates the non mutable values associated to a mutable label,
 // and tells other SquirrelDBs in the cluster to do the same.
-func (c *cache) InvalidateAssociatedValues(ctx context.Context, keys []cacheKey) {
+func (c *cache) InvalidateAssociatedValues(ctx context.Context, keys []LabelKey) {
 	// Notify the cluster, we also notify ourselves so the cache will be deleted by the listener.
 	buffer := bytes.NewBuffer(nil)
 	encoder := gob.NewEncoder(buffer)
 
 	if err := encoder.Encode(keys); err != nil {
-		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
+		logger.Printf("Failed encode message, the associated values cache won't be invalidated: %v", err)
 	}
 
 	err := c.cluster.Publish(ctx, topicInvalidateAssociatedValues, buffer.Bytes())
@@ -150,12 +160,12 @@ func (c *cache) InvalidateAssociatedValues(ctx context.Context, keys []cacheKey)
 func (c *cache) invalidateAssociatedValuesListener(buffer []byte) {
 	debug.Print(1, logger, "Invalidating mutable labels associated values cache")
 
-	var keys []cacheKey
+	var keys []LabelKey
 
 	decoder := gob.NewDecoder(bytes.NewReader(buffer))
 
 	if err := decoder.Decode(&keys); err != nil {
-		logger.Printf("Unable to decode associated values cache keys, the cache won't be invalidated: %v", err)
+		logger.Printf("Unable to decode associated values cache keys, the values cache won't be invalidated: %v", err)
 
 		return
 	}
@@ -173,7 +183,7 @@ func (c *cache) Values(tenant, name string) (values []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	key := cacheKey{
+	key := LabelKey{
 		Tenant: tenant,
 		Name:   name,
 	}
@@ -184,10 +194,8 @@ func (c *cache) Values(tenant, name string) (values []string, found bool) {
 	}
 
 	// Update last access.
-	c.valuesCache[key] = cacheEntry{
-		lastAccess:       time.Now(),
-		associatedValues: entry.associatedValues,
-	}
+	entry.lastAccess = time.Now()
+	c.valuesCache[key] = entry
 
 	// When not empty, the values cache for a key always contains all rows from Cassandra.
 	for value := range entry.associatedValues {
@@ -198,16 +206,19 @@ func (c *cache) Values(tenant, name string) (values []string, found bool) {
 }
 
 // SetAllAssociatedNames sets all mutable label names and their associated non mutable names in cache.
-// associatedNames must contain all possible mutable label names.
-func (c *cache) SetAllAssociatedNames(associatedNames map[string]string) {
+// associatedNames must contain all possible mutable label names for this tenant.
+func (c *cache) SetAllAssociatedNames(tenant string, associatedNames map[string]string) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	c.nameCache = associatedNames
+	c.nameCache[tenant] = nameEntry{
+		lastAccess:      time.Now(),
+		associatedNames: associatedNames,
+	}
 }
 
-// AssociatedName returns the non mutable label name associated to a name.
-func (c *cache) AssociatedName(name string) (associatedName string, found bool) {
+// AssociatedName returns the non mutable label name associated to a name and a tenant.
+func (c *cache) AssociatedName(tenant, name string) (associatedName string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -215,16 +226,32 @@ func (c *cache) AssociatedName(name string) (associatedName string, found bool) 
 		return "", false
 	}
 
-	associatedName, found = c.nameCache[name]
+	entry, found := c.nameCache[tenant]
+	if !found {
+		return "", false
+	}
+
+	// Update last access.
+	entry.lastAccess = time.Now()
+	c.nameCache[tenant] = entry
+
+	associatedName, found = entry.associatedNames[name]
 
 	return
 }
 
 // InvalidateAssociatedNames invalidates the mutable labels names cache and tells other
 // SquirrelDBs in the cluster to do the same.
-func (c *cache) InvalidateAssociatedNames(ctx context.Context) {
+func (c *cache) InvalidateAssociatedNames(ctx context.Context, tenants []string) {
 	// Notify the cluster, we also notify ourselves so the cache will be deleted by the listener.
-	err := c.cluster.Publish(ctx, topicInvalidateAssociatedNames, []byte("ok"))
+	buffer := bytes.NewBuffer(nil)
+	encoder := gob.NewEncoder(buffer)
+
+	if err := encoder.Encode(tenants); err != nil {
+		logger.Printf("Failed encode message, the associated names cache won't be invalidated: %v", err)
+	}
+
+	err := c.cluster.Publish(ctx, topicInvalidateAssociatedNames, buffer.Bytes())
 	if err != nil {
 		logger.Printf("Failed to publish a message, the associated names cache won't be invalidated: %v", err)
 	}
@@ -234,8 +261,12 @@ func (c *cache) InvalidateAssociatedNames(ctx context.Context) {
 func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	debug.Print(1, logger, "Invalidating mutable labels associated names cache")
 
-	if string(buffer) != "ok" {
-		logger.Printf("Wrong message received to invalidate the associated names cache")
+	var tenants []string
+
+	decoder := gob.NewDecoder(bytes.NewReader(buffer))
+
+	if err := decoder.Decode(&tenants); err != nil {
+		logger.Printf("Unable to decode tenants, the name cache won't be invalidated: %v", err)
 
 		return
 	}
@@ -243,20 +274,27 @@ func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	c.nameCache = nil
+	for _, tenant := range tenants {
+		delete(c.nameCache, tenant)
+	}
 }
 
 // MutableLabelNames returns all the mutable label names in cache.
-func (c *cache) MutableLabelNames() (names []string, found bool) {
+func (c *cache) MutableLabelNames(tenant string) (names []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	if len(c.nameCache) == 0 {
+	entry, found := c.nameCache[tenant]
+	if !found {
 		return nil, false
 	}
 
-	// When not empty, the name cache always contains all rows from Cassandra.
-	for name := range c.nameCache {
+	// Update last access.
+	entry.lastAccess = time.Now()
+	c.nameCache[tenant] = entry
+
+	// When not nil, the name cache for a tenant always contains all rows from Cassandra.
+	for name := range entry.associatedNames {
 		names = append(names, name)
 	}
 
