@@ -143,6 +143,10 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 		}
 	}
 
+	if len(matchingLabels.Values) == 0 {
+		return nil, fmt.Errorf("%w: tenant=%s, matcher=%#v", errNoResult, tenant, matcher)
+	}
+
 	// The returned matcher is always a MatchRegexp, even if the matcher was a MatchNotRegexp,
 	// because we searched for matching values.
 	newMatcher, err := mergeLabels(matchingLabels, labels.MatchRegexp)
