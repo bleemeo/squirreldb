@@ -23,7 +23,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Namespace: "squirreldb",
 			Subsystem: "queryable",
 			Name:      "series_evaluated",
-			Help:      "Total series evaludated by SquirrelDB PromQL",
+			Help:      "Total series evaluated by SquirrelDB PromQL",
 			Buckets:   []float64{0, 1, 5, 10, 100, 1000, 10000},
 		}),
 	}

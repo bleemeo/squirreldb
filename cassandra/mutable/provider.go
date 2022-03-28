@@ -7,6 +7,7 @@ import (
 	"squirreldb/types"
 
 	"github.com/gocql/gocql"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var errNoResult = errors.New("no result")
@@ -22,6 +23,7 @@ type LabelProvider interface {
 type CassandraProvider struct {
 	session *gocql.Session
 	cache   *cache
+	metrics *metrics
 }
 
 // LabelWithValues represents a mutable label with its associated non mutable labels value.
@@ -61,12 +63,13 @@ type NonMutableLabels struct {
 // NewCassandraProvider returns a new Cassandra mutable label provider.
 func NewCassandraProvider(
 	ctx context.Context,
+	reg prometheus.Registerer,
 	session *gocql.Session,
 	cluster types.Cluster,
 ) (*CassandraProvider, error) {
 	cp := &CassandraProvider{
 		session: session,
-		cache:   newCache(ctx, cluster),
+		cache:   newCache(ctx, reg, cluster),
 	}
 
 	if err := cp.createTables(); err != nil {

@@ -8,6 +8,8 @@ import (
 	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -20,6 +22,7 @@ const (
 
 type cache struct {
 	cluster types.Cluster
+	metrics *metrics
 
 	l sync.Mutex
 	// Name cache indexed by tenant.
@@ -43,9 +46,10 @@ type nameEntry struct {
 	associatedNames map[string]string
 }
 
-func newCache(ctx context.Context, cluster types.Cluster) *cache {
+func newCache(ctx context.Context, reg prometheus.Registerer, cluster types.Cluster) *cache {
 	c := cache{
 		cluster:     cluster,
+		metrics:     newMetrics(reg),
 		nameCache:   make(map[string]nameEntry),
 		valuesCache: make(map[LabelKey]valuesEntry),
 	}
@@ -71,6 +75,8 @@ func (c *cache) cleanupScheduler(ctx context.Context) {
 			return
 		}
 	}
+
+	cleanupTicker.Stop()
 }
 
 func (c *cache) cleanup() {
@@ -88,6 +94,8 @@ func (c *cache) cleanup() {
 		}
 	}
 
+	c.metrics.CacheSize.WithLabelValues("values").Set(float64(len(c.valuesCache)))
+
 	// Delete expired entries in name cache.
 	for key, entry := range c.nameCache {
 		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
@@ -96,6 +104,8 @@ func (c *cache) cleanup() {
 			delete(c.nameCache, key)
 		}
 	}
+
+	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.nameCache)))
 }
 
 // SetAllAssociatedValues sets mutable label values in cache.
@@ -113,12 +123,18 @@ func (c *cache) SetAllAssociatedValues(tenant, name string, associatedValuesByVa
 		lastAccess:       time.Now(),
 		associatedValues: associatedValuesByValue,
 	}
+
+	c.metrics.CacheSize.WithLabelValues("values").Set(float64(len(c.valuesCache)))
 }
 
 // AssociatedValues returns the label values associated to a mutable label name and value of a tenant.
 func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("values", metricStatus(found)).Inc()
+	}()
 
 	key := LabelKey{
 		Tenant: tenant,
@@ -136,7 +152,9 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 
 	associatedValues, found = entry.associatedValues[value]
 
-	return
+	// TODO: Maybe we should always return true here because the cache is always in sync with Cassandra.
+	// But than means the caller must handle nil, true with the right behavior.
+	return associatedValues, found
 }
 
 // InvalidateAssociatedValues invalidates the non mutable values associated to a mutable label,
@@ -176,12 +194,18 @@ func (c *cache) invalidateAssociatedValuesListener(buffer []byte) {
 	for _, key := range keys {
 		delete(c.valuesCache, key)
 	}
+
+	c.metrics.CacheSize.WithLabelValues("values").Set(float64(len(c.valuesCache)))
 }
 
 // Values returns all the non mutable label values associated to a tenant and a label name.
 func (c *cache) Values(tenant, name string) (values []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("values", metricStatus(found)).Inc()
+	}()
 
 	key := LabelKey{
 		Tenant: tenant,
@@ -215,12 +239,18 @@ func (c *cache) SetAllAssociatedNames(tenant string, associatedNames map[string]
 		lastAccess:      time.Now(),
 		associatedNames: associatedNames,
 	}
+
+	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.nameCache)))
 }
 
 // AssociatedName returns the non mutable label name associated to a name and a tenant.
 func (c *cache) AssociatedName(tenant, name string) (associatedName string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("names", metricStatus(found)).Inc()
+	}()
 
 	if c.nameCache == nil {
 		return "", false
@@ -237,7 +267,9 @@ func (c *cache) AssociatedName(tenant, name string) (associatedName string, foun
 
 	associatedName, found = entry.associatedNames[name]
 
-	return
+	// TODO: Maybe we should always return true here because the cache is always in sync with Cassandra.
+	// But than means the caller must handle "", true with the right behavior.
+	return associatedName, found
 }
 
 // InvalidateAssociatedNames invalidates the mutable labels names cache and tells other
@@ -277,12 +309,18 @@ func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	for _, tenant := range tenants {
 		delete(c.nameCache, tenant)
 	}
+
+	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.valuesCache)))
 }
 
 // MutableLabelNames returns all the mutable label names in cache.
 func (c *cache) MutableLabelNames(tenant string) (names []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("names", metricStatus(found)).Inc()
+	}()
 
 	entry, found := c.nameCache[tenant]
 	if !found {
