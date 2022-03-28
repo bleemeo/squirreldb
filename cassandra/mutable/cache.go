@@ -152,7 +152,7 @@ func (c *cache) AssociatedValues(tenant, name, value string) (associatedValues [
 	entry.lastAccess = time.Now()
 	c.valuesCache[key] = entry
 
-	associatedValues, _ = entry.associatedValues[value]
+	associatedValues = entry.associatedValues[value]
 
 	// Always return true here because the cache for a tenant and label name is always in sync
 	// with Cassandra. If the associated values were not found, it means they are not present
@@ -270,7 +270,7 @@ func (c *cache) AssociatedName(tenant, name string) (associatedName string, foun
 	entry.lastAccess = time.Now()
 	c.nameCache[tenant] = entry
 
-	associatedName, _ = entry.associatedNames[name]
+	associatedName = entry.associatedNames[name]
 
 	// Always return true here because the cache for a tenant is always in sync with Cassandra.
 	// If the associated name was not found, it means it's not present in Cassandra either,
