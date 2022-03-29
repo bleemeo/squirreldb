@@ -51,9 +51,8 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 		}
 	}
 
+	// Mutable labels are disabled when no tenant is found.
 	if tenant == "" {
-		logger.Printf("No tenant found in matchers %v", matchers)
-
 		return matchers, nil
 	}
 
