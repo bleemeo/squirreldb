@@ -412,6 +412,25 @@ func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Req
 		return
 	}
 
+	// Check that all fields except the associated values are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.Value == "" {
+			errMsg := "keys must be provided and not empty (tenant, name, value): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+
+		for _, value := range label.AssociatedValues {
+			if value == "" {
+				errMsg := "associated values can't contain an empty string: %#v"
+				http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+				return
+			}
+		}
+	}
+
 	if err := a.MutableLabelWriter.WriteLabelValues(req.Context(), lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to write label values: %v", err), http.StatusInternalServerError)
 
@@ -421,7 +440,7 @@ func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Req
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.Label
@@ -433,6 +452,16 @@ func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Re
 		return
 	}
 
+	// Check that all fields are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.Value == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name, value): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+	}
+
 	if err := a.MutableLabelWriter.DeleteLabelValues(req.Context(), lbls); err != nil {
 		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
 
@@ -442,7 +471,7 @@ func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Re
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) {
+func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithName
@@ -452,6 +481,16 @@ func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Requ
 		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
 
 		return
+	}
+
+	// Check that all fields are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.AssociatedName == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name, associated_name): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
 	}
 
 	if err := a.MutableLabelWriter.WriteLabelNames(req.Context(), lbls); err != nil {
@@ -473,6 +512,16 @@ func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Req
 		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
 
 		return
+	}
+
+	// Check that all fields are not empty.
+	for _, label := range labelKeys {
+		if label.Tenant == "" || label.Name == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
 	}
 
 	if err := a.MutableLabelWriter.DeleteLabelNames(req.Context(), labelKeys); err != nil {
