@@ -6,53 +6,76 @@ import (
 )
 
 // MockLabelProvider is a label provider which gets its labels from hardcoded values.
-type MockLabelProvider struct{}
+type MockLabelProvider struct {
+	labels MutableLabels
+}
+
+// MutableLabels stores all mutable labels in the dummy label provider.
+type MutableLabels map[mutable.LabelKey]map[string]mutable.NonMutableLabels
+
+//nolint:gochecknoglobals
+var DefaultMutableLabels = MutableLabels{
+	{
+		Tenant: "1234",
+		Name:   "group",
+	}: {
+		"group1": mutable.NonMutableLabels{
+			Name:   "instance",
+			Values: []string{"server1", "server2", "server3"},
+		},
+		"group2": mutable.NonMutableLabels{
+			Name:   "instance",
+			Values: []string{"server2", "server3"},
+		},
+		"group3": mutable.NonMutableLabels{
+			Name:   "instance",
+			Values: []string{"server4"},
+		},
+	},
+}
 
 // NewMutableLabelProvider returns a mock label provider.
-func NewMutableLabelProvider() MockLabelProvider {
-	return MockLabelProvider{}
-}
-
-func (lp MockLabelProvider) mutableLabels(tenant, name string) map[string]mutable.NonMutableLabels {
-	type key struct {
-		tenant string
-		name   string
+func NewMutableLabelProvider(lbls MutableLabels) MockLabelProvider {
+	if lbls == nil {
+		lbls = make(MutableLabels)
 	}
 
-	lbls := map[key]map[string]mutable.NonMutableLabels{
-		{
-			tenant: "1234",
-			name:   "group",
-		}: {
-			"group1": mutable.NonMutableLabels{
-				Name:   "instance",
-				Values: []string{"server1", "server2", "server3"},
-			},
-			"group2": mutable.NonMutableLabels{
-				Name:   "instance",
-				Values: []string{"server2", "server3"},
-			},
-			"group3": mutable.NonMutableLabels{
-				Name:   "instance",
-				Values: []string{"server4"},
-			},
-		},
-	}
-
-	return lbls[key{tenant: tenant, name: name}]
+	return MockLabelProvider{labels: lbls}
 }
 
+// Get returns the non mutable labels corresponding to a mutable label name and value.
 func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.NonMutableLabels, error) {
-	ls := lp.mutableLabels(tenant, name)[value]
+	key := mutable.LabelKey{
+		Tenant: tenant,
+		Name:   name,
+	}
 
-	return ls, nil
+	lbls, found := lp.labels[key]
+	if !found {
+		return mutable.NonMutableLabels{}, mutable.ErrNoResult
+	}
+
+	nonMutableLabels, found := lbls[value]
+	if !found {
+		return mutable.NonMutableLabels{}, mutable.ErrNoResult
+	}
+
+	return nonMutableLabels, nil
 }
 
 func (lp MockLabelProvider) AllValues(tenant, name string) ([]string, error) {
-	ls := lp.mutableLabels(tenant, name)
+	key := mutable.LabelKey{
+		Tenant: tenant,
+		Name:   name,
+	}
 
-	keys := make([]string, 0, len(ls))
-	for k := range ls {
+	lbls, found := lp.labels[key]
+	if !found {
+		return nil, mutable.ErrNoResult
+	}
+
+	keys := make([]string, 0, len(lbls))
+	for k := range lbls {
 		keys = append(keys, k)
 	}
 

@@ -89,7 +89,8 @@ func TestProcessMutableLabels(t *testing.T) {
 		},
 	}
 
-	lp := mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(), "__account_id")
+	provider := dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels)
+	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
 		test := test
