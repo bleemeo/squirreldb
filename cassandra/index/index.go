@@ -191,7 +191,7 @@ func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
 	session *gocql.Session,
-	mutableLabelProvider *mutable.CassandraProvider,
+	mutableLabelProvider mutable.ProviderAndWriter,
 	tenantLabelName string,
 	options Options,
 ) (*CassandraIndex, error) {

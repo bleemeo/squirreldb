@@ -25,6 +25,7 @@ var defaults = map[string]interface{}{
 	"internal.states":                        "cassandra",
 	"internal.store":                         "batcher",
 	"internal.redis_keyspace":                "",
+	"internal.mutable_labels_provider":       "cassandra",
 	"telemetry.address":                      "https://telemetry.bleemeo.com/v1/telemetry/",
 	"telemetry.enabled":                      true,
 	"telemetry.id.path":                      "./telemetry.json",

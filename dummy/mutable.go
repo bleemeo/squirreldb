@@ -1,6 +1,8 @@
 package dummy
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"squirreldb/cassandra/mutable"
 )
@@ -13,8 +15,8 @@ type MockLabelProvider struct {
 // MutableLabels stores all mutable labels in the dummy label provider.
 type MutableLabels map[mutable.LabelKey]map[string]mutable.NonMutableLabels
 
-//nolint:gochecknoglobals
-var DefaultMutableLabels = MutableLabels{
+// DefaultMutableLabels contains some mutable labels that can be used in tests.
+var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
 	{
 		Tenant: "1234",
 		Name:   "group",
@@ -87,5 +89,30 @@ func (lp MockLabelProvider) AllValues(tenant, name string) ([]string, error) {
 
 // IsMutableLabel returns whether the label is mutable.
 func (lp MockLabelProvider) IsMutableLabel(tenant, name string) (bool, error) {
-	return name == "group", nil
+	key := mutable.LabelKey{
+		Tenant: tenant,
+		Name:   name,
+	}
+	_, found := lp.labels[key]
+
+	return found, nil
+}
+
+// Implement LabelWriter methods.
+var errNotImplemented = errors.New("not implemented")
+
+func (lp MockLabelProvider) WriteLabelValues(ctx context.Context, lbls []mutable.LabelWithValues) error {
+	return errNotImplemented
+}
+
+func (lp MockLabelProvider) DeleteLabelValues(ctx context.Context, lbls []mutable.Label) error {
+	return errNotImplemented
+}
+
+func (lp MockLabelProvider) WriteLabelNames(ctx context.Context, lbls []mutable.LabelWithName) error {
+	return errNotImplemented
+}
+
+func (lp MockLabelProvider) DeleteLabelNames(ctx context.Context, names []mutable.LabelKey) error {
+	return errNotImplemented
 }

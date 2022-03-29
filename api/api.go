@@ -48,7 +48,7 @@ type API struct {
 	Index                       types.Index
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
-	MutableLabelWriter          MutableLabelWriter
+	MutableLabelWriter          mutable.LabelWriter
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
@@ -61,13 +61,6 @@ type API struct {
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
-}
-
-type MutableLabelWriter interface {
-	WriteLabelValues(ctx context.Context, lbls []mutable.LabelWithValues) error
-	DeleteLabelValues(ctx context.Context, lbls []mutable.Label) error
-	WriteLabelNames(ctx context.Context, lbls []mutable.LabelWithName) error
-	DeleteLabelNames(ctx context.Context, names []mutable.LabelKey) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.

@@ -74,7 +74,7 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-	mutableLabelProvider     *mutable.CassandraProvider
+	mutableLabelProvider     mutable.ProviderAndWriter
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -766,25 +766,37 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	return nil
 }
 
-func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (*mutable.CassandraProvider, error) {
+func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.ProviderAndWriter, error) {
 	if s.mutableLabelProvider == nil {
-		session, err := s.CassandraSession()
-		if err != nil {
-			return nil, err
-		}
+		switch s.Config.String("internal.mutable_labels_provider") {
+		case backendCassandra:
+			session, err := s.CassandraSession()
+			if err != nil {
+				return nil, err
+			}
 
-		cluster, err := s.Cluster(ctx)
-		if err != nil {
-			return nil, err
-		}
+			cluster, err := s.Cluster(ctx)
+			if err != nil {
+				return nil, err
+			}
 
-		labelProvider, err := mutable.NewCassandraProvider(ctx, s.MetricRegistry, session, cluster)
-		if err != nil {
-			return nil, err
-		}
+			labelProvider, err := mutable.NewCassandraProvider(ctx, s.MetricRegistry, session, cluster)
+			if err != nil {
+				return nil, err
+			}
 
-		s.mutableLabelProvider = labelProvider
-		s.api.MutableLabelWriter = labelProvider
+			s.mutableLabelProvider = labelProvider
+			s.api.MutableLabelWriter = labelProvider
+		case backendDummy:
+			logger.Println("Warning: Cassandra is disabled for mutable labels. Using dummy provider that returns no label.")
+
+			labelProvider := dummy.NewMutableLabelProvider(nil)
+
+			s.mutableLabelProvider = labelProvider
+			s.api.MutableLabelWriter = labelProvider
+		default:
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.mutable_labels_provider"))
+		}
 	}
 
 	return s.mutableLabelProvider, nil

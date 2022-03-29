@@ -16,6 +16,20 @@ type LabelProvider interface {
 	IsMutableLabel(tenant, name string) (bool, error)
 }
 
+// LabelWriter allows to add and delete mutable labels.
+type LabelWriter interface {
+	WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error
+	DeleteLabelValues(ctx context.Context, lbls []Label) error
+	WriteLabelNames(ctx context.Context, lbls []LabelWithName) error
+	DeleteLabelNames(ctx context.Context, names []LabelKey) error
+}
+
+// ProviderAndWriter allows to get and write mutable labels.
+type ProviderAndWriter interface {
+	LabelProvider
+	LabelWriter
+}
+
 // CassandraProvider is a labelProvider thats gets the labels from Cassandra.
 type CassandraProvider struct {
 	session *gocql.Session
