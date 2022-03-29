@@ -201,7 +201,7 @@ func (c *cache) invalidateAssociatedValuesListener(buffer []byte) {
 	c.metrics.CacheSize.WithLabelValues("values").Set(float64(len(c.valuesCache)))
 }
 
-// Values returns all the non mutable label values associated to a tenant and a label name.
+// Values returns all the mutable label values associated to a tenant and a label name.
 func (c *cache) Values(tenant, name string) (values []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
@@ -246,10 +246,10 @@ func (c *cache) SetAllAssociatedNames(tenant string, associatedNames map[string]
 	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.nameCache)))
 }
 
-// AssociatedName returns the non mutable label name associated to a name and a tenant.
+// NonMutableName returns the non mutable label name associated to a mutable name and a tenant.
 // It can return an empty name if the cache is up to date but the associated name for this
 // tenant and name simply doesn't exist.
-func (c *cache) AssociatedName(tenant, name string) (associatedName string, found bool) {
+func (c *cache) NonMutableName(tenant, name string) (nonMutableName string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -270,12 +270,12 @@ func (c *cache) AssociatedName(tenant, name string) (associatedName string, foun
 	entry.lastAccess = time.Now()
 	c.nameCache[tenant] = entry
 
-	associatedName = entry.associatedNames[name]
+	nonMutableName = entry.associatedNames[name]
 
 	// Always return true here because the cache for a tenant is always in sync with Cassandra.
 	// If the associated name was not found, it means it's not present in Cassandra either,
 	// and there is no need to refresh the cache.
-	return associatedName, true
+	return nonMutableName, true
 }
 
 // InvalidateAssociatedNames invalidates the mutable labels names cache and tells other
@@ -317,6 +317,35 @@ func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	}
 
 	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.valuesCache)))
+}
+
+// MutableName returns the mutable label name associated to a name and a tenant.
+// It can return an empty name if the cache is up to date but the mutable name for this
+// tenant and name simply doesn't exist.
+func (c *cache) MutableName(tenant, name string) (mutableName string, found bool) {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("names", metricStatus(found)).Inc()
+	}()
+
+	entry, found := c.nameCache[tenant]
+	if !found {
+		return "", false
+	}
+
+	// Update last access.
+	entry.lastAccess = time.Now()
+	c.nameCache[tenant] = entry
+
+	for mutableName, nonMutableName := range entry.associatedNames {
+		if name == nonMutableName {
+			return mutableName, true
+		}
+	}
+
+	return "", true
 }
 
 // MutableLabelNames returns all the mutable label names in cache.

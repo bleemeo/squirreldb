@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"strconv"
@@ -26,6 +27,7 @@ var (
 type Store struct {
 	Index                     types.Index
 	Reader                    types.MetricReader
+	LabelProcessor            *mutable.LabelProcessor
 	MetricRegistry            prometheus.Registerer
 	DefaultMaxEvaluatedPoints uint64
 	DefaultMaxEvaluatedSeries uint32
@@ -37,6 +39,7 @@ type querier struct {
 	ctx                context.Context //nolint:containedctx
 	index              IndexWithStats
 	reader             MetricReaderWithStats
+	labelProcessor     *mutable.LabelProcessor
 	mint               int64
 	maxt               int64
 	forcePreAggregated bool
@@ -57,6 +60,7 @@ type IndexWithStats interface {
 func NewStore(
 	index types.Index,
 	reader types.MetricReader,
+	labelProcessor *mutable.LabelProcessor,
 	promQLMaxEvaluatedSeries uint32,
 	promQLMaxEvaluatedPoints uint64,
 	metricRegistry prometheus.Registerer,
@@ -64,6 +68,7 @@ func NewStore(
 	store := Store{
 		Index:                     index,
 		Reader:                    reader,
+		LabelProcessor:            labelProcessor,
 		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
 		metrics:                   newMetrics(metricRegistry),
@@ -148,12 +153,13 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	q := querier{
-		ctx:     ctx,
-		index:   limitIndex,
-		reader:  reader,
-		mint:    mint,
-		maxt:    maxt,
-		metrics: s.metrics,
+		ctx:            ctx,
+		index:          limitIndex,
+		reader:         reader,
+		labelProcessor: s.LabelProcessor,
+		mint:           mint,
+		maxt:           maxt,
+		metrics:        s.metrics,
 	}
 
 	value = r.Header.Get("X-PromQL-ForcePreAggregated")
@@ -240,7 +246,14 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 
 	for metrics.Next() {
 		m := metrics.At()
-		id2Labels[m.ID] = m.Labels
+
+		// Add mutable labels.
+		newLabels, err := q.labelProcessor.AddMutableLabels(m.Labels)
+		if err != nil {
+			return &seriesIter{err: err}
+		}
+
+		id2Labels[m.ID] = newLabels
 		ids = append(ids, m.ID)
 	}
 

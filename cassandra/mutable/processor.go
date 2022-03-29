@@ -34,10 +34,10 @@ func NewLabelProcessor(provider LabelProvider, tenantLabelName string) *LabelPro
 	return &processor
 }
 
-// ProcessMutableLabels searches for mutable labels and replace them by non mutable labels.
+// ReplaceMutableLabels searches for mutable labels and replace them by non mutable labels.
 // For example if we have a mutable label group "mygroup" which contains 'server1' and 'server2',
 // the label matcher group="mygroup" becomes instance="server1|server2".
-func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
 	processedMatchers := make([]*labels.Matcher, 0, len(matchers))
 
 	// Find the tenant.
@@ -91,7 +91,7 @@ func (lp *LabelProcessor) ProcessMutableLabels(matchers []*labels.Matcher) ([]*l
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
 func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Matcher) (*labels.Matcher, error) {
-	lbls, err := lp.labelProvider.Get(tenant, matcher.Name, matcher.Value)
+	lbls, err := lp.labelProvider.GetNonMutable(tenant, matcher.Name, matcher.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 
 	for _, value := range values {
 		if matcher.Matches(value) {
-			lbls, err := lp.labelProvider.Get(tenant, matcher.Name, value)
+			lbls, err := lp.labelProvider.GetNonMutable(tenant, matcher.Name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -194,4 +194,44 @@ func regexMatchType(matchType labels.MatchType) labels.MatchType {
 	}
 
 	return labels.MatchNotRegexp
+}
+
+// AddMutableLabels searches for non mutable labels and add their corresponding mutable labels
+// if they exist. For example if we have a mutable label group "mygroup" which contains 'server1',
+// and the label instance="server1" as input, the label group="mygroup" will be added.
+func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, error) {
+	// Find the tenant.
+	var tenant string
+
+	for _, label := range lbls {
+		if label.Name == lp.tenantLabelName {
+			tenant = label.Value
+
+			break
+		}
+	}
+
+	// Mutable labels are disabled when no tenant is found.
+	if tenant == "" {
+		return lbls, nil
+	}
+
+	// Search for mutable labels associated to these labels.
+	var mutableLabels labels.Labels
+
+	for _, label := range lbls {
+		mutableLabel, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
+		if err != nil {
+			if errors.Is(err, ErrNoResult) {
+				continue
+			}
+
+			return nil, err
+		}
+
+		mutableLabels = append(mutableLabels, mutableLabel)
+	}
+
+	fmt.Printf("!!! mutable labels: %#v\n", mutableLabels)
+	return append(lbls, mutableLabels...), nil
 }

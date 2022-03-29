@@ -7,11 +7,13 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
-	Get(tenant, name, value string) (NonMutableLabels, error)
+	GetMutable(tenant, name, value string) (labels.Label, error)
+	GetNonMutable(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(tenant, name string) (bool, error)
 }
@@ -121,9 +123,9 @@ func (cp *CassandraProvider) createTables() error {
 	return nil
 }
 
-// Get returns the non mutable labels corresponding to a mutable label name and value.
-func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, error) {
-	associatedName, err := cp.associatedName(tenant, name)
+// GetNonMutable returns the non mutable labels corresponding to a mutable label name and value.
+func (cp *CassandraProvider) GetNonMutable(tenant, name, value string) (NonMutableLabels, error) {
+	associatedName, err := cp.nonMutableName(tenant, name)
 	if err != nil {
 		return NonMutableLabels{}, err
 	}
@@ -141,33 +143,32 @@ func (cp *CassandraProvider) Get(tenant, name, value string) (NonMutableLabels, 
 	return lbls, nil
 }
 
-// associatedName returns the non mutable label name associated to a mutable label name and value.
-func (cp *CassandraProvider) associatedName(tenant, name string) (string, error) {
-	associatedName, found := cp.cache.AssociatedName(tenant, name)
+// nonMutableName returns the non mutable label name associated to a mutable label name and tenant.
+func (cp *CassandraProvider) nonMutableName(tenant, name string) (string, error) {
+	nonMutableName, found := cp.cache.NonMutableName(tenant, name)
 	if found {
-		if associatedName == "" {
+		if nonMutableName == "" {
 			return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
 		}
 
-		return associatedName, nil
+		return nonMutableName, nil
 	}
 
-	// List all the associated names once to set it in cache as the table only has a few rows.
-	associatedNames, err := cp.selectAssociatedNames(tenant)
-	if err != nil {
+	// List all the associated names for a tenant once to set it in cache as the table only has a few rows.
+	if err := cp.updateAssociatedNames(tenant); err != nil {
 		return "", err
 	}
 
-	associatedName = associatedNames[name]
-	if associatedName == "" {
+	nonMutableName, _ = cp.cache.NonMutableName(tenant, name)
+	if nonMutableName == "" {
 		return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
 	}
 
-	return associatedName, nil
+	return nonMutableName, nil
 }
 
-// selectAssociatedNames returns a map of the non mutable names index by the mutable name.
-func (cp *CassandraProvider) selectAssociatedNames(tenant string) (map[string]string, error) {
+// updateAssociatedNames updates the associated names cache.
+func (cp *CassandraProvider) updateAssociatedNames(tenant string) error {
 	iter := cp.session.Query(`
 		SELECT name, associated_name FROM mutable_label_names
 		WHERE tenant = ?
@@ -184,12 +185,12 @@ func (cp *CassandraProvider) selectAssociatedNames(tenant string) (map[string]st
 	}
 
 	if err := iter.Close(); err != nil {
-		return nil, fmt.Errorf("select labels: %w", err)
+		return fmt.Errorf("select labels: %w", err)
 	}
 
 	cp.cache.SetAllAssociatedNames(tenant, associatedNames)
 
-	return associatedNames, nil
+	return nil
 }
 
 func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value string) ([]string, error) {
@@ -262,14 +263,11 @@ func (cp *CassandraProvider) updateAssociatedValuesCache(tenant, name string) er
 func (cp *CassandraProvider) IsMutableLabel(tenant, name string) (bool, error) {
 	mutableLabelNames, found := cp.cache.MutableLabelNames(tenant)
 	if !found {
-		associatedNames, err := cp.selectAssociatedNames(tenant)
-		if err != nil {
+		if err := cp.updateAssociatedNames(tenant); err != nil {
 			return false, err
 		}
 
-		for name := range associatedNames {
-			mutableLabelNames = append(mutableLabelNames, name)
-		}
+		mutableLabelNames, found = cp.cache.MutableLabelNames(tenant)
 	}
 
 	for _, mutName := range mutableLabelNames {
@@ -436,4 +434,62 @@ func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
 	}
 
 	return nil
+}
+
+// GetMutable returns the mutable labels corresponding to a non mutable label name and value.
+func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Label, error) {
+	mutableName, err := cp.mutableName(tenant, name)
+	if err != nil {
+		return labels.Label{}, err
+	}
+
+	mutableValues, err := cp.AllValues(tenant, mutableName)
+	if err != nil {
+		return labels.Label{}, err
+	}
+
+	// For each possible mutable value, search if the value is in the non mutable values associated.
+	for _, mutableValue := range mutableValues {
+		lbls, err := cp.GetNonMutable(tenant, mutableName, mutableValue)
+		if err != nil {
+			return labels.Label{}, err
+		}
+
+		for _, nonMutableValue := range lbls.Values {
+			if value == nonMutableValue {
+				res := labels.Label{
+					Name:  mutableName,
+					Value: mutableValue,
+				}
+
+				return res, nil
+			}
+		}
+	}
+
+	return labels.Label{}, ErrNoResult
+}
+
+// mutableName returns the mutable label name associated to a non mutable label name.
+func (cp *CassandraProvider) mutableName(tenant, name string) (string, error) {
+	mutableName, found := cp.cache.MutableName(tenant, name)
+	if found {
+		if mutableName == "" {
+			return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
+		}
+
+		return mutableName, nil
+	}
+
+	// List all the associated names for a tenant once to set it in cache as the table only has a few rows.
+	if err := cp.updateAssociatedNames(tenant); err != nil {
+		return "", err
+	}
+
+	mutableName, _ = cp.cache.MutableName(tenant, name)
+	if mutableName == "" {
+		return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
+	}
+
+	return mutableName, nil
 }

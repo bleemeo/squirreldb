@@ -49,6 +49,7 @@ type API struct {
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
 	MutableLabelWriter          mutable.LabelWriter
+	MutableLabelProcessor       *mutable.LabelProcessor
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
@@ -161,6 +162,7 @@ func (a *API) init() {
 	queryable := promql.NewStore(
 		a.Index,
 		a.Reader,
+		a.MutableLabelProcessor,
 		a.PromQLMaxEvaluatedSeries,
 		a.PromQLMaxEvaluatedPoints,
 		a.MetricRegistry,

@@ -191,12 +191,10 @@ func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
 	session *gocql.Session,
-	mutableLabelProvider mutable.ProviderAndWriter,
-	tenantLabelName string,
+	labelProcessor *mutable.LabelProcessor,
 	options Options,
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
-	labelProcessor := mutable.NewLabelProcessor(mutableLabelProvider, tenantLabelName)
 
 	return initialize(
 		ctx,
@@ -2356,8 +2354,9 @@ func (c *CassandraIndex) Search(
 ) (types.MetricsSet, error) {
 	start := time.Now()
 
+	// TODO: Maybe we should also move this processing in the api package?
 	// Replace mutable labels by non mutable labels.
-	matchers, err := c.labelProcessor.ProcessMutableLabels(matchers)
+	matchers, err := c.labelProcessor.ReplaceMutableLabels(matchers)
 	if err != nil {
 		// Return an empty metric set if the mutable matchers have no match.
 		if errors.Is(err, mutable.ErrNoResult) {

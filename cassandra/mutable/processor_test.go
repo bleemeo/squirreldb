@@ -98,7 +98,7 @@ func TestProcessMutableLabels(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotMatchers, err := lp.ProcessMutableLabels(test.matchers)
+			gotMatchers, err := lp.ReplaceMutableLabels(test.matchers)
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}

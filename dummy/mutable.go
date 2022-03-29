@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sort"
 	"squirreldb/cassandra/mutable"
+
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 // MockLabelProvider is a label provider which gets its labels from hardcoded values.
@@ -45,8 +47,8 @@ func NewMutableLabelProvider(lbls MutableLabels) MockLabelProvider {
 	return MockLabelProvider{labels: lbls}
 }
 
-// Get returns the non mutable labels corresponding to a mutable label name and value.
-func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.NonMutableLabels, error) {
+// GetNonMutable returns the non mutable labels corresponding to a mutable label name and value.
+func (lp MockLabelProvider) GetNonMutable(tenant, name, value string) (mutable.NonMutableLabels, error) {
 	key := mutable.LabelKey{
 		Tenant: tenant,
 		Name:   name,
@@ -63,6 +65,11 @@ func (lp MockLabelProvider) Get(tenant, name, value string) (mutable.NonMutableL
 	}
 
 	return nonMutableLabels, nil
+}
+
+func (lp MockLabelProvider) GetMutable(tenant, name, value string) (labels.Label, error) {
+	// TODO: Implement and test.
+	return labels.Label{}, errNotImplemented
 }
 
 func (lp MockLabelProvider) AllValues(tenant, name string) ([]string, error) {

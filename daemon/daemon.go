@@ -75,6 +75,7 @@ type SquirrelDB struct {
 	store                    MetricReadWriter
 	api                      api.API
 	mutableLabelProvider     mutable.ProviderAndWriter
+	mutableLabelProcessor    *mutable.LabelProcessor
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -620,14 +621,12 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			mutableLabelProvider, err := s.MutableLabelProvider(ctx)
+			mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			tenantLabelName := s.Config.String("promql.tenant_label_name")
-
-			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProvider, tenantLabelName, options)
+			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProcessor, options)
 			if err != nil {
 				return nil, err
 			}
@@ -764,6 +763,23 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	tlm.Start(ctx)
 
 	return nil
+}
+
+func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelProcessor, error) {
+	if s.mutableLabelProcessor == nil {
+		labelProvider, err := s.MutableLabelProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		tenantLabelName := s.Config.String("promql.tenant_label_name")
+		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
+
+		s.mutableLabelProcessor = labelProcessor
+		s.api.MutableLabelProcessor = labelProcessor
+	}
+
+	return s.mutableLabelProcessor, nil
 }
 
 func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.ProviderAndWriter, error) {
