@@ -229,7 +229,7 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 			return nil, err
 		}
 
-		if len(mutableLabels) > 0 {
+		if len(newMutableLabels) > 0 {
 			mutableLabels = append(mutableLabels, newMutableLabels...)
 		}
 	}

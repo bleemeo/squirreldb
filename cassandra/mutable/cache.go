@@ -319,10 +319,8 @@ func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.valuesCache)))
 }
 
-// MutableName returns the mutable label name associated to a name and a tenant.
-// It can return an empty name if the cache is up to date but the mutable name for this
-// tenant and name simply doesn't exist.
-func (c *cache) MutableName(tenant, name string) (mutableName string, found bool) {
+// MutableName returns the mutable label names associated to a name and a tenant.
+func (c *cache) MutableNames(tenant, name string) (mutableNames []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -332,7 +330,7 @@ func (c *cache) MutableName(tenant, name string) (mutableName string, found bool
 
 	entry, found := c.nameCache[tenant]
 	if !found {
-		return "", false
+		return nil, false
 	}
 
 	// Update last access.
@@ -341,11 +339,11 @@ func (c *cache) MutableName(tenant, name string) (mutableName string, found bool
 
 	for mutableName, nonMutableName := range entry.associatedNames {
 		if name == nonMutableName {
-			return mutableName, true
+			mutableNames = append(mutableNames, mutableName)
 		}
 	}
 
-	return "", true
+	return mutableNames, true
 }
 
 // MutableLabelNames returns all the mutable label names in cache.

@@ -36,6 +36,24 @@ var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
 			Values: []string{"server4"},
 		},
 	},
+	{
+		Tenant: "1234",
+		Name:   "environment",
+	}: {
+		"prod": mutable.NonMutableLabels{
+			Name:   "instance",
+			Values: []string{"server4"},
+		},
+	},
+	{
+		Tenant: "5678",
+		Name:   "group",
+	}: {
+		"group1": mutable.NonMutableLabels{
+			Name:   "instance",
+			Values: []string{"server10", "server11"},
+		},
+	},
 }
 
 // NewMutableLabelProvider returns a mock label provider.
@@ -69,8 +87,35 @@ func (lp MockLabelProvider) GetNonMutable(tenant, name, value string) (mutable.N
 
 // GetMutable returns the mutable labels corresponding to a non mutable label name and value.
 func (lp MockLabelProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
-	// TODO: Implement and test.
-	return nil, errNotImplemented
+	var mutableLabels labels.Labels
+
+outer:
+	for labelKey, lbls := range lp.labels {
+
+		if labelKey.Tenant != tenant {
+			continue
+		}
+
+		for mutableValue, nonMutableLabels := range lbls {
+			if name != nonMutableLabels.Name {
+				continue
+			}
+
+			for _, nonMutableValue := range nonMutableLabels.Values {
+				if value == nonMutableValue {
+					mutableLabel := labels.Label{
+						Name:  labelKey.Name,
+						Value: mutableValue,
+					}
+
+					mutableLabels = append(mutableLabels, mutableLabel)
+					continue outer
+				}
+			}
+		}
+	}
+
+	return mutableLabels, nil
 }
 
 // AllValues returns all possible mutable label values for a tenant and a label name.

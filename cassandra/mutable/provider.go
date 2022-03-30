@@ -2,6 +2,7 @@ package mutable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"squirreldb/types"
 
@@ -438,60 +439,71 @@ func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
 
 // GetMutable returns the mutable labels corresponding to a non mutable label name and value.
 func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
-	mutableName, err := cp.mutableName(tenant, name)
-	if err != nil {
-		return nil, err
-	}
-
-	mutableValues, err := cp.AllValues(tenant, mutableName)
+	mutableNames, err := cp.mutableNames(tenant, name)
 	if err != nil {
 		return nil, err
 	}
 
 	var mutableLabels labels.Labels
 
-	// For each possible mutable value, search if the value is in the non mutable values associated.
-	for _, mutableValue := range mutableValues {
-		lbls, err := cp.GetNonMutable(tenant, mutableName, mutableValue)
+	for _, mutableName := range mutableNames {
+		mutableValue, err := cp.getMutableValue(tenant, mutableName, value)
 		if err != nil {
+			if errors.Is(err, ErrNoResult) {
+				continue
+			}
+
 			return nil, err
 		}
 
-		for _, nonMutableValue := range lbls.Values {
-			if value == nonMutableValue {
-				mutableLabel := labels.Label{
-					Name:  mutableName,
-					Value: mutableValue,
-				}
-
-				mutableLabels = append(mutableLabels, mutableLabel)
-			}
+		mutableLabel := labels.Label{
+			Name:  mutableName,
+			Value: mutableValue,
 		}
+
+		mutableLabels = append(mutableLabels, mutableLabel)
 	}
 
 	return mutableLabels, nil
 }
 
-// mutableName returns the mutable label name associated to a non mutable label name.
-func (cp *CassandraProvider) mutableName(tenant, name string) (string, error) {
-	mutableName, found := cp.cache.MutableName(tenant, name)
-	if found {
-		if mutableName == "" {
-			return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
+// getMutableValue returns the first mutable label value the given value belongs to.
+func (cp *CassandraProvider) getMutableValue(tenant, mutableName, nonMutableValue string) (string, error) {
+	mutableValues, err := cp.AllValues(tenant, mutableName)
+	if err != nil {
+		return "", err
+	}
+
+	// For each possible mutable value, search if the value is in the non mutable values associated.
+	for _, mutableValue := range mutableValues {
+		nonMutableLabels, err := cp.GetNonMutable(tenant, mutableName, mutableValue)
+		if err != nil {
+			return "", err
 		}
 
-		return mutableName, nil
+		for _, value := range nonMutableLabels.Values {
+			if nonMutableValue == value {
+				return mutableValue, nil
+			}
+		}
+	}
+
+	return "", ErrNoResult
+}
+
+// mutableName returns the mutable label names associated to a non mutable label name.
+func (cp *CassandraProvider) mutableNames(tenant, name string) ([]string, error) {
+	mutableNames, found := cp.cache.MutableNames(tenant, name)
+	if found {
+		return mutableNames, nil
 	}
 
 	// List all the associated names for a tenant once to set it in cache as the table only has a few rows.
 	if err := cp.updateAssociatedNames(tenant); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	mutableName, _ = cp.cache.MutableName(tenant, name)
-	if mutableName == "" {
-		return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
-	}
+	mutableNames, _ = cp.cache.MutableNames(tenant, name)
 
-	return mutableName, nil
+	return mutableNames, nil
 }
