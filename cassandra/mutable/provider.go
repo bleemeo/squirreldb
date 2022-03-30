@@ -267,7 +267,7 @@ func (cp *CassandraProvider) IsMutableLabel(tenant, name string) (bool, error) {
 			return false, err
 		}
 
-		mutableLabelNames, found = cp.cache.MutableLabelNames(tenant)
+		mutableLabelNames, _ = cp.cache.MutableLabelNames(tenant)
 	}
 
 	for _, mutName := range mutableLabelNames {

@@ -232,6 +232,5 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 		mutableLabels = append(mutableLabels, mutableLabel)
 	}
 
-	fmt.Printf("!!! mutable labels: %#v\n", mutableLabels)
 	return append(lbls, mutableLabels...), nil
 }

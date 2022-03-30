@@ -2354,7 +2354,6 @@ func (c *CassandraIndex) Search(
 ) (types.MetricsSet, error) {
 	start := time.Now()
 
-	// TODO: Maybe we should also move this processing in the api package?
 	// Replace mutable labels by non mutable labels.
 	matchers, err := c.labelProcessor.ReplaceMutableLabels(matchers)
 	if err != nil {
@@ -2405,6 +2404,14 @@ func (l *metricsLabels) Next() bool {
 
 	if l.labelsList == nil {
 		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
+		if l.err != nil {
+			return false
+		}
+	}
+
+	// If any of the labels belongs to a mutable label, add these mutable labels.
+	for i, lbls := range l.labelsList {
+		l.labelsList[i], l.err = l.c.labelProcessor.AddMutableLabels(lbls)
 		if l.err != nil {
 			return false
 		}

@@ -776,7 +776,6 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
 
 		s.mutableLabelProcessor = labelProcessor
-		s.api.MutableLabelProcessor = labelProcessor
 	}
 
 	return s.mutableLabelProcessor, nil

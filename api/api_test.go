@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"squirreldb/api/remotestorage"
-	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"testing"
@@ -142,13 +141,10 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 
 	store := &dummy.MemoryTSDB{Data: storeData}
 
-	labelProvider := dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels)
-
 	api := API{
-		Index:                 dummy.NewIndex(idxData),
-		Reader:                store,
-		Writer:                store,
-		MutableLabelProcessor: mutable.NewLabelProcessor(labelProvider, "__account_id"),
+		Index:  dummy.NewIndex(idxData),
+		Reader: store,
+		Writer: store,
 	}
 	api.init()
 
