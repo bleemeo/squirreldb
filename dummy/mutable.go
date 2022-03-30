@@ -173,6 +173,19 @@ func (lp MockLabelProvider) IsMutableLabel(tenant, name string) (bool, error) {
 	return found, nil
 }
 
+// MutableLabelNames returns all the mutable label names possible for a tenant.
+func (lp MockLabelProvider) MutableLabelNames(tenant string) ([]string, error) {
+	var names []string
+
+	for key := range lp.labels {
+		if key.Tenant == tenant {
+			names = append(names, key.Name)
+		}
+	}
+
+	return names, nil
+}
+
 // Implement LabelWriter methods.
 var errNotImplemented = errors.New("not implemented")
 

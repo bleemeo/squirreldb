@@ -3,6 +3,7 @@ package mutable
 import (
 	"context"
 	"errors"
+	"sort"
 	"squirreldb/types"
 	"time"
 
@@ -96,22 +97,63 @@ func (m *mutableIndex) Search(
 
 // LabelValues returns potential values for a label name. Values will have at least
 // one metrics matching matchers.
+// Warning: If the name is a mutable label name, the values are returned without checking the matchers.
 func (m *mutableIndex) LabelValues(
 	ctx context.Context,
 	start, end time.Time,
 	name string,
 	matchers []*labels.Matcher,
 ) ([]string, error) {
-	return m.index.LabelValues(ctx, start, end, name, matchers)
+	tenant := m.labelProcessor.tenantFromMatchers(matchers)
+	if tenant != "" {
+		isMutableLabel, err := m.labelProcessor.IsMutableLabel(tenant, name)
+		if err != nil {
+			return nil, err
+		}
+
+		if isMutableLabel {
+			values, err := m.labelProcessor.labelProvider.AllValues(tenant, name)
+			if err != nil {
+				return nil, err
+			}
+
+			return values, nil
+		}
+	}
+
+	values, err := m.index.LabelValues(ctx, start, end, name, matchers)
+	if err != nil {
+		return nil, err
+	}
+
+	return values, nil
 }
 
-// LabelNames returns the unique label names for metrics matching matchers in sorted order.
+// LabelNames returns the unique label names for metrics matching matchers in ascending order.
+// Warning: mutable label names are added without checking the matchers.
 func (m *mutableIndex) LabelNames(
 	ctx context.Context,
 	start, end time.Time,
 	matchers []*labels.Matcher,
 ) ([]string, error) {
-	return m.index.LabelNames(ctx, start, end, matchers)
+	names, err := m.index.LabelNames(ctx, start, end, matchers)
+	if err != nil {
+		return nil, err
+	}
+
+	tenant := m.labelProcessor.tenantFromMatchers(matchers)
+	if tenant != "" {
+		mutableLabelNames, err := m.labelProcessor.MutableLabelNames(tenant)
+		if err != nil {
+			return nil, err
+		}
+
+		names = append(names, mutableLabelNames...)
+
+		sort.Strings(names)
+	}
+
+	return names, nil
 }
 
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.

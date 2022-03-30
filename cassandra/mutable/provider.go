@@ -17,7 +17,7 @@ type LabelProvider interface {
 	GetMutable(tenant, name, value string) (labels.Labels, error)
 	GetNonMutable(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
-	IsMutableLabel(tenant, name string) (bool, error)
+	MutableLabelNames(tenant string) ([]string, error)
 }
 
 // LabelWriter allows to add and delete mutable labels.
@@ -261,24 +261,18 @@ func (cp *CassandraProvider) updateAssociatedValuesCache(tenant, name string) er
 	return nil
 }
 
-// IsMutableLabel returns whether the label is mutable.
-func (cp *CassandraProvider) IsMutableLabel(tenant, name string) (bool, error) {
+// MutableLabelNames returns all the mutable label names possible for a tenant.
+func (cp *CassandraProvider) MutableLabelNames(tenant string) ([]string, error) {
 	mutableLabelNames, found := cp.cache.MutableLabelNames(tenant)
 	if !found {
 		if err := cp.updateAssociatedNames(tenant); err != nil {
-			return false, err
+			return nil, err
 		}
 
 		mutableLabelNames, _ = cp.cache.MutableLabelNames(tenant)
 	}
 
-	for _, mutName := range mutableLabelNames {
-		if name == mutName {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	return mutableLabelNames, nil
 }
 
 // WriteLabelValues writes the label values to Cassandra.

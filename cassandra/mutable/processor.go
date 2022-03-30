@@ -40,17 +40,7 @@ func NewLabelProcessor(provider LabelProvider, tenantLabelName string) *LabelPro
 // the label matcher group="mygroup" becomes instance="server1|server2".
 func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
 	processedMatchers := make([]*labels.Matcher, 0, len(matchers))
-
-	// Find the tenant.
-	var tenant string
-
-	for _, matcher := range matchers {
-		if matcher.Name == lp.tenantLabelName {
-			tenant = matcher.Value
-
-			break
-		}
-	}
+	tenant := lp.tenantFromMatchers(matchers)
 
 	// Mutable labels are disabled when no tenant is found.
 	if tenant == "" {
@@ -59,7 +49,7 @@ func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*l
 
 	// Search for mutable labels and replace them by non mutable labels.
 	for _, matcher := range matchers {
-		isMutableLabel, err := lp.labelProvider.IsMutableLabel(tenant, matcher.Name)
+		isMutableLabel, err := lp.IsMutableLabel(tenant, matcher.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -88,6 +78,32 @@ func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*l
 	}
 
 	return processedMatchers, nil
+}
+
+// IsMutableLabel returns whether the label name is mutable.
+func (lp *LabelProcessor) IsMutableLabel(tenant, name string) (bool, error) {
+	mutableLabelNames, err := lp.labelProvider.MutableLabelNames(tenant)
+	if err != nil {
+		return false, err
+	}
+
+	for _, mutName := range mutableLabelNames {
+		if name == mutName {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (lp *LabelProcessor) tenantFromMatchers(matchers []*labels.Matcher) string {
+	for _, matcher := range matchers {
+		if matcher.Name == lp.tenantLabelName {
+			return matcher.Value
+		}
+	}
+
+	return ""
 }
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
@@ -237,4 +253,9 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 	sort.Sort(lbls)
 
 	return lbls, nil
+}
+
+// MutableLabelNames returns all the mutable label names possible for a tenant.
+func (lp *LabelProcessor) MutableLabelNames(tenant string) ([]string, error) {
+	return lp.labelProvider.MutableLabelNames(tenant)
 }
