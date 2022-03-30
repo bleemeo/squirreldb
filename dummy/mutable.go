@@ -49,7 +49,7 @@ var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
 		Tenant: "5678",
 		Name:   "group",
 	}: {
-		"group1": mutable.NonMutableLabels{
+		"group10": mutable.NonMutableLabels{
 			Name:   "instance",
 			Values: []string{"server10", "server11"},
 		},
@@ -89,26 +89,47 @@ func (lp MockLabelProvider) GetNonMutable(tenant, name, value string) (mutable.N
 func (lp MockLabelProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
 	var mutableLabels labels.Labels
 
-outer:
-	for labelKey, lbls := range lp.labels {
+	type label struct {
+		mutableValue     string
+		nonMutableLabels mutable.NonMutableLabels
+	}
 
+outer:
+
+	for labelKey, labelsMap := range lp.labels {
 		if labelKey.Tenant != tenant {
 			continue
 		}
 
-		for mutableValue, nonMutableLabels := range lbls {
-			if name != nonMutableLabels.Name {
+		// We need to sort the labels in a slice to loop over them always in the same order.
+		lbls := make([]label, 0, len(labelsMap))
+		for mutableValue, nonMutableLabels := range labelsMap {
+			l := label{
+				mutableValue:     mutableValue,
+				nonMutableLabels: nonMutableLabels,
+			}
+
+			lbls = append(lbls, l)
+		}
+
+		sort.Slice(lbls, func(i, j int) bool {
+			return lbls[i].mutableValue < lbls[j].mutableValue
+		})
+
+		for _, l := range lbls {
+			if name != l.nonMutableLabels.Name {
 				continue
 			}
 
-			for _, nonMutableValue := range nonMutableLabels.Values {
+			for _, nonMutableValue := range l.nonMutableLabels.Values {
 				if value == nonMutableValue {
 					mutableLabel := labels.Label{
 						Name:  labelKey.Name,
-						Value: mutableValue,
+						Value: l.mutableValue,
 					}
 
 					mutableLabels = append(mutableLabels, mutableLabel)
+
 					continue outer
 				}
 			}

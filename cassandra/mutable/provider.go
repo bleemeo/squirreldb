@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"squirreldb/types"
 
 	"github.com/gocql/gocql"
@@ -473,6 +474,10 @@ func (cp *CassandraProvider) getMutableValue(tenant, mutableName, nonMutableValu
 	if err != nil {
 		return "", err
 	}
+
+	// Sort the values to make sure we always loop through the values in the same order
+	// so we return the same value while the mutable labels don't change.
+	sort.Strings(mutableValues)
 
 	// For each possible mutable value, search if the value is in the non mutable values associated.
 	for _, mutableValue := range mutableValues {

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"regexp/syntax"
+	"sort"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
@@ -217,8 +218,6 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 	}
 
 	// Search for mutable labels associated to these labels.
-	var mutableLabels labels.Labels
-
 	for _, label := range lbls {
 		newMutableLabels, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
 		if err != nil {
@@ -230,9 +229,12 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 		}
 
 		if len(newMutableLabels) > 0 {
-			mutableLabels = append(mutableLabels, newMutableLabels...)
+			lbls = append(lbls, newMutableLabels...)
 		}
 	}
 
-	return append(lbls, mutableLabels...), nil
+	// Sort the labels to make sure we always return the same labels for a given input.
+	sort.Sort(lbls)
+
+	return lbls, nil
 }
