@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"squirreldb/cassandra/mutable"
 	"squirreldb/debug"
 	"squirreldb/types"
 	"strconv"
@@ -111,10 +110,9 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	labelProcessor *mutable.LabelProcessor
-	idsToLabels    *labelsLookupCache
-	postingsCache  *postingsCache
-	metrics        *metrics
+	idsToLabels   *labelsLookupCache
+	postingsCache *postingsCache
+	metrics       *metrics
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -191,7 +189,6 @@ func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
 	session *gocql.Session,
-	labelProcessor *mutable.LabelProcessor,
 	options Options,
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
@@ -203,7 +200,6 @@ func New(
 			schemaLock: options.SchemaLock,
 			metrics:    metrics,
 		},
-		labelProcessor,
 		options,
 		metrics,
 	)
@@ -212,7 +208,6 @@ func New(
 func initialize(
 	ctx context.Context,
 	store storeImpl,
-	labelProcessor *mutable.LabelProcessor,
 	options Options,
 	metrics *metrics,
 ) (*CassandraIndex, error) {
@@ -229,7 +224,6 @@ func initialize(
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 		metrics:                  metrics,
-		labelProcessor:           labelProcessor,
 	}
 
 	if err := index.store.Init(ctx); err != nil {
@@ -2354,17 +2348,6 @@ func (c *CassandraIndex) Search(
 ) (types.MetricsSet, error) {
 	start := time.Now()
 
-	// Replace mutable labels by non mutable labels.
-	matchers, err := c.labelProcessor.ReplaceMutableLabels(matchers)
-	if err != nil {
-		// Return an empty metric set if the mutable matchers have no match.
-		if errors.Is(err, mutable.ErrNoResult) {
-			return &metricsLabels{c: c, ctx: ctx, ids: nil, labelsList: nil}, nil
-		}
-
-		return nil, err
-	}
-
 	shards, err := c.getTimeShards(ctx, queryStart, queryEnd, false)
 	if err != nil {
 		return nil, err
@@ -2404,14 +2387,6 @@ func (l *metricsLabels) Next() bool {
 
 	if l.labelsList == nil {
 		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
-		if l.err != nil {
-			return false
-		}
-	}
-
-	// If any of the labels belongs to a mutable label, add these mutable labels.
-	for i, lbls := range l.labelsList {
-		l.labelsList[i], l.err = l.c.labelProcessor.AddMutableLabels(lbls)
 		if l.err != nil {
 			return false
 		}

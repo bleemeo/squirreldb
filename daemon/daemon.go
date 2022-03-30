@@ -591,6 +591,8 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 // Index return an Index. If started is true the index is started.
 func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
 	if s.index == nil { //nolint:nestif
+		var wrappedIndex types.Index
+
 		switch s.Config.String("internal.index") {
 		case backendCassandra:
 			session, err := s.CassandraSession()
@@ -621,27 +623,29 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
+			wrappedIndex, err = index.New(ctx, s.MetricRegistry, session, options)
 			if err != nil {
 				return nil, err
 			}
-
-			index, err := index.New(ctx, s.MetricRegistry, session, mutableLabelProcessor, options)
-			if err != nil {
-				return nil, err
-			}
-
-			s.index = index
 		case backendDummy:
 			logger.Println("Warning: Using dummy for index (only do this for testing)")
 
-			s.index = &dummy.Index{
+			wrappedIndex = &dummy.Index{
 				StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
 				FixedValue:            types.MetricID(s.Config.Int64("internal.dummy_index_fixed_id")),
 			}
 		default:
 			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
 		}
+
+		mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		mutableIndex := mutable.NewIndexWrapper(wrappedIndex, mutableLabelProcessor)
+
+		s.index = mutableIndex
 	}
 
 	if task, ok := s.index.(types.Task); started && ok {

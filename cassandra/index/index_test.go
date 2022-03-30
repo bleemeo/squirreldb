@@ -11,7 +11,6 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
-	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"strconv"
@@ -589,7 +588,6 @@ func mockIndexFromMetrics(
 	index, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 1 * time.Hour,
 			LockFactory:       &mockLockFactory{},
@@ -1924,7 +1922,6 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	index1, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
@@ -2098,7 +2095,6 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	index2, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
@@ -2116,7 +2112,6 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	index3, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
@@ -4161,7 +4156,6 @@ func Test_cache(t *testing.T) {
 	index1, err := initialize(
 		context.Background(),
 		store,
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: defaultTTL,
 			LockFactory:       lock,
@@ -4175,7 +4169,6 @@ func Test_cache(t *testing.T) {
 	index2, err := initialize(
 		context.Background(),
 		store,
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: defaultTTL,
 			LockFactory:       lock,
@@ -4274,7 +4267,6 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	index1, err := initialize(
 		context.Background(),
 		store,
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: defaultTTL,
 			LockFactory:       lock,
@@ -4336,7 +4328,6 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	index2, err := initialize(
 		context.Background(),
 		store,
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: defaultTTL,
 			LockFactory:       lock,
@@ -4668,7 +4659,6 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index, err := initialize(
 		context.Background(),
 		store,
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: defaultTTL,
 			LockFactory:       &mockLockFactory{},
@@ -4977,7 +4967,6 @@ func Test_getTimeShards(t *testing.T) {
 	index, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
@@ -5094,7 +5083,6 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 	index1, err := initialize(
 		context.Background(),
 		&mockStore{},
-		mutable.NewLabelProcessor(dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels), "__account_id"),
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
