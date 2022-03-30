@@ -2,6 +2,7 @@ package mutable_test
 
 import (
 	"reflect"
+	"sort"
 	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
 	"testing"
@@ -9,7 +10,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-func TestProcessMutableLabels(t *testing.T) {
+func TestReplaceMutableLabels(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -104,7 +105,56 @@ func TestProcessMutableLabels(t *testing.T) {
 			}
 
 			if !reflect.DeepEqual(test.wantMatchers, gotMatchers) {
-				t.Errorf("ProcessMutableLabels() = %v, want %v", gotMatchers, test.wantMatchers)
+				t.Errorf("ReplaceMutableLabels() = %v, want %v", gotMatchers, test.wantMatchers)
+			}
+		})
+	}
+}
+
+func TestAddMutableLabels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		labels     labels.Labels
+		wantLabels labels.Labels
+	}{
+		{
+			name:   "match-two-groups",
+			labels: labels.FromStrings("__account_id", "1234", "instance", "server2", "job", "job1"),
+			// server2 is both in group1 and group2, but only group1 should be returned.
+			wantLabels: labels.FromStrings(
+				"__account_id", "1234", "instance", "server2", "job", "job1", "group", "group1",
+			),
+		},
+		{
+			name:   "multiple-mutable-labels",
+			labels: labels.FromStrings("__account_id", "1234", "instance", "server4", "job", "job1"),
+			wantLabels: labels.FromStrings(
+				"__account_id", "1234", "instance", "server4", "job", "job1",
+				"group", "group3", "environment", "prod",
+			),
+		},
+	}
+
+	provider := dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels)
+	lp := mutable.NewLabelProcessor(provider, "__account_id")
+
+	for _, test := range tests {
+		test := test
+
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotLabels, err := lp.AddMutableLabels(test.labels)
+			if err != nil {
+				t.Errorf("Failed to process labels: %v", err)
+			}
+
+			sort.Sort(gotLabels)
+
+			if !reflect.DeepEqual(test.wantLabels, gotLabels) {
+				t.Errorf("AddMutableLabels() = %v, want %v", gotLabels, test.wantLabels)
 			}
 		})
 	}
