@@ -220,7 +220,7 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 	var mutableLabels labels.Labels
 
 	for _, label := range lbls {
-		mutableLabel, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
+		newMutableLabels, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
 		if err != nil {
 			if errors.Is(err, ErrNoResult) {
 				continue
@@ -229,7 +229,9 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 			return nil, err
 		}
 
-		mutableLabels = append(mutableLabels, mutableLabel)
+		if len(mutableLabels) > 0 {
+			mutableLabels = append(mutableLabels, newMutableLabels...)
+		}
 	}
 
 	return append(lbls, mutableLabels...), nil

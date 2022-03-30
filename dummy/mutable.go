@@ -67,11 +67,13 @@ func (lp MockLabelProvider) GetNonMutable(tenant, name, value string) (mutable.N
 	return nonMutableLabels, nil
 }
 
-func (lp MockLabelProvider) GetMutable(tenant, name, value string) (labels.Label, error) {
+// GetMutable returns the mutable labels corresponding to a non mutable label name and value.
+func (lp MockLabelProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
 	// TODO: Implement and test.
-	return labels.Label{}, errNotImplemented
+	return nil, errNotImplemented
 }
 
+// AllValues returns all possible mutable label values for a tenant and a label name.
 func (lp MockLabelProvider) AllValues(tenant, name string) ([]string, error) {
 	key := mutable.LabelKey{
 		Tenant: tenant,

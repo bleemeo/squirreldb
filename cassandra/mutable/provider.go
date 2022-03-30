@@ -12,7 +12,7 @@ import (
 
 // LabelProvider allows to get non mutable labels from a mutable label.
 type LabelProvider interface {
-	GetMutable(tenant, name, value string) (labels.Label, error)
+	GetMutable(tenant, name, value string) (labels.Labels, error)
 	GetNonMutable(tenant, name, value string) (NonMutableLabels, error)
 	AllValues(tenant, name string) ([]string, error)
 	IsMutableLabel(tenant, name string) (bool, error)
@@ -216,7 +216,7 @@ func (cp *CassandraProvider) associatedValuesByNameAndValue(tenant, name, value 
 	return associatedValues, nil
 }
 
-// AllValues returns all possible mutable label values.
+// AllValues returns all possible mutable label values for a tenant and a label name.
 func (cp *CassandraProvider) AllValues(tenant, name string) ([]string, error) {
 	values, found := cp.cache.Values(tenant, name)
 	if found {
@@ -437,37 +437,39 @@ func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
 }
 
 // GetMutable returns the mutable labels corresponding to a non mutable label name and value.
-func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Label, error) {
+func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
 	mutableName, err := cp.mutableName(tenant, name)
 	if err != nil {
-		return labels.Label{}, err
+		return nil, err
 	}
 
 	mutableValues, err := cp.AllValues(tenant, mutableName)
 	if err != nil {
-		return labels.Label{}, err
+		return nil, err
 	}
+
+	var mutableLabels labels.Labels
 
 	// For each possible mutable value, search if the value is in the non mutable values associated.
 	for _, mutableValue := range mutableValues {
 		lbls, err := cp.GetNonMutable(tenant, mutableName, mutableValue)
 		if err != nil {
-			return labels.Label{}, err
+			return nil, err
 		}
 
 		for _, nonMutableValue := range lbls.Values {
 			if value == nonMutableValue {
-				res := labels.Label{
+				mutableLabel := labels.Label{
 					Name:  mutableName,
 					Value: mutableValue,
 				}
 
-				return res, nil
+				mutableLabels = append(mutableLabels, mutableLabel)
 			}
 		}
 	}
 
-	return labels.Label{}, ErrNoResult
+	return mutableLabels, nil
 }
 
 // mutableName returns the mutable label name associated to a non mutable label name.
