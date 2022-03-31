@@ -3,6 +3,7 @@ package mutable
 import (
 	"context"
 	"errors"
+	"io"
 	"sort"
 	"squirreldb/types"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-type mutableIndex struct {
+var errNotImplemented = errors.New("not implemented")
+
+type indexWrapper struct {
 	index          types.Index
 	labelProcessor *LabelProcessor
 }
@@ -20,7 +23,7 @@ func NewIndexWrapper(
 	index types.Index,
 	labelProcessor *LabelProcessor,
 ) types.Index {
-	mi := mutableIndex{
+	mi := indexWrapper{
 		index:          index,
 		labelProcessor: labelProcessor,
 	}
@@ -29,7 +32,7 @@ func NewIndexWrapper(
 }
 
 // Start the wrapped index.
-func (m *mutableIndex) Start(ctx context.Context) error {
+func (m *indexWrapper) Start(ctx context.Context) error {
 	if task, ok := m.index.(types.Task); ok {
 		err := task.Start(ctx)
 		if err != nil {
@@ -41,7 +44,7 @@ func (m *mutableIndex) Start(ctx context.Context) error {
 }
 
 // Stop the wrapped index.
-func (m *mutableIndex) Stop() error {
+func (m *indexWrapper) Stop() error {
 	if task, ok := m.index.(types.Task); ok {
 		err := task.Stop()
 		if err != nil {
@@ -53,12 +56,12 @@ func (m *mutableIndex) Stop() error {
 }
 
 // AllIDs get all IDs from the wrapped index.
-func (m *mutableIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (m *indexWrapper) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
 	return m.index.AllIDs(ctx, start, end)
 }
 
 // LookupIDs in the wrapped index.
-func (m *mutableIndex) LookupIDs(
+func (m *indexWrapper) LookupIDs(
 	ctx context.Context,
 	requests []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
@@ -66,7 +69,7 @@ func (m *mutableIndex) LookupIDs(
 }
 
 // Search replace the mutable labels by non mutable labels before searching the wrapped index.
-func (m *mutableIndex) Search(
+func (m *indexWrapper) Search(
 	ctx context.Context,
 	start time.Time, end time.Time,
 	matchers []*labels.Matcher,
@@ -98,7 +101,7 @@ func (m *mutableIndex) Search(
 // LabelValues returns potential values for a label name. Values will have at least
 // one metrics matching matchers.
 // Warning: If the name is a mutable label name, the values are returned without checking the matchers.
-func (m *mutableIndex) LabelValues(
+func (m *indexWrapper) LabelValues(
 	ctx context.Context,
 	start, end time.Time,
 	name string,
@@ -131,7 +134,7 @@ func (m *mutableIndex) LabelValues(
 
 // LabelNames returns the unique label names for metrics matching matchers in ascending order.
 // Warning: mutable label names are added without checking the matchers.
-func (m *mutableIndex) LabelNames(
+func (m *indexWrapper) LabelNames(
 	ctx context.Context,
 	start, end time.Time,
 	matchers []*labels.Matcher,
@@ -154,6 +157,29 @@ func (m *mutableIndex) LabelNames(
 	}
 
 	return names, nil
+}
+
+// Implement the indexVerifier interface used by the API.
+func (m *indexWrapper) Verify(
+	ctx context.Context,
+	w io.Writer,
+	doFix bool,
+	acquireLock bool,
+) (hadIssue bool, err error) {
+	if verifier, ok := m.index.(types.IndexVerifier); ok {
+		return verifier.Verify(ctx, w, doFix, acquireLock)
+	}
+
+	return false, errNotImplemented
+}
+
+// Implement the indexDumper interface used by the API.
+func (m *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
+	if dumper, ok := m.index.(types.IndexDumper); ok {
+		return dumper.Dump(ctx, w)
+	}
+
+	return errNotImplemented
 }
 
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.

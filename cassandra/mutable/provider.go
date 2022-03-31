@@ -209,6 +209,7 @@ func (cp *Provider) MutableLabelNames(tenant string) ([]string, error) {
 }
 
 // WriteLabelValues writes the label values to the store.
+//nolint:dupl // DeleteLabelValues doesn't use the same type of labels.
 func (cp *Provider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error {
 	// We use a map to to append only distinct values in the label keys.
 	usedKeys := make(map[LabelKey]struct{})
@@ -242,6 +243,7 @@ func (cp *Provider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues
 }
 
 // DeleteLabelValues deletes label values in the store.
+//nolint:dupl // WriteLabelValues doesn't use the same type of labels.
 func (cp *Provider) DeleteLabelValues(ctx context.Context, lbls []Label) error {
 	// We use a map to to append only distinct values in the label keys.
 	usedKeys := make(map[LabelKey]struct{})

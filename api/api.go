@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
@@ -305,15 +304,11 @@ func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
-type indexVerifier interface {
-	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
-}
-
 func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(indexVerifier); ok {
+	if idx, ok := a.Index.(types.IndexVerifier); ok {
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
 
@@ -332,14 +327,10 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
-type indexDumper interface {
-	Dump(ctx context.Context, w io.Writer) error
-}
-
 func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(indexDumper); ok {
+	if idx, ok := a.Index.(types.IndexDumper); ok {
 		err := idx.Dump(ctx, w)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
@@ -347,7 +338,7 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	} else {
-		http.Error(w, "Index does not implement Verify()", http.StatusNotImplemented)
+		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
 
 		return
 	}
