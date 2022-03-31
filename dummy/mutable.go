@@ -13,16 +13,16 @@ type mutableLabelStore struct {
 // MutableLabels stores all mutable labels in the dummy label provider.
 type MutableLabels struct {
 	// map[tenant][mutable label name] -> associated non mutable label name.
-	associatedNames map[string]map[string]string
+	AssociatedNames map[string]map[string]string
 	// map[tenant, mutable label name][mutable label value] -> associated non mutable label values.
-	associatedValues map[mutable.LabelKey]map[string][]string
+	AssociatedValues map[mutable.LabelKey]map[string][]string
 }
 
 var errNotImplemented = errors.New("not implemented")
 
 // DefaultMutableLabels contains some mutable labels that can be used in tests.
 var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
-	associatedNames: map[string]map[string]string{
+	AssociatedNames: map[string]map[string]string{
 		"1234": {
 			"group":       "instance",
 			"environment": "instance",
@@ -31,7 +31,7 @@ var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
 			"group": "instance",
 		},
 	},
-	associatedValues: map[mutable.LabelKey]map[string][]string{
+	AssociatedValues: map[mutable.LabelKey]map[string][]string{
 		{
 			Tenant: "1234",
 			Name:   "group",
@@ -57,19 +57,19 @@ var DefaultMutableLabels = MutableLabels{ //nolint:gochecknoglobals
 
 // NewMutableLabelStore returns a mock label store pre filled with labels.
 func NewMutableLabelStore(lbls MutableLabels) mutable.Store {
-	if lbls.associatedNames == nil {
-		lbls.associatedNames = make(map[string]map[string]string)
+	if lbls.AssociatedNames == nil {
+		lbls.AssociatedNames = make(map[string]map[string]string)
 	}
 
-	if lbls.associatedValues == nil {
-		lbls.associatedValues = make(map[mutable.LabelKey]map[string][]string)
+	if lbls.AssociatedValues == nil {
+		lbls.AssociatedValues = make(map[mutable.LabelKey]map[string][]string)
 	}
 
 	return mutableLabelStore{labels: lbls}
 }
 
 func (s mutableLabelStore) AssociatedNames(tenant string) (map[string]string, error) {
-	associatedNames := s.labels.associatedNames[tenant]
+	associatedNames := s.labels.AssociatedNames[tenant]
 
 	return associatedNames, nil
 }
@@ -80,7 +80,7 @@ func (s mutableLabelStore) AssociatedValues(tenant, name string) (map[string][]s
 		Name:   name,
 	}
 
-	associatedValues := s.labels.associatedValues[key]
+	associatedValues := s.labels.AssociatedValues[key]
 
 	return associatedValues, nil
 }
