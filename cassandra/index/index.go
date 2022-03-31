@@ -2886,20 +2886,33 @@ func (c *CassandraIndex) concurrentTasks(
 		return queryGenerator(ctx, work)
 	})
 
-	for n := 0; n < concurrentInsert; n++ {
-		group.Go(func() error {
-			for task := range work {
-				if err := task(); err != nil {
-					return err
-				}
+	startCount := 0
 
+	for task := range work {
+		task := task
+
+		group.Go(func() error {
+			if err := task(); err != nil {
+				return err
+			}
+
+			for task := range work {
 				if ctx.Err() != nil {
 					return ctx.Err()
+				}
+
+				if err := task(); err != nil {
+					return err
 				}
 			}
 
 			return nil
 		})
+
+		startCount++
+		if startCount >= concurrentInsert {
+			break
+		}
 	}
 
 	return group.Wait()
