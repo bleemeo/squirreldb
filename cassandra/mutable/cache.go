@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 const (
 	topicInvalidateAssociatedNames  = "invalidate-associated-names"
 	topicInvalidateAssociatedValues = "invalidate-associated-values"
+	topicInvalidateMutableLabels    = "invalidate-mutable-labels"
 
 	cacheCleanupInterval = 24 * time.Hour
 	cacheExpirationDelay = time.Hour
@@ -28,6 +30,8 @@ type cache struct {
 	// Name cache indexed by tenant.
 	nameCache   map[string]nameEntry
 	valuesCache map[LabelKey]valuesEntry
+	// mutableLabelsCache contains the mutable labels associated to a non mutable label.
+	mutableLabelsCache map[Label]mutableLabelsEntry
 }
 
 type valuesEntry struct {
@@ -46,16 +50,23 @@ type nameEntry struct {
 	associatedNames map[string]string
 }
 
+type mutableLabelsEntry struct {
+	lastAccess time.Time
+	labels     labels.Labels
+}
+
 func newCache(ctx context.Context, reg prometheus.Registerer, cluster types.Cluster) *cache {
 	c := cache{
-		cluster:     cluster,
-		metrics:     newMetrics(reg),
-		nameCache:   make(map[string]nameEntry),
-		valuesCache: make(map[LabelKey]valuesEntry),
+		cluster:            cluster,
+		metrics:            newMetrics(reg),
+		nameCache:          make(map[string]nameEntry),
+		valuesCache:        make(map[LabelKey]valuesEntry),
+		mutableLabelsCache: make(map[Label]mutableLabelsEntry),
 	}
 
 	c.cluster.Subscribe(topicInvalidateAssociatedValues, c.invalidateAssociatedValuesListener)
 	c.cluster.Subscribe(topicInvalidateAssociatedNames, c.invalidateAssociatedNamesListener)
+	c.cluster.Subscribe(topicInvalidateMutableLabels, c.invalidateMutableLabelsListener)
 
 	go c.cleanupScheduler(ctx)
 
@@ -106,6 +117,15 @@ func (c *cache) cleanup() {
 	}
 
 	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.nameCache)))
+
+	// Delete expired entries in mutable labels cache.
+	for key, entry := range c.mutableLabelsCache {
+		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
+			debug.Print(1, logger, "Deleting expired mutable labels cache entry %#v", key)
+
+			delete(c.mutableLabelsCache, key)
+		}
+	}
 }
 
 // SetAllAssociatedValues sets mutable label values in cache.
@@ -319,8 +339,8 @@ func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
 	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.valuesCache)))
 }
 
-// MutableName returns the mutable label names associated to a name and a tenant.
-func (c *cache) MutableNames(tenant, name string) (mutableNames []string, found bool) {
+// MutableLabelNames returns the mutable label names associated to a name and a tenant.
+func (c *cache) MutableLabelNames(tenant, name string) (mutableNames []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -346,8 +366,8 @@ func (c *cache) MutableNames(tenant, name string) (mutableNames []string, found 
 	return mutableNames, true
 }
 
-// MutableLabelNames returns all the mutable label names in cache.
-func (c *cache) MutableLabelNames(tenant string) (names []string, found bool) {
+// AllMutableLabelNames returns all the mutable label names in cache for a tenant.
+func (c *cache) AllMutableLabelNames(tenant string) (names []string, found bool) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -370,4 +390,95 @@ func (c *cache) MutableLabelNames(tenant string) (names []string, found bool) {
 	}
 
 	return names, true
+}
+
+// MutableLabels returns the mutable labels corresponding to a non mutable label name and value.
+func (c *cache) MutableLabels(tenant, name, value string) (lbls labels.Labels, found bool) {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	defer func() {
+		c.metrics.CacheAccess.WithLabelValues("labels", metricStatus(found)).Inc()
+	}()
+
+	key := Label{
+		Tenant: tenant,
+		Name:   name,
+		Value:  value,
+	}
+
+	entry, found := c.mutableLabelsCache[key]
+	if !found {
+		return nil, false
+	}
+
+	// Update last access.
+	entry.lastAccess = time.Now()
+	c.mutableLabelsCache[key] = entry
+
+	return entry.labels, true
+}
+
+// SetMutableLabels sets the mutable labels corresponding to a non mutable label name and value.
+func (c *cache) SetMutableLabels(tenant, name, value string, lbls labels.Labels) {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	key := Label{
+		Tenant: tenant,
+		Name:   name,
+		Value:  value,
+	}
+
+	c.mutableLabelsCache[key] = mutableLabelsEntry{
+		lastAccess: time.Now(),
+		labels:     lbls,
+	}
+
+	c.metrics.CacheSize.WithLabelValues("labels").Set(float64(len(c.mutableLabelsCache)))
+}
+
+// InvalidateMutableLabels invalidates the mutable labels cache and tells other
+// SquirrelDBs in the cluster to do the same.
+func (c *cache) InvalidateMutableLabels(ctx context.Context, tenants []string) {
+	// Notify the cluster, we also notify ourselves so the cache will be deleted by the listener.
+	buffer := bytes.NewBuffer(nil)
+	encoder := gob.NewEncoder(buffer)
+
+	if err := encoder.Encode(tenants); err != nil {
+		logger.Printf("Failed encode message, the associated names cache won't be invalidated: %v", err)
+	}
+
+	err := c.cluster.Publish(ctx, topicInvalidateMutableLabels, buffer.Bytes())
+	if err != nil {
+		logger.Printf("Failed to publish a message, the associated names cache won't be invalidated: %v", err)
+	}
+}
+
+// invalidateMutableLabelsListener listens for messages from the cluster to invalidate the cache.
+func (c *cache) invalidateMutableLabelsListener(buffer []byte) {
+	debug.Print(1, logger, "Invalidating mutable labels cache")
+
+	var tenants []string
+
+	decoder := gob.NewDecoder(bytes.NewReader(buffer))
+
+	if err := decoder.Decode(&tenants); err != nil {
+		logger.Printf("Unable to decode tenants, the mutable labels cache won't be invalidated: %v", err)
+
+		return
+	}
+
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	for _, tenant := range tenants {
+		for key := range c.mutableLabelsCache {
+			if key.Tenant == tenant {
+				delete(c.mutableLabelsCache, key)
+			}
+		}
+	}
+
+	c.metrics.CacheSize.WithLabelValues("names").Set(float64(len(c.valuesCache)))
 }

@@ -263,13 +263,13 @@ func (cp *CassandraProvider) updateAssociatedValuesCache(tenant, name string) er
 
 // MutableLabelNames returns all the mutable label names possible for a tenant.
 func (cp *CassandraProvider) MutableLabelNames(tenant string) ([]string, error) {
-	mutableLabelNames, found := cp.cache.MutableLabelNames(tenant)
+	mutableLabelNames, found := cp.cache.AllMutableLabelNames(tenant)
 	if !found {
 		if err := cp.updateAssociatedNames(tenant); err != nil {
 			return nil, err
 		}
 
-		mutableLabelNames, _ = cp.cache.MutableLabelNames(tenant)
+		mutableLabelNames, _ = cp.cache.AllMutableLabelNames(tenant)
 	}
 
 	return mutableLabelNames, nil
@@ -278,22 +278,32 @@ func (cp *CassandraProvider) MutableLabelNames(tenant string) ([]string, error) 
 // WriteLabelValues writes the label values to Cassandra.
 func (cp *CassandraProvider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error {
 	// We use a map to to append only distinct values in the label keys.
-	used := make(map[string]struct{})
+	usedKeys := make(map[LabelKey]struct{})
 	keys := make([]LabelKey, 0, len(lbls))
+	usedTenants := make(map[string]struct{})
+	tenants := make([]string, 0, len(lbls))
 
 	for _, label := range lbls {
 		if err := cp.insertAssociatedValues(label); err != nil {
 			return err
 		}
 
-		if _, found := used[label.Tenant]; !found {
-			used[label.Tenant] = struct{}{}
+		key := LabelKey{Tenant: label.Tenant, Name: label.Name}
+		if _, found := usedKeys[key]; !found {
+			usedKeys[key] = struct{}{}
 
-			keys = append(keys, LabelKey{Tenant: label.Tenant, Name: label.Name})
+			keys = append(keys, key)
+		}
+
+		if _, found := usedTenants[label.Tenant]; !found {
+			usedTenants[label.Tenant] = struct{}{}
+
+			tenants = append(tenants, label.Tenant)
 		}
 	}
 
 	cp.cache.InvalidateAssociatedValues(ctx, keys)
+	cp.cache.InvalidateMutableLabels(ctx, tenants)
 
 	return nil
 }
@@ -315,22 +325,32 @@ func (cp *CassandraProvider) insertAssociatedValues(label LabelWithValues) error
 // DeleteLabelValues deletes label values in Cassandra.
 func (cp *CassandraProvider) DeleteLabelValues(ctx context.Context, lbls []Label) error {
 	// We use a map to to append only distinct values in the label keys.
-	used := make(map[string]struct{})
+	usedKeys := make(map[LabelKey]struct{})
 	keys := make([]LabelKey, 0, len(lbls))
+	usedTenants := make(map[string]struct{})
+	tenants := make([]string, 0, len(lbls))
 
 	for _, label := range lbls {
 		if err := cp.deleteAssociatedValues(label); err != nil {
 			return err
 		}
 
-		if _, found := used[label.Tenant]; !found {
-			used[label.Tenant] = struct{}{}
+		key := LabelKey{Tenant: label.Tenant, Name: label.Name}
+		if _, found := usedKeys[key]; !found {
+			usedKeys[key] = struct{}{}
 
-			keys = append(keys, LabelKey{Tenant: label.Tenant, Name: label.Name})
+			keys = append(keys, key)
+		}
+
+		if _, found := usedTenants[label.Tenant]; !found {
+			usedTenants[label.Tenant] = struct{}{}
+
+			tenants = append(tenants, label.Tenant)
 		}
 	}
 
 	cp.cache.InvalidateAssociatedValues(ctx, keys)
+	cp.cache.InvalidateMutableLabels(ctx, tenants)
 
 	return nil
 }
@@ -368,6 +388,7 @@ func (cp *CassandraProvider) WriteLabelNames(ctx context.Context, lbls []LabelWi
 	}
 
 	cp.cache.InvalidateAssociatedNames(ctx, tenants)
+	cp.cache.InvalidateMutableLabels(ctx, tenants)
 
 	return nil
 }
@@ -405,6 +426,7 @@ func (cp *CassandraProvider) DeleteLabelNames(ctx context.Context, labelKeys []L
 	}
 
 	cp.cache.InvalidateAssociatedNames(ctx, tenants)
+	cp.cache.InvalidateMutableLabels(ctx, tenants)
 
 	return nil
 }
@@ -434,13 +456,17 @@ func (cp *CassandraProvider) deleteAssociatedName(tenant, name string) error {
 
 // GetMutable returns the mutable labels corresponding to a non mutable label name and value.
 func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Labels, error) {
+	mutableLabels, found := cp.cache.MutableLabels(tenant, name, value)
+	if found {
+		return mutableLabels, nil
+	}
+
 	mutableNames, err := cp.mutableNames(tenant, name)
 	if err != nil {
 		return nil, err
 	}
 
-	var mutableLabels labels.Labels
-
+	// TODO: Maybe the rest of the function could be done by the label processor instead so it can be tested.
 	for _, mutableName := range mutableNames {
 		mutableValue, err := cp.getMutableValue(tenant, mutableName, value)
 		if err != nil {
@@ -458,6 +484,8 @@ func (cp *CassandraProvider) GetMutable(tenant, name, value string) (labels.Labe
 
 		mutableLabels = append(mutableLabels, mutableLabel)
 	}
+
+	cp.cache.SetMutableLabels(tenant, name, value, mutableLabels)
 
 	return mutableLabels, nil
 }
@@ -492,7 +520,7 @@ func (cp *CassandraProvider) getMutableValue(tenant, mutableName, nonMutableValu
 
 // mutableName returns the mutable label names associated to a non mutable label name.
 func (cp *CassandraProvider) mutableNames(tenant, name string) ([]string, error) {
-	mutableNames, found := cp.cache.MutableNames(tenant, name)
+	mutableNames, found := cp.cache.MutableLabelNames(tenant, name)
 	if found {
 		return mutableNames, nil
 	}
@@ -502,7 +530,7 @@ func (cp *CassandraProvider) mutableNames(tenant, name string) ([]string, error)
 		return nil, err
 	}
 
-	mutableNames, _ = cp.cache.MutableNames(tenant, name)
+	mutableNames, _ = cp.cache.MutableLabelNames(tenant, name)
 
 	return mutableNames, nil
 }
