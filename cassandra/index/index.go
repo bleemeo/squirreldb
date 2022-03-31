@@ -33,9 +33,12 @@ const backgroundCheckInterval = time.Minute
 const cacheExpirationDelay = 300 * time.Second
 
 const (
-	concurrentInsert = 20
-	maxCQLInValue    = 100 // limit of the number of value for the "IN" clause of a CQL query
-	verifyBulkSize   = 1000
+	concurrentInsert      = 20
+	concurrentDelete      = 20
+	concurrentPostingRead = 20
+	concurrentRead        = 4
+	maxCQLInValue         = 100 // limit of the number of value for the "IN" clause of a CQL query
+	verifyBulkSize        = 1000
 )
 
 const (
@@ -335,31 +338,35 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 	results := make(map[int32]*roaring.Bitmap, len(shards))
 	l := &sync.Mutex{}
 
-	return results, c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, shard := range shards {
-			shard := int32(shard)
-			task := func() error {
-				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
-				if err != nil {
-					return err
+	return results, c.concurrentTasks(
+		ctx,
+		concurrentPostingRead,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, shard := range shards {
+				shard := int32(shard)
+				task := func() error {
+					tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+					if err != nil {
+						return err
+					}
+
+					l.Lock()
+					results[shard] = tmp
+					l.Unlock()
+
+					return nil
 				}
 
-				l.Lock()
-				results[shard] = tmp
-				l.Unlock()
-
-				return nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 // Dump writes a CSV with all metrics known by this index.
@@ -1168,27 +1175,31 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	}
 
 	if doFix && len(updates) > 0 {
-		err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-			for _, req := range updates {
-				req := req
-				task := func() error {
-					_, err := c.postingUpdate(ctx, req)
+		err = c.concurrentTasks(
+			ctx,
+			concurrentInsert,
+			func(ctx context.Context, work chan<- func() error) error {
+				for _, req := range updates {
+					req := req
+					task := func() error {
+						_, err := c.postingUpdate(ctx, req)
 
-					if errors.Is(err, errBitmapEmpty) {
-						err = nil
+						if errors.Is(err, errBitmapEmpty) {
+							err = nil
+						}
+
+						return err
 					}
-
-					return err
+					select {
+					case work <- task:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				}
-				select {
-				case work <- task:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
 
-			return nil
-		})
+				return nil
+			},
+		)
 		if err != nil {
 			return hadIssue, err
 		}
@@ -1944,21 +1955,25 @@ func (c *CassandraIndex) createMetrics(
 		return nil, fmt.Errorf("update used metric IDs: %w", err)
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, entry := range pending {
-			entry := entry
-			task := func() error {
-				return c.store.InsertID2Labels(ctx, entry.id, entry.sortedLabels, entry.cassandraEntryExpiration)
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, entry := range pending {
+				entry := entry
+				task := func() error {
+					return c.store.InsertID2Labels(ctx, entry.id, entry.sortedLabels, entry.cassandraEntryExpiration)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1967,21 +1982,25 @@ func (c *CassandraIndex) createMetrics(
 		return nil, ctx.Err()
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, entry := range pending {
-			entry := entry
-			task := func() error {
-				return c.store.InsertLabels2ID(ctx, entry.sortedLabelsString, entry.id)
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, entry := range pending {
+				entry := entry
+				task := func() error {
+					return c.store.InsertLabels2ID(ctx, entry.sortedLabelsString, entry.id)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2162,31 +2181,34 @@ func (c *CassandraIndex) invalidatePostings(ctx context.Context, entries []posti
 }
 
 func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map[int32]bool) error {
-	return c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for shard := range shards {
-			shard := shard
-			task := func() error {
-				tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
-				if err != nil {
-					return err
+	return c.concurrentTasks(
+		ctx,
+		concurrentPostingRead,
+		func(ctx context.Context, work chan<- func() error) error {
+			for shard := range shards {
+				shard := shard
+				task := func() error {
+					tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+					if err != nil {
+						return err
+					}
+
+					c.lookupIDMutex.Lock()
+					c.idInShard[shard] = tmp
+					c.lookupIDMutex.Unlock()
+
+					return nil
 				}
 
-				c.lookupIDMutex.Lock()
-				c.idInShard[shard] = tmp
-				c.lookupIDMutex.Unlock()
-
-				return nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		return nil
-	})
+			return nil
+		})
 }
 
 func (c *CassandraIndex) applyUpdatePostingShards(
@@ -2225,87 +2247,99 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 		return fmt.Errorf("update bitmap: %w", err)
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range maybePresent {
-			req := req
-			task := func() error {
-				_, err := c.postingUpdate(ctx, req)
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range maybePresent {
+				req := req
+				task := func() error {
+					_, err := c.postingUpdate(ctx, req)
 
-				if errors.Is(err, errBitmapEmpty) {
-					err = nil
+					if errors.Is(err, errBitmapEmpty) {
+						err = nil
+					}
+
+					return err
 				}
-
-				return err
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range updates {
-			req := req
-			task := func() error {
-				_, err := c.postingUpdate(ctx, req)
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range updates {
+				req := req
+				task := func() error {
+					_, err := c.postingUpdate(ctx, req)
 
-				if errors.Is(err, errBitmapEmpty) {
-					err = nil
+					if errors.Is(err, errBitmapEmpty) {
+						err = nil
+					}
+
+					return err
 				}
-
-				return err
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range precense {
-			req := req
-			task := func() error {
-				bitmap, err := c.postingUpdate(ctx, req)
-				if err == nil {
-					c.lookupIDMutex.Lock()
-					c.idInShard[req.Shard] = bitmap
-					c.lookupIDMutex.Unlock()
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range precense {
+				req := req
+				task := func() error {
+					bitmap, err := c.postingUpdate(ctx, req)
+					if err == nil {
+						c.lookupIDMutex.Lock()
+						c.idInShard[req.Shard] = bitmap
+						c.lookupIDMutex.Unlock()
+					}
+
+					if errors.Is(err, errBitmapEmpty) {
+						c.lookupIDMutex.Lock()
+						delete(c.idInShard, req.Shard)
+						delete(c.idInShardLastAccess, req.Shard)
+						c.lookupIDMutex.Unlock()
+
+						err = nil
+					}
+
+					return err
 				}
-
-				if errors.Is(err, errBitmapEmpty) {
-					c.lookupIDMutex.Lock()
-					delete(c.idInShard, req.Shard)
-					delete(c.idInShardLastAccess, req.Shard)
-					c.lookupIDMutex.Unlock()
-
-					err = nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
 				}
-
-				return err
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -2460,21 +2494,25 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 
 	c.newMetricLock.Lock()
 
-	err := c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range expireUpdates {
-			req := req
-			task := func() error {
-				return c.expirationUpdate(ctx, req)
+	err := c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range expireUpdates {
+				req := req
+				task := func() error {
+					return c.expirationUpdate(ctx, req)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 
 	c.newMetricLock.Unlock()
 
@@ -2848,21 +2886,25 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		return err
 	}
 
-	err = c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range expireUpdates {
-			req := req
-			task := func() error {
-				return c.expirationUpdate(ctx, req)
+	err = c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range expireUpdates {
+				req := req
+				task := func() error {
+					return c.expirationUpdate(ctx, req)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -2879,6 +2921,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 // The queryGenerator must stop sending to the channel as soon as ctx is terminated.
 func (c *CassandraIndex) concurrentTasks(
 	ctx context.Context,
+	concurrency int,
 	queryGenerator func(ctx context.Context, c chan<- func() error) error,
 ) error {
 	group, ctx := errgroup.WithContext(ctx)
@@ -2914,7 +2957,7 @@ func (c *CassandraIndex) concurrentTasks(
 		})
 
 		startCount++
-		if startCount >= concurrentInsert {
+		if startCount >= concurrency {
 			break
 		}
 	}
@@ -3382,48 +3425,52 @@ func (c *CassandraIndex) selectLabelsList2ID(
 		results map[string]types.MetricID
 	)
 
-	return results, c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		start := 0
-		for start < len(sortedLabelsListString) {
-			end := start + maxCQLInValue
-			if end > len(sortedLabelsListString) {
-				end = len(sortedLabelsListString)
-			}
-
-			subSortedLabelsListString := sortedLabelsListString[start:end]
-
-			start += maxCQLInValue
-
-			task := func() error {
-				tmp, err := c.store.SelectLabelsList2ID(ctx, subSortedLabelsListString)
-				if err != nil {
-					return err
+	return results, c.concurrentTasks(
+		ctx,
+		concurrentRead,
+		func(ctx context.Context, work chan<- func() error) error {
+			start := 0
+			for start < len(sortedLabelsListString) {
+				end := start + maxCQLInValue
+				if end > len(sortedLabelsListString) {
+					end = len(sortedLabelsListString)
 				}
 
-				l.Lock()
+				subSortedLabelsListString := sortedLabelsListString[start:end]
 
-				if len(results) == 0 {
-					results = tmp
-				} else {
-					for k, v := range tmp {
-						results[k] = v
+				start += maxCQLInValue
+
+				task := func() error {
+					tmp, err := c.store.SelectLabelsList2ID(ctx, subSortedLabelsListString)
+					if err != nil {
+						return err
 					}
+
+					l.Lock()
+
+					if len(results) == 0 {
+						results = tmp
+					} else {
+						for k, v := range tmp {
+							results[k] = v
+						}
+					}
+
+					l.Unlock()
+
+					return nil
 				}
 
-				l.Unlock()
-
-				return nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 // selectIDS2LabelsAndExpiration is a thin wrapper around store SelectIDS2LabelsAndExpiration.
@@ -3442,56 +3489,60 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 		results2 map[types.MetricID]time.Time
 	)
 
-	return results, results2, c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		start := 0
-		for start < len(ids) {
-			end := start + maxCQLInValue
-			if end > len(ids) {
-				end = len(ids)
-			}
-
-			subIds := ids[start:end]
-
-			start += maxCQLInValue
-
-			task := func() error {
-				tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
-				if err != nil {
-					return err
+	return results, results2, c.concurrentTasks(
+		ctx,
+		concurrentRead,
+		func(ctx context.Context, work chan<- func() error) error {
+			start := 0
+			for start < len(ids) {
+				end := start + maxCQLInValue
+				if end > len(ids) {
+					end = len(ids)
 				}
 
-				l.Lock()
+				subIds := ids[start:end]
 
-				if len(results) == 0 {
-					results = tmp
-				} else {
-					for k, v := range tmp {
-						results[k] = v
+				start += maxCQLInValue
+
+				task := func() error {
+					tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
+					if err != nil {
+						return err
 					}
-				}
 
-				if len(results2) == 0 {
-					results2 = tmp2
-				} else {
-					for k, v := range tmp2 {
-						results2[k] = v
+					l.Lock()
+
+					if len(results) == 0 {
+						results = tmp
+					} else {
+						for k, v := range tmp {
+							results[k] = v
+						}
 					}
+
+					if len(results2) == 0 {
+						results2 = tmp2
+					} else {
+						for k, v := range tmp2 {
+							results2[k] = v
+						}
+					}
+
+					l.Unlock()
+
+					return nil
 				}
 
-				l.Unlock()
-
-				return nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 // popLabelsValue get and delete value via its name from a labels.Label list.

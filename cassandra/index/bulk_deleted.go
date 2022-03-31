@@ -103,21 +103,25 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 	// expiration is reached.
 	d.c.deleteIDsFromCache(d.deleteIDs)
 
-	err := d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, sortedLabelsString := range d.deleteLabels {
-			sortedLabelsString := sortedLabelsString
-			task := func() error {
-				return d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+	err := d.c.concurrentTasks(
+		ctx,
+		concurrentDelete,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, sortedLabelsString := range d.deleteLabels {
+				sortedLabelsString := sortedLabelsString
+				task := func() error {
+					return d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -175,58 +179,66 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 
 	d.c.invalidatePostings(ctx, d.invalidateKey)
 
-	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range presenceUpdates {
-			req := req
-			task := func() error {
-				bitmap, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-					return err
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range presenceUpdates {
+				req := req
+				task := func() error {
+					bitmap, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					d.c.lookupIDMutex.Lock()
+					if bitmap == nil || errors.Is(err, errBitmapEmpty) {
+						delete(d.c.idInShard, req.Shard)
+					} else {
+						d.c.idInShard[req.Shard] = bitmap
+					}
+					d.c.lookupIDMutex.Unlock()
+
+					return nil
 				}
-
-				d.c.lookupIDMutex.Lock()
-				if bitmap == nil || errors.Is(err, errBitmapEmpty) {
-					delete(d.c.idInShard, req.Shard)
-				} else {
-					d.c.idInShard[req.Shard] = bitmap
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
 				}
-				d.c.lookupIDMutex.Unlock()
-
-				return nil
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
 
-	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range shardedUpdates {
-			req := req
-			task := func() error {
-				_, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-					return err
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range shardedUpdates {
+				req := req
+				task := func() error {
+					_, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					return nil
 				}
-
-				return nil
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -245,33 +257,37 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		},
 	}
 
-	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, req := range maybePresenceUpdates {
-			req := req
-			task := func() error {
-				it, err := d.c.postingUpdate(ctx, req)
-				if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-					return err
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range maybePresenceUpdates {
+				req := req
+				task := func() error {
+					it, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					// it is nil iff it's empty (or an error occure)
+					if it == nil || errors.Is(err, errBitmapEmpty) {
+						l.Lock()
+						shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(req.Shard))
+						l.Unlock()
+					}
+
+					return nil
 				}
-
-				// it is nil iff it's empty (or an error occure)
-				if it == nil || errors.Is(err, errBitmapEmpty) {
-					l.Lock()
-					shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(req.Shard))
-					l.Unlock()
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
 				}
-
-				return nil
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -283,21 +299,25 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		}
 	}
 
-	err = d.c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
-		for _, id := range d.deleteIDs {
-			id := types.MetricID(id)
-			task := func() error {
-				return d.c.store.DeleteID2Labels(ctx, id)
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentDelete,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, id := range d.deleteIDs {
+				id := types.MetricID(id)
+				task := func() error {
+					return d.c.store.DeleteID2Labels(ctx, id)
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
-			select {
-			case work <- task:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 
-		return nil
-	})
+			return nil
+		},
+	)
 	if err != nil {
 		return err
 	}
