@@ -32,7 +32,11 @@ const backgroundCheckInterval = time.Minute
 
 const cacheExpirationDelay = 300 * time.Second
 
-const concurrentInsert = 20
+const (
+	concurrentInsert = 20
+	maxCQLInValue    = 100 // limit of the number of value for the "IN" clause of a CQL query
+	verifyBulkSize   = 1000
+)
 
 const (
 	metricCreationLockTimeToLive  = 15 * time.Second
@@ -406,7 +410,7 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 }
 
 func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID) error {
-	id2Labels, _, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
+	id2Labels, _, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
 	}
@@ -503,7 +507,7 @@ func (c *CassandraIndex) verify(
 
 			pendingIds = append(pendingIds, metricID)
 
-			if len(pendingIds) > 1000 {
+			if len(pendingIds) > verifyBulkSize {
 				break
 			}
 		}
@@ -649,7 +653,7 @@ func (c *CassandraIndex) verifyBulk(
 	allPosting *roaring.Bitmap,
 	allGoodIds *roaring.Bitmap,
 ) (err error) {
-	id2Labels, id2expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
+	id2Labels, id2expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
 	}
@@ -682,7 +686,7 @@ func (c *CassandraIndex) verifyBulk(
 		return ctx.Err()
 	}
 
-	labels2ID, err := c.store.SelectLabelsList2ID(ctx, allLabelsString)
+	labels2ID, err := c.selectLabelsList2ID(ctx, allLabelsString)
 	if err != nil {
 		return fmt.Errorf("get labels2ID: %w", err)
 	}
@@ -714,7 +718,7 @@ func (c *CassandraIndex) verifyBulk(
 		}
 
 		if id != id2 { //nolint:nestif
-			tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
+			tmp, tmp2, err := c.selectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
 			if err != nil {
 				return fmt.Errorf("get labels from store: %w", err)
 			}
@@ -938,7 +942,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 			break
 		}
 
-		tmp, _, err := c.store.SelectIDS2LabelsAndExpiration(ctx, pendingIds)
+		tmp, _, err := c.selectIDS2LabelsAndExpiration(ctx, pendingIds)
 		if err != nil {
 			return true, fmt.Errorf("get labels: %w", err)
 		}
@@ -1310,7 +1314,7 @@ func (c *CassandraIndex) lookupLabels(
 	c.metrics.CacheAccess.WithLabelValues("lookup-labels", "hit").Add(float64(len(ids) - len(idToQuery)))
 
 	if len(idToQuery) > 0 {
-		idToLabels, idToExpiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, idToQuery)
+		idToLabels, idToExpiration, err := c.selectIDS2LabelsAndExpiration(ctx, idToQuery)
 		if err != nil {
 			c.metrics.LookupLabelsSeconds.Observe(time.Since(start).Seconds())
 
@@ -1507,7 +1511,7 @@ func (c *CassandraIndex) lookupIDs(
 	c.metrics.CacheAccess.WithLabelValues("lookup-id", "miss").Add(float64(miss))
 
 	if len(labelsToQuery) > 0 {
-		labels2ID, err := c.store.SelectLabelsList2ID(ctx, labelsToQuery)
+		labels2ID, err := c.selectLabelsList2ID(ctx, labelsToQuery)
 		if err != nil {
 			return nil, nil, fmt.Errorf("searching metric failed: %w", err)
 		}
@@ -1518,7 +1522,7 @@ func (c *CassandraIndex) lookupIDs(
 			idsToQuery = append(idsToQuery, id)
 		}
 
-		_, ids2Expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, idsToQuery)
+		_, ids2Expiration, err := c.selectIDS2LabelsAndExpiration(ctx, idsToQuery)
 		if err != nil {
 			return nil, nil, fmt.Errorf("searching metric failed: %w", err)
 		}
@@ -1866,7 +1870,7 @@ func (c *CassandraIndex) createMetrics(
 	}
 
 	// Be sure no-one registered the metric before we took the lock.
-	labels2ID, err := c.store.SelectLabelsList2ID(ctx, labelsToQuery)
+	labels2ID, err := c.selectLabelsList2ID(ctx, labelsToQuery)
 	if err != nil {
 		return nil, fmt.Errorf("check IDs from store: %w", err)
 	}
@@ -2799,7 +2803,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		metricIDs[i] = types.MetricID(intID)
 	}
 
-	idToLabels, expires, err := c.store.SelectIDS2LabelsAndExpiration(ctx, metricIDs)
+	idToLabels, expires, err := c.selectIDS2LabelsAndExpiration(ctx, metricIDs)
 	if err != nil {
 		return fmt.Errorf("get expiration from store : %w", err)
 	}
@@ -3363,6 +3367,133 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	return results, nil
 }
 
+// selectLabelsList2ID is a thin wrapper around store SelectLabelsList2ID.
+// It handle submitting parallel queries when len(ids) is too big.
+func (c *CassandraIndex) selectLabelsList2ID(
+	ctx context.Context,
+	sortedLabelsListString []string,
+) (map[string]types.MetricID, error) {
+	if len(sortedLabelsListString) < maxCQLInValue {
+		return c.store.SelectLabelsList2ID(ctx, sortedLabelsListString)
+	}
+
+	var (
+		l       sync.Mutex
+		results map[string]types.MetricID
+	)
+
+	return results, c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
+		start := 0
+		for start < len(sortedLabelsListString) {
+			end := start + maxCQLInValue
+			if end > len(sortedLabelsListString) {
+				end = len(sortedLabelsListString)
+			}
+
+			subSortedLabelsListString := sortedLabelsListString[start:end]
+
+			start += maxCQLInValue
+
+			task := func() error {
+				tmp, err := c.store.SelectLabelsList2ID(ctx, subSortedLabelsListString)
+				if err != nil {
+					return err
+				}
+
+				l.Lock()
+
+				if len(results) == 0 {
+					results = tmp
+				} else {
+					for k, v := range tmp {
+						results[k] = v
+					}
+				}
+
+				l.Unlock()
+
+				return nil
+			}
+
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		return nil
+	})
+}
+
+// selectIDS2LabelsAndExpiration is a thin wrapper around store SelectIDS2LabelsAndExpiration.
+// It handle submitting parallel queries when len(ids) is too big.
+func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
+	ctx context.Context,
+	ids []types.MetricID,
+) (map[types.MetricID]labels.Labels, map[types.MetricID]time.Time, error) {
+	if len(ids) < maxCQLInValue {
+		return c.store.SelectIDS2LabelsAndExpiration(ctx, ids)
+	}
+
+	var (
+		l        sync.Mutex
+		results  map[types.MetricID]labels.Labels
+		results2 map[types.MetricID]time.Time
+	)
+
+	return results, results2, c.concurrentTasks(ctx, func(ctx context.Context, work chan<- func() error) error {
+		start := 0
+		for start < len(ids) {
+			end := start + maxCQLInValue
+			if end > len(ids) {
+				end = len(ids)
+			}
+
+			subIds := ids[start:end]
+
+			start += maxCQLInValue
+
+			task := func() error {
+				tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
+				if err != nil {
+					return err
+				}
+
+				l.Lock()
+
+				if len(results) == 0 {
+					results = tmp
+				} else {
+					for k, v := range tmp {
+						results[k] = v
+					}
+				}
+
+				if len(results2) == 0 {
+					results2 = tmp2
+				} else {
+					for k, v := range tmp2 {
+						results2[k] = v
+					}
+				}
+
+				l.Unlock()
+
+				return nil
+			}
+
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		return nil
+	})
+}
+
 // popLabelsValue get and delete value via its name from a labels.Label list.
 func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
 	for i, label := range *labels {
@@ -3647,7 +3778,7 @@ func (s cassandraStore) SelectLabelsList2ID(
 	}()
 
 	iter := s.session.Query(
-		"SELECT labels, id FROM index_labels2id WHERE labels in ?",
+		"SELECT labels, id FROM index_labels2id WHERE labels IN ?",
 		sortedLabelsListString,
 	).WithContext(ctx).Iter()
 
