@@ -1,6 +1,7 @@
 package mutable_test
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"squirreldb/cassandra/mutable"
@@ -90,7 +91,8 @@ func TestReplaceMutableLabels(t *testing.T) {
 		},
 	}
 
-	provider := dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels)
+	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store)
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
@@ -137,7 +139,8 @@ func TestAddMutableLabels(t *testing.T) {
 		},
 	}
 
-	provider := dummy.NewMutableLabelProvider(dummy.DefaultMutableLabels)
+	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store)
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {

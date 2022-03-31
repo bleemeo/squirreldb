@@ -787,6 +787,8 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 
 func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.ProviderAndWriter, error) {
 	if s.mutableLabelProvider == nil {
+		var store mutable.Store
+
 		switch s.Config.String("internal.mutable_labels_provider") {
 		case backendCassandra:
 			session, err := s.CassandraSession()
@@ -794,28 +796,27 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 				return nil, err
 			}
 
-			cluster, err := s.Cluster(ctx)
+			store, err = mutable.NewCassandraStore(session)
 			if err != nil {
 				return nil, err
 			}
-
-			labelProvider, err := mutable.NewCassandraProvider(ctx, s.MetricRegistry, session, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-			s.mutableLabelProvider = labelProvider
-			s.api.MutableLabelWriter = labelProvider
 		case backendDummy:
-			logger.Println("Warning: Cassandra is disabled for mutable labels. Using dummy provider that returns no label.")
+			logger.Println("Warning: Cassandra is disabled for mutable labels. Using dummy store that returns no label.")
 
-			labelProvider := dummy.NewMutableLabelProvider(nil)
-
-			s.mutableLabelProvider = labelProvider
-			s.api.MutableLabelWriter = labelProvider
+			store = dummy.NewMutableLabelStore(dummy.MutableLabels{})
 		default:
 			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.mutable_labels_provider"))
 		}
+
+		cluster, err := s.Cluster(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		labelProvider := mutable.NewProvider(ctx, s.MetricRegistry, cluster, store)
+
+		s.mutableLabelProvider = labelProvider
+		s.api.MutableLabelWriter = labelProvider
 	}
 
 	return s.mutableLabelProvider, nil

@@ -169,6 +169,9 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 // mergeLabels merge the labels in one matcher that matches any of the input label values.
 // Example: mergeLabels(instance="server1", instance="server2") -> instance~="server1|server2".
 func mergeLabels(lbls NonMutableLabels, matchType labels.MatchType) (matcher *labels.Matcher, err error) {
+	// Sort the values to have a deterministic output for testing.
+	sort.Strings(lbls.Values)
+
 	regex, err := mergeRegex(lbls.Values)
 	if err != nil {
 		return nil, err
