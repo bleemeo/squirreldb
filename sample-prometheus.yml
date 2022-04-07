@@ -17,6 +17,6 @@ scrape_configs:
 
 
 remote_write:
-- url: http://squirreldb:9201/write
+- url: http://squirreldb:9201/api/v1/write
 remote_read:
-- url: http://squirreldb:9201/read
+- url: http://squirreldb:9201/api/v1/read

@@ -32,6 +32,17 @@ Note: some test will clear store (Cassandra or Redis) before processing.
 * For Cassandra, it's the keyspace "squirreldb_test" which is dropped
 * For Redis, it's all key starting with "test:"
 
+If you want to run usin goreleaser to use same Go version as the one used for release, run all "go run"
+inside a container started with:
+```
+docker run --rm -ti -e HOME=/go/pkg \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -v $(pwd):/src -w /src -v squirreldb-buildcache:/go/pkg \
+    --entrypoint '' \
+    goreleaser/goreleaser:v1.6.3 bash
+```
+
 # squirreldb-cassandra-lock-bench
 
 This test validate the Cassandra distributed locks are correct: that is two nodes
@@ -51,7 +62,7 @@ It test this by:
 Run it with:
 ```
 go run ./tests/squirreldb-cassandra-lock-bench/
-go run ./tests/squirreldb-cassandra-lock-bench/ -try-lock-duration 1ms
+go run ./tests/squirreldb-cassandra-lock-bench/ --try-lock-duration 1ms
 ```
 
 # squirreldb-cassandra-index-bench
@@ -66,31 +77,31 @@ go run ./tests/squirreldb-cassandra-index-bench/
 
 To test concurrent insertion in the Index, run with (this try to mimick 2 SquirrelDB being a nginx load-balancer):
 ```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.worker-max-threads 20 -bench.worker-processes 2 -bench.worker-client 2 -bench.query 0 -bench.batch-size 100 -bench.shard-size 1000 -force-fair-lb
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.worker-max-threads 20 --bench.worker-processes 2 --bench.worker-client 2 --bench.query 0 --bench.batch-size 100 --bench.shard-size 1000 --force-fair-lb
 ```
 
 To see impact of other shard (total number of total metrics) you may want to re-run the command increasing the shard-start/shard-end
 
 ```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 6 -bench.shard-end 10
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 11 -bench.shard-end 20
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 21 -bench.shard-end 50
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 51 -bench.shard-end 100
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 101 -bench.shard-end 200
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 6 --bench.shard-end 10
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 11 --bench.shard-end 20
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 21 --bench.shard-end 50
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 51 --bench.shard-end 100
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 101 --bench.shard-end 200
 [...]
 ```
 
 With larger index, query may excess the deadline (5s by default), you may want to run with larger deadline:
 
 ```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -no-drop -bench.shard-start 201 -bench.shard-end 400 -bench.max-time 30s
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --no-drop --bench.shard-start 201 --bench.shard-end 400 --bench.max-time 30s
 ```
 
 Finally if you want to test a bit the expiration of metric you may want to run the following two command:
 ```
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -bench.query 0 -expired-fraction 1 -bench.expiration=false -bench.shard-end 30
-go run ./tests/squirreldb-cassandra-index-bench/ -bench.shard-size 1000 -bench.query 0 -expired-fraction 2 -bench.expiration=true -bench.shard-end 30 -no-drop
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --bench.query 0 --expired-fraction 1 --bench.expiration=false --bench.shard-end 30
+go run ./tests/squirreldb-cassandra-index-bench/ --bench.shard-size 1000 --bench.query 0 --expired-fraction 2 --bench.expiration=true --bench.shard-end 30 --no-drop
 ```
 
 The first command will:
@@ -139,7 +150,7 @@ This is another testing program that rely on remote write & remote read. The dif
 go run ./tests/remote-storage-test2
 
 # Using existing remote storage
-go run ./tests/remote-storage-test2 --read-url http://localhost:9201/read --write-url http://localhost:9201/write
+go run ./tests/remote-storage-test2 --read-urls http://localhost:9201/read --write-urls http://localhost:9201/write
 ```
 
 # Run on Cassandra cluster
@@ -149,7 +160,7 @@ The easiest is to use run-tests-cluster.sh:
 ./run-tests-cluster.sh
 ```
 
-To run those program with a Cassandra cluster, the easiest way is:
+To execute the go run with a Cassandra cluster, the easiest way is:
 
 * Start a Cassandra & redis cluster using example/squirreldb_ha:
 ```
