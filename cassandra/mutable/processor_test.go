@@ -162,3 +162,63 @@ func TestAddMutableLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeRegex(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		regex          []string
+		shouldMatch    []string
+		shouldNotMatch []string
+	}{
+		{
+			name:           "one-regex",
+			regex:          []string{"web-.*"},
+			shouldMatch:    []string{"web-0", "web-1", "web-server867"},
+			shouldNotMatch: []string{"a", "aweb-0", "web1"},
+		},
+		{
+			name:           "windows-path",
+			regex:          []string{`C:\\Users\\Dummy\\Documents\\.*`, `C:\\Users\\Dummy\\Videos`},
+			shouldMatch:    []string{`C:\Users\Dummy\Documents\MyDir`, `C:\Users\Dummy\Videos`},
+			shouldNotMatch: []string{"a", `C:\Users\Dummy\Downloads`, `D:\Users\Dummy\Videos`},
+		},
+		{
+			name:           "dot",
+			regex:          []string{`\.\./file1`, `\.\./\.\./.*`},
+			shouldMatch:    []string{`../file1`, `../../file2`},
+			shouldNotMatch: []string{"aa/file1", "aa/aa/file2"},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			merged, err := mutable.MergeRegex(test.regex)
+			if err != nil {
+				t.Errorf("Failed to merge regex %v: %v", test.regex, err)
+			}
+
+			matcher, err := labels.NewMatcher(labels.MatchRegexp, test.name, merged)
+			if err != nil {
+				t.Errorf("Failed to create matcher: %v", err)
+			}
+
+			for _, shouldMatch := range test.shouldMatch {
+				if !matcher.Matches(shouldMatch) {
+					t.Errorf("%v doesn't match %v", shouldMatch, merged)
+				}
+			}
+
+			for _, shouldNotMatch := range test.shouldNotMatch {
+				if matcher.Matches(shouldNotMatch) {
+					t.Errorf("%v matches when it shouldn't %v", shouldNotMatch, merged)
+				}
+			}
+		})
+	}
+}

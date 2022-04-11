@@ -172,7 +172,7 @@ func mergeLabels(lbls NonMutableLabels, matchType labels.MatchType) (matcher *la
 	// Sort the values to have a deterministic output for testing.
 	sort.Strings(lbls.Values)
 
-	regex, err := mergeRegex(lbls.Values)
+	regex, err := MergeRegex(lbls.Values)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +185,8 @@ func mergeLabels(lbls NonMutableLabels, matchType labels.MatchType) (matcher *la
 	return newMatcher, nil
 }
 
-// mergeRegex returns a regular expression matching any of the input expressions.
-func mergeRegex(input []string) (string, error) {
+// MergeRegex returns a regular expression matching any of the input expressions.
+func MergeRegex(input []string) (string, error) {
 	var err error
 
 	allRegex := make([]*syntax.Regexp, len(input))
