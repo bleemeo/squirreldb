@@ -161,7 +161,7 @@ func (m *indexWrapper) LabelNames(
 	return names, nil
 }
 
-// Implement the indexVerifier interface used by the API.
+// Verify implements the IndexVerifier interface used by the API.
 func (m *indexWrapper) Verify(
 	ctx context.Context,
 	w io.Writer,
@@ -175,7 +175,7 @@ func (m *indexWrapper) Verify(
 	return false, errNotImplemented
 }
 
-// Implement the indexDumper interface used by the API.
+// Dump implements the IndexDumper interface used by the API.
 func (m *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
 	if dumper, ok := m.index.(types.IndexDumper); ok {
 		return dumper.Dump(ctx, w)
@@ -187,6 +187,8 @@ func (m *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.
 type mutableMetricsSet struct {
 	metricsSet     types.MetricsSet
+	currentMetric  types.MetricLabel
+	err            error
 	labelProcessor *LabelProcessor
 }
 
@@ -195,28 +197,36 @@ func (m *mutableMetricsSet) Next() bool {
 		return false
 	}
 
-	return m.metricsSet.Next()
-}
-
-func (m *mutableMetricsSet) At() types.MetricLabel {
-	if m.metricsSet == nil {
-		return types.MetricLabel{}
+	if !m.metricsSet.Next() {
+		return false
 	}
 
 	metric := m.metricsSet.At()
 
 	lbls, err := m.labelProcessor.AddMutableLabels(metric.Labels)
 	if err != nil {
-		// When there is an error, simply skip adding the mutable labels.
 		logger.Printf("Failed to add mutable labels: %v\n", err)
-	} else {
-		metric.Labels = lbls
+
+		m.err = err
+
+		return false
 	}
 
-	return metric
+	metric.Labels = lbls
+	m.currentMetric = metric
+
+	return true
+}
+
+func (m *mutableMetricsSet) At() types.MetricLabel {
+	return m.currentMetric
 }
 
 func (m *mutableMetricsSet) Err() error {
+	if m.err != nil {
+		return m.err
+	}
+
 	if m.metricsSet == nil {
 		return nil
 	}
