@@ -120,6 +120,8 @@ func (m *indexWrapper) LabelValues(
 				return nil, err
 			}
 
+			sort.Strings(values)
+
 			return values, nil
 		}
 	}
