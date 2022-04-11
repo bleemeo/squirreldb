@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"regexp/syntax"
 	"sort"
 
@@ -185,14 +186,16 @@ func mergeLabels(lbls NonMutableLabels, matchType labels.MatchType) (matcher *la
 	return newMatcher, nil
 }
 
-// MergeRegex returns a regular expression matching any of the input expressions.
+// MergeRegex returns a regular expression matching any of the input strings.
 func MergeRegex(input []string) (string, error) {
 	var err error
 
 	allRegex := make([]*syntax.Regexp, len(input))
 
 	for i, v := range input {
-		allRegex[i], err = syntax.Parse(v, syntax.Perl)
+		escaped := regexp.QuoteMeta(v)
+
+		allRegex[i], err = syntax.Parse(escaped, syntax.Perl)
 		if err != nil {
 			return "", err
 		}
