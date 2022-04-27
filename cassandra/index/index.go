@@ -2740,7 +2740,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 	// Only process entries due to expire yesterday or before, with an offset.
 	candidateDay := lastProcessedDay.Add(24 * time.Hour)
-	skipOffset := now.Sub(now.Truncate(24*time.Hour)) < expirationStartOffset
+	skipOffset := now.Sub(candidateDay.Truncate(24*time.Hour)) < expirationStartOffset
 
 	if candidateDay.After(maxTime) || skipOffset {
 		return false
