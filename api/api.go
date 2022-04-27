@@ -146,6 +146,7 @@ func (a *API) init() {
 	router.Get("/ready", a.readyHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
+	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
@@ -326,6 +327,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 
 type indexDumper interface {
 	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
+	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
 }
 
 func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
@@ -333,15 +335,43 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 
 	if idx, ok := a.Index.(indexDumper); ok {
 		_, withExpiration := req.URL.Query()["withExpiration"]
-
-		err := idx.Dump(ctx, w, withExpiration)
-		if err != nil {
+		if err := idx.Dump(ctx, w, withExpiration); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}
 	} else {
-		http.Error(w, "Index does not implement Verify()", http.StatusNotImplemented)
+		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(indexDumper); ok {
+		dates := req.URL.Query()["date"]
+		if len(dates) != 1 {
+			http.Error(w, `Expect one parameter "date"`, http.StatusBadRequest)
+
+			return
+		}
+
+		date, err := time.Parse("2006-01-02", dates[0])
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+
+			return
+		}
+
+		if err := idx.DumpByExpirationDate(ctx, w, date); err != nil {
+			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	} else {
+		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
 
 		return
 	}

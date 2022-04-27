@@ -452,6 +452,42 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer, withExpiration b
 	return ctx.Err()
 }
 
+func (c *CassandraIndex) DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error {
+	expirationBitmap, err := c.cassandraGetExpirationList(ctx, expirationDate.Truncate(24*time.Hour))
+	if err != nil {
+		return fmt.Errorf("unable to get metric expiration list: %w", err)
+	}
+
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	iter := expirationBitmap.Iterator()
+	pendingIDs := make([]types.MetricID, expireBatchSize)
+
+	for ctx.Err() == nil {
+		pendingIDs = pendingIDs[0:expireBatchSize]
+
+		n := 0
+		for id, eof := iter.Next(); !eof && n < expireBatchSize; id, eof = iter.Next() {
+			pendingIDs[n] = types.MetricID(id)
+			n++
+		}
+
+		pendingIDs = pendingIDs[:n]
+
+		if len(pendingIDs) == 0 {
+			break
+		}
+
+		err := c.dumpBulk(ctx, csvWriter, pendingIDs, true)
+		if err != nil {
+			return err
+		}
+	}
+
+	return ctx.Err()
+}
+
 func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID, withExpiration bool) error {
 	id2Labels, id2Expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
@@ -2953,7 +2989,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 	return nil
 }
 
-// Run tasks concurrently with at most concurrency task in parralle.
+// Run tasks concurrently with at most concurrency task in parallel.
 // The queryGenerator must stop sending to the channel as soon as ctx is terminated.
 func (c *CassandraIndex) concurrentTasks(
 	ctx context.Context,
