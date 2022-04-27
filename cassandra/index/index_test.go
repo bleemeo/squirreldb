@@ -4694,7 +4694,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	}
 
 	index.expire(t0)
-	index.cassandraExpire(context.Background(), t0)
+	_, _ = index.cassandraExpire(context.Background(), t0)
 
 	allIds, err := index.AllIDs(context.Background(), t0, t0)
 	if err != nil {
@@ -4760,7 +4760,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
 	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t1)
+		_, _ = index.cassandraExpire(context.Background(), t1)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t1)
@@ -4798,7 +4798,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t2)
 
 	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t2)
+		_, _ = index.cassandraExpire(context.Background(), t2)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t2)
@@ -4819,7 +4819,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t3)
 
 	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t3)
+		_, _ = index.cassandraExpire(context.Background(), t3)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t3)
@@ -4859,7 +4859,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t4)
 
 	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t4)
+		_, _ = index.cassandraExpire(context.Background(), t4)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t4)
@@ -4874,7 +4874,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t5)
 
 	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t5)
+		_, _ = index.cassandraExpire(context.Background(), t5)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t5)
@@ -4898,7 +4898,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t6)
 
 	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t6)
+		_, _ = index.cassandraExpire(context.Background(), t6)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t6)
