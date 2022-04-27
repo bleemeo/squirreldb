@@ -325,14 +325,16 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 type indexDumper interface {
-	Dump(ctx context.Context, w io.Writer) error
+	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
 }
 
 func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(indexDumper); ok {
-		err := idx.Dump(ctx, w)
+		_, withExpiration := req.URL.Query()["withExpiration"]
+
+		err := idx.Dump(ctx, w, withExpiration)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 

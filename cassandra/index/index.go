@@ -407,7 +407,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 
 // Dump writes a CSV with all metrics known by this index.
 // The format should not be considered stable and should only be used for debugging.
-func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
+func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer, withExpiration bool) error {
 	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
 	if err != nil {
 		return err
@@ -442,7 +442,7 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 		}
 
 		if len(pendingIds) > 0 {
-			err := c.dumpBulk(ctx, csvWriter, pendingIds)
+			err := c.dumpBulk(ctx, csvWriter, pendingIds, withExpiration)
 			if err != nil {
 				return err
 			}
@@ -452,30 +452,46 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 	return ctx.Err()
 }
 
-func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID) error {
-	id2Labels, _, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
+func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []types.MetricID, withExpiration bool) error {
+	id2Labels, id2Expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("get labels: %w", err)
 	}
 
 	for _, id := range ids {
-		lbls, ok := id2Labels[id]
-		if !ok {
-			err := w.Write([]string{
+		expiration, expirationOk := id2Expiration[id]
+		lbls, labelsOk := id2Labels[id]
+
+		var csvLine []string
+
+		switch {
+		case !labelsOk:
+			csvLine = []string{
 				strconv.FormatInt(int64(id), 10),
 				"Missing labels! Partial write ?",
-			})
-			if err != nil {
-				return err
 			}
-		} else {
-			err := w.Write([]string{
+		case withExpiration && !expirationOk:
+			csvLine = []string{
 				strconv.FormatInt(int64(id), 10),
 				lbls.String(),
-			})
-			if err != nil {
-				return err
+				"Missing expiration!",
 			}
+		case withExpiration:
+			csvLine = []string{
+				strconv.FormatInt(int64(id), 10),
+				lbls.String(),
+				expiration.String(),
+			}
+		default:
+			csvLine = []string{
+				strconv.FormatInt(int64(id), 10),
+				lbls.String(),
+			}
+		}
+
+		err := w.Write(csvLine)
+		if err != nil {
+			return err
 		}
 	}
 
