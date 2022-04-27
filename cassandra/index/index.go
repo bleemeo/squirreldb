@@ -69,6 +69,9 @@ const (
 	timeToLiveLabelName = "__ttl__"
 )
 
+// The expiration of entries in Cassandra starts everyday at 00:00AM UTC + expirationStartOffset.
+const expirationStartOffset = 6 * time.Hour
+
 //nolint:gochecknoglobals
 var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
@@ -2712,7 +2715,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 		_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
 		if err != nil {
-			logger.Printf("Waring: unable to get last processed day for metrics expiration: %v", err)
+			logger.Printf("Warning: unable to get last processed day for metrics expiration: %v", err)
 
 			return false
 		}
@@ -2729,15 +2732,17 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 		err := c.options.States.Write(expireMetricStateName, lastProcessedDay.Format(time.RFC3339))
 		if err != nil {
-			logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
+			logger.Printf("Warning: unable to set last processed day for metrics expiration: %v", err)
 
 			return false
 		}
 	}
 
+	// Only process entries due to expire yesterday or before, with an offset.
 	candidateDay := lastProcessedDay.Add(24 * time.Hour)
+	skipOffset := now.Sub(now.Truncate(24*time.Hour)) < expirationStartOffset
 
-	if candidateDay.After(maxTime) {
+	if candidateDay.After(maxTime) || skipOffset {
 		return false
 	}
 
@@ -2745,7 +2750,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 	// won't be added in candidateDay (which is in the past).
 	bitmap, err := c.cassandraGetExpirationList(ctx, candidateDay)
 	if err != nil {
-		logger.Printf("Waring: unable to get list of metrics to check for expiration: %v", err)
+		logger.Printf("Warning: unable to get list of metrics to check for expiration: %v", err)
 
 		return false
 	}
@@ -2773,14 +2778,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 		}
 
 		if err := c.cassandraCheckExpire(ctx, results, now); err != nil {
-			logger.Printf("Waring: unable to perform expiration check of metrics: %v", err)
+			logger.Printf("Warning: unable to perform expiration check of metrics: %v", err)
 
 			return false
 		}
 
 		_, err = bitmap.Remove(results...)
 		if err != nil {
-			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+			logger.Printf("Warning: unable to update list of metrics to check for expiration: %v", err)
 
 			return false
 		}
@@ -2793,14 +2798,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 		_, err = bitmap.WriteTo(&buffer)
 		if err != nil {
-			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+			logger.Printf("Warning: unable to update list of metrics to check for expiration: %v", err)
 
 			return false
 		}
 
 		err = c.store.InsertExpiration(ctx, candidateDay, buffer.Bytes())
 		if err != nil {
-			logger.Printf("Waring: unable to update list of metrics to check for expiration: %v", err)
+			logger.Printf("Warning: unable to update list of metrics to check for expiration: %v", err)
 
 			return false
 		}
@@ -2808,14 +2813,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) boo
 
 	err = c.store.DeleteExpiration(ctx, candidateDay)
 	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
-		logger.Printf("Waring: unable to remove processed list of metrics to check for expiration: %v", err)
+		logger.Printf("Warning: unable to remove processed list of metrics to check for expiration: %v", err)
 
 		return false
 	}
 
 	err = c.options.States.Write(expireMetricStateName, candidateDay.Format(time.RFC3339))
 	if err != nil {
-		logger.Printf("Waring: unable to set last processed day for metrics expiration: %v", err)
+		logger.Printf("Warning: unable to set last processed day for metrics expiration: %v", err)
 
 		return false
 	}

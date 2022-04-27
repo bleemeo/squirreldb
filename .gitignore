@@ -6,6 +6,7 @@
 .vscode
 *.*.swp
 .build-cache
+__debug_bin
 
 telemetry.json
 coverage.html

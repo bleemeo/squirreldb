@@ -4779,7 +4779,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	if err != nil {
 		t.Error(err)
 
-		return // can't continue, lock make be hold
+		return // can't continue, lock may be held
 	}
 
 	if ttls[0] != int64(shortTTL.Seconds()) {

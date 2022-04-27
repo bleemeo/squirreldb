@@ -732,7 +732,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 
 		err := s.states.Write("cluster_id", clusterID)
 		if err != nil {
-			logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+			logger.Printf("Warning: unable to set cluster id for telemetry: %v", err)
 		}
 	}
 
