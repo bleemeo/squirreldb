@@ -322,10 +322,10 @@ func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 		logger.Printf("Warning: %v. Retrying in %v", err, nextBackoff.Round(time.Second))
 	} else {
 		c.expirationBackoff.Reset()
-	}
 
-	if !moreWork {
-		c.nextExpirationAt = now.Add(expirationCheckInterval)
+		if !moreWork {
+			c.nextExpirationAt = now.Add(expirationCheckInterval)
+		}
 	}
 
 	return moreWork
