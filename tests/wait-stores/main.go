@@ -10,7 +10,7 @@ import (
 
 //nolint:gochecknoglobals
 var (
-	maxWaitTime = flag.Duration("max-wait-time", time.Minute, "Maximum time to wait for stores")
+	maxWaitTime = flag.Duration("max-wait-time", 3*time.Minute, "Maximum time to wait for stores")
 )
 
 func main() {
