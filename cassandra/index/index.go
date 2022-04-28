@@ -2580,6 +2580,12 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 
 	c.lookupIDMutex.Unlock()
 
+	if len(expireUpdates) == 0 {
+		return
+	}
+
+	debug.Print(debug.Level1, logger, "Applying expiration update requests %#v\n", expireUpdates)
+
 	c.newMetricLock.Lock()
 
 	err := c.concurrentTasks(
