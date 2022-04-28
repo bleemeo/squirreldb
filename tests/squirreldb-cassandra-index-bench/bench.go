@@ -130,6 +130,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 
 			go func() {
 				defer wg.Done()
+
 				loadBalancer(workChannel, channels)
 			}()
 		}

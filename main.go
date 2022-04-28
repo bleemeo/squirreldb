@@ -1,16 +1,17 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"math/rand"
-	"os"
+	"squirreldb/config"
 	"squirreldb/daemon"
-	"squirreldb/debug"
+	"squirreldb/logger"
 	"time"
-)
 
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
+	zlogsentry "github.com/archdx/zerolog-sentry"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+)
 
 // variable set by GoReleaser
 //nolint:gochecknoglobals
@@ -19,6 +20,37 @@ var (
 	commit  string
 	date    string
 )
+
+func setupSentryLogger(cfg *config.Config) bool {
+	consoleWriter := logger.NewConsoleWriter(cfg.Bool("log.disable_color"))
+	logLevel := zerolog.Level(cfg.Int("log.level"))
+	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))
+
+	sentryDSN := cfg.String("sentry.dsn")
+	if sentryDSN == "" {
+		log.Logger = logger.NewLogger(consoleWriter, logLevel)
+
+		return false
+	}
+
+	sentryWriter, err := logger.NewSentryWriter(sentryDSN, zerolog.ErrorLevel, release)
+	if err != nil {
+		log.Err(err).Msg("Failed to initialize sentry")
+
+		log.Logger = logger.NewLogger(consoleWriter, logLevel)
+
+		return false
+	}
+
+	// The writer must be closed to flush events to Sentry.
+	defer sentryWriter.Close()
+
+	// Set up logger with level filter.
+	multiWriter := zerolog.MultiLevelWriter(consoleWriter, sentryWriter)
+	log.Logger = logger.NewLogger(multiWriter, logLevel)
+
+	return true
+}
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
@@ -29,19 +61,23 @@ func main() {
 
 	cfg, err := daemon.Config()
 	if err != nil {
-		logger.Fatal(err)
+		log.Fatal().Err(err).Msg("Failed to read config")
 	}
+
+	setupSentryLogger(cfg)
+
+	defer logger.ProcessPanic()
 
 	squirreldb := &daemon.SquirrelDB{
 		Config: cfg,
 	}
 
-	logger.Printf("Starting SquirrelDB %s (commit %s)", version, commit)
+	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", version, commit)
 
 	err = daemon.RunWithSignalHandler(squirreldb.Run)
 	if err != nil {
-		logger.Printf("Failed to run SquirrelDB: %v", err)
+		log.Err(err).Msg("Failed to run SquirrelDB")
 	}
 
-	debug.Print(1, logger, "SquirrelDB is stopped")
+	log.Debug().Msg("SquirrelDB is stopped")
 }

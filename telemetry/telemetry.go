@@ -22,18 +22,16 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"os"
 	"squirreldb/facts"
+	"squirreldb/logger"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
 
 type Telemetry struct {
 	ID        string
@@ -101,12 +99,12 @@ func (t Telemetry) postInformation(ctx context.Context) {
 
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
 	if err != nil {
-		logger.Printf("failed when we post on telemetry: %v", err)
+		log.Err(err).Msg("Failed to post telemetry")
 
 		return
 	}
 
-	logger.Printf("Telemetry response Satus: %s", resp.Status)
+	log.Info().Msgf("Telemetry response status: %s", resp.Status)
 
 	defer func() {
 		// Ensure we read the whole response to avoid "Connection reset by peer" on server
@@ -146,7 +144,11 @@ func New(newFacts map[string]string, runOption map[string]string) Telemetry {
 }
 
 func (t Telemetry) Start(ctx context.Context) {
-	go t.run(ctx)
+	go func() {
+		defer logger.ProcessPanic()
+
+		t.run(ctx)
+	}()
 }
 
 func (t Telemetry) Stop() {

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"math/rand"
 	"squirreldb/aggregate"
-	"squirreldb/debug"
+	"squirreldb/logger"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -80,7 +82,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 			c.metrics.AggregatdUntilSeconds.Set(float64(minTime.Unix()))
 
 			if minTime.After(lastNotifiedAggretedUntil) {
-				logger.Printf("All shard are aggregated until %s", minTime)
+				log.Info().Msgf("All shard are aggregated until %s", minTime)
 				lastNotifiedAggretedUntil = minTime
 
 				c.l.Lock()
@@ -92,7 +94,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			debug.Print(2, logger, "Cassandra TSDB service stopped")
+			log.Debug().Msg("Cassandra TSDB service stopped")
 
 			return
 		}
@@ -128,12 +130,13 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 		}
 
 		go func() {
+			defer logger.ProcessPanic()
 			defer wg.Done()
 
 			for _, data := range metrics[startIndex:endIndex] {
 				retry.Print(func() error {
 					return c.writeAggregateData(data, writingTimestamp) //nolint:scopelint
-				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 					"write aggregated points to Cassandra",
 				)
 
@@ -170,7 +173,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 	start := time.Now()
 	workChan := make(chan time.Time)
 
-	logger.Printf("Forced pre-aggregation requested between %v and %v", from, to)
+	log.Info().Msgf("Forced pre-aggregation requested between %v and %v", from, to)
 
 	currentFrom := from
 	currentFrom = currentFrom.Truncate(aggregateSize)
@@ -179,6 +182,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 	for n := 0; n < threadCount; n++ {
 		go func() {
+			defer logger.ProcessPanic()
 			defer wg.Done()
 
 			var ids []types.MetricID
@@ -195,7 +199,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					ids, err = c.index.AllIDs(ctx, currentFrom, currentTo)
 
 					return err //nolint:wrapcheck
-				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 					"get IDs from the index",
 				)
 
@@ -214,7 +218,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					)
 
 					return err
-				}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 					fmt.Sprintf("forced pre-aggregation from %v to %v", currentFrom, currentTo),
 				)
 
@@ -230,7 +234,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 				delta := time.Since(rangeStart)
 
-				logger.Printf(
+				log.Info().Msgf(
 					"Forced pre-aggregation from %v to %v completed in %v (read %d pts, %.0fk pts/s)",
 					currentFrom,
 					currentTo,
@@ -257,7 +261,7 @@ outter:
 	wg.Wait()
 
 	delta := time.Since(start)
-	logger.Printf(
+	log.Info().Msgf(
 		"Aggregated %d range and %d points in %v (%.2fk points/s)",
 		rangeCount,
 		pointsCount,
@@ -290,7 +294,7 @@ func (c *CassandraTSDB) aggregateShard(
 			_, err := c.state.Read(name, &fromTimeStr)
 
 			return err //nolint:wrapcheck
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			"get state for shard "+name,
 		)
 
@@ -311,7 +315,7 @@ func (c *CassandraTSDB) aggregateShard(
 
 		retry.Print(func() error {
 			return c.state.Write(name, fromTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			"update state for shard "+name,
 		)
 	}
@@ -328,7 +332,7 @@ func (c *CassandraTSDB) aggregateShard(
 	}
 
 	if fromTime.After(*lastNotifiedAggretedFrom) {
-		logger.Printf("Start aggregating from %s to %s", fromTime, toTime)
+		log.Info().Msgf("Start aggregating from %s to %s", fromTime, toTime)
 		*lastNotifiedAggretedFrom = fromTime
 	}
 
@@ -339,7 +343,7 @@ func (c *CassandraTSDB) aggregateShard(
 		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
 		return err //nolint:wrapcheck
-	}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+	}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 		"get IDs from the index",
 	)
 
@@ -362,17 +366,16 @@ func (c *CassandraTSDB) aggregateShard(
 	if count, err := c.doAggregation(
 		shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds(),
 	); err == nil {
-		debug.Print(debug.Level1, logger, "Aggregated shard %d from [%v] to [%v] and read %d points in %v",
+		log.Debug().Msgf("Aggregated shard %d from [%v] to [%v] and read %d points in %v",
 			shard, fromTime, toTime, count, time.Since(start))
 
 		retry.Print(func() error {
 			return c.state.Write(name, toTime.Format(time.RFC3339))
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			"update state for shard "+name,
 		)
 	} else {
-		logger.Printf("Error: Can't aggregate shard %d from [%v] to [%v] (%v)",
-			shard, fromTime, toTime, err)
+		log.Err(err).Msgf("Can't aggregate shard %d from [%v] to [%v]", shard, fromTime, toTime)
 	}
 
 	return true, toTime

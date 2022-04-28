@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -18,9 +17,9 @@ import (
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
 	"squirreldb/config"
-	"squirreldb/debug"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
+	"squirreldb/logger"
 	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
@@ -35,6 +34,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 //nolint:gochecknoglobals
@@ -78,9 +78,6 @@ type SquirrelDB struct {
 	cassandraKeyspaceCreated bool
 }
 
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[main] ", log.LstdFlags)
-
 var errBadConfig = errors.New("configuration validation failed")
 
 // Start will run SquirrelDB and Init()ializing it. It return when SquirrelDB
@@ -115,6 +112,7 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 	s.wg.Add(1)
 
 	go func() {
+		defer logger.ProcessPanic()
 		defer s.wg.Done()
 
 		s.run(ctx, readiness)
@@ -188,6 +186,8 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 	}()
 
 	go func() {
+		defer logger.ProcessPanic()
+
 		runTerminated <- f(ctx)
 	}()
 
@@ -201,14 +201,12 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 			return err
 		case <-signalChan:
 			if firstStop {
-				logger.Println("Received stop signal, start graceful shutdown")
+				log.Info().Msg("Received stop signal, start graceful shutdown")
 
 				cancel()
 
 				firstStop = false
 			} else {
-				logger.Println("Forced stop")
-
 				return errors.New("forced shutdown")
 			}
 		}
@@ -220,7 +218,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 func Config() (cfg *config.Config, err error) {
 	cfg, err = config.New()
 	if err != nil {
-		return nil, fmt.Errorf("error: Can't load config: %w", err)
+		return nil, fmt.Errorf("can't load config: %w", err)
 	}
 
 	if cfg.Bool("help") {
@@ -243,8 +241,6 @@ func Config() (cfg *config.Config, err error) {
 	if !cfg.Validate() {
 		return cfg, errBadConfig
 	}
-
-	debug.Level = cfg.Int("log.level")
 
 	return cfg, nil
 }
@@ -422,7 +418,7 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 
 			s.lockFactory = factory
 		case backendDummy:
-			logger.Println("Warning: Using dummy lock factory (only work on single node)")
+			log.Warn().Msg("Using dummy lock factory (only work on single node)")
 
 			s.lockFactory = &dummy.Locks{}
 		default:
@@ -454,8 +450,8 @@ func (s *SquirrelDB) States() (types.State, error) {
 
 			s.states = states
 		case backendDummy:
-			logger.Println(
-				"Warning: Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
+			log.Warn().Msg(
+				"Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
 			)
 
 			s.states = &dummy.States{}
@@ -513,6 +509,8 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 			waitChan[i] = make(chan interface{})
 
 			go func() {
+				defer logger.ProcessPanic()
+
 				task.Task.Run(ctxs[i], subReadiness)
 				close(waitChan[i])
 			}()
@@ -524,7 +522,6 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 			return err
 		}, retry.NewExponentialBackOff(ctx, 30*time.Second),
-			logger,
 			fmt.Sprintf("Starting %s", task.Name),
 		)
 
@@ -537,7 +534,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 			break
 		} else {
-			debug.Print(2, logger, "Task %s started", task.Name)
+			log.Trace().Msgf("Task %s started", task.Name)
 		}
 	}
 
@@ -550,7 +547,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	for i := len(tasks) - 1; i >= 0; i-- {
 		cancels[i]()
 		<-waitChan[i]
-		debug.Print(2, logger, "Task %s stopped", tasks[i].Name)
+		log.Trace().Msgf("Task %s stopped", tasks[i].Name)
 	}
 
 	if s.cassandraSession != nil {
@@ -625,7 +622,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 
 			s.index = index
 		case backendDummy:
-			logger.Println("Warning: Using dummy for index (only do this for testing)")
+			log.Warn().Msg("Using dummy for index (only do this for testing)")
 
 			s.index = &dummy.Index{
 				StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
@@ -690,7 +687,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 			s.persistentStore = tsdb
 			s.api.PreAggregateCallback = tsdb.ForcePreAggregation
 		case backendDummy:
-			logger.Println("Warning: Cassandra is disabled for TSDB. Using dummy states store that discard every write")
+			log.Warn().Msg("Cassandra is disabled for TSDB. Using dummy states store that discard every write")
 
 			s.persistentStore = &dummy.DiscardTSDB{}
 		default:
@@ -732,7 +729,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 
 		err := s.states.Write("cluster_id", clusterID)
 		if err != nil {
-			logger.Printf("Waring: unable to set cluster id for telemetry: %v", err)
+			log.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
 		}
 	}
 
@@ -801,7 +798,9 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		wg.Add(1)
 
 		go func() {
+			defer logger.ProcessPanic()
 			defer wg.Done()
+
 			s.temporaryStoreTask(subCtx, subReady)
 		}()
 
@@ -825,7 +824,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		cancel()
 		wg.Wait()
 	case backendDummy:
-		logger.Println("Warning: SquirrelDB is configured to discard every write")
+		log.Warn().Msg("SquirrelDB is configured to discard every write")
 
 		s.store = dummy.DiscardTSDB{}
 

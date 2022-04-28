@@ -101,7 +101,7 @@ func platformFacts() map[string]string {
 
 	reg, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE)
 	if err != nil {
-		logger.Println("Couldn't open the windows registry, some facts may not be exposed")
+		log.Warn().Msg("Couldn't open the windows registry, some facts may not be exposed")
 	} else {
 		defer reg.Close()
 

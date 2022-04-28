@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"io/ioutil"
 	"path/filepath"
-	"squirreldb/debug"
 	"strconv"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -69,11 +69,11 @@ func platformFacts() map[string]string {
 
 	osReleasePath := filepath.Join("/", "etc/os-release")
 	if osReleaseData, err := ioutil.ReadFile(osReleasePath); err != nil {
-		debug.Print(1, logger, "unable to read os-release file: %v", err)
+		log.Debug().Err(err).Msg("Unable to read os-release file")
 	} else {
 		osRelease, err := decodeOsRelease(string(osReleaseData))
 		if err != nil {
-			logger.Printf("os-release file is invalid: %v", err)
+			log.Err(err).Msg("os-release file is invalid")
 		}
 
 		facts["os_name"] = osRelease["NAME"]

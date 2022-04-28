@@ -24,16 +24,14 @@ package batch
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
-	"os"
-	"squirreldb/debug"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -58,9 +56,6 @@ const (
 )
 
 const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[batch] ", log.LstdFlags)
 
 // TemporaryStore is an interface to the temporary points associated to metrics.
 type TemporaryStore interface {
@@ -173,17 +168,17 @@ func (b *Batch) Run(ctx context.Context) {
 		case <-tickerBackground.C:
 			err := b.check(ctx, time.Now(), false, false)
 			if err != nil {
-				logger.Printf("Batch service background check failed: %v", err)
+				log.Err(err).Msg("Batch service background check failed")
 			}
 		case <-tickerTakeover.C:
 			b.checkTakeover(ctx, time.Now())
 		case <-ctx.Done():
 			err := b.check(context.Background(), time.Now(), true, true) //nolint: contextcheck
 			if err != nil {
-				logger.Printf("Unable to shutdown batch service: %v", err)
+				log.Err(err).Msg("Unable to shutdown batch service")
 			}
 
-			debug.Print(2, logger, "Batch service stopped")
+			log.Trace().Msg("Batch service stopped")
 
 			return
 		}
@@ -208,7 +203,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 	for !shutdown {
 		metrics, err := b.memoryStore.GetTransfert(ctx, transferredOwnershipLimit)
 		if err != nil {
-			logger.Printf("Unable to query memory store for metrics transfer: %v", err)
+			log.Err(err).Msg("Unable to query memory store for metrics transfer")
 
 			metrics = nil
 		}
@@ -274,7 +269,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 	for {
 		metrics, err := b.memoryStore.GetAllKnownMetrics(ctx)
 		if err != nil {
-			logger.Printf("Unable to query memory store for metrics overdue: %v", err)
+			log.Err(err).Msg("Unable to query memory store for metrics overdue")
 
 			return
 		}
@@ -297,7 +292,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 
 		err = b.takeoverMetrics(ctx, overdue, now)
 		if err != nil {
-			logger.Printf("Unable to takeover metrics: %v", err)
+			log.Err(err).Msg("Unable to takeover metrics")
 
 			return
 		}
@@ -363,7 +358,6 @@ func (b *Batch) setPointsAndOffset(
 		return err //nolint:wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
 		"write points in temporary store",
 	)
 	if err != nil {
@@ -456,7 +450,6 @@ func (b *Batch) setPointsAndOffset(
 			return err //nolint:wrapcheck
 		},
 			retry.NewExponentialBackOff(ctx, 30*time.Second),
-			logger,
 			"append points in temporary store",
 		)
 		if err != nil {
@@ -518,7 +511,7 @@ func (b *Batch) flush(
 		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ctx, ids)
 
 		return err //nolint:wrapcheck
-	}, retry.NewExponentialBackOff(ctx, 30*time.Second), logger,
+	}, retry.NewExponentialBackOff(ctx, 30*time.Second),
 		"get points from the memory store",
 	)
 	if err != nil {
@@ -534,7 +527,7 @@ func (b *Batch) flush(
 
 		if offset > len(storeData.Points) {
 			msg := "Batch.flush(): unexpected offset == %d is too big for metric ID %d (only %d points)"
-			logger.Printf(msg, offset, data.ID, len(data.Points))
+			log.Warn().Msgf(msg, offset, data.ID, len(data.Points))
 			offset = len(storeData.Points)
 		}
 
@@ -550,7 +543,6 @@ func (b *Batch) flush(
 		return b.writer.Write(ctx, metricsToWrite)
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
 		"write points in persistent store",
 	)
 	if err != nil {
@@ -615,7 +607,6 @@ func (b *Batch) flush(
 		return b.memoryStore.AddToTransfert(ctx, transfertOwnership)
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
 		"transfert ownership using memory store",
 	)
 	if err != nil {
@@ -632,7 +623,6 @@ func (b *Batch) flush(
 		return b.memoryStore.MarkToExpire(ctx, idToExpire, ttl)
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
 		"mark metrics to expire in memory store",
 	)
 	if err != nil {
@@ -649,7 +639,6 @@ func (b *Batch) flush(
 		return err //nolint:wrapcheck
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
-		logger,
 		"set deadline in memory store",
 	)
 	if err != nil {

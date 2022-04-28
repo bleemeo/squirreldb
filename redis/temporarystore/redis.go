@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"squirreldb/compare"
 	"squirreldb/redis/client"
 	"squirreldb/types"
@@ -17,6 +15,7 @@ import (
 
 	goredis "github.com/go-redis/redis/v8"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -26,9 +25,6 @@ const (
 	defaultKnownMetricsKey   = "squirreldb-known-metrics"
 	defaultTransfertKey      = "squirreldb-transfert-metrics"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[redis] ", log.LstdFlags)
 
 type Options struct {
 	Keyspace  string
@@ -82,9 +78,9 @@ func New(ctx context.Context, reg prometheus.Registerer, options Options) (*Redi
 	}
 
 	if cluster {
-		logger.Println("detected cluster")
+		log.Info().Msg("detected cluster")
 	} else {
-		logger.Println("detected single")
+		log.Info().Msg("detected single")
 	}
 
 	return redis, nil

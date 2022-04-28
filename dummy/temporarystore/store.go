@@ -3,23 +3,18 @@ package temporarystore
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"squirreldb/compare"
-	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 const expiratorInterval = 60
 
 const defaultTTL = 24 * time.Hour
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
 	flushDeadline  time.Time
@@ -249,7 +244,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			debug.Print(2, logger, "Expirator service stopped")
+			log.Trace().Msgf("Expirator service stopped")
 
 			return
 		}

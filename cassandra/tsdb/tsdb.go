@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
 	"strings"
@@ -36,9 +35,6 @@ var (
 	errPointsEmptyValues = errors.New("empty points values")
 	errUnsupportedFormat = errors.New("unsupporter format version")
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[tsdb] ", log.LstdFlags)
 
 type Options struct {
 	SchemaLock                sync.Locker
@@ -136,7 +132,11 @@ func (c *CassandraTSDB) Start(_ context.Context) error {
 
 	c.wg.Add(1)
 
-	go c.run(ctx) //nolint: contextcheck
+	go func() {
+		defer logger.ProcessPanic()
+
+		c.run(ctx)
+	}()
 
 	return nil
 }

@@ -3,19 +3,14 @@ package session
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
-	"os"
-	"squirreldb/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/rs/zerolog/log"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[session] ", log.LstdFlags)
 
 type Options struct {
 	Keyspace          string
@@ -55,7 +50,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
-			debug.Print(1, logger, "keyspace %s created", options.Keyspace)
+			log.Debug().Msgf("Keyspace %s created", options.Keyspace)
 		}
 	}
 

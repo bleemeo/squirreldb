@@ -3,8 +3,6 @@ package remotestorage
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,9 +11,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/gate"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[remotestorage] ", log.LstdFlags)
 
 type RemoteStorage struct {
 	writer          types.MetricWriter

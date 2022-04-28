@@ -3,7 +3,6 @@ package config
 import (
 	goflag "flag"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 )
 
@@ -20,9 +20,6 @@ const (
 	envPrefix  = "SQUIRRELDB_"
 	configFile = "squirreldb.conf"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[config] ", log.LstdFlags)
 
 type Config struct {
 	*koanf.Koanf
@@ -109,25 +106,25 @@ func (c *Config) Validate() bool {
 	if keyspace == "" {
 		valid = false
 
-		logger.Println("Error: 'cassandra.keyspace' must be set")
+		log.Error().Msg("'cassandra.keyspace' must be set")
 	}
 
 	if replicationFactor <= 0 {
 		valid = false
 
-		logger.Println("Error: 'cassandra.replication_factor' must be strictly greater than 0")
+		log.Error().Msg("'cassandra.replication_factor' must be strictly greater than 0")
 	}
 
 	if batchSize <= 0 {
 		valid = false
 
-		logger.Println("Error: 'batch.size' must be strictly greater than 0")
+		log.Error().Msg("'batch.size' must be strictly greater than 0")
 	}
 
 	if aggregateIntendedDuration <= 0 {
 		valid = false
 
-		logger.Println("Error: 'cassandra.aggregate.intended_duration' must be strictly greater than 0")
+		log.Error().Msg("'cassandra.aggregate.intended_duration' must be strictly greater than 0")
 	}
 
 	return valid

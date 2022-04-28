@@ -8,19 +8,17 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
-	"os"
 	"regexp"
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
@@ -28,6 +26,7 @@ import (
 	ppromql "github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -54,7 +53,6 @@ type API struct {
 	PromQLMaxEvaluatedSeries    uint32
 
 	ready      int32
-	logger     log.Logger
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
@@ -69,10 +67,10 @@ func NewPrometheus(
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
 ) *v1.API {
-	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	zerologLogger := log.Logger.With().Str("component", "query engine").Logger()
 
 	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
-		Logger:             log.With(stderrLogger, "component", "query engine"),
+		Logger:             logger.NewKitLogger(&zerologLogger),
 		Reg:                metricRegistry,
 		MaxSamples:         50000000,
 		Timeout:            2 * time.Minute,
@@ -105,6 +103,8 @@ func NewPrometheus(
 	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
 	CORSOrigin := regexp.MustCompile(".*")
 
+	apiLogger := log.Logger.With().Str("component", "api").Logger()
+
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
@@ -119,7 +119,7 @@ func NewPrometheus(
 		mockTSDBAdminStat{},
 		dbDir,
 		enableAdmin,
-		log.With(stderrLogger, "component", "api"),
+		logger.NewKitLogger(&apiLogger),
 		rulesRetrieverFunc,
 		remoteReadSampleLimit,
 		maxConcurrent,
@@ -136,7 +136,6 @@ func NewPrometheus(
 }
 
 func (a *API) init() {
-	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	a.metrics = newMetrics(a.MetricRegistry)
 
 	router := route.New()
@@ -227,10 +226,12 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	go func() {
+		defer logger.ProcessPanic()
+
 		serverStopped <- server.Serve(ln)
 	}()
 
-	_ = a.logger.Log("msg", "Server listening on", "address", a.ListenAddress)
+	log.Info().Msgf("Server listening on %s", a.ListenAddress)
 
 	readiness <- nil
 
@@ -240,7 +241,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
-			_ = a.logger.Log("msg", "Failed stop the HTTP server", "err", err)
+			log.Err(err).Msg("Failed stop the HTTP server")
 		}
 
 		err = <-serverStopped
@@ -248,10 +249,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		_ = a.logger.Log("msg", "HTTP server failed", "err", err)
+		log.Err(err).Msg("HTTP server failed")
 	}
 
-	_ = level.Debug(a.logger).Log("msg", "server stopped")
+	log.Debug().Msg("Server stopped")
 }
 
 // ListenPort return the port listenning on. Should not be used before Run()

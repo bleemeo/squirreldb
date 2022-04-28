@@ -8,8 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"os"
+	"squirreldb/logger"
 	"squirreldb/redis/client"
 	"sync"
 	"time"
@@ -17,10 +16,8 @@ import (
 	goredis "github.com/go-redis/redis/v8"
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[redis-cluster] ", log.LstdFlags)
 
 // errors about topic name.
 var (
@@ -75,9 +72,9 @@ func (c *Cluster) Start(ctx context.Context) error {
 	}
 
 	if cluster {
-		logger.Println("detected cluster")
+		log.Info().Msg("detected cluster")
 	} else {
-		logger.Println("detected single")
+		log.Info().Msg("detected single")
 	}
 
 	pubsub, err := c.client.Subscribe(ctx, c.redisChannel)
@@ -94,12 +91,16 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
 	c.cancel = cancel
 
 	c.wg.Add(1)
 
-	go c.run(ctx, pubsub) //nolint: contextcheck
+	go func() {
+		defer logger.ProcessPanic()
+
+		c.run(ctx, pubsub)
+	}()
 
 	return nil
 }
@@ -171,7 +172,7 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 
 			topic, message, err := decode(msg.Payload)
 			if err != nil {
-				logger.Printf("failed to decode message: %v", err)
+				log.Err(err).Msg("failed to decode message")
 				c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
 
 				continue
