@@ -291,9 +291,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			for ctx.Err() == nil && c.RunOnce(ctx, time.Now()) {
-				time.Sleep(10 * time.Second)
-			}
+			c.RunOnce(ctx, time.Now())
 		case <-ctx.Done():
 			debug.Print(2, logger, "Cassandra index service stopped")
 
@@ -310,7 +308,7 @@ func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 	c.applyExpirationUpdateRequests(ctx)
 	c.periodicRefreshIDInShard(ctx, now)
 
-	// Expire entries in cassandra every 10s when there is more work, every 15mn when all work is done,
+	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
 	// or with an exponential backoff between 1mn and 15mn when errors occurs.
 	if now.Before(c.nextExpirationAt) {
 		return false
