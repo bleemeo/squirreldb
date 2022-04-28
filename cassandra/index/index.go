@@ -71,7 +71,7 @@ const (
 )
 
 const (
-	// The expiration of entries in Cassandra starts everyday at 00:00AM UTC + expirationStartOffset.
+	// The expiration of entries in Cassandra starts everyday at 00:00 UTC + expirationStartOffset.
 	expirationStartOffset = 6 * time.Hour
 	// The expiration is checked every expirationCheckInterval.
 	expirationCheckInterval = 15 * time.Minute
