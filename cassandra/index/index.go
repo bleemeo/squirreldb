@@ -2584,7 +2584,9 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		return
 	}
 
-	debug.Print(debug.Level1, logger, "Applying expiration update requests %#v\n", expireUpdates)
+	for _, req := range expireUpdates {
+		debug.Print(debug.Level1, logger, "Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
+	}
 
 	c.newMetricLock.Lock()
 
