@@ -510,7 +510,7 @@ func (c *CassandraIndex) dumpBulk(ctx context.Context, w *csv.Writer, ids []type
 			csvLine = []string{
 				strconv.FormatInt(int64(id), 10),
 				lbls.String(),
-				"Missing expiration!",
+				"Missing expiration which shouldn't be possible !",
 			}
 		case withExpiration:
 			csvLine = []string{
