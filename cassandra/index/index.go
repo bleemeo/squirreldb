@@ -2825,11 +2825,18 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		}
 	}
 
-	// Only process entries due to expire yesterday or before, with an offset.
 	candidateDay := lastProcessedDay.Add(24 * time.Hour)
-	skipOffset := now.Sub(candidateDay.Truncate(24*time.Hour)) < expirationStartOffset
 
-	if candidateDay.After(maxTime) || skipOffset {
+	// Process entries due to expire before yesterday and entries due to expire yesterday with an offset.
+	//
+	// On the processing of the 29 April 2022:
+	// - the most recent day we could process is 28 April 2022, the day must be completely terminated
+	// - before the processing, the lastProcessedDay is 27 April 2022
+	// - so candidateDay is 28 April 2022
+	// - therefore, now.Sub(candidateDay)-24*time.Hour is the time since the 29 April 2022 at 00:00
+	// So on this day, with an expirationStartOffset of 6h, the expiration is skipped before 6AM.
+	skipOffset := now.Sub(candidateDay)-24*time.Hour < expirationStartOffset
+	if skipOffset {
 		return false, nil
 	}
 
