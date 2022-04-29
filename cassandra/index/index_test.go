@@ -24,6 +24,7 @@ import (
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -585,11 +586,17 @@ func mockIndexFromMetrics(
 	start, end time.Time,
 	metrics map[types.MetricID]map[string]string,
 ) *CassandraIndex {
-	index, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 1 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 1 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -1916,11 +1923,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	t5 := t4.Add(8 * 24 * time.Hour)
 	now := t5.Add(8 * 24 * time.Hour)
 
-	index1, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 365 * 24 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index1, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index1").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2086,11 +2099,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		}
 	}
 
-	index2, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 365 * 24 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index2, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index2").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2100,11 +2119,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Fatal(err)
 	}
 
-	index3, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 365 * 24 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index3, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index3").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4141,22 +4166,34 @@ func Test_cache(t *testing.T) {
 	states := &mockState{}
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 
-	index1, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       lock,
-		States:            states,
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index1, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       lock,
+			States:            states,
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index1").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	index2, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       lock,
-		States:            states,
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index2, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       lock,
+			States:            states,
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index2").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4246,12 +4283,18 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	lock := &mockLockFactory{}
 	states := &mockState{}
 
-	index1, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       lock,
-		States:            states,
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index1, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       lock,
+			States:            states,
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index1").Logger(),
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -4304,12 +4347,18 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	metricsID[0] = tmp[0]
 
-	index2, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       lock,
-		States:            states,
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index2, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       lock,
+			States:            states,
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index2").Logger(),
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -4632,12 +4681,18 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	store := &mockStore{}
 
-	index, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       &mockLockFactory{},
-		States:            &mockState{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       &mockLockFactory{},
+			States:            &mockState{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -4948,12 +5003,18 @@ func Test_expiration_offset(t *testing.T) {
 
 	store := &mockStore{}
 
-	index, err := initialize(context.Background(), store, Options{
-		DefaultTimeToLive: defaultTTL,
-		LockFactory:       &mockLockFactory{},
-		States:            &mockState{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       &mockLockFactory{},
+			States:            &mockState{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -5040,11 +5101,17 @@ func Test_getTimeShards(t *testing.T) {
 	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
 	base := time.Unix(int64(baseTS)*3600, 0)
 
-	index, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 365 * 24 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5153,11 +5220,17 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 	t3 := t2.Add(postingShardSize * 2)
 	now := t3.Add(postingShardSize * 2)
 
-	index1, err := initialize(context.Background(), &mockStore{}, Options{
-		DefaultTimeToLive: 365 * 24 * time.Hour,
-		LockFactory:       &mockLockFactory{},
-		Cluster:           &dummy.LocalCluster{},
-	}, newMetrics(prometheus.NewRegistry()))
+	index1, err := initialize(
+		context.Background(),
+		&mockStore{},
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index1").Logger(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

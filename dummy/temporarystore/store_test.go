@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -1377,7 +1378,7 @@ func TestStore_GetTransfert(t *testing.T) {
 }
 
 func TestStore_GetAllKnownMetrics(t *testing.T) {
-	store := New(prometheus.NewRegistry())
+	store := New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
 
 	_, err := store.getSetPointsAndOffset(
 		[]types.MetricData{

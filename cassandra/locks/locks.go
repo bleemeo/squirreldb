@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
-	"squirreldb/debug"
+	"squirreldb/logger"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -15,16 +14,15 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 )
 
 const retryMaxDelay = 30 * time.Second
 
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[locks] ", log.LstdFlags)
-
 type CassandraLocks struct {
 	session *gocql.Session
 	metrics *metrics
+	logger  zerolog.Logger
 }
 
 type Lock struct {
@@ -32,6 +30,7 @@ type Lock struct {
 	timeToLive time.Duration
 	c          CassandraLocks
 	lockID     string
+	logger     zerolog.Logger
 
 	mutex            sync.Mutex
 	cond             *sync.Cond // cond use the mutex as Locker
@@ -44,7 +43,12 @@ type Lock struct {
 }
 
 // New creates a new CassandraLocks object.
-func New(reg prometheus.Registerer, session *gocql.Session, createdKeySpace bool) (*CassandraLocks, error) {
+func New(
+	reg prometheus.Registerer,
+	session *gocql.Session,
+	createdKeySpace bool,
+	logger zerolog.Logger,
+) (*CassandraLocks, error) {
 	var err error
 
 	// Creation of tables concurrently is not possible on Cassandra.
@@ -58,7 +62,7 @@ func New(reg prometheus.Registerer, session *gocql.Session, createdKeySpace bool
 		err = initTable(session)
 	} else if !tableExists(session) {
 		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint:gosec
-		debug.Print(1, logger, "created lock tables")
+		logger.Debug().Msg("Created lock tables")
 
 		err = initTable(session)
 	}
@@ -70,6 +74,7 @@ func New(reg prometheus.Registerer, session *gocql.Session, createdKeySpace bool
 	locks := &CassandraLocks{
 		session: session,
 		metrics: newMetrics(reg),
+		logger:  logger,
 	}
 
 	return locks, nil
@@ -96,7 +101,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 	hostname, _ := os.Hostname()
 
 	if timeToLive < 2*time.Second {
-		logger.Printf("Warning: lock TTL = %v but should be at least 2s or two SquirrelDB may acquire the lock", timeToLive)
+		c.logger.Warn().Msgf("Lock TTL = %v but should be at least 2s or two SquirrelDB may acquire the lock", timeToLive)
 	}
 
 	l := &Lock{
@@ -104,6 +109,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 		timeToLive: timeToLive,
 		c:          c,
 		lockID:     fmt.Sprintf("%s-PID-%d-RND-%d", hostname, os.Getpid(), rand.Intn(65536)), //nolint:gosec
+		logger:     c.logger,
 	}
 
 	l.cond = sync.NewCond(&l.mutex)
@@ -133,7 +139,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
 
 	if err != nil {
-		logger.Printf("Unable to acquire lock: %v", err)
+		l.logger.Err(err).Msgf("Unable to acquire lock")
 
 		// Be careful, it indeed a pointer and we took the address...
 		// We have to guess that gocql will return a pointer to this error
@@ -151,7 +157,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 
 			_, err = locksTableDeleteLockQuery.ScanCAS(nil)
 			if err != nil {
-				debug.Print(debug.Level1, logger, "oportinistic unlock fail: %v", err)
+				l.logger.Debug().Err(err).Msg("Opportunistic unlock failed")
 			}
 
 			l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
@@ -161,7 +167,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}
 
 	if !acquired {
-		debug.Print(debug.Level1, logger, "lock %s is already acquired by %s (i'm %s)", l.name, holder, l.lockID)
+		l.logger.Debug().Msgf("Lock %s is already acquired by %s (i'm %s)", l.name, holder, l.lockID)
 
 		return false
 	}
@@ -174,8 +180,11 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	l.cancel = cancel
 
 	l.wg.Add(1)
-	go func() { //nolint:wsl
+
+	go func() {
+		defer logger.ProcessPanic()
 		defer l.wg.Done()
+
 		l.updateLock(subCtx)
 	}()
 
@@ -292,14 +301,17 @@ func (l *Lock) Unlock() {
 
 		applied, err := locksTableDeleteLockQuery.ScanCAS(nil)
 		if err == nil && !applied {
-			logger.Printf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
+			l.logger.Warn().Msgf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
 		}
 
 		l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
 
 		return err //nolint:wrapcheck
 	},
-		retry.NewExponentialBackOff(context.Background(), retryMaxDelay), logger, "free lock")
+		retry.NewExponentialBackOff(context.Background(), retryMaxDelay),
+		l.logger,
+		"free lock",
+	)
 
 	l.c.metrics.LocksUnlockSeconds.Observe(time.Since(start).Seconds())
 
@@ -329,7 +341,8 @@ func (l *Lock) updateLock(ctx context.Context) {
 				l.c.metrics.CassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
 				return err //nolint:wrapcheck
-			}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+			}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
+				l.logger,
 				"refresh lock "+l.name,
 			)
 		case <-ctx.Done():

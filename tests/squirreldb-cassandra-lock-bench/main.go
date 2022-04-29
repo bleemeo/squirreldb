@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"squirreldb/daemon"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
+	"github.com/rs/zerolog/log"
 )
 
 //nolint:lll,gochecknoglobals
@@ -58,14 +58,14 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
 func run(ctx context.Context) error {
 	cfg, err := daemon.Config()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Failed to get config")
 	}
 
 	rand.Seed(*seed)
@@ -87,6 +87,7 @@ func run(ctx context.Context) error {
 				map[string]string{"process": strconv.FormatInt(int64(p), 10)},
 				prometheus.DefaultRegisterer,
 			),
+			Logger: log.With().Str("component", "daemon").Logger(),
 		}
 
 		lockFactory, err := squirreldb.LockFactory()

@@ -8,13 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"math/rand"
 	"net/http"
-	"os"
 	"sort"
-	"squirreldb/debug"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
 	"strings"
@@ -26,6 +24,8 @@ import (
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -78,9 +78,6 @@ const (
 )
 
 //nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
-
-//nolint:gochecknoglobals
 var (
 	minTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 	maxTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -130,6 +127,7 @@ type CassandraIndex struct {
 	idsToLabels   *labelsLookupCache
 	postingsCache *postingsCache
 	metrics       *metrics
+	logger        zerolog.Logger
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -207,6 +205,7 @@ func New(
 	reg prometheus.Registerer,
 	session *gocql.Session,
 	options Options,
+	logger zerolog.Logger,
 ) (*CassandraIndex, error) {
 	metrics := newMetrics(reg)
 
@@ -219,10 +218,17 @@ func New(
 		},
 		options,
 		metrics,
+		logger,
 	)
 }
 
-func initialize(ctx context.Context, store storeImpl, options Options, metrics *metrics) (*CassandraIndex, error) {
+func initialize(
+	ctx context.Context,
+	store storeImpl,
+	options Options,
+	metrics *metrics,
+	logger zerolog.Logger,
+) (*CassandraIndex, error) {
 	expBackoff := backoff.NewExponentialBackOff()
 	expBackoff.InitialInterval = time.Minute
 	expBackoff.MaxInterval = 15 * time.Minute
@@ -243,6 +249,7 @@ func initialize(ctx context.Context, store storeImpl, options Options, metrics *
 		expirationBackoff:        expBackoff,
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 		metrics:                  metrics,
+		logger:                   logger,
 	}
 
 	if err := index.store.Init(ctx); err != nil {
@@ -265,7 +272,11 @@ func (c *CassandraIndex) Start(_ context.Context) error {
 
 	c.wg.Add(1)
 
-	go c.run(ctx) //nolint: contextcheck
+	go func() {
+		defer logger.ProcessPanic()
+
+		c.run(ctx)
+	}()
 
 	return nil
 }
@@ -293,7 +304,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 		case <-ticker.C:
 			c.RunOnce(ctx, time.Now())
 		case <-ctx.Done():
-			debug.Print(2, logger, "Cassandra index service stopped")
+			c.logger.Trace().Msg("Cassandra index service stopped")
 
 			return
 		}
@@ -319,7 +330,7 @@ func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 		nextBackoff := c.expirationBackoff.NextBackOff()
 		c.nextExpirationAt = now.Add(nextBackoff)
 
-		logger.Printf("Warning: %v. Retrying in %v", err, nextBackoff.Round(time.Second))
+		c.logger.Printf("Warning: %v. Retrying in %v", err, nextBackoff.Round(time.Second))
 	} else {
 		c.expirationBackoff.Reset()
 
@@ -2245,7 +2256,7 @@ func (c *CassandraIndex) invalidatePostingsListenner(message []byte) {
 	dec := gob.NewDecoder(bytes.NewReader(message))
 
 	if err := dec.Decode(&keys); err != nil {
-		logger.Printf("unable to deserialize new metrics message. Search cache may be wrong: %v", err)
+		c.logger.Err(err).Msg("Unable to deserialize new metrics message. Search cache may be wrong.")
 	} else {
 		size := c.postingsCache.Invalidate(keys)
 		c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
@@ -2257,11 +2268,11 @@ func (c *CassandraIndex) invalidatePostings(ctx context.Context, entries []posti
 	enc := gob.NewEncoder(buffer)
 
 	if err := enc.Encode(entries); err != nil {
-		logger.Printf("unable to serialize new metrics. Cache invalidation on other name may fail: %v", err)
+		c.logger.Err(err).Msg("Unable to serialize new metrics. Cache invalidation on other name may fail.")
 	} else {
 		err := c.options.Cluster.Publish(ctx, clusterChannelPostingInvalidate, buffer.Bytes())
 		if err != nil {
-			logger.Printf("unable to send message for new metrics to other node. Their cache won't be invalidated: %v", err)
+			c.logger.Err(err).Msg("Unable to send message for new metrics to other node. Their cache won't be invalidated.")
 		}
 	}
 }
@@ -2583,7 +2594,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 	}
 
 	for _, req := range expireUpdates {
-		debug.Print(debug.Level1, logger, "Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
+		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
 	}
 
 	c.newMetricLock.Lock()
@@ -2611,7 +2622,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 	c.newMetricLock.Unlock()
 
 	if err != nil {
-		logger.Printf("Warning: update of expiration date failed: %v", err)
+		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
 
 		c.lookupIDMutex.Lock()
 
@@ -2760,12 +2771,12 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 
 	_, err := c.getExistingShards(ctx, true)
 	if err != nil {
-		debug.Print(debug.Level1, logger, "refresh existingsShards failed: %v", err)
+		c.logger.Debug().Err(err).Msg("Refresh existingsShards failed")
 	}
 
 	err = c.refreshPostingIDInShard(ctx, allShard)
 	if err != nil {
-		debug.Print(debug.Level1, logger, "refresh PostingIDInShard failed: %v", err)
+		c.logger.Debug().Err(err).Msg("Refresh PostingIDInShard failed")
 	}
 }
 
@@ -2847,7 +2858,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		return false, fmt.Errorf("unable to get list of metrics to check for expiration: %w", err)
 	}
 
-	debug.Print(debug.Level1, logger, "processing expiration for day %v", candidateDay)
+	c.logger.Debug().Msgf("Processing expiration for day %v", candidateDay)
 
 	results := make([]uint64, expireBatchSize)
 
@@ -3662,7 +3673,7 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 		timeToLive, err = strconv.ParseInt(value, 10, 64)
 
 		if err != nil {
-			logger.Printf("Warning: Can't get time to live from labels (%v), using default", err)
+			log.Warn().Err(err).Msg("Can't get time to live from labels, using default")
 
 			return 0
 		}

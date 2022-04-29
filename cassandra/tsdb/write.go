@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"squirreldb/aggregate"
+	"squirreldb/logger"
 	"squirreldb/retry"
 	"squirreldb/types"
 	"sync"
@@ -55,7 +56,9 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 		}
 
 		go func() {
+			defer logger.ProcessPanic()
 			defer wg.Done()
+
 			c.writeMetrics(ctx, metrics[startIndex:endIndex], writingTimestamp)
 		}()
 	}
@@ -73,7 +76,8 @@ func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.Metric
 	for _, data := range metrics {
 		retry.Print(func() error {
 			return c.writeRawData(data, writingTimestamp) //nolint:scopelint
-		}, retry.NewExponentialBackOff(ctx, retryMaxDelay), logger,
+		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
+			c.logger,
 			"write points to Cassandra",
 		)
 	}

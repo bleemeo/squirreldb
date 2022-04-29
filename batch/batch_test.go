@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -20,14 +21,14 @@ const (
 )
 
 func newMemoryStore(initialData []types.MetricData) *temporarystore.Store {
-	store := temporarystore.New(prometheus.NewRegistry())
+	store := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
 	_, _ = store.Append(context.Background(), initialData)
 
 	return store
 }
 
 func newMemoryStoreOffset(initialData []types.MetricData, offsets []int) *temporarystore.Store {
-	store := temporarystore.New(prometheus.NewRegistry())
+	store := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
 	_, _ = store.GetSetPointsAndOffset(context.Background(), initialData, offsets)
 
 	return store
@@ -1273,11 +1274,13 @@ func TestBatch_flush(t *testing.T) { //nolint:maintidx
 // memoryStore (e.g. Redis).
 func TestBatch_write(t *testing.T) { //nolint:maintidx
 	batchSize := 100 * time.Second
-	memoryStore := temporarystore.New(prometheus.NewRegistry())
+	memoryStore := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
 	writer1 := newPersistentStore(nil)
 	writer2 := newPersistentStore(nil)
-	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
-	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
+	logger1 := log.With().Str("component", "batch1").Logger()
+	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1, logger1)
+	logger2 := log.With().Str("component", "batch2").Logger()
+	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2, logger2)
 
 	// tests case will reuse batch1 & batch2.
 	// When write1 is not nil, sent it to batch1. Then after does the same with
@@ -1967,10 +1970,12 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			}
 
 			if tt.shutdown1 {
-				batch1 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
+				logger1 := log.With().Str("component", "batch1").Logger()
+				batch1 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1, logger1)
 			}
 			if tt.shutdown2 {
-				batch2 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
+				logger2 := log.With().Str("component", "batch2").Logger()
+				batch2 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2, logger2)
 			}
 
 			writer1.Data = nil
@@ -2001,11 +2006,13 @@ func Test_randomDuration(t *testing.T) {
 
 func Test_takeover(t *testing.T) { //nolint:maintidx
 	batchSize := 100 * time.Second
-	memoryStore := temporarystore.New(prometheus.NewRegistry())
+	memoryStore := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
 	writer1 := newPersistentStore(nil)
 	writer2 := newPersistentStore(nil)
-	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1)
-	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2)
+	logger1 := log.With().Str("component", "batch1").Logger()
+	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1, logger1)
+	logger2 := log.With().Str("component", "batch2").Logger()
+	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2, logger2)
 	ctx := context.Background()
 
 	err := batch1.write(

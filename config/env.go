@@ -7,6 +7,7 @@ import (
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/maps"
 	"github.com/knadh/koanf/providers/env"
+	"github.com/rs/zerolog/log"
 )
 
 // An Koanf.Provider for environment that support string list.
@@ -33,7 +34,7 @@ func newEnvProvider() koanf.Provider {
 		key, exists := envToKey[s]
 
 		if !exists {
-			logger.Printf("Warning: '%s%s' environment variable doesn't exist.", envPrefix, s)
+			log.Warn().Msgf("'%s%s' environment variable doesn't exist.", envPrefix, s)
 		}
 
 		return key

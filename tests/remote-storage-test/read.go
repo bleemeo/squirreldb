@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -16,6 +15,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -26,7 +26,7 @@ type readRequest struct {
 }
 
 func read(ctx context.Context, now time.Time, readURL string) error { //nolint:maintidx
-	log.Println("Starting read phase")
+	log.Print("Starting read phase")
 
 	workChannel := make(chan readRequest, *threads)
 
@@ -288,7 +288,7 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 
 	err := group.Wait()
 
-	log.Println("Finished read phase")
+	log.Print("Finished read phase")
 
 	return err
 }
@@ -335,7 +335,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if response.StatusCode >= 300 {
 			newErr = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)
 
-			log.Println(newErr)
+			log.Print(newErr)
 
 			return newErr
 		}
@@ -484,7 +484,7 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 			msg := "%s: got more result than expected. Extra result labels of 1st timeseries: %v"
 			err = fmt.Errorf(msg, name, gotResult.Timeseries[0].Labels)
 
-			log.Println(err)
+			log.Print(err)
 
 			continue
 		}
@@ -496,7 +496,7 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 				msg := "%s: got more timeseries than expected. Extra timeseries labels of 1st timeseries: %v"
 				err = fmt.Errorf(msg, name, gotTS.Labels)
 
-				log.Println(err)
+				log.Print(err)
 
 				continue
 			}
@@ -506,13 +506,13 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 			if !labelsEqual(gotTS.Labels, wantTS.Labels) {
 				err = fmt.Errorf("%s: labels = %v want %v", name, gotTS.Labels, wantTS.Labels)
 
-				log.Println(err)
+				log.Print(err)
 			}
 
 			if msg := samplesEqual(gotTS.Samples, wantTS.Samples); msg != "" {
 				err = fmt.Errorf("%s: Results[%d].TS[%d] = %s", name, i, j, msg)
 
-				log.Println(err)
+				log.Print(err)
 			}
 		}
 
@@ -520,14 +520,14 @@ func equal(name string, got, want prompb.ReadResponse) (err error) {
 			lenDiff := len(want.Results[i].Timeseries) - len(gotResult.Timeseries)
 			err = fmt.Errorf("%s: want %d more TS in Results[%d]", name, lenDiff, i)
 
-			log.Println(err)
+			log.Print(err)
 		}
 	}
 
 	if len(want.Results) > len(got.Results) {
 		err = fmt.Errorf("%s: want %d more Results", name, len(want.Results)-len(got.Results))
 
-		log.Println(err)
+		log.Print(err)
 	}
 
 	return err

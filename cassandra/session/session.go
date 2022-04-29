@@ -3,24 +3,20 @@ package session
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
-	"os"
-	"squirreldb/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/rs/zerolog"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[session] ", log.LstdFlags)
 
 type Options struct {
 	Keyspace          string
 	Addresses         []string
 	ReplicationFactor int
+	Logger            zerolog.Logger
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
@@ -55,7 +51,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
-			debug.Print(1, logger, "keyspace %s created", options.Keyspace)
+			options.Logger.Debug().Msgf("Keyspace %s created", options.Keyspace)
 		}
 	}
 
