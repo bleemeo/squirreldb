@@ -4932,9 +4932,10 @@ func Test_expiration_offset(t *testing.T) {
 	// At t0, we create 1 metric with shortTLL.
 	t0 := time.Date(2022, 4, 29, 1, 42, 0, 0, time.UTC)
 	// At t1, the metric shouldn't have expired because of the expiration offset.
-	t1 := t0.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	t1 := t0.Add(updateDelay).Add(shortTTL).Add(implementationDelay).
+		Truncate(24 * time.Hour).Add(expirationStartOffset).Add(-time.Second)
 	// At t2, the metric should be expired.
-	t2 := t1.Add(expirationStartOffset)
+	t2 := t1.Add(time.Second)
 
 	metric := map[string]string{
 		"__name__":    "ttl",
@@ -4995,7 +4996,7 @@ func Test_expiration_offset(t *testing.T) {
 	index.expire(t1)
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
-	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
+	for t := t0; t.Before(t1); t = t.Add(expirationCheckInterval) {
 		_, _ = index.cassandraExpire(context.Background(), t1)
 	}
 
