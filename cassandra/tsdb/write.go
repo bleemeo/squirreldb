@@ -77,6 +77,7 @@ func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.Metric
 		retry.Print(func() error {
 			return c.writeRawData(data, writingTimestamp) //nolint:scopelint
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
+			c.logger,
 			"write points to Cassandra",
 		)
 	}

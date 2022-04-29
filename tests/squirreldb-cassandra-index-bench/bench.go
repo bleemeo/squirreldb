@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog/log"
 )
 
 type queryResult struct {
@@ -99,6 +99,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 			map[string]string{"process": "bench-query"},
 			prometheus.DefaultRegisterer,
 		),
+		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
 	idx, err := squirreldb.Index(ctx, false)
@@ -144,6 +145,7 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 					prometheus.DefaultRegisterer,
 				),
 				ExistingCluster: cluster,
+				Logger:          log.With().Str("component", "daemon").Logger(),
 			}
 
 			localIndex, err := squirreldb.Index(ctx, false)
@@ -445,7 +447,7 @@ func worker(ctx context.Context, localIndex types.Index, workChanel chan []types
 		go func() {
 			_, _, err := localIndex.LookupIDs(ctx, work)
 			if err != nil {
-				log.Fatalf("LookupIDs() failed: %v", err)
+				log.Fatal().Err(err).Msg("LookupIDs() failed")
 			}
 
 			result <- len(work)

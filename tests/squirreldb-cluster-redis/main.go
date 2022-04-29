@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"squirreldb/daemon"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
@@ -55,6 +55,7 @@ func run(ctx context.Context) error {
 				map[string]string{"process": strconv.FormatInt(int64(i), 10)},
 				prometheus.DefaultRegisterer,
 			),
+			Logger: log.With().Str("component", "daemon").Logger(),
 		}
 
 		cluster, err := squirreldb.Cluster(ctx)
@@ -93,7 +94,7 @@ func run(ctx context.Context) error {
 	}
 
 	wg.Wait()
-	log.Println("Publish stopped")
+	log.Print("Publish stopped")
 
 	maxDeadline := time.Now().Add(*runTime / 2)
 	totalTopic1 := 0
@@ -164,13 +165,13 @@ func run(ctx context.Context) error {
 		if len(cl.topic1) != totalTopic1 {
 			err = fmt.Errorf("process %d received %d message on topic1, want %d", i, len(cl.topic1), totalTopic1)
 
-			log.Println(err)
+			log.Print(err)
 		}
 
 		if len(cl.topic2) != totalTopic2 {
 			err = fmt.Errorf("process %d received %d message on topic2, want %d", i, len(cl.topic2), totalTopic2)
 
-			log.Println(err)
+			log.Print(err)
 		}
 	}
 

@@ -11,7 +11,7 @@ import (
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 )
 
@@ -24,10 +24,11 @@ const (
 type Config struct {
 	*koanf.Koanf
 	FlagSet *pflag.FlagSet
+	logger  zerolog.Logger
 }
 
 // New creates a new Config object.
-func New() (*Config, error) {
+func New(logger zerolog.Logger) (*Config, error) {
 	instance := koanf.New(delimiter)
 
 	err := instance.Load(ConfMapProvider(defaults, delimiter), nil)
@@ -63,6 +64,7 @@ func New() (*Config, error) {
 	config := &Config{
 		Koanf:   instance,
 		FlagSet: flagSet,
+		logger:  logger,
 	}
 
 	return config, nil
@@ -106,25 +108,25 @@ func (c *Config) Validate() bool {
 	if keyspace == "" {
 		valid = false
 
-		log.Error().Msg("'cassandra.keyspace' must be set")
+		c.logger.Error().Msg("'cassandra.keyspace' must be set")
 	}
 
 	if replicationFactor <= 0 {
 		valid = false
 
-		log.Error().Msg("'cassandra.replication_factor' must be strictly greater than 0")
+		c.logger.Error().Msg("'cassandra.replication_factor' must be strictly greater than 0")
 	}
 
 	if batchSize <= 0 {
 		valid = false
 
-		log.Error().Msg("'batch.size' must be strictly greater than 0")
+		c.logger.Error().Msg("'batch.size' must be strictly greater than 0")
 	}
 
 	if aggregateIntendedDuration <= 0 {
 		valid = false
 
-		log.Error().Msg("'cassandra.aggregate.intended_duration' must be strictly greater than 0")
+		c.logger.Error().Msg("'cassandra.aggregate.intended_duration' must be strictly greater than 0")
 	}
 
 	return valid

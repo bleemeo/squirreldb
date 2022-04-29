@@ -30,13 +30,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type Telemetry struct {
 	ID        string
 	newFacts  map[string]string
 	runOption map[string]string
+	logger    zerolog.Logger
 }
 
 type telemetryJSONID struct {
@@ -99,12 +100,12 @@ func (t Telemetry) postInformation(ctx context.Context) {
 
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
 	if err != nil {
-		log.Err(err).Msg("Failed to post telemetry")
+		t.logger.Err(err).Msg("Failed to post telemetry")
 
 		return
 	}
 
-	log.Info().Msgf("Telemetry response status: %s", resp.Status)
+	t.logger.Info().Msgf("Telemetry response status: %s", resp.Status)
 
 	defer func() {
 		// Ensure we read the whole response to avoid "Connection reset by peer" on server
@@ -134,11 +135,12 @@ func (t Telemetry) run(ctx context.Context) {
 	}
 }
 
-func New(newFacts map[string]string, runOption map[string]string) Telemetry {
+func New(newFacts map[string]string, runOption map[string]string, logger zerolog.Logger) Telemetry {
 	var tlm Telemetry
 
 	tlm.newFacts = newFacts
 	tlm.runOption = runOption
+	tlm.logger = logger
 
 	return tlm
 }

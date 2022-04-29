@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 const expiratorInterval = 60
@@ -29,14 +29,16 @@ type Store struct {
 	transfertMetrics []types.MetricID
 	mutex            sync.Mutex
 	metrics          *metrics
+	logger           zerolog.Logger
 }
 
 // New creates a new Store object.
-func New(reg prometheus.Registerer) *Store {
+func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
 	store := &Store{
 		metricsStore: make(map[types.MetricID]storeData),
 		knownMetrics: make(map[types.MetricID]interface{}),
 		metrics:      newMetrics(reg),
+		logger:       logger,
 	}
 
 	return store
@@ -244,7 +246,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			log.Trace().Msgf("Expirator service stopped")
+			s.logger.Trace().Msgf("Expirator service stopped")
 
 			return
 		}

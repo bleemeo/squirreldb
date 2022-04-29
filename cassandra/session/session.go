@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type Options struct {
 	Keyspace          string
 	Addresses         []string
 	ReplicationFactor int
+	Logger            zerolog.Logger
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
@@ -50,7 +51,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
-			log.Debug().Msgf("Keyspace %s created", options.Keyspace)
+			options.Logger.Debug().Msgf("Keyspace %s created", options.Keyspace)
 		}
 	}
 

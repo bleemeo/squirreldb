@@ -14,6 +14,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -50,6 +51,7 @@ type CassandraTSDB struct {
 	session *gocql.Session
 	options Options
 	metrics *metrics
+	logger  zerolog.Logger
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -74,6 +76,7 @@ func New(
 	index types.Index,
 	lockFactory lockFactory,
 	state types.State,
+	logger zerolog.Logger,
 ) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
@@ -101,6 +104,7 @@ func New(
 		session:     session,
 		options:     options,
 		metrics:     newMetrics(reg),
+		logger:      logger,
 		index:       index,
 		lockFactory: lockFactory,
 		state:       state,

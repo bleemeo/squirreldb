@@ -26,7 +26,7 @@ import (
 	ppromql "github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -51,6 +51,7 @@ type API struct {
 	PromQLMaxEvaluatedPoints    uint64
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
+	Logger                      zerolog.Logger
 
 	ready      int32
 	router     http.Handler
@@ -66,11 +67,12 @@ func NewPrometheus(
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
+	apiLogger zerolog.Logger,
 ) *v1.API {
-	zerologLogger := log.Logger.With().Str("component", "query engine").Logger()
+	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
 	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
-		Logger:             logger.NewKitLogger(&zerologLogger),
+		Logger:             logger.NewKitLogger(&queryLogger),
 		Reg:                metricRegistry,
 		MaxSamples:         50000000,
 		Timeout:            2 * time.Minute,
@@ -102,8 +104,6 @@ func NewPrometheus(
 
 	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
 	CORSOrigin := regexp.MustCompile(".*")
-
-	apiLogger := log.Logger.With().Str("component", "api").Logger()
 
 	api := v1.NewAPI(
 		queryEngine,
@@ -169,6 +169,7 @@ func (a *API) init() {
 		appendable,
 		maxConcurrent,
 		a.MetricRegistry,
+		a.Logger,
 	)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
@@ -231,7 +232,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		serverStopped <- server.Serve(ln)
 	}()
 
-	log.Info().Msgf("Server listening on %s", a.ListenAddress)
+	a.Logger.Info().Msgf("Server listening on %s", a.ListenAddress)
 
 	readiness <- nil
 
@@ -241,7 +242,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
-			log.Err(err).Msg("Failed stop the HTTP server")
+			a.Logger.Err(err).Msg("Failed stop the HTTP server")
 		}
 
 		err = <-serverStopped
@@ -249,10 +250,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Err(err).Msg("HTTP server failed")
+		a.Logger.Err(err).Msg("HTTP server failed")
 	}
 
-	log.Debug().Msg("Server stopped")
+	a.Logger.Debug().Msg("Server stopped")
 }
 
 // ListenPort return the port listenning on. Should not be used before Run()

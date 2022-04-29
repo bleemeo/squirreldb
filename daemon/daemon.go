@@ -34,6 +34,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -64,6 +65,7 @@ type SquirrelDB struct {
 	Config          *config.Config
 	ExistingCluster types.Cluster
 	MetricRegistry  prometheus.Registerer
+	Logger          zerolog.Logger
 
 	cassandraSession         *gocql.Session
 	lockFactory              LockFactory
@@ -216,7 +218,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 // Config return the configuration after validation.
 //nolint:forbidigo // This function is allowed to use fmt.Print*
 func Config() (cfg *config.Config, err error) {
-	cfg, err = config.New()
+	cfg, err = config.New(log.With().Str("component", "config").Logger())
 	if err != nil {
 		return nil, fmt.Errorf("can't load config: %w", err)
 	}
@@ -355,6 +357,8 @@ func SetTestEnvironment() {
 		// If not explicitly set, use a dynamic port.
 		os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
 	}
+
+	log.Logger = logger.NewTestLogger()
 }
 
 // SchemaLock return a lock to modify the Cassandra schema.
@@ -387,6 +391,7 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 			Addresses:         s.Config.Strings("cassandra.addresses"),
 			ReplicationFactor: s.Config.Int("cassandra.replication_factor"),
 			Keyspace:          s.Config.String("cassandra.keyspace"),
+			Logger:            s.Logger.With().Str("component", "session").Logger(),
 		}
 
 		session, keyspaceCreated, err := session.New(options)
@@ -411,14 +416,19 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 				return nil, err
 			}
 
-			factory, err := locks.New(s.MetricRegistry, session, s.cassandraKeyspaceCreated)
+			factory, err := locks.New(
+				s.MetricRegistry,
+				session,
+				s.cassandraKeyspaceCreated,
+				s.Logger.With().Str("component", "locks").Logger(),
+			)
 			if err != nil {
 				return nil, err
 			}
 
 			s.lockFactory = factory
 		case backendDummy:
-			log.Warn().Msg("Using dummy lock factory (only work on single node)")
+			s.Logger.Warn().Msg("Using dummy lock factory (only work on single node)")
 
 			s.lockFactory = &dummy.Locks{}
 		default:
@@ -450,7 +460,7 @@ func (s *SquirrelDB) States() (types.State, error) {
 
 			s.states = states
 		case backendDummy:
-			log.Warn().Msg(
+			s.Logger.Warn().Msg(
 				"Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
 			)
 
@@ -477,6 +487,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
 	s.api.MaxConcurrentRemoteRequests = s.Config.Int("remote_storage.max_concurrent_requests")
 	s.api.MetricRegistry = s.MetricRegistry
+	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 
 	s.api.Run(ctx, readiness)
 }
@@ -522,6 +533,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 			return err
 		}, retry.NewExponentialBackOff(ctx, 30*time.Second),
+			s.Logger,
 			fmt.Sprintf("Starting %s", task.Name),
 		)
 
@@ -534,7 +546,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 			break
 		} else {
-			log.Trace().Msgf("Task %s started", task.Name)
+			s.Logger.Trace().Msgf("Task %s started", task.Name)
 		}
 	}
 
@@ -547,7 +559,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	for i := len(tasks) - 1; i >= 0; i-- {
 		cancels[i]()
 		<-waitChan[i]
-		log.Trace().Msgf("Task %s stopped", tasks[i].Name)
+		s.Logger.Trace().Msgf("Task %s stopped", tasks[i].Name)
 	}
 
 	if s.cassandraSession != nil {
@@ -564,6 +576,7 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 				Addresses:      redisAddresses,
 				MetricRegistry: s.MetricRegistry,
 				Keyspace:       s.Config.String("internal.redis_keyspace"),
+				Logger:         s.Logger.With().Str("component", "cluster").Logger(),
 			}
 
 			err := c.Start(ctx)
@@ -615,14 +628,20 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			index, err := index.New(ctx, s.MetricRegistry, session, options)
+			index, err := index.New(
+				ctx,
+				s.MetricRegistry,
+				session,
+				options,
+				s.Logger.With().Str("component", "index").Logger(),
+			)
 			if err != nil {
 				return nil, err
 			}
 
 			s.index = index
 		case backendDummy:
-			log.Warn().Msg("Using dummy for index (only do this for testing)")
+			s.Logger.Warn().Msg("Using dummy for index (only do this for testing)")
 
 			s.index = &dummy.Index{
 				StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
@@ -679,7 +698,15 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 				SchemaLock:                schemaLock,
 			}
 
-			tsdb, err := tsdb.New(s.MetricRegistry, session, options, index, lockFactory, states)
+			tsdb, err := tsdb.New(
+				s.MetricRegistry,
+				session,
+				options,
+				index,
+				lockFactory,
+				states,
+				s.Logger.With().Str("component", "tsdb").Logger(),
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -687,7 +714,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 			s.persistentStore = tsdb
 			s.api.PreAggregateCallback = tsdb.ForcePreAggregation
 		case backendDummy:
-			log.Warn().Msg("Cassandra is disabled for TSDB. Using dummy states store that discard every write")
+			s.Logger.Warn().Msg("Cassandra is disabled for TSDB. Using dummy states store that discard every write")
 
 			s.persistentStore = &dummy.DiscardTSDB{}
 		default:
@@ -729,7 +756,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 
 		err := s.states.Write("cluster_id", clusterID)
 		if err != nil {
-			log.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
+			s.Logger.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
 		}
 	}
 
@@ -748,7 +775,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 
 	rand.Seed(time.Now().UnixNano())
 
-	tlm := telemetry.New(addFacts, runOption)
+	tlm := telemetry.New(addFacts, runOption, s.Logger.With().Str("component", "telemetry").Logger())
 	tlm.Start(ctx)
 
 	return nil
@@ -764,7 +791,12 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 				Keyspace:  s.Config.String("internal.redis_keyspace"),
 			}
 
-			tmp, err := redisTemporarystore.New(ctx, s.MetricRegistry, options)
+			tmp, err := redisTemporarystore.New(
+				ctx,
+				s.MetricRegistry,
+				options,
+				s.Logger.With().Str("component", "temporary_store").Logger(),
+			)
 			s.temporaryStore = tmp
 
 			readiness <- err
@@ -775,7 +807,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 
 			<-ctx.Done()
 		} else {
-			mem := temporarystore.New(s.MetricRegistry)
+			mem := temporarystore.New(s.MetricRegistry, s.Logger.With().Str("component", "temporary_store").Logger())
 			s.temporaryStore = mem
 			readiness <- nil
 			mem.Run(ctx)
@@ -814,7 +846,14 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 			return
 		}
 
-		batch := batch.New(s.MetricRegistry, squirrelBatchSize, s.temporaryStore, s.persistentStore, s.persistentStore)
+		batch := batch.New(
+			s.MetricRegistry,
+			squirrelBatchSize,
+			s.temporaryStore,
+			s.persistentStore,
+			s.persistentStore,
+			s.Logger.With().Str("component", "batch").Logger(),
+		)
 		s.store = batch
 		s.api.FlushCallback = batch.Flush
 
@@ -824,7 +863,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		cancel()
 		wg.Wait()
 	case backendDummy:
-		log.Warn().Msg("SquirrelDB is configured to discard every write")
+		s.Logger.Warn().Msg("SquirrelDB is configured to discard every write")
 
 		s.store = dummy.DiscardTSDB{}
 

@@ -16,7 +16,7 @@ import (
 	goredis "github.com/go-redis/redis/v8"
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // errors about topic name.
@@ -34,6 +34,7 @@ type Cluster struct {
 	Addresses      []string
 	MetricRegistry prometheus.Registerer
 	Keyspace       string
+	Logger         zerolog.Logger
 
 	client       *client.Client
 	cancel       context.CancelFunc
@@ -72,9 +73,9 @@ func (c *Cluster) Start(ctx context.Context) error {
 	}
 
 	if cluster {
-		log.Info().Msg("detected cluster")
+		c.Logger.Info().Msg("detected cluster")
 	} else {
-		log.Info().Msg("detected single")
+		c.Logger.Info().Msg("detected single")
 	}
 
 	pubsub, err := c.client.Subscribe(ctx, c.redisChannel)
@@ -172,7 +173,7 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 
 			topic, message, err := decode(msg.Payload)
 			if err != nil {
-				log.Err(err).Msg("failed to decode message")
+				c.Logger.Err(err).Msg("failed to decode message")
 				c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
 
 				continue

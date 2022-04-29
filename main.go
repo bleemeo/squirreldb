@@ -21,7 +21,9 @@ var (
 	date    string
 )
 
-func setupSentryLogger(cfg *config.Config) bool {
+// setupSentryLogger sets the default zerolog logger to a Sentry logger, or
+// a simple console logger if Sentry is disabled.
+func setupSentryLogger(cfg *config.Config) {
 	consoleWriter := logger.NewConsoleWriter(cfg.Bool("log.disable_color"))
 	logLevel := zerolog.Level(cfg.Int("log.level"))
 	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))
@@ -30,7 +32,7 @@ func setupSentryLogger(cfg *config.Config) bool {
 	if sentryDSN == "" {
 		log.Logger = logger.NewLogger(consoleWriter, logLevel)
 
-		return false
+		return
 	}
 
 	sentryWriter, err := logger.NewSentryWriter(sentryDSN, zerolog.ErrorLevel, release)
@@ -39,7 +41,7 @@ func setupSentryLogger(cfg *config.Config) bool {
 
 		log.Logger = logger.NewLogger(consoleWriter, logLevel)
 
-		return false
+		return
 	}
 
 	// The writer must be closed to flush events to Sentry.
@@ -48,8 +50,6 @@ func setupSentryLogger(cfg *config.Config) bool {
 	// Set up logger with level filter.
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, sentryWriter)
 	log.Logger = logger.NewLogger(multiWriter, logLevel)
-
-	return true
 }
 
 func main() {
@@ -70,6 +70,7 @@ func main() {
 
 	squirreldb := &daemon.SquirrelDB{
 		Config: cfg,
+		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
 	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", version, commit)

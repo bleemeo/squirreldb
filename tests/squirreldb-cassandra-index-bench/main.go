@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"runtime/pprof"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
+	"github.com/rs/zerolog/log"
 )
 
 //nolint:lll,gochecknoglobals
@@ -52,7 +52,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
@@ -63,7 +63,7 @@ func run(ctx context.Context) error {
 	}
 
 	if !*runExpiration && *verify {
-		log.Println("Force running expiration because index verify is enabled")
+		log.Print("Force running expiration because index verify is enabled")
 
 		*runExpiration = true
 	}
@@ -74,6 +74,7 @@ func run(ctx context.Context) error {
 			map[string]string{"process": "test1"},
 			prometheus.DefaultRegisterer,
 		),
+		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
 	if !*noDropTables {
@@ -81,7 +82,7 @@ func run(ctx context.Context) error {
 
 		err := squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
-			log.Fatalf("failed to drop keyspace: %v", err)
+			log.Fatal().Err(err).Msg("Failed to drop keyspace")
 		}
 	}
 
@@ -90,12 +91,12 @@ func run(ctx context.Context) error {
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("Failed to create file")
 		}
 
 		err = pprof.StartCPUProfile(f)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("Failed to start CPU profile")
 		}
 
 		defer pprof.StopCPUProfile()
@@ -120,6 +121,7 @@ func run(ctx context.Context) error {
 				map[string]string{"process": "test2"},
 				prometheus.DefaultRegisterer,
 			),
+			Logger: log.With().Str("component", "daemon2").Logger(),
 		}
 
 		cassandraIndex2, err := squirreldb2.Index(ctx, false)
@@ -141,6 +143,7 @@ func run(ctx context.Context) error {
 		squirreldb3 := &daemon.SquirrelDB{
 			Config:         cfg,
 			MetricRegistry: prometheus.NewRegistry(),
+			Logger:         log.With().Str("component", "daemon3").Logger(),
 		}
 
 		idx, err := squirreldb3.Index(ctx, false)

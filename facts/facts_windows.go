@@ -19,14 +19,11 @@ package facts
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows/registry"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 var errNoResults = errors.New("the WMI request returned 0 result")
 
