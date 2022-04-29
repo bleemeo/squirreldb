@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"squirreldb/config"
 	"squirreldb/daemon"
@@ -21,9 +22,10 @@ var (
 	date    string
 )
 
-// setupSentryLogger sets the default zerolog logger to a Sentry logger, or
-// a simple console logger if Sentry is disabled.
-func setupSentryLogger(cfg *config.Config) {
+// setupSentryLogger sets the default zerolog logger to a Sentry logger, or a simple
+// console logger if Sentry is disabled. The closer returned should be closed at the
+// end of the program to flush the events to Sentry.
+func setupSentryLogger(cfg *config.Config) io.Closer {
 	consoleWriter := logger.NewConsoleWriter(cfg.Bool("log.disable_color"))
 	logLevel := zerolog.Level(cfg.Int("log.level"))
 	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))
@@ -32,7 +34,7 @@ func setupSentryLogger(cfg *config.Config) {
 	if sentryDSN == "" {
 		log.Logger = logger.NewLogger(consoleWriter, logLevel)
 
-		return
+		return nil
 	}
 
 	sentryWriter, err := logger.NewSentryWriter(sentryDSN, zerolog.ErrorLevel, release)
@@ -41,15 +43,14 @@ func setupSentryLogger(cfg *config.Config) {
 
 		log.Logger = logger.NewLogger(consoleWriter, logLevel)
 
-		return
+		return nil
 	}
-
-	// The writer must be closed to flush events to Sentry.
-	defer sentryWriter.Close()
 
 	// Set up logger with level filter.
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, sentryWriter)
 	log.Logger = logger.NewLogger(multiWriter, logLevel)
+
+	return sentryWriter
 }
 
 func main() {
@@ -64,7 +65,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to read config")
 	}
 
-	setupSentryLogger(cfg)
+	if sentryCloser := setupSentryLogger(cfg); sentryCloser != nil {
+		defer sentryCloser.Close()
+	}
 
 	defer logger.ProcessPanic()
 
