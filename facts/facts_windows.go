@@ -19,14 +19,11 @@ package facts
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows/registry"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[index] ", log.LstdFlags)
 
 var errNoResults = errors.New("the WMI request returned 0 result")
 
@@ -101,7 +98,7 @@ func platformFacts() map[string]string {
 
 	reg, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE)
 	if err != nil {
-		logger.Println("Couldn't open the windows registry, some facts may not be exposed")
+		log.Warn().Msg("Couldn't open the windows registry, some facts may not be exposed")
 	} else {
 		defer reg.Close()
 

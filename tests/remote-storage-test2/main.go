@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"squirreldb/daemon"
@@ -21,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
@@ -77,6 +77,7 @@ func run(ctx context.Context) error {
 					map[string]string{"process": strconv.FormatInt(int64(n), 10)},
 					prometheus.DefaultRegisterer,
 				),
+				Logger: log.With().Str("component", "daemon").Logger(),
 			}
 
 			if n == 0 {
@@ -153,7 +154,7 @@ func run(ctx context.Context) error {
 		receiveTime, ok := sim.agentFirstReceive[k]
 		if !ok {
 			err = fmt.Errorf("agent %s were never seen on read", k)
-			log.Println(err)
+			log.Print(err)
 		} else {
 			delay := receiveTime.Sub(sendTime)
 			sumDelay += delay
@@ -285,7 +286,7 @@ func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteReque
 		}
 	}
 
-	log.Println("write producer terminated")
+	log.Print("write producer terminated")
 
 	return ctx.Err()
 }

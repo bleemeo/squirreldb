@@ -3,23 +3,18 @@ package temporarystore
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"squirreldb/compare"
-	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 )
 
 const expiratorInterval = 60
 
 const defaultTTL = 24 * time.Hour
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
 type storeData struct {
 	flushDeadline  time.Time
@@ -34,14 +29,16 @@ type Store struct {
 	transfertMetrics []types.MetricID
 	mutex            sync.Mutex
 	metrics          *metrics
+	logger           zerolog.Logger
 }
 
 // New creates a new Store object.
-func New(reg prometheus.Registerer) *Store {
+func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
 	store := &Store{
 		metricsStore: make(map[types.MetricID]storeData),
 		knownMetrics: make(map[types.MetricID]interface{}),
 		metrics:      newMetrics(reg),
+		logger:       logger,
 	}
 
 	return store
@@ -249,7 +246,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.expire(time.Now())
 		case <-ctx.Done():
-			debug.Print(2, logger, "Expirator service stopped")
+			s.logger.Trace().Msgf("Expirator service stopped")
 
 			return
 		}

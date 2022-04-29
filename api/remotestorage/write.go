@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -136,7 +137,7 @@ func metricsFromTimeseries(
 		}
 
 		if min < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
-			logger.Printf("warning: points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
+			log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
 		}
 
 		requests = append(requests, types.LookupRequest{
