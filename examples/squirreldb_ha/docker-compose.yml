@@ -49,7 +49,7 @@ services:
     # * it make easier to run some test with higher number of Cassandra. Just scale cassandra3
 
   redis1:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -60,7 +60,7 @@ services:
       default:
         ipv4_address: 172.28.0.21 # Redis need fixed IP of the cluster may fail to recover by itself if node switch their IPs or all node changes their IP.
   redis2:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -71,7 +71,7 @@ services:
       default:
         ipv4_address: 172.28.0.22
   redis3:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -82,7 +82,7 @@ services:
       default:
         ipv4_address: 172.28.0.23
   redis4:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -93,7 +93,7 @@ services:
       default:
         ipv4_address: 172.28.0.24
   redis5:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -104,7 +104,7 @@ services:
       default:
         ipv4_address: 172.28.0.25
   redis6:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"
@@ -115,7 +115,7 @@ services:
       default:
         ipv4_address: 172.28.0.26
   redis_init:
-    image: redis
+    image: redis:6
     restart: unless-stopped
     labels:
         glouton.enable: "false"

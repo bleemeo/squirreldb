@@ -4749,7 +4749,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	}
 
 	index.expire(t0)
-	index.cassandraExpire(context.Background(), t0)
+	_, _ = index.cassandraExpire(context.Background(), t0)
 
 	allIds, err := index.AllIDs(context.Background(), t0, t0)
 	if err != nil {
@@ -4815,7 +4815,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
 	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t1)
+		_, _ = index.cassandraExpire(context.Background(), t1)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t1)
@@ -4834,7 +4834,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	if err != nil {
 		t.Error(err)
 
-		return // can't continue, lock make be hold
+		return // can't continue, lock may be held
 	}
 
 	if ttls[0] != int64(shortTTL.Seconds()) {
@@ -4853,7 +4853,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t2)
 
 	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t2)
+		_, _ = index.cassandraExpire(context.Background(), t2)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t2)
@@ -4874,7 +4874,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t3)
 
 	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t3)
+		_, _ = index.cassandraExpire(context.Background(), t3)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t3)
@@ -4914,7 +4914,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t4)
 
 	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t4)
+		_, _ = index.cassandraExpire(context.Background(), t4)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t4)
@@ -4929,7 +4929,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t5)
 
 	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t5)
+		_, _ = index.cassandraExpire(context.Background(), t5)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t5)
@@ -4953,7 +4953,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t6)
 
 	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
-		index.cassandraExpire(context.Background(), t6)
+		_, _ = index.cassandraExpire(context.Background(), t6)
 	}
 
 	allIds, err = index.AllIDs(context.Background(), t0, t6)
@@ -4972,6 +4972,115 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	if hadIssue {
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+	}
+}
+
+// Test_expiration_offset checks that the expiration start offset is respected.
+func Test_expiration_offset(t *testing.T) {
+	defaultTTL := 365 * 24 * time.Hour
+	shortTTL := 24 * time.Hour
+	// current implementation only delete metrics expired the day before
+	implementationDelay := 24 * time.Hour
+	// updateDelay is the delay after which we are guaranteed to trigger an TTL update
+	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
+
+	// At t0, we create 1 metric with shortTLL.
+	t0 := time.Date(2022, 4, 29, 1, 42, 0, 0, time.UTC)
+	// At t1, the metric shouldn't have expired because of the expiration offset.
+	t1 := t0.Add(updateDelay).Add(shortTTL).Add(implementationDelay).
+		Truncate(24 * time.Hour).Add(expirationStartOffset).Add(-time.Second)
+	// At t2, the metric should be expired.
+	t2 := t1.Add(time.Second)
+
+	metric := map[string]string{
+		"__name__":    "ttl",
+		"unit":        "day",
+		"value":       "2",
+		"updated":     "yes",
+		"description": "The metrics with TTL set to 2 months",
+		"__ttl__":     strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+	}
+
+	store := &mockStore{}
+
+	index, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       &mockLockFactory{},
+			States:            &mockState{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Check that the metric is in the index.
+	labelsList := []labels.Labels{labelsMapToList(metric, false)}
+
+	metricsID, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ttls) != 1 {
+		t.Fatalf("got %d ttls, want 1", len(ttls))
+	}
+
+	if len(metricsID) != 1 {
+		t.Fatalf("got %d metricIDs, want 1", len(ttls))
+	}
+
+	want := int64(shortTTL.Seconds())
+	if ttls[0] != want {
+		t.Errorf("got ttl = %d, want %d", ttls[0], want)
+	}
+
+	// t0
+	index.expire(t0)
+	_, _ = index.cassandraExpire(context.Background(), t0)
+
+	allIds, err := index.AllIDs(context.Background(), t0, t0)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if len(allIds) != 1 {
+		t.Errorf("len(allIds) = %d, want 1", len(allIds))
+	}
+
+	// t1
+	index.expire(t1)
+	// each call to cassandraExpire do one day, but calling multiple time
+	// isn't an issue but it must be called at least once per day
+	for t := t0; t.Before(t1); t = t.Add(expirationCheckInterval) {
+		_, _ = index.cassandraExpire(context.Background(), t1)
+	}
+
+	allIds, err = index.AllIDs(context.Background(), t0, t1)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if len(allIds) != 1 {
+		t.Errorf("len(allIds) = %d, want 1", len(allIds))
+	}
+
+	// t2
+	index.expire(t2)
+	_, _ = index.cassandraExpire(context.Background(), t2)
+
+	allIds, err = index.AllIDs(context.Background(), t0, t1)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if len(allIds) != 0 {
+		t.Errorf("len(allIds) = %d, want 0", len(allIds))
 	}
 }
 

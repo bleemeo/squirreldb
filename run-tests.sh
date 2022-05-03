@@ -94,7 +94,7 @@ fi
 export GORACE=halt_on_error=1
 
 echo "== waiting stores"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
@@ -105,7 +105,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cassandra-lock-bench"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -114,7 +114,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cassandra-index-bench"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -123,7 +123,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running remote-storage-test"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -132,7 +132,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running remote-storage-test2"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -141,7 +141,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cluster-redis"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
