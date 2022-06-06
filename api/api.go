@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
-	"regexp"
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
@@ -19,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/grafana/regexp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
@@ -130,6 +130,7 @@ func NewPrometheus(
 		&v1.PrometheusVersion{},
 		mockGatherer{},
 		metricRegistry,
+		nil,
 	)
 
 	return api
