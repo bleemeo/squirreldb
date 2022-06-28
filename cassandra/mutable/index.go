@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
 )
 
 var errNotImplemented = errors.New("not implemented")
@@ -16,24 +17,27 @@ var errNotImplemented = errors.New("not implemented")
 type indexWrapper struct {
 	index          types.Index
 	labelProcessor *LabelProcessor
+	logger         zerolog.Logger
 }
 
 // NewIndexWrapper returns an index wrapper that handles mutable labels.
 func NewIndexWrapper(
 	index types.Index,
 	labelProcessor *LabelProcessor,
+	logger zerolog.Logger,
 ) types.Index {
 	mi := indexWrapper{
 		index:          index,
 		labelProcessor: labelProcessor,
+		logger:         logger,
 	}
 
 	return &mi
 }
 
 // Start the wrapped index.
-func (m *indexWrapper) Start(ctx context.Context) error {
-	if task, ok := m.index.(types.Task); ok {
+func (i *indexWrapper) Start(ctx context.Context) error {
+	if task, ok := i.index.(types.Task); ok {
 		err := task.Start(ctx)
 		if err != nil {
 			return err
@@ -44,8 +48,8 @@ func (m *indexWrapper) Start(ctx context.Context) error {
 }
 
 // Stop the wrapped index.
-func (m *indexWrapper) Stop() error {
-	if task, ok := m.index.(types.Task); ok {
+func (i *indexWrapper) Stop() error {
+	if task, ok := i.index.(types.Task); ok {
 		err := task.Stop()
 		if err != nil {
 			return err
@@ -56,43 +60,44 @@ func (m *indexWrapper) Stop() error {
 }
 
 // AllIDs get all IDs from the wrapped index.
-func (m *indexWrapper) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
-	return m.index.AllIDs(ctx, start, end)
+func (i *indexWrapper) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+	return i.index.AllIDs(ctx, start, end)
 }
 
 // LookupIDs in the wrapped index.
-func (m *indexWrapper) LookupIDs(
+func (i *indexWrapper) LookupIDs(
 	ctx context.Context,
 	requests []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
-	return m.index.LookupIDs(ctx, requests)
+	return i.index.LookupIDs(ctx, requests)
 }
 
 // Search replace the mutable labels by non mutable labels before searching the wrapped index.
-func (m *indexWrapper) Search(
+func (i *indexWrapper) Search(
 	ctx context.Context,
 	start time.Time, end time.Time,
 	matchers []*labels.Matcher,
 ) (types.MetricsSet, error) {
 	// Replace mutable labels by non mutable labels.
-	matchers, err := m.labelProcessor.ReplaceMutableLabels(matchers)
+	matchers, err := i.labelProcessor.ReplaceMutableLabels(matchers)
 	if err != nil {
 		// Return an empty metric set if the mutable matchers have no match.
-		if errors.Is(err, ErrNoResult) {
+		if errors.Is(err, errNoResult) {
 			return emptyMetricsSet{}, nil
 		}
 
 		return nil, err
 	}
 
-	metricsSet, err := m.index.Search(ctx, start, end, matchers)
+	metricsSet, err := i.index.Search(ctx, start, end, matchers)
 	if err != nil {
 		return metricsSet, err
 	}
 
 	metricsSetWrapper := &mutableMetricsSet{
 		metricsSet:     metricsSet,
-		labelProcessor: m.labelProcessor,
+		labelProcessor: i.labelProcessor,
+		logger:         i.logger,
 	}
 
 	return metricsSetWrapper, nil
@@ -101,21 +106,21 @@ func (m *indexWrapper) Search(
 // LabelValues returns potential values for a label name. Values will have at least
 // one metrics matching matchers.
 // Warning: If the name is a mutable label name, the values are returned without checking the matchers.
-func (m *indexWrapper) LabelValues(
+func (i *indexWrapper) LabelValues(
 	ctx context.Context,
 	start, end time.Time,
 	name string,
 	matchers []*labels.Matcher,
 ) ([]string, error) {
-	tenant := m.labelProcessor.tenantFromMatchers(matchers)
+	tenant := i.labelProcessor.tenantFromMatchers(matchers)
 	if tenant != "" {
-		isMutableLabel, err := m.labelProcessor.IsMutableLabel(tenant, name)
+		isMutableLabel, err := i.labelProcessor.IsMutableLabel(tenant, name)
 		if err != nil {
 			return nil, err
 		}
 
 		if isMutableLabel {
-			values, err := m.labelProcessor.labelProvider.AllValues(tenant, name)
+			values, err := i.labelProcessor.labelProvider.AllValues(tenant, name)
 			if err != nil {
 				return nil, err
 			}
@@ -126,7 +131,7 @@ func (m *indexWrapper) LabelValues(
 		}
 	}
 
-	values, err := m.index.LabelValues(ctx, start, end, name, matchers)
+	values, err := i.index.LabelValues(ctx, start, end, name, matchers)
 	if err != nil {
 		return nil, err
 	}
@@ -136,19 +141,19 @@ func (m *indexWrapper) LabelValues(
 
 // LabelNames returns the unique label names for metrics matching matchers in ascending order.
 // Warning: mutable label names are added without checking the matchers.
-func (m *indexWrapper) LabelNames(
+func (i *indexWrapper) LabelNames(
 	ctx context.Context,
 	start, end time.Time,
 	matchers []*labels.Matcher,
 ) ([]string, error) {
-	names, err := m.index.LabelNames(ctx, start, end, matchers)
+	names, err := i.index.LabelNames(ctx, start, end, matchers)
 	if err != nil {
 		return nil, err
 	}
 
-	tenant := m.labelProcessor.tenantFromMatchers(matchers)
+	tenant := i.labelProcessor.tenantFromMatchers(matchers)
 	if tenant != "" {
-		mutableLabelNames, err := m.labelProcessor.MutableLabelNames(tenant)
+		mutableLabelNames, err := i.labelProcessor.MutableLabelNames(tenant)
 		if err != nil {
 			return nil, err
 		}
@@ -162,13 +167,13 @@ func (m *indexWrapper) LabelNames(
 }
 
 // Verify implements the IndexVerifier interface used by the API.
-func (m *indexWrapper) Verify(
+func (i *indexWrapper) Verify(
 	ctx context.Context,
 	w io.Writer,
 	doFix bool,
 	acquireLock bool,
 ) (hadIssue bool, err error) {
-	if verifier, ok := m.index.(types.IndexVerifier); ok {
+	if verifier, ok := i.index.(types.IndexVerifier); ok {
 		return verifier.Verify(ctx, w, doFix, acquireLock)
 	}
 
@@ -176,8 +181,8 @@ func (m *indexWrapper) Verify(
 }
 
 // Dump implements the IndexDumper interface used by the API.
-func (m *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
-	if dumper, ok := m.index.(types.IndexDumper); ok {
+func (i *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
 		return dumper.Dump(ctx, w)
 	}
 
@@ -190,6 +195,7 @@ type mutableMetricsSet struct {
 	currentMetric  types.MetricLabel
 	err            error
 	labelProcessor *LabelProcessor
+	logger         zerolog.Logger
 }
 
 func (m *mutableMetricsSet) Next() bool {
@@ -205,7 +211,7 @@ func (m *mutableMetricsSet) Next() bool {
 
 	lbls, err := m.labelProcessor.AddMutableLabels(metric.Labels)
 	if err != nil {
-		logger.Printf("Failed to add mutable labels: %v\n", err)
+		m.logger.Err(err).Msg("Failed to add mutable labels")
 
 		m.err = err
 

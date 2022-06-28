@@ -4,8 +4,6 @@ package mutable
 import (
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"regexp"
 	"regexp/syntax"
 	"sort"
@@ -13,12 +11,9 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-//nolint:gochecknoglobals
 var (
-	logger = log.New(os.Stdout, "[mutable] ", log.LstdFlags)
-
 	errUnsupportedOperation = errors.New("unsupported operation")
-	ErrNoResult             = errors.New("no result")
+	errNoResult             = errors.New("no result")
 )
 
 // LabelProcessor can replace mutable labels by non mutable labels.
@@ -154,7 +149,7 @@ func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *label
 	}
 
 	if len(matchingLabels.Values) == 0 {
-		return nil, fmt.Errorf("%w: tenant=%s, matcher=%#v", ErrNoResult, tenant, matcher)
+		return nil, fmt.Errorf("%w: tenant=%s, matcher=%#v", errNoResult, tenant, matcher)
 	}
 
 	// The returned matcher is always a MatchRegexp, even if the matcher was a MatchNotRegexp,
@@ -243,7 +238,7 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 	for _, label := range lbls {
 		newMutableLabels, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
 		if err != nil {
-			if errors.Is(err, ErrNoResult) {
+			if errors.Is(err, errNoResult) {
 				continue
 			}
 

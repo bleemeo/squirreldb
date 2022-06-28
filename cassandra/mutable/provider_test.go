@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
+	"squirreldb/logger"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	registry := prometheus.NewRegistry()
 	initialData := generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel)
 	store := dummy.NewMutableLabelStore(initialData)
-	provider := mutable.NewProvider(context.Background(), registry, &dummy.LocalCluster{}, store)
+	provider := mutable.NewProvider(context.Background(), registry, &dummy.LocalCluster{}, store, logger.NewTestLogger())
 
 	var searchedTenant, searchedNonMutableName, searchedMutableName string
 	for tenant, names := range initialData.AssociatedNames {

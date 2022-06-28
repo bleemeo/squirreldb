@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
 )
 
 // LabelProvider allows to get non mutable labels from a mutable label.
@@ -79,10 +80,11 @@ func NewProvider(
 	reg prometheus.Registerer,
 	cluster types.Cluster,
 	store Store,
+	logger zerolog.Logger,
 ) *Provider {
 	cp := &Provider{
 		store: store,
-		cache: newCache(ctx, reg, cluster),
+		cache: newCache(ctx, reg, cluster, logger),
 	}
 
 	return cp
@@ -113,7 +115,7 @@ func (cp *Provider) nonMutableName(tenant, name string) (string, error) {
 	nonMutableName, found := cp.cache.NonMutableName(tenant, name)
 	if found {
 		if nonMutableName == "" {
-			return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
+			return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
 		}
 
 		return nonMutableName, nil
@@ -126,7 +128,7 @@ func (cp *Provider) nonMutableName(tenant, name string) (string, error) {
 
 	nonMutableName, _ = cp.cache.NonMutableName(tenant, name)
 	if nonMutableName == "" {
-		return "", fmt.Errorf("%w: tenant=%s, name=%s", ErrNoResult, tenant, name)
+		return "", fmt.Errorf("%w: tenant=%s, name=%s", errNoResult, tenant, name)
 	}
 
 	return nonMutableName, nil
@@ -147,7 +149,7 @@ func (cp *Provider) associatedValuesByNameAndValue(tenant, name, value string) (
 	associatedValues, found := cp.cache.AssociatedValues(tenant, name, value)
 	if found {
 		if len(associatedValues) == 0 {
-			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", ErrNoResult, tenant, name, value)
+			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
 		}
 
 		return associatedValues, nil
@@ -160,7 +162,7 @@ func (cp *Provider) associatedValuesByNameAndValue(tenant, name, value string) (
 
 	associatedValues, _ = cp.cache.AssociatedValues(tenant, name, value)
 	if len(associatedValues) == 0 {
-		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", ErrNoResult, tenant, name, value)
+		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
 	}
 
 	return associatedValues, nil
@@ -339,7 +341,7 @@ func (cp *Provider) GetMutable(tenant, name, value string) (labels.Labels, error
 	for _, mutableName := range mutableNames {
 		mutableValue, err := cp.getMutableValue(tenant, mutableName, value)
 		if err != nil {
-			if errors.Is(err, ErrNoResult) {
+			if errors.Is(err, errNoResult) {
 				continue
 			}
 
@@ -384,7 +386,7 @@ func (cp *Provider) getMutableValue(tenant, mutableName, nonMutableValue string)
 		}
 	}
 
-	return "", ErrNoResult
+	return "", errNoResult
 }
 
 // mutableName returns the mutable label names associated to a non mutable label name.

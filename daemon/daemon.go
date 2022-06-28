@@ -659,9 +659,13 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			return nil, err
 		}
 
-		mutableIndex := mutable.NewIndexWrapper(wrappedIndex, mutableLabelProcessor)
+		indexWrapper := mutable.NewIndexWrapper(
+			wrappedIndex,
+			mutableLabelProcessor,
+			s.Logger.With().Str("component", "index_wrapper").Logger(),
+		)
 
-		s.index = mutableIndex
+		s.index = indexWrapper
 	}
 
 	if task, ok := s.index.(types.Task); started && ok {
@@ -837,7 +841,8 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 			return nil, err
 		}
 
-		labelProvider := mutable.NewProvider(ctx, s.MetricRegistry, cluster, store)
+		logger := s.Logger.With().Str("component", "label_provider").Logger()
+		labelProvider := mutable.NewProvider(ctx, s.MetricRegistry, cluster, store, logger)
 
 		s.mutableLabelProvider = labelProvider
 		s.api.MutableLabelWriter = labelProvider

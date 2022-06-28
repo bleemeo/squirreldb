@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"squirreldb/debug"
 	"squirreldb/types"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -25,6 +25,7 @@ const (
 type cache struct {
 	cluster types.Cluster
 	metrics *metrics
+	logger  zerolog.Logger
 
 	l sync.Mutex
 	// Name cache indexed by tenant.
@@ -55,13 +56,19 @@ type mutableLabelsEntry struct {
 	labels     labels.Labels
 }
 
-func newCache(ctx context.Context, reg prometheus.Registerer, cluster types.Cluster) *cache {
+func newCache(
+	ctx context.Context,
+	reg prometheus.Registerer,
+	cluster types.Cluster,
+	logger zerolog.Logger,
+) *cache {
 	c := cache{
 		cluster:            cluster,
 		metrics:            newMetrics(reg),
 		nameCache:          make(map[string]nameEntry),
 		valuesCache:        make(map[LabelKey]valuesEntry),
 		mutableLabelsCache: make(map[Label]mutableLabelsEntry),
+		logger:             logger,
 	}
 
 	c.cluster.Subscribe(topicInvalidateAssociatedValues, c.invalidateAssociatedValuesListener)
@@ -99,7 +106,7 @@ func (c *cache) cleanup() {
 	// Delete expired entries in values cache.
 	for key, entry := range c.valuesCache {
 		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
-			debug.Print(1, logger, "Deleting expired mutable values cache entry %#v", key)
+			c.logger.Debug().Msgf("Deleting expired mutable values cache entry %#v", key)
 
 			delete(c.valuesCache, key)
 		}
@@ -110,7 +117,7 @@ func (c *cache) cleanup() {
 	// Delete expired entries in name cache.
 	for key, entry := range c.nameCache {
 		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
-			debug.Print(1, logger, "Deleting expired mutable name cache entry %#v", key)
+			c.logger.Debug().Msgf("Deleting expired mutable name cache entry %#v", key)
 
 			delete(c.nameCache, key)
 		}
@@ -121,7 +128,7 @@ func (c *cache) cleanup() {
 	// Delete expired entries in mutable labels cache.
 	for key, entry := range c.mutableLabelsCache {
 		if entry.lastAccess.Add(cacheExpirationDelay).Before(now) {
-			debug.Print(1, logger, "Deleting expired mutable labels cache entry %#v", key)
+			c.logger.Debug().Msgf("Deleting expired mutable labels cache entry %#v", key)
 
 			delete(c.mutableLabelsCache, key)
 		}
@@ -188,25 +195,25 @@ func (c *cache) InvalidateAssociatedValues(ctx context.Context, keys []LabelKey)
 	encoder := gob.NewEncoder(buffer)
 
 	if err := encoder.Encode(keys); err != nil {
-		logger.Printf("Failed encode message, the associated values cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed encode message, the associated values cache won't be invalidated")
 	}
 
 	err := c.cluster.Publish(ctx, topicInvalidateAssociatedValues, buffer.Bytes())
 	if err != nil {
-		logger.Printf("Failed to publish a message, the associated values cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed to publish a message, the associated values cache won't be invalidated")
 	}
 }
 
 // invalidateAssociatedValuesListener listens for messages from the cluster to invalidate the cache.
 func (c *cache) invalidateAssociatedValuesListener(buffer []byte) {
-	debug.Print(1, logger, "Invalidating mutable labels associated values cache")
+	c.logger.Debug().Msg("Invalidating mutable labels associated values cache")
 
 	var keys []LabelKey
 
 	decoder := gob.NewDecoder(bytes.NewReader(buffer))
 
 	if err := decoder.Decode(&keys); err != nil {
-		logger.Printf("Unable to decode associated values cache keys, the values cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Unable to decode associated values cache keys, the values cache won't be invalidated")
 
 		return
 	}
@@ -306,25 +313,25 @@ func (c *cache) InvalidateAssociatedNames(ctx context.Context, tenants []string)
 	encoder := gob.NewEncoder(buffer)
 
 	if err := encoder.Encode(tenants); err != nil {
-		logger.Printf("Failed encode message, the associated names cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed encode message, the associated names cache won't be invalidated")
 	}
 
 	err := c.cluster.Publish(ctx, topicInvalidateAssociatedNames, buffer.Bytes())
 	if err != nil {
-		logger.Printf("Failed to publish a message, the associated names cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed to publish a message, the associated names cache won't be invalidated")
 	}
 }
 
 // invalidateAssociatedNamesListener listens for messages from the cluster to invalidate the cache.
 func (c *cache) invalidateAssociatedNamesListener(buffer []byte) {
-	debug.Print(1, logger, "Invalidating mutable labels associated names cache")
+	c.logger.Debug().Msg("Invalidating mutable labels associated names cache")
 
 	var tenants []string
 
 	decoder := gob.NewDecoder(bytes.NewReader(buffer))
 
 	if err := decoder.Decode(&tenants); err != nil {
-		logger.Printf("Unable to decode tenants, the name cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Unable to decode tenants, the name cache won't be invalidated")
 
 		return
 	}
@@ -446,25 +453,25 @@ func (c *cache) InvalidateMutableLabels(ctx context.Context, tenants []string) {
 	encoder := gob.NewEncoder(buffer)
 
 	if err := encoder.Encode(tenants); err != nil {
-		logger.Printf("Failed encode message, the associated names cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed encode message, the associated names cache won't be invalidated")
 	}
 
 	err := c.cluster.Publish(ctx, topicInvalidateMutableLabels, buffer.Bytes())
 	if err != nil {
-		logger.Printf("Failed to publish a message, the associated names cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Failed to publish a message, the associated names cache won't be invalidated")
 	}
 }
 
 // invalidateMutableLabelsListener listens for messages from the cluster to invalidate the cache.
 func (c *cache) invalidateMutableLabelsListener(buffer []byte) {
-	debug.Print(1, logger, "Invalidating mutable labels cache")
+	c.logger.Debug().Msg("Invalidating mutable labels cache")
 
 	var tenants []string
 
 	decoder := gob.NewDecoder(bytes.NewReader(buffer))
 
 	if err := decoder.Decode(&tenants); err != nil {
-		logger.Printf("Unable to decode tenants, the mutable labels cache won't be invalidated: %v", err)
+		c.logger.Warn().Err(err).Msg("Unable to decode tenants, the mutable labels cache won't be invalidated")
 
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -37,9 +38,9 @@ func TestMutableIndex(t *testing.T) {
 
 	dummyIndex := dummy.NewIndex(metrics)
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store)
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger())
 	labelProcessor := mutable.NewLabelProcessor(provider, "__account_id")
-	idx := mutable.NewIndexWrapper(dummyIndex, labelProcessor)
+	idx := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger())
 
 	tests := []struct {
 		want     types.MetricsSet
