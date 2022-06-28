@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
 	"squirreldb/daemon"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 //nolint:gochecknoglobals
 var (
-	maxWaitTime = flag.Duration("max-wait-time", time.Minute, "Maximum time to wait for stores")
+	maxWaitTime = flag.Duration("max-wait-time", 3*time.Minute, "Maximum time to wait for stores")
 )
 
 func main() {
@@ -18,7 +19,7 @@ func main() {
 
 	err := daemon.RunWithSignalHandler(run)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
@@ -30,6 +31,7 @@ func run(ctx context.Context) error {
 
 	squirreldb := &daemon.SquirrelDB{
 		Config: cfg,
+		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
 	replication := cfg.Int("cassandra.replication_factor")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"squirreldb/daemon"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/rs/zerolog/log"
 )
 
 //nolint:lll,gochecknoglobals
@@ -39,7 +39,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
@@ -55,6 +55,7 @@ func run(ctx context.Context) error {
 	if *remoteRead == "" && *remoteWrite == "" {
 		squirreldb := &daemon.SquirrelDB{
 			Config: cfg,
+			Logger: log.With().Str("component", "daemon").Logger(),
 		}
 
 		err = squirreldb.DropCassandraData(ctx, false)

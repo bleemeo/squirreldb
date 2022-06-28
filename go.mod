@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.1.2 // indirect
+	github.com/archdx/zerolog-sentry v0.0.2
 	github.com/armon/go-metrics v0.3.10 // indirect
 	github.com/aws/aws-sdk-go v1.43.18 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.2
@@ -27,6 +28,7 @@ require (
 	github.com/prometheus/common v0.32.1
 	github.com/prometheus/procfs v0.7.3
 	github.com/prometheus/prometheus v1.8.2-0.20220308163432-03831554a519 // 2.33.5
+	github.com/rs/zerolog v1.26.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5

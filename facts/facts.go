@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"log"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,9 +13,6 @@ import (
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/mem"
 )
-
-//nolint:gochecknoglobals
-var logger = log.New(os.Stdout, "[facts] ", log.LstdFlags)
 
 func Facts(ctx context.Context) map[string]string {
 	newFacts := make(map[string]string)

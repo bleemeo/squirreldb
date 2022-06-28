@@ -5,7 +5,7 @@ set -e
 USER_UID=$(id -u)
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v1.2.5"
+GORELEASER_VERSION="v1.6.3"
 
 while [ ! -z "$1" ]; do
     case "$1" in
@@ -21,12 +21,16 @@ while [ ! -z "$1" ]; do
     "nostop")
         WITH_NOSTOP=1
         ;;
+    "scylladb")
+        WITH_SCYLLADB=1
+        ;;
     *)
-        echo "Usage: $0 [cluster|race|long|nostop]"
-        echo "cluster: Run test with clustered Redis & Cassandra"
-        echo "   long: Run longer test"
-        echo "   race: Run test with -race"
-        echo " nostop: Do not stop Cassandra & Redis at the end"
+        echo "Usage: $0 [cluster|race|long|nostop|scylladb]"
+        echo " cluster: Run test with clustered Redis & Cassandra"
+        echo "    long: Run longer test"
+        echo "    race: Run test with -race"
+        echo "  nostop: Do not stop Cassandra & Redis at the end"
+        echo "scylladb: Use ScyllaDB instead of Cassandra"
 
         exit 1
     esac
@@ -38,6 +42,11 @@ if docker volume ls | grep -q squirreldb-buildcache; then
 fi
 
 if [ "${WITH_CLUSTER}" = "1" ]; then
+    if [ "${WITH_SCYLLADB}" = "1" ]; then
+        echo "ScyllaDB is not yet supported in cluster with run-tests.sh"
+        exit 1
+    fi
+
     echo
     echo "== Starting cluster component using examples/squirreldb_ha/"
     (cd examples/squirreldb_ha/; docker-compose up -d cassandra1 cassandra2 cassandra3 redis1 redis2 redis3 redis4 redis5 redis6 redis_init)
@@ -45,11 +54,21 @@ if [ "${WITH_CLUSTER}" = "1" ]; then
     export SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     export SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+elif [ "${WITH_SCYLLADB}" = "1" ]; then
+    echo
+    echo "== Starting ScyllaDB & Redis"
+    docker run --name squirreldb-test-scylla -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M scylladb/scylla:4.6.0 || true
+    docker run --name squirreldb-test-redis -d redis:6.2.6 || true
+
+    docker_network=""
+    export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.IPAddress }}'):9042
+    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.IPAddress }}'):6379
+    export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
 else
     echo
     echo "== Starting Cassandra & Redis"
-    docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra:3.11.9 || true
-    docker run --name squirreldb-test-redis -d redis:6.0.9 || true
+    docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra:4.0.3 || true
+    docker run --name squirreldb-test-redis -d redis:6.2.6 || true
 
     docker_network=""
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
@@ -75,7 +94,7 @@ fi
 export GORACE=halt_on_error=1
 
 echo "== waiting stores"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
@@ -86,7 +105,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cassandra-lock-bench"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -95,7 +114,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cassandra-index-bench"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -104,7 +123,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running remote-storage-test"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -113,7 +132,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running remote-storage-test2"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -122,7 +141,7 @@ docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
 
 echo
 echo "== Running squirreldb-cluster-redis"
-docker run $docker_network --rm -u $USER_UID -e HOME=/go/pkg \
+docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -140,7 +159,13 @@ if [ ! "${WITH_NOSTOP}" = "1" ]; then
     else
         echo
         echo "== Stopping Cassandra & Redis"
-        docker rm -f squirreldb-test-cassandra
+
+        if [ "${WITH_SCYLLADB}" = "1" ]; then
+            docker rm -f squirreldb-test-scylla
+        else
+            docker rm -f squirreldb-test-cassandra
+        fi
+
         docker rm -f squirreldb-test-redis
     fi
 fi

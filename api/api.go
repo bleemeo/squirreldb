@@ -5,23 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
-	"os"
 	"regexp"
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
 	"squirreldb/cassandra/mutable"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
@@ -29,6 +28,7 @@ import (
 	ppromql "github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -54,9 +54,9 @@ type API struct {
 	PromQLMaxEvaluatedPoints    uint64
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
+	Logger                      zerolog.Logger
 
 	ready      int32
-	logger     log.Logger
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
@@ -70,11 +70,12 @@ func NewPrometheus(
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
+	apiLogger zerolog.Logger,
 ) *v1.API {
-	stderrLogger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
 	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
-		Logger:             log.With(stderrLogger, "component", "query engine"),
+		Logger:             logger.NewKitLogger(&queryLogger),
 		Reg:                metricRegistry,
 		MaxSamples:         50000000,
 		Timeout:            2 * time.Minute,
@@ -121,7 +122,7 @@ func NewPrometheus(
 		mockTSDBAdminStat{},
 		dbDir,
 		enableAdmin,
-		log.With(stderrLogger, "component", "api"),
+		logger.NewKitLogger(&apiLogger),
 		rulesRetrieverFunc,
 		remoteReadSampleLimit,
 		maxConcurrent,
@@ -138,7 +139,6 @@ func NewPrometheus(
 }
 
 func (a *API) init() {
-	a.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	a.metrics = newMetrics(a.MetricRegistry)
 
 	router := route.New()
@@ -148,6 +148,7 @@ func (a *API) init() {
 	router.Get("/ready", a.readyHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
+	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
@@ -177,6 +178,7 @@ func (a *API) init() {
 		appendable,
 		maxConcurrent,
 		a.MetricRegistry,
+		a.Logger,
 	)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
@@ -234,10 +236,12 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	go func() {
+		defer logger.ProcessPanic()
+
 		serverStopped <- server.Serve(ln)
 	}()
 
-	_ = a.logger.Log("msg", "Server listening on", "address", a.ListenAddress)
+	a.Logger.Info().Msgf("Server listening on %s", a.ListenAddress)
 
 	readiness <- nil
 
@@ -247,7 +251,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
-			_ = a.logger.Log("msg", "Failed stop the HTTP server", "err", err)
+			a.Logger.Err(err).Msg("Failed stop the HTTP server")
 		}
 
 		err = <-serverStopped
@@ -255,10 +259,10 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	}
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		_ = a.logger.Log("msg", "HTTP server failed", "err", err)
+		a.Logger.Err(err).Msg("HTTP server failed")
 	}
 
-	_ = level.Debug(a.logger).Log("msg", "server stopped")
+	a.Logger.Debug().Msg("Server stopped")
 }
 
 // ListenPort return the port listenning on. Should not be used before Run()
@@ -327,18 +331,53 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
+type indexDumper interface {
+	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
+	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
+}
+
 func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		err := idx.Dump(ctx, w)
-		if err != nil {
+	if idx, ok := a.Index.(indexDumper); ok {
+		_, withExpiration := req.URL.Query()["withExpiration"]
+		if err := idx.Dump(ctx, w, withExpiration); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}
 	} else {
 		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(indexDumper); ok {
+		dates := req.URL.Query()["date"]
+		if len(dates) != 1 {
+			http.Error(w, `Expect one parameter "date"`, http.StatusBadRequest)
+
+			return
+		}
+
+		date, err := time.Parse("2006-01-02", dates[0])
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+
+			return
+		}
+
+		if err := idx.DumpByExpirationDate(ctx, w, date); err != nil {
+			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	} else {
+		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
 
 		return
 	}
