@@ -490,7 +490,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 
 		var addN int
 		// 50% of metrics have 3 additional labels
-		if rnd.Intn(1) == 0 {
+		if rnd.Intn(2) == 0 {
 			addN = 3
 		} else {
 			addN = rnd.Intn(20)
