@@ -1,4 +1,5 @@
 run:
+  go: "1.17"
   timeout: 5m
 
 linters:
@@ -45,6 +46,12 @@ linters-settings:
       rules:
         json: snake
         yaml: snake
+
+  # Project specific settings.
+  gomoddirectives:
+    # List of allowed `replace` directives. Needed because go.mod doesn't support nolint comments.
+    replace-allow-list:
+      - cloud.google.com/go
 
 issues:
   exclude-rules:
