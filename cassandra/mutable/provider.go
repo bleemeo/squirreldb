@@ -148,10 +148,6 @@ func (cp *Provider) updateAssociatedNamesCache(tenant string) error {
 func (cp *Provider) associatedValuesByNameAndValue(tenant, name, value string) ([]string, error) {
 	associatedValues, found := cp.cache.AssociatedValues(tenant, name, value)
 	if found {
-		if len(associatedValues) == 0 {
-			return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
-		}
-
 		return associatedValues, nil
 	}
 
@@ -161,9 +157,6 @@ func (cp *Provider) associatedValuesByNameAndValue(tenant, name, value string) (
 	}
 
 	associatedValues, _ = cp.cache.AssociatedValues(tenant, name, value)
-	if len(associatedValues) == 0 {
-		return nil, fmt.Errorf("%w: tenant=%s, name=%s, value=%s", errNoResult, tenant, name, value)
-	}
 
 	return associatedValues, nil
 }
