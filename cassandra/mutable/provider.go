@@ -204,7 +204,6 @@ func (cp *Provider) MutableLabelNames(tenant string) ([]string, error) {
 }
 
 // WriteLabelValues writes the label values to the store.
-//nolint:dupl // DeleteLabelValues doesn't use the same type of labels.
 func (cp *Provider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues) error {
 	// We use a map to to append only distinct values in the label keys.
 	usedKeys := make(map[LabelKey]struct{})
@@ -213,8 +212,21 @@ func (cp *Provider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues
 	tenants := make([]string, 0, len(lbls))
 
 	for _, label := range lbls {
-		if err := cp.store.SetAssociatedValues(label); err != nil {
-			return err
+		// Delete the associated values if the list is empty.
+		if len(label.AssociatedValues) == 0 {
+			labelToDelete := Label{
+				Tenant: label.Tenant,
+				Name:   label.Name,
+				Value:  label.Value,
+			}
+
+			if err := cp.store.DeleteAssociatedValues(labelToDelete); err != nil {
+				return err
+			}
+		} else {
+			if err := cp.store.SetAssociatedValues(label); err != nil {
+				return err
+			}
 		}
 
 		key := LabelKey{Tenant: label.Tenant, Name: label.Name}
@@ -238,7 +250,6 @@ func (cp *Provider) WriteLabelValues(ctx context.Context, lbls []LabelWithValues
 }
 
 // DeleteLabelValues deletes label values in the store.
-//nolint:dupl // WriteLabelValues doesn't use the same type of labels.
 func (cp *Provider) DeleteLabelValues(ctx context.Context, lbls []Label) error {
 	// We use a map to to append only distinct values in the label keys.
 	usedKeys := make(map[LabelKey]struct{})
