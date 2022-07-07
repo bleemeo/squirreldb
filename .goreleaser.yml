@@ -9,14 +9,11 @@ before:
 builds:
 - env:
   - CGO_ENABLED=0
-  goos:
-  - linux
-  goarch:
-  - amd64
-  - arm
-  - 386
-  goarm:
-  - 6
+  targets:
+  - linux_amd64
+  - linux_386
+  - linux_arm_6
+  - linux_arm64
 archives:
 - replacements:
     darwin: Darwin
