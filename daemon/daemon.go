@@ -13,6 +13,7 @@ import (
 	"squirreldb/batch"
 	"squirreldb/cassandra/index"
 	"squirreldb/cassandra/locks"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
@@ -75,6 +76,8 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
+	mutableLabelProvider     mutable.ProviderAndWriter
+	mutableLabelProcessor    *mutable.LabelProcessor
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	cassandraKeyspaceCreated bool
@@ -598,6 +601,8 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 // Index return an Index. If started is true the index is started.
 func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
 	if s.index == nil { //nolint:nestif
+		var wrappedIndex types.Index
+
 		switch s.Config.String("internal.index") {
 		case backendCassandra:
 			session, err := s.CassandraSession()
@@ -628,7 +633,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				Cluster:           cluster,
 			}
 
-			index, err := index.New(
+			wrappedIndex, err = index.New(
 				ctx,
 				s.MetricRegistry,
 				session,
@@ -638,18 +643,29 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			if err != nil {
 				return nil, err
 			}
-
-			s.index = index
 		case backendDummy:
 			s.Logger.Warn().Msg("Using dummy for index (only do this for testing)")
 
-			s.index = &dummy.Index{
+			wrappedIndex = &dummy.Index{
 				StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
 				FixedValue:            types.MetricID(s.Config.Int64("internal.dummy_index_fixed_id")),
 			}
 		default:
 			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
 		}
+
+		mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		indexWrapper := mutable.NewIndexWrapper(
+			wrappedIndex,
+			mutableLabelProcessor,
+			s.Logger.With().Str("component", "index_wrapper").Logger(),
+		)
+
+		s.index = indexWrapper
 	}
 
 	if task, ok := s.index.(types.Task); started && ok {
@@ -779,6 +795,60 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	tlm.Start(ctx)
 
 	return nil
+}
+
+func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelProcessor, error) {
+	if s.mutableLabelProcessor == nil {
+		labelProvider, err := s.MutableLabelProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		tenantLabelName := s.Config.String("promql.tenant_label_name")
+		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
+
+		s.mutableLabelProcessor = labelProcessor
+	}
+
+	return s.mutableLabelProcessor, nil
+}
+
+func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.ProviderAndWriter, error) {
+	if s.mutableLabelProvider == nil {
+		var store mutable.Store
+
+		switch s.Config.String("internal.mutable_labels_provider") {
+		case backendCassandra:
+			session, err := s.CassandraSession()
+			if err != nil {
+				return nil, err
+			}
+
+			store, err = mutable.NewCassandraStore(session)
+			if err != nil {
+				return nil, err
+			}
+		case backendDummy:
+			s.Logger.Warn().Msg("Cassandra is disabled for mutable labels. Using dummy store that returns no label.")
+
+			store = dummy.NewMutableLabelStore(dummy.MutableLabels{})
+		default:
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.mutable_labels_provider"))
+		}
+
+		cluster, err := s.Cluster(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		logger := s.Logger.With().Str("component", "label_provider").Logger()
+		labelProvider := mutable.NewProvider(ctx, s.MetricRegistry, cluster, store, logger)
+
+		s.mutableLabelProvider = labelProvider
+		s.api.MutableLabelWriter = labelProvider
+	}
+
+	return s.mutableLabelProvider, nil
 }
 
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {

@@ -1,6 +1,7 @@
 /squirreldb*
 !squirreldb.conf
 /dist*
+/work
 
 /.idea
 .vscode

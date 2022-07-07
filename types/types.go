@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -54,6 +55,14 @@ type Index interface {
 	Search(ctx context.Context, start time.Time, end time.Time, matchers []*labels.Matcher) (MetricsSet, error)
 	LabelValues(ctx context.Context, start, end time.Time, name string, matchers []*labels.Matcher) ([]string, error)
 	LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error)
+}
+
+type IndexDumper interface {
+	Dump(ctx context.Context, w io.Writer) error
+}
+
+type IndexVerifier interface {
+	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
 }
 
 type MetricsSet interface {

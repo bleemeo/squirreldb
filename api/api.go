@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
@@ -45,6 +47,7 @@ type API struct {
 	Index                       types.Index
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
+	MutableLabelWriter          mutable.LabelWriter
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
@@ -150,6 +153,11 @@ func (a *API) init() {
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+
+	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
+	router.Del("/mutable/names", a.mutableLabelNamesDeleteHandler)
+	router.Post("/mutable/values", a.mutableLabelValuesWriteHandler)
+	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
 
 	queryable := promql.NewStore(
 		a.Index,
@@ -301,15 +309,11 @@ func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
-type indexVerifier interface {
-	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
-}
-
 func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(indexVerifier); ok {
+	if idx, ok := a.Index.(types.IndexVerifier); ok {
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
 
@@ -425,6 +429,139 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
+}
+
+func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var lbls []mutable.LabelWithValues
+
+	err := decoder.Decode(&lbls)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	// Check that all fields except the associated values are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.Value == "" {
+			errMsg := "keys must be provided and not empty (tenant, name, value): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+
+		for _, value := range label.AssociatedValues {
+			if value == "" {
+				errMsg := "associated values can't contain an empty string: %#v"
+				http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+				return
+			}
+		}
+	}
+
+	if err := a.MutableLabelWriter.WriteLabelValues(req.Context(), lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write label values: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+	decoder := json.NewDecoder(req.Body)
+
+	var lbls []mutable.Label
+
+	err := decoder.Decode(&lbls)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	// Check that all fields are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.Value == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name, value): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	if err := a.MutableLabelWriter.DeleteLabelValues(req.Context(), lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+	decoder := json.NewDecoder(req.Body)
+
+	var lbls []mutable.LabelWithName
+
+	err := decoder.Decode(&lbls)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	// Check that all fields are not empty.
+	for _, label := range lbls {
+		if label.Tenant == "" || label.Name == "" || label.AssociatedName == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name, associated_name): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	if err := a.MutableLabelWriter.WriteLabelNames(req.Context(), lbls); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write label names: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
+}
+
+func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+
+	var labelKeys []mutable.LabelKey
+
+	err := decoder.Decode(&labelKeys)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	// Check that all fields are not empty.
+	for _, label := range labelKeys {
+		if label.Tenant == "" || label.Name == "" {
+			errMsg := "all keys must be provided and not empty (tenant, name): %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	if err := a.MutableLabelWriter.DeleteLabelNames(req.Context(), labelKeys); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete label values: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Fprint(w, "ok")
 }
 
 // interceptor implements the http.ResponseWriter interface,
