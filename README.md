@@ -1,20 +1,39 @@
+<p align="center">
+   <img src="logo.svg" alt="SquirrelDB" height="300"/>
+</p>
+
 # SquirrelDB
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/bleemeo/squirreldb)](https://goreportcard.com/report/github.com/bleemeo/squirreldb)
-![Docker Image Version (latest by date)](https://img.shields.io/docker/v/bleemeo/squirreldb)
-![Docker Image Size (latest by date)](https://img.shields.io/docker/image-size/bleemeo/squirreldb)
-[![Open Source? Yes!](https://badgen.net/badge/Open%20Source%20%3F/Yes%21/blue?icon=github)](https://github.com/bleemeo/squirreldb/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/bleemeo/glouton/blob/master/LICENSE)
+[![Docker Image Version](https://img.shields.io/docker/v/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/glouton/tags)
+[![Docker Image Size](https://img.shields.io/docker/image-size/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/glouton)
 
-SquirrelDB is a scalable high-available timeseries database (TSDB) compatible with Prometheus remote storage.
-SquirrelDB store data in Cassandra which allow to rely on Cassandra's scalability and availability.
+**SquirrelDB** is a scalable and highly available **timeseries database** (TSDB) compatible with **Prometheus remote storage**. Timeseries are stored in **Cassandra** to provide **scalability** and **availability**.
 
+## Features
 
-## Quickstart using Docker-compose
+- Time Series Database with **Prometheus Long Term Storage**
+- Support **pre-aggregation of data** for faster read
+- Rely on **Cassandra, well known and reliable** NoSQL database
+- Support **single node and cluster architectures**
+- Export **remote read and write endpoints**
 
-If you have Docker compose, you may run SquirrelDB, its Cassandra and Prometheus + Grafana
-using docker-compose:
+## High Availability
 
-```
+SquirrelDB allows both **availability** and **scalability**:
+
+* The **long term storage** availability and scalability is done by a **Cassandra cluster** by using a replication level > 1 (3 is recommended).
+* The **short term storage** (by default last 15 minutes) is store in-memory by default and can be configured to be stored in Redis. A **Redis cluster** will provide availability and scalability of short term storage.
+* When short term storage is provided by Redis, SquirrelDB instance are **stateless**, scaling them is just adding more of them behind a load-balancer (like nginx).
+
+Check out [examples/squirreldb-ha](./examples/squirreldb_ha/) for a highly available setup.
+
+## Quickstart
+
+You can run SquirrelDB easily with Cassandra, Prometheus, Grafana and Node Exporter using the provided docker-compose:
+
+```sh
 docker-compose up -d
 ```
 
@@ -23,83 +42,33 @@ Then, go to http://localhost:3000 (default credentials are admin/admin) and:
 * Add a Prometheus datasource (using http://squirreldb:9201 as URL)
 * Create your dashboard or import a dashboard (for example import dashboard with ID 1860).
 
+## Install
 
-## HA setup
+### Cassandra
 
-SquirrelDB allow both availability and scalability:
-
-* The long term storage availability and scalability is done by a Cassandra cluster. Setup
-  a Cassandra cluster and use a replication level > 1 (3 is recommended).
-* The short term storage (by default last 15 minutes) which is store in-memory could be
-  moved to Redis.
-  A Redis cluster will provide availability and scalability of short term storage.
-* When short term storage is provided by Redis, SquirrelDB instance are stateless,
-  scalling them is just adding more of them behind a load-balancer (like nginx).
-
-See [examples/squirreldb-ha](./examples/squirreldb_ha/) for a quickstart on HA setup.
-
-
-## Build a release
-
-SquirrelDB use goreleaser and Docker to build its release, to build the release binaries
-and Docker images run:
-
-```
-docker volume create squirreldb-buildcache  # (optional) enable cache and speed-up build/lint run
-
-./build.sh
+Cassandra must be running before starting SquirrelDB. If you don't have Cassandra, you can run it with Docker:
+```sh
+docker run -d --name squirreldb-cassandra -p 127.0.0.1:9042:9042 \
+    -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
 ```
 
-The resulting binaries are in dist/ folder and a Docker image named "squirreldb" is built
+### Binary
 
+You can run SquirrelDB as a binary using the latest Github release for your platform at https://github.com/bleemeo/squirreldb/releases.
 
-## Test and Develop
+### Docker
 
-SquirrelDB need a Cassandra database, you may run one with:
+You can use docker to run SquirrelDB:
+```sh
+export SQUIRRELDB_CASSANDRA_ADDRESSES=localhost:9042
 
-```
-docker run -d --name squirreldb-cassandra -p 127.0.0.1:9042:9042 -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
-```
-
-To build binary you can use build.sh script. For example to just
-compile Go binary:
-```
-docker volume create squirreldb-buildcache
-
-./build.sh go
+docker run -d --name squirreldb -p 127.0.0.1:9201:9201 bleemeo/squirreldb
 ```
 
-Then run SquirrelDB:
+## Configuration
 
-```
-./squirreldb
-```
+The file `squirreldb.conf` contains all available configuration options. This file must be placed in the same directory as the SquirrelDB binary.
 
-SquirrelDB use golangci-lint as linter. You may run it with:
-```
-docker volume create squirreldb-buildcache
+## Contributing
 
-./lint.sh
-```
-
-SquirrelDB has some tests that run using a real Cassandra (not like Go test which
-mock Cassandra). A helper shell script will start a Cassandra (using Docker) and run
-those tests.
-The script had option to run on cluster, run longer test and with race detector. Option could be summed
-or all absent:
-```
-./run-tests.sh race
-./run-tests.sh cluster long
-# all combinaison are possible, including no-option.
-```
-
-### Note on VS code
-
-SquirrelDB use Go module. VS code support for Go module require usage of gopls.
-Enable "Use Language Server" in VS code option for Go.
-
-To install or update gopls, use:
-
-```
-(cd /tmp; GO111MODULE=on go get golang.org/x/tools/gopls@latest)
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md).
