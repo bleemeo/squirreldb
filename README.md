@@ -48,8 +48,11 @@ Then, go to http://localhost:3000 (default credentials are admin/admin) and:
 
 Cassandra must be running before starting SquirrelDB. If you don't have Cassandra, you can run it with Docker:
 ```sh
+# The network is needed only if you run SquirrelDB with Docker.
+docker network create squirreldb
+
 docker run -d --name squirreldb-cassandra -p 127.0.0.1:9042:9042 \
-    -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
+    --net squirreldb -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra
 ```
 
 ### Binary
@@ -60,14 +63,21 @@ You can run SquirrelDB as a binary using the latest Github release for your plat
 
 You can use docker to run SquirrelDB:
 ```sh
-export SQUIRRELDB_CASSANDRA_ADDRESSES=localhost:9042
-
-docker run -d --name squirreldb -p 127.0.0.1:9201:9201 bleemeo/squirreldb
+docker run -d --name squirreldb -p 127.0.0.1:9201:9201 \
+    --net squirreldb -e SQUIRRELDB_CASSANDRA_ADDRESSES=squirreldb-cassandra:9042 \
+    bleemeo/squirreldb
 ```
 
 ## Configuration
 
 The file `squirreldb.conf` contains all available configuration options. This file must be placed in the same directory as the SquirrelDB binary.
+
+All configuration options can be overriden by environment variables. The environment variable is
+- Prefixed by `SQUIRRELDB_`
+- All letters are converted to uppercase
+- Each yaml indentation is converted to an underscore
+
+For example, cassandra.addresses becomes `SQUIRRELDB_CASSANDRA_ADDRESSES`.
 
 ## Contributing
 
