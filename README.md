@@ -17,14 +17,14 @@
 - Support **pre-aggregation of data** for faster read
 - Rely on **Cassandra, well known and reliable** NoSQL database
 - Support **single node and cluster architectures**
-- Export **remote read and write endpoints**
+- Expose **PromQL, remote read and write Prometheus endpoints**
 
 ## High Availability
 
 SquirrelDB allows both **availability** and **scalability**:
 
 * The **long term storage** availability and scalability is done by a **Cassandra cluster** by using a replication level > 1 (3 is recommended).
-* The **short term storage** (by default last 15 minutes) is store in-memory by default and can be configured to be stored in Redis. A **Redis cluster** will provide availability and scalability of short term storage.
+* The **short term storage** (by default last 15 minutes) is stored in-memory by default and can be configured to be stored in Redis. A **Redis cluster** will provide availability and scalability of short term storage.
 * When short term storage is provided by Redis, SquirrelDB instance are **stateless**, scaling them is just adding more of them behind a load-balancer (like nginx).
 
 Check out [examples/squirreldb-ha](./examples/squirreldb_ha/) for a highly available setup.

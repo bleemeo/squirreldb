@@ -12,9 +12,9 @@ services:
     - HEAP_NEWSIZE=24M
     labels:
         # Glouton is the monitoring agent made by Bleemeo.
-        # On real setup of SquirrelDB, you probably want to monitor component, but
-        # this docker-compose is a quick-start used to test and evaluate SquirrelDB so disable
-        # monitoring to avoid false notification.
+        # On real setup of SquirrelDB, you probably want to monitor this component, but
+        # this docker-compose is a quick-start used to test and evaluate SquirrelDB, so
+        # monitoring is disabled to avoid false notifications.
         glouton.enable: "false"
   squirreldb:
     image: bleemeo/squirreldb
