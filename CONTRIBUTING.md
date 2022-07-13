@@ -5,18 +5,6 @@ Enable the cache to speed-up build and lint.
 docker volume create squirreldb-buildcache
 ```
 
-
-## Build a release
-
-SquirrelDB uses Goreleaser and Docker to build its release, to build the release binaries
-and Docker images run:
-```sh
-./build.sh
-```
-
-The resulting binaries can be found in the `dist/` folder and a Docker image named `squirreldb` is built.
-
-
 ## Test and Develop
 
 SquirrelDB needs a Cassandra database, you may run one with:
@@ -34,18 +22,27 @@ compile and run SquirrelDB, you can use:
 ./squirreldb
 ```
 
-SquirrelDB use golangci-lint as linter. You may run it with:
+SquirrelDB uses golangci-lint as linter. You may run it with:
 ```sh
 ./lint.sh
 ```
 
 SquirrelDB has some tests that run using a real Cassandra (not like Go test which
-mock Cassandra). A helper shell script will start a Cassandra (using Docker) and run
+mocks Cassandra). A helper shell script will start a Cassandra (using Docker) and run
 those tests.
-The script had option to run on cluster, run longer test and with race detector. Option could be summed
-or all absent:
+The script has options to run on cluster, run longer test and with race detector. 
+The options can be combined:
 ```sh
 ./run-tests.sh race
 ./run-tests.sh cluster long
-# all combinations are possible, including no-option.
 ```
+
+## Build a release
+
+SquirrelDB uses Goreleaser and Docker to build its release, to build the release binaries
+and Docker images run:
+```sh
+./build.sh
+```
+
+The resulting binaries can be found in the `dist/` folder and a Docker image named `squirreldb` is built.
