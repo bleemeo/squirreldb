@@ -21,6 +21,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
@@ -5650,5 +5651,84 @@ func Test_mergeSorted(t *testing.T) {
 				t.Errorf("mergeSorted() = %v, want %v", gotResult, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestSimplifyRegex(t *testing.T) {
+	tests := []struct {
+		name           string
+		inputMatcher   *labels.Matcher
+		wantedMatchers []*labels.Matcher
+		wantErr        error
+	}{
+		{
+			name: "2-values",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|mem_used_perc)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+			},
+		},
+		{
+			name: "3-values",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|mem_used_perc|swap_used_perc)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"swap_used_perc",
+				),
+			},
+		},
+		{
+			name: "cant-simplify",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|i*)",
+			),
+			wantErr: errNotASimpleRegex,
+		},
+	}
+
+	for _, test := range tests {
+		gotMatchers, err := simplifyRegex(test.inputMatcher)
+		if errors.Is(err, test.wantErr) {
+			continue
+		}
+
+		if err != nil {
+			t.Fatalf("Failed to simplify regex: %s", err)
+		}
+
+		if diff := cmp.Diff(gotMatchers, test.wantedMatchers, cmpopts.IgnoreUnexported(labels.Matcher{})); diff != "" {
+			t.Fatalf("Got wrong matchers\n%s", diff)
+		}
 	}
 }
