@@ -241,6 +241,19 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 			},
 		},
 		{
+			Name: "shard=N name=~X simple regex",
+			Fun: func(_ int) []*labels.Matcher {
+				return []*labels.Matcher{
+					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
+					labels.MustNewMatcher(
+						labels.MatchRegexp,
+						"__name__",
+						fmt.Sprintf("(%s|%s)", names[rnd.Intn(len(names))], names[rnd.Intn(len(names))]),
+					),
+				}
+			},
+		},
+		{
 			Name: "shard=N name=node_.* name!=node_netstat_Udp_InErrors",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
@@ -289,23 +302,28 @@ func bench(ctx context.Context, cfg *config.Config, rnd *rand.Rand) error { //no
 		)
 	}
 
-	if *runExpiration {
-		cassandraIndex, ok := idx.(*index.CassandraIndex)
+	if *runExpiration { //nolint:nestif
+		indexExpirerer, ok := idx.(types.IndexInternalExpirerer)
 		if !ok {
-			return fmt.Errorf("can not run expiration on index which is not a CassandraIndex")
+			return fmt.Errorf("can not run expiration on index which doesn't implement IndexInternalExpirerer")
 		}
 
 		beforePurge := len(ids)
 		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
 
-		err = cassandraIndex.InternalForceExpirationTimestamp(beforeYesterday)
+		err = indexExpirerer.InternalForceExpirationTimestamp(beforeYesterday)
 		if err != nil {
 			return fmt.Errorf("state.Write() failed: %w", err)
 		}
 
+		indexRunner, ok := idx.(types.IndexRunner)
+		if !ok {
+			return fmt.Errorf("can not run index which doesn't implement IndexRunner")
+		}
+
 		start = time.Now()
 
-		cassandraIndex.RunOnce(ctx, time.Now())
+		indexRunner.RunOnce(ctx, time.Now())
 
 		stop := time.Now()
 

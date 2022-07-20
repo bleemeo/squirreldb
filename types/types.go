@@ -65,6 +65,14 @@ type IndexVerifier interface {
 	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
 }
 
+type IndexInternalExpirerer interface {
+	InternalForceExpirationTimestamp(value time.Time) error
+}
+
+type IndexRunner interface {
+	RunOnce(ctx context.Context, now time.Time) bool
+}
+
 type MetricsSet interface {
 	Next() bool
 	At() MetricLabel
