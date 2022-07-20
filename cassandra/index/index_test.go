@@ -1661,6 +1661,50 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
+			name:  "re-simple",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_cpu_seconds_total)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-complex",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_cpu_seconds_tota\\w)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
