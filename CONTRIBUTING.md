@@ -56,10 +56,7 @@ export SQUIRRELDB_BUILDX_OPTION="--builder squirreldb-builder -t squirreldb:late
 unset SQUIRRELDB_BUILDX_OPTION
 ```
 
-The resulting binaries can be found in the `dist/` folder and a Docker image named `squirreldb` is built.
-
-Release files are present in dist/ folder and a Docker image is build (squirreldb:latest) and loaded to
-your Docker images.
+The release files are created in the `dist/` folder and a Docker image named `squirreldb:latest` is built.
 
 ### Production release
 
