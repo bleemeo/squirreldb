@@ -3425,7 +3425,7 @@ func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	matchers := make([]*labels.Matcher, 0, len(alternateRegex.Sub))
 
 	for _, literalRegex := range alternateRegex.Sub {
-		if literalRegex.Op != syntax.OpLiteral {
+		if literalRegex.Op != syntax.OpLiteral && literalRegex.Op != syntax.OpEmptyMatch {
 			return nil, errNotASimpleRegex
 		}
 
@@ -3443,7 +3443,7 @@ func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 // getOpAlternate returns the OpAlternate inside a regex composed only of OR clauses,
 // the prefix used by all OR clauses, and an error if the regex is not simple.
 func getOpAlternate(regex *syntax.Regexp, prefix string) (*syntax.Regexp, string, error) {
-	switch regex.Op {
+	switch regex.Op { //nolint:exhaustive
 	// "a|b|c"
 	case syntax.OpAlternate:
 		return regex, prefix, nil
