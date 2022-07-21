@@ -3407,39 +3407,14 @@ func (c *CassandraIndex) postingsForMatcher(
 // -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds),
 //     __name__="(probe_ssl_validation_success)]
 func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
-	// regex = (a|b|c)
 	regex, err := syntax.Parse(matcher.Value, syntax.Perl)
 	if err != nil {
 		return nil, err
 	}
 
-	if regex.Op != syntax.OpCapture || len(regex.Sub) != 1 {
-		return nil, errNotASimpleRegex
-	}
-
-	// alternateRegex = a|b|c
-	alternateRegex := regex.Sub[0]
-
-	// Support regex with repeated prefix, e.g. (prefix_a|prefix_b)
-	prefix := ""
-
-	if alternateRegex.Op == syntax.OpConcat {
-		if len(alternateRegex.Sub) != 2 {
-			return nil, errNotASimpleRegex
-		}
-
-		prefixRegex := alternateRegex.Sub[0]
-		if prefixRegex.Op != syntax.OpLiteral {
-			return nil, errNotASimpleRegex
-		}
-
-		prefix = string(prefixRegex.Rune)
-
-		alternateRegex = alternateRegex.Sub[1]
-	}
-
-	if alternateRegex.Op != syntax.OpAlternate {
-		return nil, errNotASimpleRegex
+	alternateRegex, prefix, err := getOpAlternate(regex, "")
+	if err != nil {
+		return nil, err
 	}
 
 	// When their is too many OR clauses, we keep with usual regexp behavior.
@@ -3463,6 +3438,37 @@ func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	}
 
 	return matchers, nil
+}
+
+// getOpAlternate returns the OpAlternate inside a regex composed only of OR clauses,
+// the prefix used by all OR clauses, and an error if the regex is not simple.
+func getOpAlternate(regex *syntax.Regexp, prefix string) (*syntax.Regexp, string, error) {
+	switch regex.Op {
+	// "a|b|c"
+	case syntax.OpAlternate:
+		return regex, prefix, nil
+	// Support regex with a capture group, e.g. "(a|b|c)"
+	case syntax.OpCapture:
+		if len(regex.Sub) != 1 {
+			return nil, "", errNotASimpleRegex
+		}
+
+		return getOpAlternate(regex.Sub[0], prefix)
+	// Support regex with repeated prefix, e.g. "(prefix_a|prefix_b)"
+	case syntax.OpConcat:
+		if len(regex.Sub) != 2 {
+			return nil, "", errNotASimpleRegex
+		}
+
+		prefixRegex := regex.Sub[0]
+		if prefixRegex.Op != syntax.OpLiteral {
+			return nil, "", errNotASimpleRegex
+		}
+
+		return getOpAlternate(regex.Sub[1], string(prefixRegex.Rune))
+	default:
+		return nil, "", errNotASimpleRegex
+	}
 }
 
 func (c *CassandraIndex) inversePostingsForMatcher(

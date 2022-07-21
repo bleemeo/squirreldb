@@ -1667,7 +1667,51 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
 					"__name__",
+					"up|node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-simple-capture",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
 					"(up|node_cpu_seconds_total)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-simple-with-unknown-matcher",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"up|does_not_exist|node_cpu_seconds_total",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -5699,6 +5743,8 @@ func Test_mergeSorted(t *testing.T) {
 }
 
 func TestSimplifyRegex(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		inputMatcher   *labels.Matcher
@@ -5707,6 +5753,26 @@ func TestSimplifyRegex(t *testing.T) {
 	}{
 		{
 			name: "2-values",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"cpu_used|mem_used_perc",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+			},
+		},
+		{
+			name: "2-values-capture",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
 				"__name__",
@@ -5726,7 +5792,7 @@ func TestSimplifyRegex(t *testing.T) {
 			},
 		},
 		{
-			name: "3-values",
+			name: "3-values-capture",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
 				"__name__",
@@ -5751,6 +5817,46 @@ func TestSimplifyRegex(t *testing.T) {
 			},
 		},
 		{
+			name: "2-values-same-prefix",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_last_chain_expiry_timestamp_seconds",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_validation_success",
+				),
+			},
+		},
+		{
+			name: "2-values-capture-same-prefix",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_last_chain_expiry_timestamp_seconds",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_validation_success",
+				),
+			},
+		},
+		{
 			name: "cant-simplify",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
@@ -5762,17 +5868,23 @@ func TestSimplifyRegex(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		gotMatchers, err := simplifyRegex(test.inputMatcher)
-		if errors.Is(err, test.wantErr) {
-			continue
-		}
+		test := test
 
-		if err != nil {
-			t.Fatalf("Failed to simplify regex: %s", err)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
-		if diff := cmp.Diff(gotMatchers, test.wantedMatchers, cmpopts.IgnoreUnexported(labels.Matcher{})); diff != "" {
-			t.Fatalf("Got wrong matchers\n%s", diff)
-		}
+			gotMatchers, err := simplifyRegex(test.inputMatcher)
+			if err != nil {
+				if errors.Is(err, test.wantErr) {
+					return
+				}
+
+				t.Fatalf("Failed to simplify regex: %s", err)
+			}
+
+			if diff := cmp.Diff(gotMatchers, test.wantedMatchers, cmpopts.IgnoreUnexported(labels.Matcher{})); diff != "" {
+				t.Fatalf("Got wrong matchers\n%s", diff)
+			}
+		})
 	}
 }
