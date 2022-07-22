@@ -1749,6 +1749,50 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
+			name:  "re-simple-mountpoint-missing",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_filesystem_avail_bytes)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mountpoint",
+					"(/|)",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest7,
+			},
+		},
+		{
+			name:  "re-complex-mountpoint-missing",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_filesystem_avail_bytes)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mountpoint",
+					"(/+|)",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest7,
+			},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
