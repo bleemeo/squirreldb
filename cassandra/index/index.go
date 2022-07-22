@@ -3425,7 +3425,7 @@ func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	matchers := make([]*labels.Matcher, 0, len(alternateRegex.Sub))
 
 	for _, literalRegex := range alternateRegex.Sub {
-		if literalRegex.Op != syntax.OpLiteral && literalRegex.Op != syntax.OpEmptyMatch {
+		if literalRegex.Op != syntax.OpLiteral {
 			return nil, errNotASimpleRegex
 		}
 

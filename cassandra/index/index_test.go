@@ -5901,26 +5901,6 @@ func TestSimplifyRegex(t *testing.T) {
 			},
 		},
 		{
-			name: "2-values-one-missing",
-			inputMatcher: labels.MustNewMatcher(
-				labels.MatchRegexp,
-				"item",
-				"(eth0|)",
-			),
-			wantedMatchers: []*labels.Matcher{
-				labels.MustNewMatcher(
-					labels.MatchEqual,
-					"item",
-					"eth0",
-				),
-				labels.MustNewMatcher(
-					labels.MatchEqual,
-					"item",
-					"",
-				),
-			},
-		},
-		{
 			name: "cant-simplify",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
