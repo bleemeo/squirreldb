@@ -77,7 +77,7 @@ else
 fi
 
 if [ "${WITH_RACE}" = "1" ]; then
-    race_opt="-race"
+    race_opt="-ldflags='-linkmode external -extldflags=-static' -race"
 else
     race_opt=""
 fi
