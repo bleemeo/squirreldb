@@ -1,4 +1,4 @@
-## Build cache
+## Build cache (optional)
 
 Enable the cache to speed-up build and lint.
 ```sh

@@ -5,46 +5,59 @@ services:
     image: cassandra
     restart: unless-stopped
     cap_add:
-    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+      - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     environment:
-    # Limit memory usage of Cassandra. On developper machine Cassandra don't need lots of RAM.
-    - MAX_HEAP_SIZE=128M
-    - HEAP_NEWSIZE=24M
+      # Limit memory usage of Cassandra. On developper machine Cassandra don't need lots of RAM.
+      - MAX_HEAP_SIZE=128M
+      - HEAP_NEWSIZE=24M
     labels:
-        # Glouton is the monitoring agent made by Bleemeo.
-        # On real setup of SquirrelDB, you probably want to monitor this component, but
-        # this docker-compose is a quick-start used to test and evaluate SquirrelDB, so
-        # monitoring is disabled to avoid false notifications.
-        glouton.enable: "false"
+      # Glouton is the monitoring agent made by Bleemeo.
+      # On real setup of SquirrelDB, you probably want to monitor this component, but
+      # this docker-compose is a quick-start used to test and evaluate SquirrelDB, so
+      # monitoring is disabled to avoid false notifications.
+      glouton.enable: "false"
+    volumes:
+      - cassandra-data:/var/lib/cassandra
   squirreldb:
     image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     ports:
-    - 127.0.0.1:9201:9201
+      - 127.0.0.1:9201:9201
     environment:
-    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
+      - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
 
   prometheus:
     image: prom/prometheus
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./examples/prometheus/sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - 127.0.0.1:9090:9090
   node:
     image: prom/node-exporter
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - /:/rootfs:ro,rslave
+      - /:/rootfs:ro,rslave
     command: --path.rootfs=/rootfs
   grafana:
     image: grafana/grafana
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./examples/prometheus/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=password
     ports:
-    - 127.0.0.1:3000:3000
+      - 127.0.0.1:3000:3000
+
+volumes:
+  cassandra-data: {}
+  grafana-data: {}

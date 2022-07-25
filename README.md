@@ -37,12 +37,10 @@ You can run SquirrelDB easily with Cassandra, Prometheus, Grafana and Node Expor
 docker-compose up -d
 ```
 
-Then, go to http://localhost:3000 (default credentials are admin/admin) and:
+Then go to the Grafana dashboard at http://localhost:3000/d/83ceCuenk/, and log in with the user "admin" 
+and the password "password". You may need to wait a few minutes to see the graphs, because Cassandra starts slowly.
 
-* Add a Prometheus datasource (using http://squirreldb:9201 as URL)
-* Create your dashboard or import a dashboard (for example import dashboard with ID 1860).
-
-## Install
+## Single node installation
 
 ### Cassandra
 
