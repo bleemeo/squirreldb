@@ -5,17 +5,17 @@ services:
     image: cassandra
     restart: unless-stopped
     cap_add:
-    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+      - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     labels:
-        # Glouton is the monitoring agent made by Bleemeo.
-        # On real setup of SquirrelDB, you probably want to monitor component, but
-        # this docker-compose is a quick-start used to test and evaluate SquirrelDB so disable
-        # monitoring to avoid false notification.
-        glouton.enable: "false"
+      # Glouton is the monitoring agent made by Bleemeo.
+      # On real setup of SquirrelDB, you probably want to monitor component, but
+      # this docker-compose is a quick-start used to test and evaluate SquirrelDB so disable
+      # monitoring to avoid false notification.
+      glouton.enable: "false"
     environment:
-    - "MAX_HEAP_SIZE=128M"
-    - "HEAP_NEWSIZE=24M"
-    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+      - "MAX_HEAP_SIZE=128M"
+      - "HEAP_NEWSIZE=24M"
+      - "CASSANDRA_SEEDS=cassandra1,cassandra2"
     networks:
       default:
         ipv4_address: 172.28.0.11 # Cassandra don't like if node swap their IPs. Other case should be fine
@@ -23,13 +23,13 @@ services:
     image: cassandra
     restart: unless-stopped
     cap_add:
-    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+      - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     environment:
-    - "MAX_HEAP_SIZE=128M"
-    - "HEAP_NEWSIZE=24M"
-    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+      - "MAX_HEAP_SIZE=128M"
+      - "HEAP_NEWSIZE=24M"
+      - "CASSANDRA_SEEDS=cassandra1,cassandra2"
     networks:
       default:
         ipv4_address: 172.28.0.12
@@ -37,25 +37,25 @@ services:
     image: cassandra
     restart: unless-stopped
     cap_add:
-    - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+      - CAP_SYS_NICE # Cassandra use mbind on NUMA system
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     environment:
-    - "MAX_HEAP_SIZE=128M"
-    - "HEAP_NEWSIZE=24M"
-    - "CASSANDRA_SEEDS=cassandra1,cassandra2"
-    # We don't fix Cassandra 3 IP because:
-    # * in a 3 nodes cluster, with the first two having fixed IP avoid any swap of node IP
-    # * it make easier to run some test with higher number of Cassandra. Just scale cassandra3
+      - "MAX_HEAP_SIZE=128M"
+      - "HEAP_NEWSIZE=24M"
+      - "CASSANDRA_SEEDS=cassandra1,cassandra2"
+      # We don't fix Cassandra 3 IP because:
+      # * in a 3 nodes cluster, with the first two having fixed IP avoid any swap of node IP
+      # * it make easier to run some test with higher number of Cassandra. Just scale cassandra3
 
   redis1:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.21 # Redis need fixed IP of the cluster may fail to recover by itself if node switch their IPs or all node changes their IP.
@@ -63,10 +63,10 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.22
@@ -74,10 +74,10 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.23
@@ -85,10 +85,10 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.24
@@ -96,10 +96,10 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.25
@@ -107,10 +107,10 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis.conf:/etc/redis.conf:ro
-    command: ["/etc/redis.conf"]
+      - ./redis.conf:/etc/redis.conf:ro
+    command: [ "/etc/redis.conf" ]
     networks:
       default:
         ipv4_address: 172.28.0.26
@@ -118,20 +118,20 @@ services:
     image: redis:6
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./redis-init.sh:/usr/bin/redis-init.sh:ro
-    command: ["/bin/sh", "/usr/bin/redis-init.sh"]
+      - ./redis-init.sh:/usr/bin/redis-init.sh:ro
+    command: [ "/bin/sh", "/usr/bin/redis-init.sh" ]
 
   squirreldb1:
     image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     environment:
-    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
-    - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
-    - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+      - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
+      - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+      - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
     networks:
       default:
         ipv4_address: 172.28.0.31 # SquirrelDB don't care about its IP, but nginx will only resolv DNS name on startup. So if SquirrelDB change their IP, nginx will no longer send traffic to them
@@ -139,11 +139,11 @@ services:
     image: bleemeo/squirreldb
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     environment:
-    - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
-    - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
-    - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+      - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
+      - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+      - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
     networks:
       default:
         ipv4_address: 172.28.0.32
@@ -151,38 +151,38 @@ services:
   squirreldb:
     image: nginx
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     restart: unless-stopped
     volumes:
-    - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-    - 127.0.0.1:9201:9201
+      - 127.0.0.1:9201:9201
 
   prometheus:
     image: prom/prometheus
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
   node:
     image: prom/node-exporter
     restart: unless-stopped
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     volumes:
-    - /:/rootfs:ro,rslave
+      - /:/rootfs:ro,rslave
     command: --path.rootfs=/rootfs
   grafana:
     image: grafana/grafana
     labels:
-        glouton.enable: "false"
+      glouton.enable: "false"
     restart: unless-stopped
     ports:
-    - 127.0.0.1:3000:3000
+      - 127.0.0.1:3000:3000
 
 networks:
   default:
     ipam:
       config:
-      - subnet: 172.28.0.0/16
+        - subnet: 172.28.0.0/16
