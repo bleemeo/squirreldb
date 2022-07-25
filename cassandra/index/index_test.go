@@ -21,6 +21,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
@@ -1657,6 +1658,138 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				MetricIDTest6,
 				MetricIDTest7,
 				MetricIDTest8,
+			},
+		},
+		{
+			name:  "re-simple",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"up|node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-simple-capture",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_cpu_seconds_total)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-simple-with-unknown-matcher",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"up|does_not_exist|node_cpu_seconds_total",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-complex",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_cpu_seconds_tota\\w)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"instance",
+					"remotehost:9100",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest3,
+				MetricIDTest4,
+				MetricIDTest5,
+				MetricIDTest6,
+			},
+		},
+		{
+			name:  "re-simple-mountpoint-missing",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_filesystem_avail_bytes)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mountpoint",
+					"(/|)",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest7,
+			},
+		},
+		{
+			name:  "re-complex-mountpoint-missing",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"(up|node_filesystem_avail_bytes)",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"mountpoint",
+					"(/+|)",
+				),
+			},
+			want: []types.MetricID{
+				MetricIDTest1,
+				MetricIDTest2,
+				MetricIDTest3,
+				MetricIDTest7,
 			},
 		},
 		{
@@ -5648,6 +5781,153 @@ func Test_mergeSorted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if gotResult := mergeSorted(tt.left, tt.right); !reflect.DeepEqual(gotResult, tt.wantResult) {
 				t.Errorf("mergeSorted() = %v, want %v", gotResult, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestSimplifyRegex(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		inputMatcher   *labels.Matcher
+		wantedMatchers []*labels.Matcher
+		wantErr        error
+	}{
+		{
+			name: "2-values",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"cpu_used|mem_used_perc",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+			},
+		},
+		{
+			name: "2-values-capture",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|mem_used_perc)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+			},
+		},
+		{
+			name: "3-values-capture",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|mem_used_perc|swap_used_perc)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"cpu_used",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"mem_used_perc",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"swap_used_perc",
+				),
+			},
+		},
+		{
+			name: "2-values-same-prefix",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_last_chain_expiry_timestamp_seconds",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_validation_success",
+				),
+			},
+		},
+		{
+			name: "2-values-capture-same-prefix",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)",
+			),
+			wantedMatchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_last_chain_expiry_timestamp_seconds",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"probe_ssl_validation_success",
+				),
+			},
+		},
+		{
+			name: "cant-simplify",
+			inputMatcher: labels.MustNewMatcher(
+				labels.MatchRegexp,
+				"__name__",
+				"(cpu_used|i*)",
+			),
+			wantErr: errNotASimpleRegex,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotMatchers, err := simplifyRegex(test.inputMatcher)
+			if err != nil {
+				if errors.Is(err, test.wantErr) {
+					return
+				}
+
+				t.Fatalf("Failed to simplify regex: %s", err)
+			}
+
+			if diff := cmp.Diff(gotMatchers, test.wantedMatchers, cmpopts.IgnoreUnexported(labels.Matcher{})); diff != "" {
+				t.Fatalf("Got wrong matchers\n%s", diff)
 			}
 		})
 	}

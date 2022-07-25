@@ -189,6 +189,24 @@ func (i *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
 	return errNotImplemented
 }
 
+// InternalForceExpirationTimestamp implements the IndexInternalExpirerer interface used in tests.
+func (i *indexWrapper) InternalForceExpirationTimestamp(value time.Time) error {
+	if expirerer, ok := i.index.(types.IndexInternalExpirerer); ok {
+		return expirerer.InternalForceExpirationTimestamp(value)
+	}
+
+	return errNotImplemented
+}
+
+// RunOnce implements the IndexRunner interface used in tests.
+func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
+	if runner, ok := i.index.(types.IndexRunner); ok {
+		return runner.RunOnce(ctx, now)
+	}
+
+	return false
+}
+
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.
 type mutableMetricsSet struct {
 	metricsSet     types.MetricsSet

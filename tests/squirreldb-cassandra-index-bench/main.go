@@ -7,8 +7,8 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
-	"squirreldb/cassandra/index"
 	"squirreldb/daemon"
+	"squirreldb/types"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -151,13 +151,13 @@ func run(ctx context.Context) error {
 			return err
 		}
 
-		cassandraIndex, ok := idx.(*index.CassandraIndex)
+		indexVerifier, ok := idx.(types.IndexVerifier)
 
 		if !ok {
 			return fmt.Errorf("can not verify, index isn't a CassandraIndex")
 		}
 
-		_, err = cassandraIndex.Verify(ctx, os.Stderr, false, false)
+		_, err = indexVerifier.Verify(ctx, os.Stderr, false, false)
 
 		if err != nil {
 			return err

@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"regexp/syntax"
 	"sort"
 	"squirreldb/logger"
 	"squirreldb/types"
@@ -40,6 +41,9 @@ const (
 	concurrentRead        = 4
 	maxCQLInValue         = 100 // limit of the number of value for the "IN" clause of a CQL query
 	verifyBulkSize        = 1000
+	// Simple regex composed of less than maxOpAlertnateSubsForSimpleRegex OR
+	// clauses are simplified to multiple non regex matchers.
+	maxOpAlertnateSubsForSimpleRegex = 10
 )
 
 const (
@@ -66,9 +70,7 @@ const (
 	expireBatchSize                 = 1000
 )
 
-const (
-	timeToLiveLabelName = "__ttl__"
-)
+const timeToLiveLabelName = "__ttl__"
 
 const (
 	// The expiration of entries in Cassandra starts everyday at 00:00 UTC + expirationStartOffset.
@@ -84,8 +86,9 @@ var (
 )
 
 var (
-	errTimeOutOfRange = errors.New("time out of range")
-	errBitmapEmpty    = errors.New("the result bitmap is empty")
+	errTimeOutOfRange  = errors.New("time out of range")
+	errBitmapEmpty     = errors.New("the result bitmap is empty")
+	errNotASimpleRegex = errors.New("not a simple regex")
 )
 
 type idData struct {
@@ -3347,7 +3350,24 @@ func (c *CassandraIndex) postingsForMatcher(
 		return c.postings(ctx, shards, m.Name, m.Value, true)
 	}
 
-	var it *roaring.Bitmap
+	it := roaring.NewBTreeBitmap()
+
+	// Try to convert simple OR regex to multiple MatchEqual matchers,
+	// keep the usual regex behavior if there is an error.
+	matchers, err := simplifyRegex(m)
+	if err == nil {
+		// Make the bitmap of the union of all matchers.
+		for _, matcher := range matchers {
+			bitset, err := c.postings(ctx, shards, matcher.Name, matcher.Value, true)
+			if err != nil {
+				return nil, err
+			}
+
+			it.UnionInPlace(bitset)
+		}
+
+		return it, nil
+	}
 
 	for _, baseTime := range shards {
 		if ctx.Err() != nil {
@@ -3372,20 +3392,83 @@ func (c *CassandraIndex) postingsForMatcher(
 					return nil, fmt.Errorf("unmarshal bitmap: %w", err)
 				}
 
-				if it == nil {
-					it = bitset
-				} else {
-					it.UnionInPlace(bitset)
-				}
+				it.UnionInPlace(bitset)
 			}
 		}
 	}
 
-	if it == nil {
-		it = roaring.NewBTreeBitmap()
+	return it, nil
+}
+
+// simplifyRegex converts a regex matcher into multiple equal matchers,
+// it returns an error if the regex can't be converted.
+// For example:
+// __name__=~"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)
+// -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds),
+//     __name__="(probe_ssl_validation_success)]
+func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
+	regex, err := syntax.Parse(matcher.Value, syntax.Perl)
+	if err != nil {
+		return nil, err
 	}
 
-	return it, nil
+	alternateRegex, prefix, err := getOpAlternate(regex, "")
+	if err != nil {
+		return nil, err
+	}
+
+	// When their is too many OR clauses, we keep with usual regexp behavior.
+	if len(alternateRegex.Sub) > maxOpAlertnateSubsForSimpleRegex {
+		return nil, errNotASimpleRegex
+	}
+
+	matchers := make([]*labels.Matcher, 0, len(alternateRegex.Sub))
+
+	for _, literalRegex := range alternateRegex.Sub {
+		if literalRegex.Op != syntax.OpLiteral {
+			return nil, errNotASimpleRegex
+		}
+
+		newMatcher, err := labels.NewMatcher(labels.MatchEqual, matcher.Name, prefix+string(literalRegex.Rune))
+		if err != nil {
+			return nil, err
+		}
+
+		matchers = append(matchers, newMatcher)
+	}
+
+	return matchers, nil
+}
+
+// getOpAlternate returns the OpAlternate inside a regex composed only of OR clauses,
+// the prefix used by all OR clauses, and an error if the regex is not simple.
+func getOpAlternate(regex *syntax.Regexp, prefix string) (*syntax.Regexp, string, error) {
+	switch regex.Op { //nolint:exhaustive
+	// "a|b|c"
+	case syntax.OpAlternate:
+		return regex, prefix, nil
+	// Support regex with a capture group, e.g. "(a|b|c)"
+	case syntax.OpCapture:
+		if len(regex.Sub) != 1 {
+			return nil, "", errNotASimpleRegex
+		}
+
+		return getOpAlternate(regex.Sub[0], prefix)
+	// Support regex with repeated prefix, e.g. "(prefix_a|prefix_b)"
+	case syntax.OpConcat:
+		if len(regex.Sub) != 2 {
+			return nil, "", errNotASimpleRegex
+		}
+
+		prefixRegex := regex.Sub[0]
+		if prefixRegex.Op != syntax.OpLiteral {
+			return nil, "", errNotASimpleRegex
+		}
+
+		return getOpAlternate(regex.Sub[1], string(prefixRegex.Rune))
+	default:
+		return nil, "", errNotASimpleRegex
+	}
 }
 
 func (c *CassandraIndex) inversePostingsForMatcher(
