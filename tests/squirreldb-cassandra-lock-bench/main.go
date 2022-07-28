@@ -149,23 +149,23 @@ func run(ctx context.Context) error {
 	}
 
 	workPercent := globalResult.WorkTotalTime.Seconds() / duration.Seconds() * 100
-	log.Printf("Worked %.2f %% of time (%v)", workPercent, globalResult.WorkTotalTime)
+	log.Info().Msgf("Worked %.2f %% of time (%v)", workPercent, globalResult.WorkTotalTime)
 
-	log.Printf("In %v acquired %d locks + failed %d + timeout %d",
+	log.Info().Msgf("In %v acquired %d locks + failed %d + timeout %d",
 		duration,
 		globalResult.LockAcquired,
 		globalResult.LockFail,
 		globalResult.LockTimeOut,
 	)
 
-	log.Printf("This result in %.2f lock acquired/s and %.2f lock fail/s (+ %.2f timeout/s)",
+	log.Info().Msgf("This result in %.2f lock acquired/s and %.2f lock fail/s (+ %.2f timeout/s)",
 		float64(globalResult.LockAcquired)/duration.Seconds(),
 		float64(globalResult.LockFail)/duration.Seconds(),
 		float64(globalResult.LockTimeOut)/duration.Seconds(),
 	)
 
 	if globalResult.LockFail > 0 {
-		log.Printf(
+		log.Warn().Msgf(
 			"Time to fail Lock avg = %v max = %v",
 			globalResult.FailTotalTime/time.Duration(globalResult.LockFail),
 			globalResult.FailMaxTime,
@@ -173,7 +173,7 @@ func run(ctx context.Context) error {
 	}
 
 	if globalResult.LockAcquired > 0 {
-		log.Printf(
+		log.Info().Msgf(
 			"Time to      Lock avg = %v max = %v  Unlock avg = %v max = %v",
 			globalResult.AcquireTotalTime/time.Duration(globalResult.LockAcquired),
 			globalResult.AcquireMaxTime,
@@ -183,11 +183,7 @@ func run(ctx context.Context) error {
 	}
 
 	if globalResult.ErrCount > 0 {
-		log.Printf("Had %d errors, see logs", globalResult.ErrCount)
-	}
-
-	if globalResult.ErrCount > 0 {
-		return fmt.Errorf("had %d error", globalResult.ErrCount)
+		return fmt.Errorf("had %d error, see logs", globalResult.ErrCount)
 	}
 
 	return nil
@@ -235,7 +231,10 @@ func worker(
 
 			running := atomic.AddInt32(jobRunning, 1)
 			if running != 1 {
-				log.Printf("lock=%s P=%d, T=%d, job running = %d want 1", subLockName, p, t, running)
+				log.Error().Msgf(
+					"Someone took the lock while I held it, lock=%s P=%d, T=%d, job running = %d want 1",
+					subLockName, p, t, running,
+				)
 				r.ErrCount++
 			}
 
@@ -244,7 +243,10 @@ func worker(
 
 			running = atomic.AddInt32(jobRunning, -1)
 			if running != 0 {
-				log.Printf("lock=%s P=%d, T=%d, job running = %d want 0", subLockName, p, t, running)
+				log.Error().Msgf(
+					"Someone took the lock while I held it, lock=%s P=%d, T=%d, job running = %d want 0",
+					subLockName, p, t, running,
+				)
 				r.ErrCount++
 			}
 

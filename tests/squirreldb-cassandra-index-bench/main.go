@@ -78,7 +78,7 @@ func run(ctx context.Context) error {
 	}
 
 	if !*noDropTables {
-		log.Printf("Droping tables")
+		log.Printf("Dropping tables")
 
 		err := squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
