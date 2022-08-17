@@ -167,7 +167,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}
 
 	if !acquired {
-		l.logger.Debug().Msgf("Lock %s is already acquired by %s (i'm %s)", l.name, holder, l.lockID)
+		l.logger.Debug().Msgf("tryLock: can't acquire lock %s as it is held by %s (i'm %s)", l.name, holder, l.lockID)
 
 		return false
 	}
