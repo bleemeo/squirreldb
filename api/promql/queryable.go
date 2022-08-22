@@ -74,17 +74,18 @@ func NewStore(
 
 // newIndexAndReaderFromHeaders builds a new index and metric reader with limits from
 // the HTTP headers. Available headers are:
-// * X-PromQL-Forced-Matcher: Add one matcher to limit evaluated series. Useful for
-//   filtering per-tenant.
-// * X-PromQL-Max-Evaluated-Series: Limit the number of series that can be evaluated
-//   by this request
-// * X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
-//   by this request.
-// * X-PromQL-ForcePreAggregated: Force using pre-aggregated data instead of raw points.
-//   Default for query is raw data. Default for query_range depends on step value.
-// * X-PromQL-ForceRaw: Force using raw data instead of pre-aggregated points.
-//   If both ForcePreAggregated and ForceRaw are true, ForceRaw take precedence
-//   Default for query is raw data. Default for query_range depends on step value.
+//   - X-PromQL-Forced-Matcher: Add one matcher to limit evaluated series. Useful for
+//     filtering per-tenant.
+//   - X-PromQL-Max-Evaluated-Series: Limit the number of series that can be evaluated
+//     by this request
+//   - X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
+//     by this request.
+//   - X-PromQL-ForcePreAggregated: Force using pre-aggregated data instead of raw points.
+//     Default for query is raw data. Default for query_range depends on step value.
+//   - X-PromQL-ForceRaw: Force using raw data instead of pre-aggregated points.
+//     If both ForcePreAggregated and ForceRaw are true, ForceRaw take precedence
+//     Default for query is raw data. Default for query_range depends on step value.
+//
 // A limit of 0 means unlimited.
 func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (querier, error) {
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)

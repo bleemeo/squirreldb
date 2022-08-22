@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -170,7 +169,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequestWithContext(ctx, "POST", writeURL, bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, writeURL, bytes.NewBuffer(compressedBody))
 		if err != nil {
 			log.Printf("unable to create request: %v", err)
 
@@ -189,13 +188,13 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 		}
 
 		if response.StatusCode >= 300 {
-			content, _ := ioutil.ReadAll(response.Body)
+			content, _ := io.ReadAll(response.Body)
 			log.Printf("Response code = %d, content: %s", response.StatusCode, content)
 
 			return err
 		}
 
-		_, err = io.Copy(ioutil.Discard, response.Body)
+		_, err = io.Copy(io.Discard, response.Body)
 		if err != nil {
 			log.Printf("Failed to read response: %v", err)
 

@@ -14,6 +14,7 @@ type reducedTimeRangeIndex struct {
 }
 
 // Those min and max date must be narrowed than min/max from Cassandra index.
+//
 //nolint:gochecknoglobals
 var (
 	minTime = time.Unix(0, 0).UTC()

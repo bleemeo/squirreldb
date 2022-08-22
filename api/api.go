@@ -219,8 +219,9 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 	a.init() //nolint: contextcheck
 
 	server := &http.Server{
-		Addr:    a.ListenAddress,
-		Handler: a,
+		Addr:              a.ListenAddress,
+		Handler:           a,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	serverStopped := make(chan error)

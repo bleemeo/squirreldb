@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"flag"
-	"io/ioutil"
 	"log"
+	"os"
 
 	"github.com/pilosa/pilosa/v2/roaring"
 )
@@ -25,7 +25,7 @@ var (
 func loadBitmap(filename string) (*roaring.Bitmap, error) {
 	tmp := roaring.NewBTreeBitmap()
 
-	bufferHex, err := ioutil.ReadFile(filename)
+	bufferHex, err := os.ReadFile(filename)
 	if err != nil {
 		return tmp, err
 	}

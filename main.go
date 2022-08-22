@@ -15,6 +15,7 @@ import (
 )
 
 // variable set by GoReleaser
+//
 //nolint:gochecknoglobals
 var (
 	version string

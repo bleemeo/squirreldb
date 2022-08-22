@@ -18,7 +18,7 @@ package facts
 
 import (
 	"bytes"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -68,7 +68,7 @@ func platformFacts() map[string]string {
 	facts := make(map[string]string)
 
 	osReleasePath := filepath.Join("/", "etc/os-release")
-	if osReleaseData, err := ioutil.ReadFile(osReleasePath); err != nil {
+	if osReleaseData, err := os.ReadFile(osReleasePath); err != nil {
 		log.Debug().Err(err).Msg("Unable to read os-release file")
 	} else {
 		osRelease, err := decodeOsRelease(string(osReleaseData))

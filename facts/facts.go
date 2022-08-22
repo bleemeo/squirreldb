@@ -3,7 +3,7 @@ package facts
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -23,7 +23,7 @@ func Facts(ctx context.Context) map[string]string {
 
 	newFacts["architecture"] = runtime.GOARCH
 
-	if v, err := ioutil.ReadFile(filepath.Join("/", "etc/timezone")); err == nil {
+	if v, err := os.ReadFile(filepath.Join("/", "etc/timezone")); err == nil {
 		newFacts["timezone"] = strings.TrimSpace(string(v))
 	}
 

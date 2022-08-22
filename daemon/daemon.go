@@ -219,6 +219,7 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 }
 
 // Config return the configuration after validation.
+//
 //nolint:forbidigo // This function is allowed to use fmt.Print*
 func Config() (cfg *config.Config, err error) {
 	cfg, err = config.New(log.With().Str("component", "config").Logger())
