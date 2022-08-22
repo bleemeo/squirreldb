@@ -2,7 +2,7 @@ package config
 
 //nolint:gochecknoglobals
 var defaults = map[string]interface{}{
-	"cassandra.addresses":                    []string{"localhost:9042"},
+	"cassandra.addresses":                    []string{"127.0.0.1:9042"},
 	"cassandra.keyspace":                     "squirreldb",
 	"cassandra.replication_factor":           1,
 	"cassandra.default_time_to_live":         "8760h", // 1 year
