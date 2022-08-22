@@ -5,7 +5,7 @@ set -e
 USER_UID=$(id -u)
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v1.9.2"
+GORELEASER_VERSION="v1.10.3"
 
 while [ ! -z "$1" ]; do
     case "$1" in
