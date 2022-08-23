@@ -3404,9 +3404,7 @@ func (c *CassandraIndex) postingsForMatcher(
 // it returns an error if the regex can't be converted.
 // For example:
 // __name__=~"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)
-// -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds),
-//
-//	__name__="(probe_ssl_validation_success)]
+// -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds), __name__="(probe_ssl_validation_success)].
 func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	regex, err := syntax.Parse(matcher.Value, syntax.Perl)
 	if err != nil {
