@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"squirreldb/daemon"
@@ -450,7 +449,7 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequestWithContext(ctx, "POST", s.writeURL(), bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.writeURL(), bytes.NewBuffer(compressedBody))
 		if err != nil {
 			return err
 		}
@@ -465,13 +464,13 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 		}
 
 		if response.StatusCode >= 300 {
-			content, _ := ioutil.ReadAll(response.Body)
+			content, _ := io.ReadAll(response.Body)
 			log.Printf("Response code = %d, content: %s", response.StatusCode, content)
 
 			return err
 		}
 
-		_, err = io.Copy(ioutil.Discard, response.Body)
+		_, err = io.Copy(io.Discard, response.Body)
 		if err != nil {
 			log.Printf("Failed to read response: %v", err)
 
@@ -520,7 +519,7 @@ func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.Read
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, err := http.NewRequestWithContext(ctx, "POST", s.readURL(), bytes.NewBuffer(compressedBody))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.readURL(), bytes.NewBuffer(compressedBody))
 		if err != nil {
 			return err
 		}
@@ -534,7 +533,7 @@ func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.Read
 			return err
 		}
 
-		content, _ := ioutil.ReadAll(response.Body)
+		content, _ := io.ReadAll(response.Body)
 
 		if response.StatusCode >= 300 {
 			err = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -312,7 +312,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 
 		compressedBody := snappy.Encode(nil, body)
 
-		request, newErr := http.NewRequestWithContext(ctx, "POST", readURL, bytes.NewBuffer(compressedBody))
+		request, newErr := http.NewRequestWithContext(ctx, http.MethodPost, readURL, bytes.NewBuffer(compressedBody))
 		if newErr != nil {
 			log.Printf("unable to create request: %v", newErr)
 
@@ -330,7 +330,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 			return newErr
 		}
 
-		content, _ := ioutil.ReadAll(response.Body)
+		content, _ := io.ReadAll(response.Body)
 
 		if response.StatusCode >= 300 {
 			newErr = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)

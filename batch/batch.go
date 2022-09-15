@@ -341,7 +341,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 // It also ensure that any new points that arrived between the initial read of previousMetrics and
 // the time the set of newMetrics is done are re-added.
 //
-// It return a boolean telling if there is points for each metrics in the memory store
+// # It return a boolean telling if there is points for each metrics in the memory store
 //
 // This function may recursivelly call itself, deep count the number of recursing and avoid infinite recussion.
 func (b *Batch) setPointsAndOffset(
@@ -483,12 +483,12 @@ func (b *Batch) setPointsAndOffset(
 
 // Flushes the points corresponding to the specified metrics state list
 // It does the following:
-// * Read points & write offset from memoryStore (excepted for new metric for which we just become owner)
-// * Send all points after write offset to TSDB (excepted for new metrics, we write nothing)
-// * Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points
-//   that come from states)
-// * Get + Set to memoryStore the points filtered
-// * Update states (in-memory and in temporaryStore).
+//   - Read points & write offset from memoryStore (excepted for new metric for which we just become owner)
+//   - Send all points after write offset to TSDB (excepted for new metrics, we write nothing)
+//   - Filter to keep only point more recent than batchSize (excepted for new metric, here we kept all points
+//     that come from states)
+//   - Get + Set to memoryStore the points filtered
+//   - Update states (in-memory and in temporaryStore).
 func (b *Batch) flush(
 	ctx context.Context,
 	ids []types.MetricID,

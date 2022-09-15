@@ -157,9 +157,9 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 // The from & to will be extended to be aligned with the aggregation size.
 //
 // Forcing pre-aggregation should only serve when:
-// 1) a bug caused the normal pre-aggregation to have anormal result
-// 2) data were inserted with too many delay and normal pre-aggregation already
-//    processed the time range.
+//  1. a bug caused the normal pre-aggregation to have anormal result
+//  2. data were inserted with too many delay and normal pre-aggregation already
+//     processed the time range.
 func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int, from time.Time, to time.Time) error {
 	var (
 		wg         sync.WaitGroup

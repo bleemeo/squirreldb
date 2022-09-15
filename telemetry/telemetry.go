@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"os"
@@ -50,7 +49,7 @@ func (t *Telemetry) getIDFromFile() {
 		t.setIDToFile(filepath)
 	}
 
-	file, _ := ioutil.ReadFile(filepath)
+	file, _ := os.ReadFile(filepath)
 
 	var tlm telemetryJSONID
 
@@ -70,7 +69,7 @@ func (t *Telemetry) setIDToFile(filepath string) {
 
 	file, _ := json.MarshalIndent(tlm, "", " ") //nolint:errchkjson // False positive.
 
-	_ = ioutil.WriteFile(filepath, file, 0o600)
+	_ = os.WriteFile(filepath, file, 0o600)
 }
 
 func (t Telemetry) postInformation(ctx context.Context) {
@@ -91,7 +90,7 @@ func (t Telemetry) postInformation(ctx context.Context) {
 		"version":             t.newFacts["version"],
 	})
 
-	req, _ := http.NewRequest("POST", t.runOption["url"], bytes.NewBuffer(body))
+	req, _ := http.NewRequest(http.MethodPost, t.runOption["url"], bytes.NewBuffer(body))
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -110,7 +109,7 @@ func (t Telemetry) postInformation(ctx context.Context) {
 	defer func() {
 		// Ensure we read the whole response to avoid "Connection reset by peer" on server
 		// and ensure HTTP connection can be resused
-		_, _ = io.Copy(ioutil.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}()
 }

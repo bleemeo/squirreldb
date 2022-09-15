@@ -80,14 +80,14 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 //
 // The method should be called only once, a new deleter should be created to reuse it.
 //
-// This method will also remove IDs local in-memory cache
+// # This method will also remove IDs local in-memory cache
 //
 // Deletion is performed in reverse order of the creation of metrics:
-// * First we delete from labels2id (this cause any new write to create a new metrics)
-// * drop id from every sharded postings (TODO: during those deletes, Search() may wrongly
-//   return the metric ID in cause of negative search.)
-// * drop the id2labels (at this points, Search() can elimitate wrong metric ID)
-// * the remote the id from all postings, making the ID free
+//   - First we delete from labels2id (this cause any new write to create a new metrics)
+//   - drop id from every sharded postings (TODO: during those deletes, Search() may wrongly
+//     return the metric ID in cause of negative search.)
+//   - drop the id2labels (at this points, Search() can elimitate wrong metric ID)
+//   - the remote the id from all postings, making the ID free
 //
 // Note: it's not this function which clear the expiration table, this is done elsewhere.
 func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx

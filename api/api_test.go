@@ -378,7 +378,7 @@ func Test_InterceptorStatusCode(t *testing.T) {
 			encoded := snappy.Encode(nil, data)
 			body := bytes.NewReader(encoded)
 
-			req, err := http.NewRequest("POST", "http://localhost:9201/write", body) //nolint: noctx
+			req, err := http.NewRequest(http.MethodPost, "http://localhost:9201/write", body) //nolint: noctx
 			if err != nil {
 				t.Fatal(err)
 			}

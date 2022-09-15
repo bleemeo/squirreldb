@@ -462,13 +462,13 @@ func (c *CassandraTSDB) xorChunkEncodeAggregate(points []aggregate.AggregatedPoi
 // gorillaEncode encode points using Gorilla tsz
 //
 // It's the encoding described in https://www.vldb.org/pvldb/vol8/p1816-teller.pdf with two change:
-// * This function use millisecond precision timestamp (while Gorilla use second). This function
-//   will pass the millisecond timestamp as second timestamp.
-// * All timestamp of offseted by baseTimestamp (that is, the actual value stored is the timestamp
-//   with baseTimestamp subtracted).
-//   This second points allow timestamp to remain smaller than 32-bits integer, which is required
-//   because Gorilla can't store larger timestamp (strictly speaking, can't store delta larger than
-//   a 32-bits integer)
+//   - This function use millisecond precision timestamp (while Gorilla use second). This function
+//     will pass the millisecond timestamp as second timestamp.
+//   - All timestamp of offseted by baseTimestamp (that is, the actual value stored is the timestamp
+//     with baseTimestamp subtracted).
+//     This second points allow timestamp to remain smaller than 32-bits integer, which is required
+//     because Gorilla can't store larger timestamp (strictly speaking, can't store delta larger than
+//     a 32-bits integer)
 //
 // There are the following constraint:
 // * points must be sorted

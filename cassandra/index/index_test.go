@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"reflect"
 	"sort"
 	"squirreldb/dummy"
@@ -3772,7 +3772,7 @@ func Test_PilosaSerialization(t *testing.T) {
 func loadBitmap(filename string) (*roaring.Bitmap, error) {
 	tmp := roaring.NewBTreeBitmap()
 
-	bufferHex, err := ioutil.ReadFile(filename)
+	bufferHex, err := os.ReadFile(filename)
 	if err != nil {
 		return tmp, err
 	}

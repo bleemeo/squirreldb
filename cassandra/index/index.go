@@ -1931,31 +1931,31 @@ type lookupEntry struct {
 // * To avoid race-condition, redo a check that metrics is not yet registered now that lock is acquired
 // * Read the all-metric postings. From there we find a free ID
 // * Update Cassandra tables to store this new metrics. The insertion is done in the following order:
-//   * First an entry is added to the expiration table. This ensure that in case of crash in this process,
+//   - First an entry is added to the expiration table. This ensure that in case of crash in this process,
 //     the ID will eventually be freed.
-//   * Then it update:
-//     * the all-metric postings. This effectively reseve the ID.
-//     * the id2labels tables (it give informations needed to cleanup other postings)
-//   * finally insert in labels2id, which is done as last because it's this table that determine that
+//   - Then it update:
+//   - the all-metric postings. This effectively reseve the ID.
+//   - the id2labels tables (it give informations needed to cleanup other postings)
+//   - finally insert in labels2id, which is done as last because it's this table that determine that
 //     a metrics didn't exists
 //
 // If the above process crash and partially write some value, it still in a good state because:
-// * For the insertion, it's the last entry (in labels2id) that matter.
-//   The creation will be retried when point is retried
-// * For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen),
-//   since no data points could be wrote and empty result are stipped, they won't be in results
-// * For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels...
-//   BUT to have the metric ID, client must first do a succesfull read to get the ID. So this shouldn't happen.
+//   - For the insertion, it's the last entry (in labels2id) that matter.
+//     The creation will be retried when point is retried
+//   - For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen),
+//     since no data points could be wrote and empty result are stipped, they won't be in results
+//   - For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels...
+//     BUT to have the metric ID, client must first do a succesfull read to get the ID. So this shouldn't happen.
 //
 // The expiration tables is used to known which metrics are likely to expire on a give date.
 // They are grouped by day (that is, the tables contains on row per day, each row being the day
 // and the list of metric IDs that may expire on this day).
 // A background process will process each past day from this tables and for each metrics:
-// * Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points.
-//   It does this check using a field of the table id2labels which is refreshed.
-// * If expired, delete entry for this metric from the index (the opposite of creation)
-// * Of not expired, add the metric IDs to the new expiration day in the table.
-// * Once finished, delete the processed day.
+//   - Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points.
+//     It does this check using a field of the table id2labels which is refreshed.
+//   - If expired, delete entry for this metric from the index (the opposite of creation)
+//   - Of not expired, add the metric IDs to the new expiration day in the table.
+//   - Once finished, delete the processed day.
 func (c *CassandraIndex) createMetrics(
 	ctx context.Context,
 	now time.Time,
@@ -2111,19 +2111,19 @@ func (c *CassandraIndex) createMetrics(
 // updatePostingShards update sharded-posting.
 //
 // It works with the following way:
-// * if updateCache is true, gather all shard impacted and refresh the idInShard cache
-//   (avoid re-use issue after metric creation)
-// * For each update in a shard, if the ID is already present, skip it
-// * Then update list of existings shards
-// * Add ID to maybe-present posting list (this is used in cleanup)
-// * Add ID to postings
-// * Add ID to presence list per shard
+//   - if updateCache is true, gather all shard impacted and refresh the idInShard cache
+//     (avoid re-use issue after metric creation)
+//   - For each update in a shard, if the ID is already present, skip it
+//   - Then update list of existings shards
+//   - Add ID to maybe-present posting list (this is used in cleanup)
+//   - Add ID to postings
+//   - Add ID to presence list per shard
 //
 // This insertion order all to recover some failure:
-// * No write will happen because ID is inserted to the presence list. Meaning
-//   reads won't get inconsistent result.
-//   It also means that retry of write will fix the issue,
-// * The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
+//   - No write will happen because ID is inserted to the presence list. Meaning
+//     reads won't get inconsistent result.
+//     It also means that retry of write will fix the issue,
+//   - The insert in maybe-present allow cleanup to known if an ID (may) need cleanup in the shard.
 func (c *CassandraIndex) updatePostingShards(
 	ctx context.Context,
 	pending []lookupEntry,
@@ -2467,13 +2467,13 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 // when the label should NOT be defined (e.g. name="").
 // In those case, it use the ability of our posting table to query for metric ID that has a LabelName regardless of
 // the values.
-// * For label must be defined, it increments the number of Matcher satified if the metric has the label.
-//   In principle it's the same as if it expanded it to all possible values (e.g. with name!="" it avoids expanding
-//   to name="memory" || name="disk" and directly ask for name=*)
-// * For label must NOT be defined, it query for all metric IDs that has this label, then increments the number of
-//   Matcher satified if currently found metrics are not in the list of metrics having this label.
-//   Note: this means that it must already have found some metrics (and that this filter is applied at the end)
-//   but PromQL forbids to only have label-not-defined matcher, so some other matcher must exists.
+//   - For label must be defined, it increments the number of Matcher satified if the metric has the label.
+//     In principle it's the same as if it expanded it to all possible values (e.g. with name!="" it avoids expanding
+//     to name="memory" || name="disk" and directly ask for name=*)
+//   - For label must NOT be defined, it query for all metric IDs that has this label, then increments the number of
+//     Matcher satified if currently found metrics are not in the list of metrics having this label.
+//     Note: this means that it must already have found some metrics (and that this filter is applied at the end)
+//     but PromQL forbids to only have label-not-defined matcher, so some other matcher must exists.
 func (c *CassandraIndex) Search(
 	ctx context.Context,
 	queryStart, queryEnd time.Time,
@@ -3404,8 +3404,7 @@ func (c *CassandraIndex) postingsForMatcher(
 // it returns an error if the regex can't be converted.
 // For example:
 // __name__=~"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)
-// -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds),
-//     __name__="(probe_ssl_validation_success)]
+// -> [__name__="(probe_ssl_last_chain_expiry_timestamp_seconds), __name__="(probe_ssl_validation_success)].
 func simplifyRegex(matcher *labels.Matcher) ([]*labels.Matcher, error) {
 	regex, err := syntax.Parse(matcher.Value, syntax.Perl)
 	if err != nil {
