@@ -8,7 +8,7 @@ COPY dist/squirreldb_linux_arm_6/squirreldb /squirreldb.arm
 
 RUN cp -p /squirreldb.$TARGETARCH /squirreldb
 
-FROM gcr.io/distroless/base
+FROM alpine:3.16
 
 LABEL maintainer="Bleemeo Docker Maintainers <packaging-team@bleemeo.com>"
 
