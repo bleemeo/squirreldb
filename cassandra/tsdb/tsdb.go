@@ -194,7 +194,10 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duratio
 		AND COMPACTION = {
 			'class': 'TimeWindowCompactionStrategy',
 			'compaction_window_unit': 'DAYS',
-			'compaction_window_size': 6
+			'compaction_window_size': 6,
+			'tombstone_threshold': 0.2,
+			'unchecked_tombstone_compaction': true,
+			'tombstone_compaction_interval': 604800
 		}
 		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
 	`))
@@ -217,7 +220,10 @@ func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive tim
 		AND COMPACTION = {
 			'class': 'TimeWindowCompactionStrategy',
 			'compaction_window_unit': 'DAYS',
-			'compaction_window_size': 90
+			'compaction_window_size': 90,
+			'tombstone_threshold': 0.2,
+			'unchecked_tombstone_compaction': true,
+			'tombstone_compaction_interval': 8467200
 		}
 		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
 	`))
