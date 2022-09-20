@@ -1,7 +1,7 @@
 project_name: squirreldb
 snapshot:
   # Our version is based on the date.
-  name_template: '{{ time "06.01.02.150405" }}'
+  name_template: '{{ .Env.SQUIRRELDB_VERSION }}'
 before:
   hooks:
     - go mod download

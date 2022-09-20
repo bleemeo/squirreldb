@@ -36,6 +36,8 @@ if [ -z "${SQUIRRELDB_BUILDX_OPTION}" ]; then
    SQUIRRELDB_BUILDX_OPTION="-t squirreldb:latest --load"
 fi
 
+export SQUIRRELDB_VERSION
+
 if [ "${ONLY_GO}" = "1" -a "${WITH_RACE}" != "1" ]; then
    docker run --rm -e HOME=/go/pkg -e CGO_ENABLED=0 \
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -51,6 +53,7 @@ else
       -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
       -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint '' \
+      -e SQUIRRELDB_VERSION \
       -e GORELEASER_PREVIOUS_TAG=0.1.0 \
       -e GORELEASER_CURRENT_TAG=0.1.1 \
       goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "(mkdir -p /go/pkg && git config --global --add safe.directory /src && goreleaser check && go test ./... && goreleaser --rm-dist --snapshot --parallelism 2);result=\$?;chown -R $USER_UID dist; exit \$result"
