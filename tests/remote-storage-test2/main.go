@@ -463,7 +463,7 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 			return err
 		}
 
-		if response.StatusCode >= 300 {
+		if response.StatusCode >= http.StatusMultipleChoices {
 			content, _ := io.ReadAll(response.Body)
 			log.Printf("Response code = %d, content: %s", response.StatusCode, content)
 
@@ -535,7 +535,7 @@ func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.Read
 
 		content, _ := io.ReadAll(response.Body)
 
-		if response.StatusCode >= 300 {
+		if response.StatusCode >= http.StatusMultipleChoices {
 			err = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)
 
 			return err

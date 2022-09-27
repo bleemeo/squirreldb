@@ -216,7 +216,7 @@ func (a *API) init() {
 
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
-	a.init() //nolint: contextcheck
+	a.init()
 
 	server := &http.Server{
 		Addr:              a.ListenAddress,
