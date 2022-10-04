@@ -8,8 +8,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var Logger zerolog.Logger //nolint:gochecknoglobals
-
 // NewConsoleWriter returns a zerolog writer with colored console output.
 func NewConsoleWriter(disableColor bool) io.Writer {
 	writer := zerolog.ConsoleWriter{

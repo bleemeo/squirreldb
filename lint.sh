@@ -2,7 +2,7 @@
 
 set -e
 
-LINTER_VERSION=v1.48.0
+LINTER_VERSION=v1.49.0
 
 if docker volume ls | grep -q squirreldb-buildcache; then
    GO_MOUNT_CACHE="-v squirreldb-buildcache:/go/pkg"

@@ -332,7 +332,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 
 		content, _ := io.ReadAll(response.Body)
 
-		if response.StatusCode >= 300 {
+		if response.StatusCode >= http.StatusMultipleChoices {
 			newErr = fmt.Errorf("response code = %d, content: %s", response.StatusCode, content)
 
 			log.Print(newErr)

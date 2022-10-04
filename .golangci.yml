@@ -14,13 +14,17 @@ linters:
     - varnamelen # I think there is too many false-positive.
     - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
     - nonamedreturns # Warn for every named return, not useful.
-    - nosnakecase # Unusable because it reports problems on variable from other packages: https://github.com/sivchari/nosnakecase/issues/21.
+    - interfacebloat # Warn when an interface has too many methods, not useful.
     # Disable deprecated and replaced linter.
     - maligned
     - golint
     - interfacer
     - scopelint
     - ifshort
+    - deadcode
+    - structcheck
+    - varcheck
+    - nosnakecase
     # We use maintidx to lint function complexity.
     - gocyclo
     - cyclop

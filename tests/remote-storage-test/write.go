@@ -187,7 +187,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 			return err
 		}
 
-		if response.StatusCode >= 300 {
+		if response.StatusCode >= http.StatusMultipleChoices {
 			content, _ := io.ReadAll(response.Body)
 			log.Printf("Response code = %d, content: %s", response.StatusCode, content)
 
