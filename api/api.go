@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
@@ -333,15 +332,10 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
-type indexDumper interface {
-	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
-	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
-}
-
 func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(indexDumper); ok {
+	if idx, ok := a.Index.(types.IndexDumper); ok {
 		_, withExpiration := req.URL.Query()["withExpiration"]
 		if err := idx.Dump(ctx, w, withExpiration); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
@@ -358,7 +352,7 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(indexDumper); ok {
+	if idx, ok := a.Index.(types.IndexDumper); ok {
 		dates := req.URL.Query()["date"]
 		if len(dates) != 1 {
 			http.Error(w, `Expect one parameter "date"`, http.StatusBadRequest)

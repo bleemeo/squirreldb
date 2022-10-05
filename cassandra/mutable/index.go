@@ -181,9 +181,18 @@ func (i *indexWrapper) Verify(
 }
 
 // Dump implements the IndexDumper interface used by the API.
-func (i *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
+func (i *indexWrapper) Dump(ctx context.Context, w io.Writer, withExpiration bool) error {
 	if dumper, ok := i.index.(types.IndexDumper); ok {
-		return dumper.Dump(ctx, w)
+		return dumper.Dump(ctx, w, withExpiration)
+	}
+
+	return errNotImplemented
+}
+
+// DumpByExpirationDate implements the IndexDumper interface used by the API.
+func (i *indexWrapper) DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.DumpByExpirationDate(ctx, w, expirationDate)
 	}
 
 	return errNotImplemented

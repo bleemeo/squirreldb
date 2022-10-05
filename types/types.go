@@ -58,7 +58,8 @@ type Index interface {
 }
 
 type IndexDumper interface {
-	Dump(ctx context.Context, w io.Writer) error
+	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
+	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
 }
 
 type IndexVerifier interface {
