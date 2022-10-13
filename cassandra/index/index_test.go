@@ -5932,3 +5932,39 @@ func TestSimplifyRegex(t *testing.T) {
 		})
 	}
 }
+
+func Test_timeForShard(t *testing.T) {
+	tests := []struct {
+		inputTime time.Time
+		want      time.Time
+	}{
+		{
+			inputTime: time.Date(2022, 10, 1, 0, 0, 0, 0, time.UTC),
+			want:      time.Date(2022, 9, 29, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			inputTime: time.Date(2022, 9, 29, 0, 0, 0, 0, time.UTC),
+			want:      time.Date(2022, 9, 29, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			inputTime: time.Date(2022, 9, 29, 1, 0, 0, 0, time.UTC),
+			want:      time.Date(2022, 9, 29, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			inputTime: time.Date(2022, 9, 22, 0, 0, 0, 0, time.UTC),
+			want:      time.Date(2022, 9, 22, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			inputTime: time.Date(2022, 9, 15, 0, 0, 0, 0, time.UTC),
+			want:      time.Date(2022, 9, 15, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tt := range tests {
+		name := tt.inputTime.Format(time.RFC3339)
+		t.Run(name, func(t *testing.T) {
+			if got := timeForShard(ShardForTime(tt.inputTime.Unix())); !got.Equal(tt.want) {
+				t.Errorf("timeForShard() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

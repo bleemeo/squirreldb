@@ -58,8 +58,13 @@ type Index interface {
 }
 
 type IndexDumper interface {
-	Dump(ctx context.Context, w io.Writer, withExpiration bool) error
+	InfoGlobal(ctx context.Context, w io.Writer) error
+	InfoByID(ctx context.Context, w io.Writer, id MetricID, verbose bool) error
+	InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error
+	Dump(ctx context.Context, w io.Writer) error
 	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
+	DumpByShard(ctx context.Context, w io.Writer, shard time.Time) error
+	DumpByPosting(ctx context.Context, w io.Writer, shard time.Time, name string, value string) error
 }
 
 type IndexVerifier interface {

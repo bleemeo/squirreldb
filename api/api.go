@@ -24,7 +24,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/model/labels"
 	ppromql "github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
@@ -146,9 +148,13 @@ func (a *API) init() {
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
 	router.Get("/flush", a.flushHandler)
 	router.Get("/ready", a.readyHandler)
+	router.Get("/debug/", a.debugHelpHandler)
+	router.Get("/debug/index_info", a.indexInfoHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
 	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
+	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
+	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
@@ -309,6 +315,99 @@ func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
+func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
+	fmt.Fprintln(w, "The following debug enpoints exists")
+	fmt.Fprintln(w, "/debug/index_info: provide global information")
+	fmt.Fprintln(w, "/debug/index_info?metricID=XXX: provide information on given metric ID")
+	fmt.Fprintln(w, "/debug/index_info?verbose&metricID=XXX: provide more information on given metric ID")
+	fmt.Fprintln(w, "/debug/index_info?metricLabels=XXX: provide information on give metric labels")
+	fmt.Fprintln(w, "/debug/index_dump: all known metrics")
+	fmt.Fprintln(w, "/debug/index_dump_by_expiration?date=2006-01-02: metrics to check for expiration at given date")
+	fmt.Fprintln(w, "/debug/index_dump_by_shard?shard_time=2006-01-02: metrics in given shard")
+	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used&value=/: metrics in given posting")
+	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used: metrics in given postings ")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "With the dump_by_posting you can omit the shard_time, which will query the special global shard.")
+	fmt.Fprintln(w, "This allow to query the globalShardNumber which contains few special values (like all ")
+	fmt.Fprintln(w, "assigned ID, existing shard,...)")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "To use /debug/index_info?metricLabels=XXX, you need to encode the labels. The easiest is using curl")
+	fmt.Fprintln(w, "curl http://localhost:9201/debug/index_info -G -d metricLabels='item=\"/\",__name__=\"disk_used\"")
+	fmt.Fprintln(w, "If curl complain about bad URL format, remove whitespace after each \",\"")
+}
+
+func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(types.IndexDumper); ok {
+		metricIDText := req.URL.Query()["metricID"]
+		metricLabelsText := req.URL.Query()["metricLabels"]
+		_, verbose := req.URL.Query()["verbose"]
+
+		switch {
+		case len(metricLabelsText) > 0:
+			a.indexInfoLabels(ctx, w, idx, metricLabelsText)
+		case len(metricIDText) > 0:
+			a.indexInfoIDs(ctx, w, idx, metricIDText, verbose)
+		default:
+			if err := idx.InfoGlobal(ctx, w); err != nil {
+				http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+				return
+			}
+		}
+	} else {
+		http.Error(w, "Index does not implement Info*()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexInfoLabels(
+	ctx context.Context,
+	w http.ResponseWriter,
+	idx types.IndexDumper,
+	metricLabelsText []string,
+) {
+	for _, text := range metricLabelsText {
+		metricLabels, err := textToLabels(text)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+
+		if err := idx.InfoByLabels(ctx, w, metricLabels); err != nil {
+			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	}
+}
+
+func (a API) indexInfoIDs(
+	ctx context.Context,
+	w http.ResponseWriter,
+	idx types.IndexDumper,
+	metricIDText []string,
+	verbose bool,
+) {
+	for _, text := range metricIDText {
+		id, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+
+		if err := idx.InfoByID(ctx, w, types.MetricID(id), verbose); err != nil {
+			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	}
+}
+
 func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
@@ -336,8 +435,7 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
-		_, withExpiration := req.URL.Query()["withExpiration"]
-		if err := idx.Dump(ctx, w, withExpiration); err != nil {
+		if err := idx.Dump(ctx, w); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 			return
@@ -368,6 +466,95 @@ func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.R
 		}
 
 		if err := idx.DumpByExpirationDate(ctx, w, date); err != nil {
+			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	} else {
+		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(types.IndexDumper); ok {
+		dates := req.URL.Query()["shard_time"]
+		if len(dates) != 1 {
+			http.Error(w, `Expect one parameter "shard_time"`, http.StatusBadRequest)
+
+			return
+		}
+
+		date, err := time.Parse("2006-01-02", dates[0])
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+
+			return
+		}
+
+		if err := idx.DumpByShard(ctx, w, date); err != nil {
+			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	} else {
+		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func getIndexDumpByPostingArgument(req *http.Request) (time.Time, string, string, string) {
+	dates := req.URL.Query()["shard_time"]
+	if len(dates) > 1 {
+		return time.Time{}, "", "", `Expect at most one parameter "shard_time"`
+	}
+
+	var date time.Time
+
+	if len(dates) == 1 {
+		var err error
+
+		date, err = time.Parse("2006-01-02", dates[0])
+		if err != nil {
+			return date, "", "", fmt.Sprintf("Failed to parse date: %v", err)
+		}
+	}
+
+	names := req.URL.Query()["name"]
+	values := req.URL.Query()["value"]
+
+	if len(names) != 1 {
+		return date, "", "", `Expect one parameter "name"`
+	}
+
+	if len(values) > 1 {
+		return date, names[0], "", `Expect at most one parameter "value"`
+	}
+
+	var value string
+	if len(values) == 1 {
+		value = values[0]
+	}
+
+	return date, names[0], value, ""
+}
+
+func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(types.IndexDumper); ok {
+		date, name, value, errorMessage := getIndexDumpByPostingArgument(req)
+		if errorMessage != "" {
+			http.Error(w, errorMessage, http.StatusBadRequest)
+
+			return
+		}
+
+		if err := idx.DumpByPosting(ctx, w, date, name, value); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 			return
@@ -586,4 +773,18 @@ func (i *interceptor) Write(b []byte) (int, error) {
 
 func (i *interceptor) Header() http.Header {
 	return i.OrigWriter.Header()
+}
+
+func textToLabels(text string) (labels.Labels, error) {
+	matchers, err := parser.ParseMetricSelector("{" + text + "}")
+	if err != nil {
+		return nil, fmt.Errorf("fail to parse labels: %w", err)
+	}
+
+	builder := labels.NewBuilder(nil)
+	for _, v := range matchers {
+		builder.Set(v.Name, v.Value)
+	}
+
+	return builder.Labels(), nil
 }
