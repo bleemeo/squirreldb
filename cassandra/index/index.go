@@ -194,6 +194,7 @@ const (
 	maybePostingLabel   = "__maybe|metrics__"
 	existingShardsLabel = "__shard|exists__" // We store existings shards in postings
 	postingShardSize    = 7 * 24 * time.Hour
+	shardDateFormat     = "2006-01-02"
 	// Index is shard by time for postings. The shard number (an int32) is the
 	// rounded to postingShardSize number of hours since epoc (1970).
 	// The globalShardNumber value is an impossible value for normal shard,
@@ -644,9 +645,9 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 
 		fmt.Fprintf(
 			w,
-			"Shard ID = %d (%s) has %d metrics (and %d in maybePosting). It has %d label names\n",
+			"Shard %s (ID %d) has %d metrics (and %d in maybePosting). It has %d label names\n",
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
-			timeForShard(int32(shard)),
 			postingShard.Count(),
 			maybepostingShard.Count(),
 			labelNamesCount,
@@ -724,9 +725,9 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 
 		fmt.Fprintf(
 			w,
-			"Shard ID = %d (%s) has the metric in posting=%v, maybePosting=%v\n",
+			"Shard %s (ID %d) has the metric in posting=%v, maybePosting=%v\n",
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
-			timeForShard(int32(shard)),
 			inPosting,
 			inMaybe,
 		)
@@ -748,13 +749,12 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			if len(missingPostings) > 0 {
 				fmt.Fprintf(
 					w,
-					"Shard ID = %d (%s): the following postings are missing: %s\n",
-					shard,
-					timeForShard(int32(shard)),
+					"Shard %s: the following postings are missing: %s\n",
+					timeForShard(int32(shard)).Format(shardDateFormat),
 					strings.Join(missingPostings, ", "),
 				)
 			} else {
-				fmt.Fprintf(w, "Shard ID = %d (%s): all postings are present\n", shard, timeForShard(int32(shard)))
+				fmt.Fprintf(w, "Shard %s: all postings are present\n", timeForShard(int32(shard)).Format(shardDateFormat))
 			}
 		}
 	}
@@ -884,7 +884,7 @@ func (c *CassandraIndex) verify(
 
 	for _, shard := range shards.Slice() {
 		shard := int32(shard)
-		fmt.Fprintf(w, "Checking shard %d\n", shard)
+		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
 		tmp, err := c.verifyShard(ctx, w, doFix, shard, allGoodIds)
 		if err != nil {
@@ -1170,8 +1170,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 		fmt.Fprintf(
 			w,
-			"shard %d is empty (automatic cleanup may fix this)!\n",
-			shard,
+			"shard %s is empty (automatic cleanup may fix this)!\n",
+			timeForShard(shard).Format(shardDateFormat),
 		)
 	}
 
@@ -1180,8 +1180,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 		fmt.Fprintf(
 			w,
-			"shard %d is empty!\n",
-			shard,
+			"shard %s is empty!\n",
+			timeForShard(shard).Format(shardDateFormat),
 		)
 	}
 
@@ -1198,8 +1198,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 		fmt.Fprintf(
 			w,
-			"shard %d: ID %d is present in localAll but not in localMaybe!\n",
-			shard,
+			"shard %s: ID %d is present in localAll but not in localMaybe!\n",
+			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
@@ -1236,8 +1236,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 		fmt.Fprintf(
 			w,
-			"shard %d: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
-			shard,
+			"shard %s: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
+			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
@@ -1364,8 +1364,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 				fmt.Fprintf(
 					w,
-					"shard %d: extra posting for %s=%s exists (with %d IDs)\n",
-					shard,
+					"shard %s: extra posting for %s=%s exists (with %d IDs)\n",
+					timeForShard(shard).Format(shardDateFormat),
 					name,
 					labelValue,
 					tmp.Count(),
