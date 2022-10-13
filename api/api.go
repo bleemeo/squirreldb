@@ -320,7 +320,7 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "/debug/index_info: provide global information")
 	fmt.Fprintln(w, "/debug/index_info?metricID=XXX: provide information on given metric ID")
 	fmt.Fprintln(w, "/debug/index_info?verbose&metricID=XXX: provide more information on given metric ID")
-	fmt.Fprintln(w, "/debug/index_info?metricLabels=XXX: provide information on give metric labels")
+	fmt.Fprintln(w, "/debug/index_info?metricLabels=XXX: provide information on given metric labels")
 	fmt.Fprintln(w, "/debug/index_dump: all known metrics")
 	fmt.Fprintln(w, "/debug/index_dump_by_expiration?date=2006-01-02: metrics to check for expiration at given date")
 	fmt.Fprintln(w, "/debug/index_dump_by_shard?shard_time=2006-01-02: metrics in given shard")
@@ -328,12 +328,12 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used: metrics in given postings ")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "With the dump_by_posting you can omit the shard_time, which will query the special global shard.")
-	fmt.Fprintln(w, "This allow to query the globalShardNumber which contains few special values (like all ")
+	fmt.Fprintln(w, "This allows to query the globalShardNumber which contains few special values (like all ")
 	fmt.Fprintln(w, "assigned ID, existing shard,...)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "To use /debug/index_info?metricLabels=XXX, you need to encode the labels. The easiest is using curl")
 	fmt.Fprintln(w, "curl http://localhost:9201/debug/index_info -G -d metricLabels='item=\"/\",__name__=\"disk_used\"")
-	fmt.Fprintln(w, "If curl complain about bad URL format, remove whitespace after each \",\"")
+	fmt.Fprintln(w, "If curl complains about bad URL format, remove whitespace after each \",\"")
 }
 
 func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
