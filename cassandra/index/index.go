@@ -793,6 +793,13 @@ func (c *CassandraIndex) Verify(
 	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
 }
 
+// verify perform some checks on index consistency.
+// It could apply fixes and could acquire the newMetricLock to ensure a consitent read of the index.
+// The lock is required as a metric creation / expiration during the verification process could
+// return a false-positive, but holding the lock will block metric creation during the whole verification process.
+// When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
+// that some issue might get fixed automatically (e.g. expired metrics that are not yet processed, partial write should
+// be fixed when expiration is applied for them, ...).
 func (c *CassandraIndex) verify(
 	ctx context.Context,
 	now time.Time,
@@ -861,10 +868,12 @@ func (c *CassandraIndex) verify(
 		}
 
 		if len(pendingIds) > 0 {
-			err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, allPosting, allGoodIds)
+			bulkHadIssue, err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, allPosting, allGoodIds)
 			if err != nil {
 				return hadIssue, err
 			}
+
+			hadIssue = hadIssue || bulkHadIssue
 		}
 	}
 
@@ -886,12 +895,12 @@ func (c *CassandraIndex) verify(
 		shard := int32(shard)
 		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
-		tmp, err := c.verifyShard(ctx, w, doFix, shard, allGoodIds)
+		shardHadIssue, err := c.verifyShard(ctx, w, doFix, shard, allPosting)
 		if err != nil {
 			return hadIssue, err
 		}
 
-		hadIssue = hadIssue || tmp
+		hadIssue = hadIssue || shardHadIssue
 
 		if respf, ok := w.(http.Flusher); ok {
 			respf.Flush()
@@ -1001,10 +1010,10 @@ func (c *CassandraIndex) verifyBulk(
 	bulkDeleter *deleter,
 	allPosting *roaring.Bitmap,
 	allGoodIds *roaring.Bitmap,
-) (err error) {
+) (hadIssue bool, err error) {
 	id2Labels, id2expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
-		return fmt.Errorf("get labels: %w", err)
+		return hadIssue, fmt.Errorf("get labels: %w", err)
 	}
 
 	allLabelsString := make([]string, 0, len(ids))
@@ -1013,6 +1022,8 @@ func (c *CassandraIndex) verifyBulk(
 		lbls, ok := id2Labels[id]
 		if !ok {
 			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
+
+			hadIssue = true
 
 			if doFix {
 				bulkDeleter.PrepareDelete(id, nil, false)
@@ -1025,24 +1036,31 @@ func (c *CassandraIndex) verifyBulk(
 
 		_, ok = id2expiration[id]
 		if !ok {
-			msg := "ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify"
+			fmt.Fprintf(
+				w,
+				"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify\n",
+				id,
+				lbls.String(),
+			)
 
-			return fmt.Errorf(msg, id, lbls.String())
+			hadIssue = true
+
+			continue
 		}
 	}
 
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return hadIssue, ctx.Err()
 	}
 
 	labels2ID, err := c.selectLabelsList2ID(ctx, allLabelsString)
 	if err != nil {
-		return fmt.Errorf("get labels2ID: %w", err)
+		return hadIssue, fmt.Errorf("get labels2ID: %w", err)
 	}
 
 	for _, id := range ids {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return hadIssue, ctx.Err()
 		}
 
 		lbls, ok := id2Labels[id]
@@ -1059,6 +1077,8 @@ func (c *CassandraIndex) verifyBulk(
 		if !ok {
 			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
 
+			hadIssue = true
+
 			if doFix {
 				bulkDeleter.PrepareDelete(id, lbls, false)
 			}
@@ -1069,16 +1089,23 @@ func (c *CassandraIndex) verifyBulk(
 		if id != id2 { //nolint:nestif
 			tmp, tmp2, err := c.selectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
 			if err != nil {
-				return fmt.Errorf("get labels from store: %w", err)
+				return hadIssue, fmt.Errorf("get labels from store: %w", err)
 			}
 
 			lbls2 := tmp[id2]
 			expiration2, ok := tmp2[id2]
 
 			if !ok && lbls2 != nil {
-				msg := "ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify"
+				fmt.Fprintf(
+					w,
+					"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify",
+					id2,
+					lbls2.String(),
+				)
 
-				return fmt.Errorf(msg, id2, lbls2.String())
+				hadIssue = true
+
+				continue
 			}
 
 			switch {
@@ -1090,6 +1117,8 @@ func (c *CassandraIndex) verifyBulk(
 					lbls.String(),
 					id2,
 				)
+
+				hadIssue = true
 
 				if doFix {
 					// well, the only solution is to delete *both* ID.
@@ -1104,6 +1133,8 @@ func (c *CassandraIndex) verifyBulk(
 					lbls.String(),
 					id2,
 				)
+
+				hadIssue = true
 
 				if doFix {
 					// well, the only solution is to delete *both* ID.
@@ -1121,6 +1152,9 @@ func (c *CassandraIndex) verifyBulk(
 					expiration,
 					expiration2,
 				)
+
+				hadIssue = true
+
 				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
 				if doFix {
 					bulkDeleter.PrepareDelete(id, lbls, true)
@@ -1133,6 +1167,8 @@ func (c *CassandraIndex) verifyBulk(
 		if now.After(expiration.Add(24 * time.Hour)) {
 			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
 
+			hadIssue = true
+
 			if doFix {
 				bulkDeleter.PrepareDelete(id, lbls, false)
 			}
@@ -1142,11 +1178,11 @@ func (c *CassandraIndex) verifyBulk(
 
 		_, err = allGoodIds.AddN(uint64(id))
 		if err != nil {
-			return fmt.Errorf("update bitmap: %w", err)
+			return hadIssue, fmt.Errorf("update bitmap: %w", err)
 		}
 	}
 
-	return nil
+	return hadIssue, nil
 }
 
 // check that postings for given shard is consistent.
@@ -1155,7 +1191,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	w io.Writer,
 	doFix bool,
 	shard int32,
-	allGoodIds *roaring.Bitmap,
+	allPosting *roaring.Bitmap,
 ) (hadIssue bool, err error) {
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
@@ -1336,7 +1372,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		it   *roaring.Bitmap
 		name string
 	}{
-		{name: "global all IDs", it: allGoodIds},
+		{name: "global all IDs", it: allPosting},
 		{name: "shard all IDs", it: localAll},
 		{name: "shard maybe present IDs", it: localMaybe},
 	}
@@ -1445,7 +1481,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 						labelValue,
 						localMaybe.Contains(id),
 						localAll.Contains(id),
-						allGoodIds.Contains(id),
+						allPosting.Contains(id),
 					)
 
 					if doFix {
