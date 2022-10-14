@@ -676,7 +676,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	var lbls labels.Labels
 
 	if len(labelsMap) == 0 {
-		fmt.Fprintf(w, "Metric ID %d not found in ID2Labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id)))
+		fmt.Fprintf(w, "Metric ID %d not found in id2labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id)))
 	} else {
 		lbls = labelsMap[id]
 
@@ -697,9 +697,9 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		}
 
 		if len(resp) == 0 {
-			fmt.Fprintf(w, "Labels %s not found in labels2index\n", sortedLabelsString)
+			fmt.Fprintf(w, "Labels %s not found in labels2id\n", sortedLabelsString)
 		} else {
-			fmt.Fprintf(w, "Labels %s found in labels2index and ID is %d\n", sortedLabelsString, resp[sortedLabelsString])
+			fmt.Fprintf(w, "Labels %s found in labels2id and ID is %d\n", sortedLabelsString, resp[sortedLabelsString])
 		}
 	}
 
@@ -930,7 +930,12 @@ func (c *CassandraIndex) verifyMissingShard(
 		if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
 			errorCount++
 
-			fmt.Fprintf(w, "Shard %d for time %v isn't in all shards", queryShard[0], current.String())
+			fmt.Fprintf(
+				w,
+				"Shard %s for time %v isn't in all shards",
+				timeForShard(queryShard[0]).Format(shardDateFormat),
+				current.String(),
+			)
 
 			if doFix {
 				_, err = shards.AddN(uint64(queryShard[0]))
@@ -957,7 +962,7 @@ func (c *CassandraIndex) verifyMissingShard(
 		if it == nil || !it.Any() {
 			errorCount++
 
-			fmt.Fprintf(w, "Shard %d is listed in all shards but don't exists\n", shard)
+			fmt.Fprintf(w, "Shard %s is listed in all shards but don't exists\n", timeForShard(shard).Format(shardDateFormat))
 
 			if doFix {
 				_, err = shards.RemoveN(uint64(shard))
@@ -1399,8 +1404,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 					fmt.Fprintf(
 						w,
-						"shard %d: missing ID %d in posting for %s=%s\n",
-						shard,
+						"shard %s: missing ID %d in posting for %s=%s\n",
+						timeForShard(shard).Format(shardDateFormat),
 						id,
 						name,
 						labelValue,
@@ -1433,8 +1438,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 					fmt.Fprintf(
 						w,
-						"shard %d: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
-						shard,
+						"shard %s: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
+						timeForShard(shard).Format(shardDateFormat),
 						id,
 						name,
 						labelValue,
@@ -1473,8 +1478,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 					fmt.Fprintf(
 						w,
-						"shard %d: posting for %s=%s has ID %d which is not in %s!\n",
-						shard,
+						"shard %s: posting for %s=%s has ID %d which is not in %s!\n",
+						timeForShard(shard).Format(shardDateFormat),
 						name,
 						labelValue,
 						id,
@@ -1490,8 +1495,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 
 		fmt.Fprintf(
 			w,
-			"shard %d: posting %s=%s was expected to exists\n",
-			shard,
+			"shard %s: posting %s=%s was expected to exists\n",
+			timeForShard(shard).Format(shardDateFormat),
 			lbl.Name,
 			lbl.Value,
 		)
