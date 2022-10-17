@@ -1385,7 +1385,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	for iter.HasNext() {
 		labelValue, buffer := iter.Next()
 
-		if _, ok := labelNames[labelValue]; !ok {
+		if _, ok := labelNames[labelValue]; !ok { //nolint:nestif
 			hadIssue = true
 
 			fmt.Fprintf(
