@@ -5,9 +5,9 @@
 # SquirrelDB
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/bleemeo/squirreldb)](https://goreportcard.com/report/github.com/bleemeo/squirreldb)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/bleemeo/glouton/blob/master/LICENSE)
-[![Docker Image Version](https://img.shields.io/docker/v/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/glouton/tags)
-[![Docker Image Size](https://img.shields.io/docker/image-size/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/glouton)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/bleemeo/squirreldb/blob/master/LICENSE)
+[![Docker Image Version](https://img.shields.io/docker/v/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/squirreldb/tags)
+[![Docker Image Size](https://img.shields.io/docker/image-size/bleemeo/squirreldb)](https://hub.docker.com/r/bleemeo/squirreldb)
 
 **SquirrelDB** is a scalable and highly available **timeseries database** (TSDB) compatible with **Prometheus remote storage**. Timeseries are stored in **Cassandra** to provide **scalability** and **availability**.
 
