@@ -26,6 +26,7 @@ var (
 	workDuration    = flag.Duration("work-duration", 100*time.Millisecond, "Duration of one work (randomized +/- 50%")
 	workerThreads   = flag.Int("worker-threads", 25, "Number of concurrent threads per processes")
 	workerProcesses = flag.Int("worker-processes", 2, "Number of concurrent index (equivalent to process) inserting data")
+	workerDelay     = flag.Duration("worker-delay", 0, "Delay after a sucessful task and the next attempt for thread")
 	tryLockDelay    = flag.Duration("try-lock-duration", 15*time.Second, "If delay given to TryLock()")
 	recreateLock    = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
 	lockTTL         = flag.Duration("lock-ttl", 2*time.Second, "TTL of the locks")
@@ -241,6 +242,8 @@ func worker(
 			sleep := time.Duration(float64(*workDuration) * (rnd.Float64() + 0.5))
 			time.Sleep(sleep)
 
+			r.WorkTotalTime += sleep
+
 			running = atomic.AddInt32(jobRunning, -1)
 			if running != 0 {
 				log.Error().Msgf(
@@ -262,9 +265,9 @@ func worker(
 				r.UnlockMaxTime = duration
 			}
 
-			sleep = time.Duration(float64(*workDuration) * (rnd.Float64() + 0.5))
-			r.WorkTotalTime += sleep
-			time.Sleep(sleep)
+			if *workerDelay > 0 {
+				time.Sleep(*workerDelay)
+			}
 		case ctx.Err() != nil:
 			r.LockTimeOut++
 		default:
