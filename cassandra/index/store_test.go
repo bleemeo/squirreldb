@@ -86,11 +86,15 @@ type failingStore struct {
 	shouldFail shouldFail
 }
 
-func newFailingStore(realStore storeImpl) *failingStore {
-	return &failingStore{
+func newFailingStore(realStore storeImpl, shouldFail shouldFail) *failingStore {
+	s := &failingStore{
 		realStore:  realStore,
 		shouldFail: dontFail{},
 	}
+
+	s.SetShouldFail(shouldFail)
+
+	return s
 }
 
 func (s *failingStore) SetShouldFail(obj shouldFail) {

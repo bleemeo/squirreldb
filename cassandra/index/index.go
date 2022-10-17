@@ -3478,7 +3478,12 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 	}
 
 	if !bitmapExpiration.Any() {
-		return c.store.DeleteExpiration(ctx, job.Day)
+		err := c.store.DeleteExpiration(ctx, job.Day)
+		if errors.Is(err, gocql.ErrNotFound) {
+			return nil
+		}
+
+		return err
 	}
 
 	var buffer bytes.Buffer

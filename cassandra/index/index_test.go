@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -47,10 +48,14 @@ const (
 )
 
 type mockState struct {
+	l      sync.Mutex
 	values map[string]string
 }
 
-func (m mockState) Read(name string, output interface{}) (bool, error) {
+func (m *mockState) Read(name string, output interface{}) (bool, error) {
+	m.l.Lock()
+	defer m.l.Unlock()
+
 	result, ok := m.values[name]
 	if !ok {
 		return false, nil
@@ -67,6 +72,9 @@ func (m mockState) Read(name string, output interface{}) (bool, error) {
 }
 
 func (m *mockState) Write(name string, value interface{}) error {
+	m.l.Lock()
+	defer m.l.Unlock()
+
 	valueStr, ok := value.(string)
 	if !ok {
 		return errors.New("only string supported")
@@ -180,6 +188,57 @@ func (s *mockStore) Init(ctx context.Context) error {
 	s.expiration = make(map[time.Time][]byte)
 
 	return ctx.Err()
+}
+
+func (s *mockStore) verifyStore(
+	t *testing.T,
+	now time.Time,
+	metrics []labels.Labels,
+	expiration []time.Time,
+	expiredMustBeDeleted bool,
+) error {
+	t.Helper()
+
+	// updateDelay is the delay after which we are guaranteed to trigger an TTL update
+	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
+
+	for i, metricLabels := range metrics {
+		key := sortLabels(metricLabels).String()
+		id, ok := s.labels2id[key]
+
+		wantMinExpire := expiration[i]
+		wantMaxExpire := expiration[i].Add(updateDelay)
+
+		if !ok {
+			if now.After(expiration[i]) {
+				continue
+			}
+
+			return fmt.Errorf("metric %s isn't in labels2id", key)
+		}
+
+		labelsInStore := s.id2labels[id]
+
+		if diff := cmp.Diff(metricLabels, labelsInStore); diff != "" {
+			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
+		}
+
+		if s.id2expiration[id].After(wantMaxExpire) || s.id2expiration[id].Before(wantMinExpire) {
+			return fmt.Errorf(
+				"id2expiration[%d] = %v, want between %v and %v",
+				id,
+				s.id2expiration[id],
+				wantMinExpire,
+				wantMaxExpire,
+			)
+		}
+
+		if now.After(wantMaxExpire) && expiredMustBeDeleted {
+			return fmt.Errorf("metric %s is not deleted but expired", key)
+		}
+	}
+
+	return nil
 }
 
 func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (map[string]types.MetricID, error) {
@@ -620,6 +679,26 @@ func mockIndexFromMetrics(
 	}
 
 	return index
+}
+
+func mapsToLabelsList(input []map[string]string) []labels.Labels {
+	result := make([]labels.Labels, 0, len(input))
+
+	for _, v := range input {
+		result = append(result, labels.FromMap(v))
+	}
+
+	return result
+}
+
+func sameExpirations(count int, expiration time.Time) []time.Time {
+	result := make([]time.Time, count)
+
+	for i := range result {
+		result[i] = expiration
+	}
+
+	return result
 }
 
 func bufferToStringTruncated(b []byte) string {
@@ -5969,9 +6048,7 @@ func Test_timeForShard(t *testing.T) {
 	}
 }
 
-func executeRunOnce(t *testing.T, now time.Time, index *CassandraIndex, maxRunCount int, maxTime time.Time) error {
-	t.Helper()
-
+func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTime time.Time) error {
 	previousLastProcessedDay, err := index.expirationLastProcessedDay()
 	if err != nil {
 		return err
@@ -6136,45 +6213,6 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 		{
 			"__name__": "cpu_used",
 		},
-	}
-
-	verifyStore := func(
-		t *testing.T,
-		realStore *mockStore,
-		metrics []map[string]string,
-		now time.Time,
-		ttl time.Duration,
-	) {
-		t.Helper()
-
-		for _, metric := range metrics {
-			metricLabels := labels.FromMap(metric)
-			key := sortLabels(labels.FromMap(metric)).String()
-			id, ok := realStore.labels2id[key]
-
-			if !ok {
-				t.Fatalf("metric %s isn't in labels2id", key)
-			}
-
-			labelsInStore := realStore.id2labels[id]
-
-			if diff := cmp.Diff(metricLabels, labelsInStore); diff != "" {
-				t.Errorf("id2labels mismatch: (-want +got): %s", diff)
-			}
-
-			wantMinExpire := now.Add(ttl).Add(cassandraTTLUpdateDelay)
-			wantMaxExpire := now.Add(ttl).Add(updateDelay)
-
-			if realStore.id2expiration[id].After(wantMaxExpire) || realStore.id2expiration[id].Before(wantMinExpire) {
-				t.Errorf(
-					"id2expiration[%d] = %v, want between %v and %v",
-					id,
-					realStore.id2expiration[id],
-					wantMinExpire,
-					wantMaxExpire,
-				)
-			}
-		}
 	}
 
 	unknownError := errors.New("this error isn't expected by code")
@@ -6352,8 +6390,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 			shouldFail := newRandomShouldFail(run.rndSeed, run.err)
 
 			realStore := &mockStore{}
-			store := newFailingStore(realStore)
-			store.SetShouldFail(shouldFail)
+			store := newFailingStore(realStore, shouldFail)
 
 			index, err := initialize(
 				context.Background(),
@@ -6410,13 +6447,33 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					t.Fatalf("on batch %d: %v", batchIdx, err)
 				}
 
-				verifyStore(t, realStore, batch.metrics, batch.now, defaultTTL)
+				err = realStore.verifyStore(
+					t,
+					batch.now,
+					mapsToLabelsList(batch.metrics),
+					sameExpirations(len(batch.metrics),
+						batch.now.Add(defaultTTL)),
+					true,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-				if err := executeRunOnce(t, batch.now, index, 2000, nextNow); err != nil {
+				if err := executeRunOnce(batch.now, index, 2000, nextNow); err != nil {
 					t.Fatalf("on batch %d: %v", batchIdx, err)
 				}
 
-				verifyStore(t, realStore, batch.metrics, batch.now, defaultTTL)
+				err = realStore.verifyStore(
+					t,
+					batch.now,
+					mapsToLabelsList(batch.metrics),
+					sameExpirations(len(batch.metrics),
+						batch.now.Add(defaultTTL)),
+					true,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
 
 				shouldFail.SetRate(0, 0)
 
@@ -6462,4 +6519,402 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 			}
 		})
 	}
+}
+
+// Test_cluster_expiration_and_error will tests multiple SquirrelDB with expiration AND error.
+func Test_cluster_expiration_and_error(t *testing.T) {
+	defaultTTL := 10 * 24 * time.Hour
+	baseTime := time.Date(2019, 9, 1, 0, 0, 0, 0, time.UTC)
+
+	runs := []struct {
+		name                string
+		node1FailRateBefore float64
+		node1FfailRateAfter float64
+		node2FailRateBefore float64
+		node2FfailRateAfter float64
+		err                 error
+		rndSeed             int64
+	}{
+		{
+			name:                "no-error",
+			node1FailRateBefore: 0,
+			node1FfailRateAfter: 0,
+			node2FailRateBefore: 0,
+			node2FfailRateAfter: 0,
+			err:                 nil,
+		},
+		{
+			name:                "before-rnd",
+			node1FailRateBefore: 0.1,
+			node1FfailRateAfter: 0,
+			node2FailRateBefore: 0.1,
+			node2FfailRateAfter: 0,
+			err:                 gocql.ErrTimeoutNoResponse,
+			rndSeed:             rand.Int63(),
+		},
+		{
+			name:                "after-rnd",
+			node1FailRateBefore: 0,
+			node1FfailRateAfter: 0.1,
+			node2FailRateBefore: 0,
+			node2FfailRateAfter: 0.1,
+			err:                 gocql.ErrTimeoutNoResponse,
+			rndSeed:             rand.Int63(),
+		},
+		{
+			name:                "node1-fail",
+			node1FailRateBefore: 0.03,
+			node1FfailRateAfter: 0.01,
+			node2FailRateBefore: 0,
+			node2FfailRateAfter: 0,
+			err:                 gocql.ErrTimeoutNoResponse,
+			rndSeed:             2019,
+		},
+		{
+			name:                "node2-fail",
+			node1FailRateBefore: 0,
+			node1FfailRateAfter: 0,
+			node2FailRateBefore: 0.04,
+			node2FfailRateAfter: 0.01,
+			err:                 gocql.ErrTimeoutNoResponse,
+			rndSeed:             2019,
+		},
+	}
+
+	for _, run := range runs {
+		run := run
+
+		t.Run(run.name, func(t *testing.T) {
+			expectedMetrics := make(map[string]metricLabelsExpiration)
+			realStore := &mockStore{}
+			lock := &mockLockFactory{}
+			states := &mockState{}
+
+			rnd := rand.New(rand.NewSource(run.rndSeed))
+
+			shouldFail1 := newRandomShouldFail(rnd.Int63(), run.err)
+			shouldFail2 := newRandomShouldFail(rnd.Int63(), run.err)
+
+			index1, err := initialize(
+				context.Background(),
+				newFailingStore(realStore, shouldFail1),
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				log.With().Str("component", "index2").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			index2, err := initialize(
+				context.Background(),
+				newFailingStore(realStore, shouldFail2),
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				log.With().Str("component", "index2").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			indexes := []*CassandraIndex{index1, index2}
+
+			var metricToWrite []labels.Labels
+
+			currentTime := baseTime
+			step := 18 * time.Hour
+			for currentTime.Before(baseTime.Add(22 * 24 * time.Hour)) {
+				// Each 18 hours, write some metrics:
+				// We will have both brand new metrics and few reused from previous run.
+				// In total metricsNew + metricsReuse metrics will be wrote (except very first run).
+				// This list is split in 3 part: common, unique to node 1 and unique to node 2.
+				currentTime = currentTime.Add(18 * time.Hour)
+
+				// To speed-up test, do a just after 7 days (one shard time)
+				if currentTime.After(baseTime.Add(postingShardSize)) &&
+					currentTime.Before(baseTime.Add(postingShardSize).Add(step)) {
+					currentTime = currentTime.Add(12 * 24 * time.Hour)
+				}
+
+				metricToWrite, expectedMetrics = clusterDoOneBatch(
+					t,
+					currentTime,
+					rnd,
+					defaultTTL,
+					metricToWrite,
+					expectedMetrics,
+					indexes,
+				)
+
+				allExpectedLabels := make([]labels.Labels, 0, len(expectedMetrics))
+				allExpectedExpirations := make([]time.Time, 0, len(expectedMetrics))
+
+				for _, metric := range expectedMetrics {
+					allExpectedLabels = append(allExpectedLabels, metric.labels)
+					allExpectedExpirations = append(allExpectedExpirations, metric.Expiration)
+				}
+
+				err = realStore.verifyStore(
+					t,
+					currentTime,
+					allExpectedLabels,
+					allExpectedExpirations,
+					false, // expiration are likely to not be applied, because RunOnce isn't retried until no failure.
+				)
+				if err != nil {
+					t.Fatalf("at %s: %v", currentTime, err)
+				}
+			}
+
+			if err := clusterCheckSearch(context.Background(), t, currentTime, index1, realStore); err != nil {
+				t.Error(err)
+			}
+
+			if err := clusterCheckSearch(context.Background(), t, currentTime, index2, realStore); err != nil {
+				t.Error(err)
+			}
+
+			allExpectedLabels := make([]labels.Labels, 0, len(expectedMetrics))
+			allExpectedExpirations := make([]time.Time, 0, len(expectedMetrics))
+
+			for _, metric := range expectedMetrics {
+				allExpectedLabels = append(allExpectedLabels, metric.labels)
+				allExpectedExpirations = append(allExpectedExpirations, metric.Expiration)
+			}
+
+			err = realStore.verifyStore(
+				t,
+				currentTime,
+				allExpectedLabels,
+				allExpectedExpirations,
+				false, // expiration are likely to not be applied, because RunOnce isn't retried until no failure.
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			group, _ := errgroup.WithContext(context.Background())
+
+			for _, index := range indexes {
+				index := index
+
+				group.Go(func() error {
+					return executeRunOnce(currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
+				})
+			}
+
+			if err := group.Wait(); err != nil {
+				t.Fatal(err)
+			}
+
+			err = realStore.verifyStore(
+				t,
+				currentTime,
+				allExpectedLabels,
+				allExpectedExpirations,
+				true,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			buffer := bytes.NewBuffer(nil)
+
+			hadError, err := index1.verify(
+				context.Background(),
+				currentTime,
+				buffer,
+				false,
+				false,
+			)
+			if err != nil {
+				t.Error(err)
+			}
+
+			if hadError {
+				t.Errorf("Verify had error, message=%s", buffer.String())
+			}
+		})
+	}
+}
+
+type metricLabelsExpiration struct {
+	Expiration time.Time
+	labels     labels.Labels
+}
+
+func clusterDoOneBatch(t *testing.T,
+	currentTime time.Time,
+	rnd *rand.Rand,
+	defaultTTL time.Duration,
+	oldMetricToWrite []labels.Labels,
+	expectedMetrics map[string]metricLabelsExpiration,
+	indexes []*CassandraIndex,
+) ([]labels.Labels, map[string]metricLabelsExpiration) {
+	t.Helper()
+
+	const (
+		retryCount    = 10
+		metricsReuse  = 20
+		metricsCommon = 10
+		metricsNew    = 30
+	)
+
+	var rndLock sync.Mutex
+
+	metricToWrite := make([]labels.Labels, 0, metricsReuse+metricsNew)
+
+	if len(oldMetricToWrite) > 0 {
+		indices := rnd.Perm(len(oldMetricToWrite))
+		for count, idx := range indices {
+			if count < len(oldMetricToWrite) {
+				metricToWrite = append(metricToWrite, oldMetricToWrite[idx])
+			}
+		}
+	}
+
+	for n := 0; n < metricsNew; n++ {
+		lbls := map[string]string{
+			"__name__": "filler",
+			"id":       strconv.FormatInt(int64(n), 10),
+			"ts":       currentTime.Format("2006-01-02T15"),
+		}
+
+		if rnd.Float64() < 0.5 {
+			lbls["random_present"] = "1"
+		}
+
+		if rnd.Float64() < 0.5 {
+			lbls[fmt.Sprintf("lbl_name_%d", n)] = "name_is_randomized"
+		}
+
+		if rnd.Float64() < 0.5 {
+			lbls[fmt.Sprintf("lbl2_name_%d", n)] = fmt.Sprintf("name_value_rnd_%d", rnd.Int63())
+		}
+
+		metricToWrite = append(metricToWrite, labels.FromMap(lbls))
+	}
+
+	commonMetrics := metricToWrite[:len(metricToWrite)/3]
+	nodeSpecificMetrics := metricToWrite[len(commonMetrics):]
+
+	group, ctx := errgroup.WithContext(context.Background())
+
+	for workerID, index := range indexes {
+		workerID := workerID
+		index := index
+
+		group.Go(func() error {
+			fullList := append([]labels.Labels{}, commonMetrics...)
+
+			perNodeCount := len(nodeSpecificMetrics) / len(indexes)
+			if workerID == len(indexes)-1 {
+				fullList = append(fullList, nodeSpecificMetrics[workerID*perNodeCount:]...)
+			} else {
+				fullList = append(fullList, nodeSpecificMetrics[workerID*perNodeCount:(workerID+1)*perNodeCount]...)
+			}
+
+			rndLock.Lock()
+
+			rnd.Shuffle(len(fullList), func(i, j int) {
+				fullList[i], fullList[j] = fullList[j], fullList[i]
+			})
+
+			rndLock.Unlock()
+
+			var err error
+
+			for i := 0; i < retryCount; i++ {
+				if i == retryCount-1 {
+					ctx = contextSkipError(ctx)
+				}
+
+				_, _, err = index.lookupIDs(ctx, toLookupRequests(fullList, currentTime), currentTime)
+				if err == nil {
+					break
+				}
+			}
+
+			if err != nil {
+				return fmt.Errorf("worker %d: %w", workerID, err)
+			}
+
+			index.RunOnce(ctx, currentTime)
+
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		t.Fatalf("at time %s: %v", currentTime, err)
+	}
+
+	for _, lbls := range metricToWrite {
+		lblsString := lbls.String()
+
+		expectedMetrics[lblsString] = metricLabelsExpiration{
+			Expiration: currentTime.Add(defaultTTL),
+			labels:     lbls,
+		}
+	}
+
+	return metricToWrite, expectedMetrics
+}
+
+func clusterCheckSearch(
+	ctx context.Context,
+	t *testing.T,
+	now time.Time,
+	index *CassandraIndex,
+	realStore *mockStore,
+) error {
+	t.Helper()
+
+	ctx = contextSkipError(ctx)
+
+	matchers := make([]*labels.Matcher, 0, 2)
+	matchers = append(matchers, labels.MustNewMatcher(
+		labels.MatchEqual,
+		"__name__",
+		"filler",
+	))
+	matchers = append(matchers, labels.MustNewMatcher(
+		labels.MatchEqual,
+		"id",
+		"1",
+	))
+
+	result, err := index.Search(ctx, now, now, matchers)
+	if err != nil {
+		return err
+	}
+
+	for result.Next() {
+		item := result.At()
+
+		if !matchers[0].Matches(item.Labels.Get("__name__")) {
+			return fmt.Errorf("metric ID=%d: %s shouldn't be in Search()", item.ID, item.Labels)
+		}
+
+		if !matchers[1].Matches(item.Labels.Get("id")) {
+			return fmt.Errorf("metric ID=%d: %s shouldn't be in Search()", item.ID, item.Labels)
+		}
+
+		realLabels := realStore.id2labels[item.ID]
+		if !labels.Equal(realLabels, item.Labels) {
+			return fmt.Errorf("labels = %s, want %s", item.Labels, realLabels)
+		}
+	}
+
+	return nil
 }
