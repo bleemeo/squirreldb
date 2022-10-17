@@ -21,6 +21,9 @@ while [ ! -z "$1" ]; do
     "nostop")
         WITH_NOSTOP=1
         ;;
+    "shell")
+        WITH_SHELL=1
+        ;;
     "scylladb")
         WITH_SCYLLADB=1
         ;;
@@ -30,6 +33,7 @@ while [ ! -z "$1" ]; do
         echo "    long: Run longer test"
         echo "    race: Run test with -race"
         echo "  nostop: Do not stop Cassandra & Redis at the end"
+        echo "   shell: Open a shell instead of running tests. It will start Redis & Cassandra"
         echo "scylladb: Use ScyllaDB instead of Cassandra"
 
         exit 1
@@ -93,6 +97,18 @@ fi
 
 export GORACE=halt_on_error=1
 
+if [ "${WITH_SHELL}" = "1" ]; then
+
+docker run $docker_network --rm -ti -e HOME=/go/pkg \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} bash
+else
+
 echo "== waiting stores"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
@@ -150,6 +166,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
 
 echo
 echo "== Success =="
+
+fi
 
 if [ ! "${WITH_NOSTOP}" = "1" ]; then
     if [ "${WITH_CLUSTER}" = "1" ]; then
