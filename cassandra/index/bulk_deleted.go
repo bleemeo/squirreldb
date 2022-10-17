@@ -144,6 +144,16 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return err
 	}
 
+	var l sync.Mutex
+
+	shardsListUpdate := postingUpdateRequest{
+		Shard: globalShardNumber,
+		Label: labels.Label{
+			Name:  existingShardsLabel,
+			Value: existingShardsLabel,
+		},
+	}
+
 	shardedUpdates := make([]postingUpdateRequest, 0, len(d.unshardedPostingUpdates)*int(shards.Count()))
 	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
 	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
@@ -153,6 +163,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
+			// The shard exit in existingShardsLabel but is fully empty.
+			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
+			// deleting it from existingShardsLabel.
+			// Cleanup entry in existingShardsLabel
+			shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(shard))
+
 			continue
 		}
 
@@ -253,16 +269,6 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 
 	if ctx.Err() != nil {
 		return ctx.Err()
-	}
-
-	var l sync.Mutex
-
-	shardsListUpdate := postingUpdateRequest{
-		Shard: globalShardNumber,
-		Label: labels.Label{
-			Name:  existingShardsLabel,
-			Value: existingShardsLabel,
-		},
 	}
 
 	err = d.c.concurrentTasks(
