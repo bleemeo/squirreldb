@@ -340,7 +340,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,
 	})
-	if err != nil && !errors.Is(err, errBitmapEmpty) {
+	if err != nil && !errors.Is(err, errBitmapEmpty) && !errors.Is(err, gocql.ErrNotFound) {
 		return err
 	}
 
