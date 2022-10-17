@@ -63,10 +63,11 @@ type MetricReadWriter interface {
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
-	Config          *config.Config
-	ExistingCluster types.Cluster
-	MetricRegistry  prometheus.Registerer
-	Logger          zerolog.Logger
+	Config                     *config.Config
+	ExistingCluster            types.Cluster
+	MetricRegistry             prometheus.Registerer
+	Logger                     zerolog.Logger
+	DebugDisableBackgroundTask bool
 
 	cassandraSession         *gocql.Session
 	lockFactory              LockFactory
@@ -89,17 +90,21 @@ var errBadConfig = errors.New("configuration validation failed")
 // is ready.
 // On error, we can retry calling Start() which will resume starting SquirrelDB.
 func (s *SquirrelDB) Start(ctx context.Context) error {
+	if s.DebugDisableBackgroundTask {
+		s.Logger.Warn().Msg("DebugDisableBackgroundTask is enabled. Don't use this on production.")
+	}
+
 	err := s.Init()
 	if err != nil {
 		return err
 	}
 
-	_, err = s.Index(ctx, true)
+	_, err = s.Index(ctx, !s.DebugDisableBackgroundTask)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.TSDB(ctx, true)
+	_, err = s.TSDB(ctx, !s.DebugDisableBackgroundTask)
 	if err != nil {
 		return err
 	}

@@ -166,6 +166,33 @@ func (i *indexWrapper) LabelNames(
 	return names, nil
 }
 
+// InfoGlobal implements the IndexDumper interface used by the API.
+func (i *indexWrapper) InfoGlobal(ctx context.Context, w io.Writer) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.InfoGlobal(ctx, w)
+	}
+
+	return errNotImplemented
+}
+
+// InfoByID implements the IndexDumper interface used by the API.
+func (i *indexWrapper) InfoByID(ctx context.Context, w io.Writer, id types.MetricID, verbose bool) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.InfoByID(ctx, w, id, verbose)
+	}
+
+	return errNotImplemented
+}
+
+// InfoByLabels implements the IndexDumper interface used by the API.
+func (i *indexWrapper) InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.InfoByLabels(ctx, w, lbls)
+	}
+
+	return errNotImplemented
+}
+
 // Verify implements the IndexVerifier interface used by the API.
 func (i *indexWrapper) Verify(
 	ctx context.Context,
@@ -181,9 +208,9 @@ func (i *indexWrapper) Verify(
 }
 
 // Dump implements the IndexDumper interface used by the API.
-func (i *indexWrapper) Dump(ctx context.Context, w io.Writer, withExpiration bool) error {
+func (i *indexWrapper) Dump(ctx context.Context, w io.Writer) error {
 	if dumper, ok := i.index.(types.IndexDumper); ok {
-		return dumper.Dump(ctx, w, withExpiration)
+		return dumper.Dump(ctx, w)
 	}
 
 	return errNotImplemented
@@ -193,6 +220,28 @@ func (i *indexWrapper) Dump(ctx context.Context, w io.Writer, withExpiration boo
 func (i *indexWrapper) DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error {
 	if dumper, ok := i.index.(types.IndexDumper); ok {
 		return dumper.DumpByExpirationDate(ctx, w, expirationDate)
+	}
+
+	return errNotImplemented
+}
+
+func (i *indexWrapper) DumpByShard(ctx context.Context, w io.Writer, shard time.Time) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.DumpByShard(ctx, w, shard)
+	}
+
+	return errNotImplemented
+}
+
+func (i *indexWrapper) DumpByPosting(
+	ctx context.Context,
+	w io.Writer,
+	shard time.Time,
+	name string,
+	value string,
+) error {
+	if dumper, ok := i.index.(types.IndexDumper); ok {
+		return dumper.DumpByPosting(ctx, w, shard, name, value)
 	}
 
 	return errNotImplemented

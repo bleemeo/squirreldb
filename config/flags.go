@@ -21,6 +21,12 @@ var flags = []flag{
 		usage: "Show build-info and exit",
 	},
 	{
+		name:  "debug-disable-background-task",
+		short: "",
+		value: false,
+		usage: "Debug option that disable (some) background tasks like index metric expiration",
+	},
+	{
 		name:  "cassandra.addresses",
 		short: "",
 		value: defaults["cassandra.addresses"],

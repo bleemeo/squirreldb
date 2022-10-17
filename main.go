@@ -73,8 +73,9 @@ func main() {
 	defer logger.ProcessPanic()
 
 	squirreldb := &daemon.SquirrelDB{
-		Config: cfg,
-		Logger: log.With().Str("component", "daemon").Logger(),
+		Config:                     cfg,
+		Logger:                     log.With().Str("component", "daemon").Logger(),
+		DebugDisableBackgroundTask: cfg.Bool("debug-disable-background-task"),
 	}
 
 	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", version, commit)
