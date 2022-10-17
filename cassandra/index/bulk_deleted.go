@@ -158,8 +158,6 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
 	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
 
-	// shardsNeedingUpdate := make([]int32, 0, int(shards.Count()))
-
 	for _, shard := range shards.Slice() {
 		shard := int32(shard)
 
