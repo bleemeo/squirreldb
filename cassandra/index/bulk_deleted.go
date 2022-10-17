@@ -113,7 +113,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			for _, sortedLabelsString := range d.deleteLabels {
 				sortedLabelsString := sortedLabelsString
 				task := func() error {
-					return d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+					err := d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+						return err
+					}
+
+					return nil
 				}
 				select {
 				case work <- task:
@@ -309,7 +314,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			for _, id := range d.deleteIDs {
 				id := types.MetricID(id)
 				task := func() error {
-					return d.c.store.DeleteID2Labels(ctx, id)
+					err := d.c.store.DeleteID2Labels(ctx, id)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+						return err
+					}
+
+					return nil
 				}
 				select {
 				case work <- task:
