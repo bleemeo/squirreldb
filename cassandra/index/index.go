@@ -2285,7 +2285,7 @@ func (c *CassandraIndex) createMetrics(
 			return nil, errors.New("too many metrics registered, unable to find a free ID")
 		}
 
-		_, err = allPosting.Add(uint64(newID))
+		_, err = allPosting.AddN(uint64(newID))
 		if err != nil {
 			return nil, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -3165,7 +3165,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 			return false, fmt.Errorf("unable to perform expiration check of metrics: %w", err)
 		}
 
-		_, err = bitmap.Remove(results...)
+		_, err = bitmap.RemoveN(results...)
 		if err != nil {
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
@@ -3355,12 +3355,28 @@ func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateReq
 		return nil, err
 	}
 
-	_, err = bitmap.Add(job.AddIDs...)
+	// AddN / removeN will mutage the list. This list can't be mutated (it is shared by multiple req by bulk deleted,
+	// the slice is reused for other update...). It safest is to always copy it here.
+	var bufferIDs []uint64
+
+	if len(job.AddIDs) > len(job.RemoveIDs) {
+		bufferIDs = make([]uint64, 0, len(job.AddIDs))
+	} else {
+		bufferIDs = make([]uint64, 0, len(job.RemoveIDs))
+	}
+
+	bufferIDs = bufferIDs[:len(job.AddIDs)]
+	copy(bufferIDs, job.AddIDs)
+
+	_, err = bitmap.AddN(bufferIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("update bitmap: %w", err)
 	}
 
-	_, err = bitmap.Remove(job.RemoveIDs...)
+	bufferIDs = bufferIDs[:len(job.RemoveIDs)]
+	copy(bufferIDs, job.RemoveIDs)
+
+	_, err = bitmap.RemoveN(bufferIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("update bitmap: %w", err)
 	}

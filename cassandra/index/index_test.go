@@ -3718,7 +3718,7 @@ func Test_PilosaBugs2(t *testing.T) {
 	}
 
 	// Alternative to Flip
-	if _, err := b2.Add(1, 2, 3); err != nil {
+	if _, err := b2.AddN(1, 2, 3); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3727,11 +3727,11 @@ func Test_PilosaBugs2(t *testing.T) {
 
 		_ = tmp.Xor(bitmap)
 
-		if _, err := bitmap.Add(5); err != nil {
+		if _, err := bitmap.AddN(5); err != nil {
 			t.Fatal(err)
 		}
 
-		if _, err := bitmap.Add(6); err != nil {
+		if _, err := bitmap.AddN(6); err != nil {
 			t.Fatal(err)
 		}
 
@@ -3744,7 +3744,7 @@ func Test_PilosaBugs2(t *testing.T) {
 func Test_PilosaSerialization(t *testing.T) {
 	want := roaring.NewBTreeBitmap()
 	want = want.Flip(1, 36183)
-	_, _ = want.Remove(31436, 31437)
+	_, _ = want.RemoveN(31436, 31437)
 
 	/*
 		use the following to get gotBinary value
@@ -3800,15 +3800,15 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	compact = compact.Flip(1, 5000)
 
 	spare := compact.Clone()
-	if _, err := spare.Remove(42); err != nil {
+	if _, err := spare.RemoveN(42); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := spare.Remove(1337); err != nil {
+	if _, err := spare.RemoveN(1337); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := spare.Remove(44); err != nil {
+	if _, err := spare.RemoveN(44); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3816,15 +3816,15 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	compactLarge = compactLarge.Flip(1, 1e5)
 
 	spareLarge := compactLarge.Clone()
-	if _, err := spareLarge.Remove(65539); err != nil {
+	if _, err := spareLarge.RemoveN(65539); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := spareLarge.Remove(65540); err != nil {
+	if _, err := spareLarge.RemoveN(65540); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := spareLarge.Remove(70000); err != nil {
+	if _, err := spareLarge.RemoveN(70000); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3838,7 +3838,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	// startAndEnd = startAndEnd.Flip(math.MaxUint64 - 1e4, math.MaxUint64)
 	// Do Add() instead
 	for n := uint64(math.MaxUint64 - 1e4); true; n++ {
-		if _, err := startAndEnd.Add(n); err != nil {
+		if _, err := startAndEnd.AddN(n); err != nil {
 			t.Fatal(err)
 		}
 
@@ -3848,17 +3848,17 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	}
 
 	freeAtSplit1 := compactLarge.Clone()
-	if _, err := freeAtSplit1.Remove(50000); err != nil {
+	if _, err := freeAtSplit1.RemoveN(50000); err != nil {
 		t.Fatal(err)
 	}
 
 	freeAtSplit2 := compactLarge.Clone()
-	if _, err := freeAtSplit2.Remove(50001); err != nil {
+	if _, err := freeAtSplit2.RemoveN(50001); err != nil {
 		t.Fatal(err)
 	}
 
 	freeAtSplit3 := compactLarge.Clone()
-	if _, err := freeAtSplit3.Remove(49999); err != nil {
+	if _, err := freeAtSplit3.RemoveN(49999); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3867,7 +3867,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	// This is actually a bug in pilosa :(
 	bug1 := roaring.NewBTreeBitmap()
 	bug1 = bug1.Flip(1, 36183)
-	_, _ = bug1.Remove(31436, 31437)
+	_, _ = bug1.RemoveN(31436, 31437)
 	bug1.Optimize()
 
 	bug2, err := loadBitmap("testdata/large.hex")
@@ -4011,7 +4011,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 
 		holdsInt := rnd.Perm(1e6)[:holdCount]
 		for _, v := range holdsInt {
-			if _, err := bitmap.Remove(uint64(v)); err != nil {
+			if _, err := bitmap.RemoveN(uint64(v)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -4113,7 +4113,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 						t.Errorf("newID = %d isn't free", newID)
 					}
 
-					_, err := allPosting.Add(newID)
+					_, err := allPosting.AddN(newID)
 					if err != nil {
 						t.Error(err)
 					}
@@ -4156,15 +4156,15 @@ func Benchmark_freeFreeID(b *testing.B) {
 
 	spare := compact.Clone()
 
-	if _, err := spare.Remove(42); err != nil {
+	if _, err := spare.RemoveN(42); err != nil {
 		b.Fatal(err)
 	}
 
-	if _, err := spare.Remove(1337); err != nil {
+	if _, err := spare.RemoveN(1337); err != nil {
 		b.Fatal(err)
 	}
 
-	if _, err := spare.Remove(44); err != nil {
+	if _, err := spare.RemoveN(44); err != nil {
 		b.Fatal(err)
 	}
 
@@ -4173,15 +4173,15 @@ func Benchmark_freeFreeID(b *testing.B) {
 
 	spareLarge := compactLarge.Clone()
 
-	if _, err := spareLarge.Remove(65539); err != nil {
+	if _, err := spareLarge.RemoveN(65539); err != nil {
 		b.Fatal(err)
 	}
 
-	if _, err := spareLarge.Remove(65540); err != nil {
+	if _, err := spareLarge.RemoveN(65540); err != nil {
 		b.Fatal(err)
 	}
 
-	if _, err := spareLarge.Remove(70000); err != nil {
+	if _, err := spareLarge.RemoveN(70000); err != nil {
 		b.Fatal(err)
 	}
 
@@ -4197,25 +4197,25 @@ func Benchmark_freeFreeID(b *testing.B) {
 
 	spareSuperLarge := compactSuperLarge.Clone()
 
-	if _, err := spareSuperLarge.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
+	if _, err := spareSuperLarge.AddN(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
 		b.Fatal(err)
 	}
 
 	spareSuperLarge.Flip(1e2, 1e3)
 
-	if _, err := spareSuperLarge.Remove(4242, 4299, 4288, 1e9, 2e9); err != nil {
+	if _, err := spareSuperLarge.RemoveN(4242, 4299, 4288, 1e9, 2e9); err != nil {
 		b.Fatal(err)
 	}
 
 	spareLargerest := compactLargerest.Clone()
 
-	if _, err := spareLargerest.Add(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
+	if _, err := spareLargerest.AddN(2e9, 3e9, 4e9, 1e10, 1e10+1, 1e13); err != nil {
 		b.Fatal(err)
 	}
 
 	spareLargerest.Flip(1e2, 1e3)
 
-	if _, err := spareLargerest.Remove(4242, 4299, 4288, 1e9, 2e9); err != nil {
+	if _, err := spareLargerest.RemoveN(4242, 4299, 4288, 1e9, 2e9); err != nil {
 		b.Fatal(err)
 	}
 
@@ -4223,7 +4223,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	startAndEnd = startAndEnd.Flip(0, 1e4)
 
 	for n := uint64(math.MaxUint64); true; n++ {
-		_, err := startAndEnd.Add(n)
+		_, err := startAndEnd.AddN(n)
 		if err != nil {
 			b.Fatal(err)
 		}
