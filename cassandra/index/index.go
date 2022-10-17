@@ -3234,9 +3234,21 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		return fmt.Errorf("get expiration from store : %w", err)
 	}
 
+	allLabelsString := make([]string, 0, len(idToLabels))
+	for _, k := range idToLabels {
+		allLabelsString = append(allLabelsString, k.String())
+	}
+
+	labelsToID, err := c.selectLabelsList2ID(ctx, allLabelsString)
+	if err != nil {
+		return fmt.Errorf("get labels2id from store : %w", err)
+	}
+
 	for _, id := range metricIDs {
 		expire, ok := expires[id]
-		if !ok {
+
+		switch {
+		case !ok:
 			// This shouldn't happen. It means that metric were partially created.
 			// Cleanup this metric from all posting if ever it's present in this list.
 			c.metrics.ExpireGhostMetric.Inc()
@@ -3244,7 +3256,15 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			bulkDelete.PrepareDelete(id, nil, false)
 
 			continue
-		} else if expire.After(now) {
+		case labelsToID[idToLabels[id].String()] != id:
+			// This is another case of partial write.
+			// Once more, we need to cleanup the metric, but we must NOT delete it from labels2id.
+			c.metrics.ExpireGhostMetric.Inc()
+
+			bulkDelete.PrepareDelete(id, idToLabels[id], true)
+
+			continue
+		case expire.After(now):
 			expireDay := expire.Truncate(24 * time.Hour)
 
 			idx, ok := dayToExpireUpdates[expireDay]

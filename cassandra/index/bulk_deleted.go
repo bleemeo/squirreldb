@@ -29,7 +29,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 
 // PrepareDelete add a metric to be deleted. No read is performed at this point and no lock is required
 // sortedLabels may be nil if labels are unknown (so only ID is deleted from all postings).
-// Skipping labels2id is used by index verification & fix. It shouldn't be used in normal condition.
+// Skipping labels2id is used by index fix. It shouldn't be used in normal condition.
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
 	d.deleteIDs = append(d.deleteIDs, uint64(id))
 
