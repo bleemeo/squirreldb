@@ -5968,3 +5968,498 @@ func Test_timeForShard(t *testing.T) {
 		})
 	}
 }
+
+func executeRunOnce(t *testing.T, now time.Time, index *CassandraIndex, maxRunCount int, maxTime time.Time) error {
+	t.Helper()
+
+	previousLastProcessedDay, err := index.expirationLastProcessedDay()
+	if err != nil {
+		return err
+	}
+
+	currentNow := now
+	allWorkDone := false
+
+	ctx := context.Background()
+
+	// RunOnce does few actions that could fail is store is failing:
+	// * periodicRefreshIDInShard: error for this one will be ignored
+	// * applyExpirationUpdateRequests: we can check index.expirationUpdateRequests to check for completion
+	// * cassandraExpire: we can check expirationLastProcessedDay to check for completion
+	for runCount := 0; runCount < maxRunCount; runCount++ {
+		// If we are close to maxRunCount or maxTime, enable skipping errors
+		if runCount > maxRunCount*3/4 && !shouldSkipError(ctx) {
+			ctx = contextSkipError(ctx)
+		}
+
+		if maxTime.Sub(currentNow) < 300*time.Minute && !shouldSkipError(ctx) {
+			ctx = contextSkipError(ctx)
+		}
+
+		moreWore := index.RunOnce(ctx, currentNow)
+
+		if moreWore {
+			// when moreWork is true, run call to cassandraExpire isn't delayed
+			currentNow = currentNow.Add(backgroundCheckInterval)
+		} else {
+			// when moreWork is false, it's either due to an error or because all works are done.
+			// For the later case, we break the for-loop few lines below.
+			// For error case, cassandraExpire will be delayed by up to 15 minutes, so add 15 minutes to current time.
+			currentNow = currentNow.Add(15 * time.Minute)
+
+			lastProcessedDay, err := index.expirationLastProcessedDay()
+			if err != nil {
+				return err
+			}
+
+			// We finished our work if:
+			// * the expirationLastProcessedDay didn't changed
+			// * the expirationLastProcessedDay is close enough to now (we have some margin, because
+			//	 the real value depends on implemention).
+			// * expirationUpdateRequests are all processed.
+			if previousLastProcessedDay.Equal(lastProcessedDay) &&
+				lastProcessedDay.Add(48*time.Hour).After(now) &&
+				len(index.expirationUpdateRequests) == 0 {
+				allWorkDone = true
+
+				break
+			}
+
+			previousLastProcessedDay = lastProcessedDay
+		}
+
+		if currentNow.After(maxTime) {
+			return fmt.Errorf("RunOnce didn't completed it work before the max-time %s", maxTime)
+		}
+	}
+
+	if !allWorkDone {
+		return fmt.Errorf("RunOnce didn't completed it work after %d runs", maxRunCount)
+	}
+
+	return nil
+}
+
+// Test_store_errors try that in case of store errors, it will recovery and end in correct state.
+// In this test we will:
+//   - At t1 to t4: insert metrics (metrics1 to metrics4 respectively), run the expiration & the index verify
+//   - During each insert & expiration processing, the store have a failure rate of 10%. We retry the
+//     insert & expiration until it succeed.
+//   - We repeat the whole processed few times, since the failure are randomized.
+func Test_store_errors(t *testing.T) { //nolint:maintidx
+	defaultTTL := 365 * 24 * time.Hour
+	// updateDelay is the delay after which we are guaranteed to trigger an TTL update
+	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
+	defaultRetryCount := 50
+
+	t1 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t2 := t1.Add(updateDelay)
+	t3 := t2.Add(postingShardSize)
+	t4 := t3.Add(300 * 24 * time.Hour)
+	t5 := t4.Add(defaultTTL + 72*time.Hour)
+	metrics := []map[string]string{
+		{
+			"__name__": "up",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/home",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/srv",
+		},
+		{
+			"__name__": "cpu_used",
+		},
+	}
+	metrics2 := []map[string]string{
+		{
+			"__name__": "up",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/home",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/mnt",
+		},
+		{
+			"__name__": "cpu_used",
+		},
+	}
+	metrics3 := []map[string]string{
+		{
+			"__name__": "up",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/maison",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/mnt",
+		},
+		{
+			"__name__": "cpu_used",
+		},
+	}
+	metrics4 := []map[string]string{
+		{
+			"__name__": "up",
+		},
+		{
+			"__name__": "disk_free",
+			"item":     "/",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/maison",
+		},
+		{
+			"__name__": "disk_used",
+			"item":     "/mnt",
+		},
+		{
+			"__name__": "cpu_used",
+		},
+	}
+
+	verifyStore := func(
+		t *testing.T,
+		realStore *mockStore,
+		metrics []map[string]string,
+		now time.Time,
+		ttl time.Duration,
+	) {
+		t.Helper()
+
+		for _, metric := range metrics {
+			metricLabels := labels.FromMap(metric)
+			key := sortLabels(labels.FromMap(metric)).String()
+			id, ok := realStore.labels2id[key]
+
+			if !ok {
+				t.Fatalf("metric %s isn't in labels2id", key)
+			}
+
+			labelsInStore := realStore.id2labels[id]
+
+			if diff := cmp.Diff(metricLabels, labelsInStore); diff != "" {
+				t.Errorf("id2labels mismatch: (-want +got): %s", diff)
+			}
+
+			wantMinExpire := now.Add(ttl).Add(cassandraTTLUpdateDelay)
+			wantMaxExpire := now.Add(ttl).Add(updateDelay)
+
+			if realStore.id2expiration[id].After(wantMaxExpire) || realStore.id2expiration[id].Before(wantMinExpire) {
+				t.Errorf(
+					"id2expiration[%d] = %v, want between %v and %v",
+					id,
+					realStore.id2expiration[id],
+					wantMinExpire,
+					wantMaxExpire,
+				)
+			}
+		}
+	}
+
+	unknownError := errors.New("this error isn't expected by code")
+
+	runs := []struct {
+		name           string
+		failRateBefore float64
+		failRateAfter  float64
+		err            error
+		rndSeed        int64
+	}{
+		{
+			name:           "no error",
+			failRateBefore: 0,
+			failRateAfter:  0,
+			err:            nil,
+		},
+		{
+			name:           "before-1",
+			failRateBefore: 0.1,
+			failRateAfter:  0,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "before-2",
+			failRateBefore: 0.1,
+			failRateAfter:  0,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        8685443574379551565, // this seed was known to generate an error when all concurrent* variable are 1.
+		},
+		{
+			name:           "before-3",
+			failRateBefore: 0.1,
+			failRateAfter:  0,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        1184364543667845743, // this seed was known to generate an error when all concurrent* variable are 1.
+		},
+		{
+			name:           "before-4",
+			failRateBefore: 0.05,
+			failRateAfter:  0,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "before-rnd",
+			failRateBefore: 0.1,
+			failRateAfter:  0,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        rand.Int63(),
+		},
+		{
+			name:           "before-unknown-error",
+			failRateBefore: 0.1,
+			failRateAfter:  0,
+			err:            unknownError,
+			rndSeed:        42,
+		},
+		{
+			name:           "after-1",
+			failRateBefore: 0,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "after-2",
+			failRateBefore: 0,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        8685443574379551565, // this seed was known to generate an error when all concurrent* variable are 1.
+		},
+		{
+			name:           "after-3",
+			failRateBefore: 0,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        1184364543667845743, // this seed was known to generate an error when all concurrent* variable are 1.
+		},
+		{
+			name:           "after-4",
+			failRateBefore: 0,
+			failRateAfter:  0.05,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "after-rnd",
+			failRateBefore: 0,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        rand.Int63(),
+		},
+		{
+			name:           "after-unknown-error",
+			failRateBefore: 0,
+			failRateAfter:  0.1,
+			err:            unknownError,
+			rndSeed:        42,
+		},
+		{
+			name:           "both-1",
+			failRateBefore: 0.1,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        1184364543667845743, // this seed was known to generate an error when all concurrent* variable are 1.
+		},
+		{
+			name:           "both-2",
+			failRateBefore: 0.1,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "both-rnd",
+			failRateBefore: 0.1,
+			failRateAfter:  0.1,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        rand.Int63(),
+		},
+		{
+			name:           "both-lower-1",
+			failRateBefore: 0.05,
+			failRateAfter:  0.05,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "both-lower-2",
+			failRateBefore: 0.02,
+			failRateAfter:  0.02,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "both-lower-3",
+			failRateBefore: 0.01,
+			failRateAfter:  0.01,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+		{
+			name:           "both-lower-4",
+			failRateBefore: 0.005,
+			failRateAfter:  0.005,
+			err:            gocql.ErrTimeoutNoResponse,
+			rndSeed:        2015,
+		},
+	}
+
+	batches := []struct {
+		now     time.Time
+		metrics []map[string]string
+	}{
+		{t1, metrics},
+		{t2, metrics2},
+		{t3, metrics3},
+		{t4, metrics4},
+		{t5, nil},
+	}
+
+	for _, run := range runs {
+		run := run
+
+		t.Run(run.name, func(t *testing.T) {
+			verifyResults := make([]*bytes.Buffer, 0, len(batches))
+			verifyHadErrors := make([]bool, len(batches))
+
+			for range batches {
+				verifyResults = append(verifyResults, bytes.NewBuffer(nil))
+			}
+
+			shouldFail := newRandomShouldFail(run.rndSeed, run.err)
+
+			realStore := &mockStore{}
+			store := newFailingStore(realStore)
+			store.SetShouldFail(shouldFail)
+
+			index, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       &mockLockFactory{},
+					States:            &mockState{},
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				log.With().Str("component", "index").Logger(),
+			)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for batchIdx, batch := range batches {
+				var nextNow time.Time
+
+				if batchIdx+1 < len(batches) {
+					nextNow = batches[batchIdx+1].now
+				} else {
+					nextNow = batch.now.Add(365 * 24 * time.Hour)
+				}
+
+				labelsList := make([]labels.Labels, len(batch.metrics))
+				for i, m := range batch.metrics {
+					labelsList[i] = labelsMapToList(m, false)
+				}
+
+				shouldFail.SetRate(run.failRateBefore, run.failRateAfter)
+
+				for i := 0; i < defaultRetryCount; i++ {
+					ctx := context.Background()
+					if i == defaultRetryCount-1 {
+						ctx = contextSkipError(ctx)
+					}
+
+					_, _, err = index.lookupIDs(ctx, toLookupRequests(labelsList, batch.now), batch.now)
+					if err == nil {
+						break
+					}
+				}
+
+				if err != nil {
+					t.Fatalf("on batch %d: %v", batchIdx, err)
+				}
+
+				// Check in store that correct write happened
+				// Note: no error even if store still had 10% failure, because everything is in cache.
+				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, batch.now), batch.now)
+				if err != nil {
+					t.Fatalf("on batch %d: %v", batchIdx, err)
+				}
+
+				verifyStore(t, realStore, batch.metrics, batch.now, defaultTTL)
+
+				if err := executeRunOnce(t, batch.now, index, 2000, nextNow); err != nil {
+					t.Fatalf("on batch %d: %v", batchIdx, err)
+				}
+
+				verifyStore(t, realStore, batch.metrics, batch.now, defaultTTL)
+
+				shouldFail.SetRate(0, 0)
+
+				verifyHadErrors[batchIdx], err = index.verify(
+					context.Background(),
+					batch.now,
+					verifyResults[batchIdx],
+					false,
+					false,
+				)
+				if err != nil {
+					t.Error(err)
+				}
+
+				if batchIdx == len(batches)-1 && verifyHadErrors[batchIdx] {
+					for i := range verifyResults {
+						t.Errorf("batch %d, hadError=%v message=%s", i, verifyHadErrors[i], verifyResults[i].String())
+					}
+				}
+
+				if batchIdx == 4 { //nolint:nestif
+					// Ensure store is empty
+					if got := len(realStore.postings); got != 0 {
+						t.Errorf("len(postings) = %d, want 0", got)
+					}
+
+					if got := len(realStore.expiration); got != 0 {
+						t.Errorf("len(expiration) = %d, want 0", got)
+					}
+
+					if got := len(realStore.id2expiration); got != 0 {
+						t.Errorf("len(id2expiration) = %d, want 0", got)
+					}
+
+					if got := len(realStore.id2labels); got != 0 {
+						t.Errorf("len(id2labels) = %d, want 0", got)
+					}
+
+					if got := len(realStore.labels2id); got != 0 {
+						t.Errorf("len(labels2id) = %d, want 0", got)
+					}
+				}
+			}
+		})
+	}
+}

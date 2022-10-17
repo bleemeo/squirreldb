@@ -3088,6 +3088,23 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 	return c.existingShards, nil
 }
 
+func (c *CassandraIndex) expirationLastProcessedDay() (time.Time, error) {
+	var fromTimeStr string
+
+	_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unable to get last processed day for metrics expiration: %w", err)
+	}
+
+	if fromTimeStr != "" {
+		lastProcessedDay, _ := time.Parse(time.RFC3339, fromTimeStr)
+
+		return lastProcessedDay, nil
+	}
+
+	return time.Time{}, nil
+}
+
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bool, error) {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
@@ -3102,19 +3119,9 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		c.metrics.ExpireTotalSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	var lastProcessedDay time.Time
-
-	{
-		var fromTimeStr string
-
-		_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
-		if err != nil {
-			return false, fmt.Errorf("unable to get last processed day for metrics expiration: %w", err)
-		}
-
-		if fromTimeStr != "" {
-			lastProcessedDay, _ = time.Parse(time.RFC3339, fromTimeStr)
-		}
+	lastProcessedDay, err := c.expirationLastProcessedDay()
+	if err != nil {
+		return false, err
 	}
 
 	maxTime := now.Truncate(24 * time.Hour).Add(-24 * time.Hour)
