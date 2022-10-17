@@ -910,7 +910,7 @@ func (c *CassandraIndex) verify(
 	return hadIssue, ctx.Err()
 }
 
-// verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
+// verifyMissingShard search from now+3 weeks to 100 weeks before this points for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
 func (c *CassandraIndex) verifyMissingShard(
 	ctx context.Context,
@@ -953,6 +953,8 @@ func (c *CassandraIndex) verifyMissingShard(
 				}
 			}
 		}
+
+		current = current.Add(-postingShardSize)
 	}
 
 	slice := shards.Slice()
@@ -1378,6 +1380,47 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	}
 
 	labelNames[postinglabelName] = true
+
+	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	for iter.HasNext() {
+		labelValue, buffer := iter.Next()
+
+		if _, ok := labelNames[labelValue]; !ok {
+			hadIssue = true
+
+			fmt.Fprintf(
+				w,
+				"shard %s: postinglabelName has extra name=%s\n",
+				timeForShard(shard).Format(shardDateFormat),
+				labelValue,
+			)
+
+			if doFix {
+				lbl := labels.Label{
+					Name:  postinglabelName,
+					Value: labelValue,
+				}
+				tmp := roaring.NewBTreeBitmap()
+
+				err := tmp.UnmarshalBinary(buffer)
+				if err != nil {
+					return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
+				}
+
+				idx, ok := labelToIndex[lbl]
+				if !ok {
+					idx = len(updates)
+					updates = append(updates, postingUpdateRequest{
+						Label: lbl,
+						Shard: shard,
+					})
+					labelToIndex[lbl] = idx
+				}
+
+				updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, tmp.Slice()...)
+			}
+		}
+	}
 
 	for name := range labelNames {
 		if ctx.Err() != nil {
