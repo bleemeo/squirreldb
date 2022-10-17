@@ -394,7 +394,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 			for _, shard := range shards {
 				shard := int32(shard)
 				task := func() error {
-					tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+					tmp, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 					if err != nil {
 						return err
 					}
