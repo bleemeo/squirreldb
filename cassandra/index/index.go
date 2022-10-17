@@ -2885,9 +2885,20 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range expireUpdates {
-				req := req
+				// We need to create a copy of AddIDs/RemoveIDs, because expirationUpdate will mutate them
+				// (because AddN/RemoveN mutate them).
+				// We can't have mutation of them, because in case of C* error, we need to restore the initial state.
+				newReq := expirationUpdateRequest{
+					Day:       req.Day,
+					AddIDs:    make([]uint64, len(req.AddIDs)),
+					RemoveIDs: make([]uint64, len(req.RemoveIDs)),
+				}
+
+				copy(newReq.AddIDs, req.AddIDs)
+				copy(newReq.RemoveIDs, req.RemoveIDs)
+
 				task := func() error {
-					return c.expirationUpdate(ctx, req)
+					return c.expirationUpdate(ctx, newReq)
 				}
 				select {
 				case work <- task:
@@ -3410,13 +3421,16 @@ type expirationUpdateRequest struct {
 	RemoveIDs []uint64
 }
 
+// expirationUpdate apply an expirationUpdateRequest, which is a request to move metricID between day at which
+// they are expected to expire.
+// Be aware that job.AddIDs and job.RemoveIDs are mutated (do a copy if the slice is shared / reused after this call).
 func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpdateRequest) error {
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
 	if err != nil {
 		return err
 	}
 
-	_, err = bitmapExpiration.Add(job.AddIDs...)
+	_, err = bitmapExpiration.AddN(job.AddIDs...)
 	if err != nil {
 		return fmt.Errorf("update bitmap: %w", err)
 	}
@@ -3431,7 +3445,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 		c.deleteIDsFromCache(slice)
 	}
 
-	_, err = bitmapExpiration.Remove(job.RemoveIDs...)
+	_, err = bitmapExpiration.RemoveN(job.RemoveIDs...)
 	if err != nil {
 		return fmt.Errorf("update bitmap: %w", err)
 	}

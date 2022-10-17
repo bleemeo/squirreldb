@@ -95,13 +95,16 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return nil
 	}
 
+	idsCopy := make([]uint64, len(d.deleteIDs))
+	copy(idsCopy, d.deleteIDs)
+
 	// Delete metrics from cache *before* processing to Cassandra.
 	// Doing this ensure that if a write for a metric that in being delete will
 	// trigger the creation of a new metrics (which will wait for complet delete since we hold the lock).
 	// Note: in case of multiple SquirrelDB, this race-condition may still happen, but the only consequence
 	// is leaving an orphaned id2labels entry that will not be used and will eventually be purged when its
 	// expiration is reached.
-	d.c.deleteIDsFromCache(d.deleteIDs)
+	d.c.deleteIDsFromCache(idsCopy)
 
 	err := d.c.concurrentTasks(
 		ctx,
