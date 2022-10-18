@@ -4750,10 +4750,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Errorf("Index don't have the same IDs")
 	}
 
-	for index1.RunOnce(context.Background(), t5) {
+	if err := executeRunOnce(t5, index1, 1000, t6); err != nil {
+		t.Fatal(err)
 	}
 
-	for index2.RunOnce(context.Background(), t5) {
+	if err := executeRunOnce(t5, index2, 1000, t6); err != nil {
+		t.Fatal(err)
 	}
 
 	labelsList = []labels.Labels{
@@ -4784,7 +4786,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
 	}
 
-	for index1.RunOnce(context.Background(), t6) {
+	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
@@ -4797,7 +4800,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Fatal(err)
 	}
 
-	for index2.RunOnce(context.Background(), t6) {
+	if err := executeRunOnce(t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
