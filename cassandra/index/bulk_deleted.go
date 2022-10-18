@@ -157,6 +157,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 	shardedUpdates := make([]postingUpdateRequest, 0, len(d.unshardedPostingUpdates)*int(shards.Count()))
 	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
 	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
+	allDeleteIDs := roaring.NewBitmap(d.deleteIDs...)
 
 	for _, shard := range shards.Slice() {
 		shard := int32(shard)
@@ -169,6 +170,10 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			// Cleanup entry in existingShardsLabel
 			shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(shard))
 
+			continue
+		}
+
+		if allDeleteIDs.IntersectionCount(it) == 0 {
 			continue
 		}
 
