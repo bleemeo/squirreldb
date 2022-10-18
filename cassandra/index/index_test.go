@@ -4698,13 +4698,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	batchSize := 100
 	workerCount := 4
+	group, _ := errgroup.WithContext(context.Background())
 
 	for n := 0; n < workerCount; n++ {
 		n := n
 
-		t.Run(fmt.Sprintf("worker-%d", n), func(t *testing.T) {
-			t.Parallel()
-
+		group.Go(func() error {
 			index := index1
 
 			if n%2 == 1 {
@@ -4723,12 +4722,18 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
 				if err != nil {
-					t.Fatal(err)
+					return err
 				}
 
 				current = idxEnd
 			}
+
+			return nil
 		})
+	}
+
+	if err := group.Wait(); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
