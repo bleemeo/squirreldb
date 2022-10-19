@@ -29,7 +29,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 
 // PrepareDelete add a metric to be deleted. No read is performed at this point and no lock is required
 // sortedLabels may be nil if labels are unknown (so only ID is deleted from all postings).
-// Skipping labels2id is used by index verification & fix. It shouldn't be used in normal condition.
+// Skipping labels2id is used by index fix. It shouldn't be used in normal condition.
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
 	d.deleteIDs = append(d.deleteIDs, uint64(id))
 
@@ -95,13 +95,16 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return nil
 	}
 
+	idsCopy := make([]uint64, len(d.deleteIDs))
+	copy(idsCopy, d.deleteIDs)
+
 	// Delete metrics from cache *before* processing to Cassandra.
 	// Doing this ensure that if a write for a metric that in being delete will
 	// trigger the creation of a new metrics (which will wait for complet delete since we hold the lock).
 	// Note: in case of multiple SquirrelDB, this race-condition may still happen, but the only consequence
 	// is leaving an orphaned id2labels entry that will not be used and will eventually be purged when its
 	// expiration is reached.
-	d.c.deleteIDsFromCache(d.deleteIDs)
+	d.c.deleteIDsFromCache(idsCopy)
 
 	err := d.c.concurrentTasks(
 		ctx,
@@ -110,7 +113,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			for _, sortedLabelsString := range d.deleteLabels {
 				sortedLabelsString := sortedLabelsString
 				task := func() error {
-					return d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+					err := d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+						return err
+					}
+
+					return nil
 				}
 				select {
 				case work <- task:
@@ -136,6 +144,16 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return err
 	}
 
+	var l sync.Mutex
+
+	shardsListUpdate := postingUpdateRequest{
+		Shard: globalShardNumber,
+		Label: labels.Label{
+			Name:  existingShardsLabel,
+			Value: existingShardsLabel,
+		},
+	}
+
 	shardedUpdates := make([]postingUpdateRequest, 0, len(d.unshardedPostingUpdates)*int(shards.Count()))
 	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
 	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
@@ -145,6 +163,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
+			// The shard exit in existingShardsLabel but is fully empty.
+			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
+			// deleting it from existingShardsLabel.
+			// Cleanup entry in existingShardsLabel
+			shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(shard))
+
 			continue
 		}
 
@@ -247,16 +271,6 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return ctx.Err()
 	}
 
-	var l sync.Mutex
-
-	shardsListUpdate := postingUpdateRequest{
-		Shard: globalShardNumber,
-		Label: labels.Label{
-			Name:  existingShardsLabel,
-			Value: existingShardsLabel,
-		},
-	}
-
 	err = d.c.concurrentTasks(
 		ctx,
 		concurrentInsert,
@@ -306,7 +320,12 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			for _, id := range d.deleteIDs {
 				id := types.MetricID(id)
 				task := func() error {
-					return d.c.store.DeleteID2Labels(ctx, id)
+					err := d.c.store.DeleteID2Labels(ctx, id)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+						return err
+					}
+
+					return nil
 				}
 				select {
 				case work <- task:
@@ -327,7 +346,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,
 	})
-	if err != nil && !errors.Is(err, errBitmapEmpty) {
+	if err != nil && !errors.Is(err, errBitmapEmpty) && !errors.Is(err, gocql.ErrNotFound) {
 		return err
 	}
 

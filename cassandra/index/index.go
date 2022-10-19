@@ -394,7 +394,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 			for _, shard := range shards {
 				shard := int32(shard)
 				task := func() error {
-					tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+					tmp, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 					if err != nil {
 						return err
 					}
@@ -910,7 +910,7 @@ func (c *CassandraIndex) verify(
 	return hadIssue, ctx.Err()
 }
 
-// verifyMissingShard search last 100 shards from now+3 shards-size for shard not present in existingShards.
+// verifyMissingShard search from now+3 weeks to 100 weeks before this points for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
 func (c *CassandraIndex) verifyMissingShard(
 	ctx context.Context,
@@ -953,6 +953,8 @@ func (c *CassandraIndex) verifyMissingShard(
 				}
 			}
 		}
+
+		current = current.Add(-postingShardSize)
 	}
 
 	slice := shards.Slice()
@@ -1378,6 +1380,47 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	}
 
 	labelNames[postinglabelName] = true
+
+	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	for iter.HasNext() {
+		labelValue, buffer := iter.Next()
+
+		if _, ok := labelNames[labelValue]; !ok { //nolint:nestif
+			hadIssue = true
+
+			fmt.Fprintf(
+				w,
+				"shard %s: postinglabelName has extra name=%s\n",
+				timeForShard(shard).Format(shardDateFormat),
+				labelValue,
+			)
+
+			if doFix {
+				lbl := labels.Label{
+					Name:  postinglabelName,
+					Value: labelValue,
+				}
+				tmp := roaring.NewBTreeBitmap()
+
+				err := tmp.UnmarshalBinary(buffer)
+				if err != nil {
+					return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
+				}
+
+				idx, ok := labelToIndex[lbl]
+				if !ok {
+					idx = len(updates)
+					updates = append(updates, postingUpdateRequest{
+						Label: lbl,
+						Shard: shard,
+					})
+					labelToIndex[lbl] = idx
+				}
+
+				updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, tmp.Slice()...)
+			}
+		}
+	}
 
 	for name := range labelNames {
 		if ctx.Err() != nil {
@@ -2285,7 +2328,7 @@ func (c *CassandraIndex) createMetrics(
 			return nil, errors.New("too many metrics registered, unable to find a free ID")
 		}
 
-		_, err = allPosting.Add(uint64(newID))
+		_, err = allPosting.AddN(uint64(newID))
 		if err != nil {
 			return nil, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -2885,9 +2928,20 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range expireUpdates {
-				req := req
+				// We need to create a copy of AddIDs/RemoveIDs, because expirationUpdate will mutate them
+				// (because AddN/RemoveN mutate them).
+				// We can't have mutation of them, because in case of C* error, we need to restore the initial state.
+				newReq := expirationUpdateRequest{
+					Day:       req.Day,
+					AddIDs:    make([]uint64, len(req.AddIDs)),
+					RemoveIDs: make([]uint64, len(req.RemoveIDs)),
+				}
+
+				copy(newReq.AddIDs, req.AddIDs)
+				copy(newReq.RemoveIDs, req.RemoveIDs)
+
 				task := func() error {
-					return c.expirationUpdate(ctx, req)
+					return c.expirationUpdate(ctx, newReq)
 				}
 				select {
 				case work <- task:
@@ -3077,6 +3131,23 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 	return c.existingShards, nil
 }
 
+func (c *CassandraIndex) expirationLastProcessedDay() (time.Time, error) {
+	var fromTimeStr string
+
+	_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unable to get last processed day for metrics expiration: %w", err)
+	}
+
+	if fromTimeStr != "" {
+		lastProcessedDay, _ := time.Parse(time.RFC3339, fromTimeStr)
+
+		return lastProcessedDay, nil
+	}
+
+	return time.Time{}, nil
+}
+
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bool, error) {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
@@ -3091,19 +3162,9 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		c.metrics.ExpireTotalSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	var lastProcessedDay time.Time
-
-	{
-		var fromTimeStr string
-
-		_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
-		if err != nil {
-			return false, fmt.Errorf("unable to get last processed day for metrics expiration: %w", err)
-		}
-
-		if fromTimeStr != "" {
-			lastProcessedDay, _ = time.Parse(time.RFC3339, fromTimeStr)
-		}
+	lastProcessedDay, err := c.expirationLastProcessedDay()
+	if err != nil {
+		return false, err
 	}
 
 	maxTime := now.Truncate(24 * time.Hour).Add(-24 * time.Hour)
@@ -3165,7 +3226,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 			return false, fmt.Errorf("unable to perform expiration check of metrics: %w", err)
 		}
 
-		_, err = bitmap.Remove(results...)
+		_, err = bitmap.RemoveN(results...)
 		if err != nil {
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
@@ -3223,9 +3284,21 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		return fmt.Errorf("get expiration from store : %w", err)
 	}
 
+	allLabelsString := make([]string, 0, len(idToLabels))
+	for _, k := range idToLabels {
+		allLabelsString = append(allLabelsString, k.String())
+	}
+
+	labelsToID, err := c.selectLabelsList2ID(ctx, allLabelsString)
+	if err != nil {
+		return fmt.Errorf("get labels2id from store : %w", err)
+	}
+
 	for _, id := range metricIDs {
 		expire, ok := expires[id]
-		if !ok {
+
+		switch {
+		case !ok:
 			// This shouldn't happen. It means that metric were partially created.
 			// Cleanup this metric from all posting if ever it's present in this list.
 			c.metrics.ExpireGhostMetric.Inc()
@@ -3233,7 +3306,15 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			bulkDelete.PrepareDelete(id, nil, false)
 
 			continue
-		} else if expire.After(now) {
+		case labelsToID[idToLabels[id].String()] != id:
+			// This is another case of partial write.
+			// Once more, we need to cleanup the metric, but we must NOT delete it from labels2id.
+			c.metrics.ExpireGhostMetric.Inc()
+
+			bulkDelete.PrepareDelete(id, idToLabels[id], true)
+
+			continue
+		case expire.After(now):
 			expireDay := expire.Truncate(24 * time.Hour)
 
 			idx, ok := dayToExpireUpdates[expireDay]
@@ -3355,12 +3436,28 @@ func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateReq
 		return nil, err
 	}
 
-	_, err = bitmap.Add(job.AddIDs...)
+	// AddN / removeN will mutage the list. This list can't be mutated (it is shared by multiple req by bulk deleted,
+	// the slice is reused for other update...). It safest is to always copy it here.
+	var bufferIDs []uint64
+
+	if len(job.AddIDs) > len(job.RemoveIDs) {
+		bufferIDs = make([]uint64, 0, len(job.AddIDs))
+	} else {
+		bufferIDs = make([]uint64, 0, len(job.RemoveIDs))
+	}
+
+	bufferIDs = bufferIDs[:len(job.AddIDs)]
+	copy(bufferIDs, job.AddIDs)
+
+	_, err = bitmap.AddN(bufferIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("update bitmap: %w", err)
 	}
 
-	_, err = bitmap.Remove(job.RemoveIDs...)
+	bufferIDs = bufferIDs[:len(job.RemoveIDs)]
+	copy(bufferIDs, job.RemoveIDs)
+
+	_, err = bitmap.RemoveN(bufferIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("update bitmap: %w", err)
 	}
@@ -3394,13 +3491,16 @@ type expirationUpdateRequest struct {
 	RemoveIDs []uint64
 }
 
+// expirationUpdate apply an expirationUpdateRequest, which is a request to move metricID between day at which
+// they are expected to expire.
+// Be aware that job.AddIDs and job.RemoveIDs are mutated (do a copy if the slice is shared / reused after this call).
 func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpdateRequest) error {
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
 	if err != nil {
 		return err
 	}
 
-	_, err = bitmapExpiration.Add(job.AddIDs...)
+	_, err = bitmapExpiration.AddN(job.AddIDs...)
 	if err != nil {
 		return fmt.Errorf("update bitmap: %w", err)
 	}
@@ -3415,13 +3515,18 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 		c.deleteIDsFromCache(slice)
 	}
 
-	_, err = bitmapExpiration.Remove(job.RemoveIDs...)
+	_, err = bitmapExpiration.RemoveN(job.RemoveIDs...)
 	if err != nil {
 		return fmt.Errorf("update bitmap: %w", err)
 	}
 
 	if !bitmapExpiration.Any() {
-		return c.store.DeleteExpiration(ctx, job.Day)
+		err := c.store.DeleteExpiration(ctx, job.Day)
+		if errors.Is(err, gocql.ErrNotFound) {
+			return nil
+		}
+
+		return err
 	}
 
 	var buffer bytes.Buffer
