@@ -225,8 +225,9 @@ func (s *mockStore) verifyStore(
 
 		if s.id2expiration[id].After(wantMaxExpire) || s.id2expiration[id].Before(wantMinExpire) {
 			return fmt.Errorf(
-				"id2expiration[%d] = %v, want between %v and %v",
+				"id2expiration[%d (%s)] = %v, want between %v and %v",
 				id,
+				metricLabels.String(),
 				s.id2expiration[id],
 				wantMinExpire,
 				wantMaxExpire,
@@ -236,6 +237,33 @@ func (s *mockStore) verifyStore(
 		if now.After(wantMaxExpire) && expiredMustBeDeleted {
 			return fmt.Errorf("metric %s is not deleted but expired", key)
 		}
+	}
+
+	return nil
+}
+
+// verifyStoreEmpty ensure that the store is completly empty.
+func (s *mockStore) verifyStoreEmpty(t *testing.T) error {
+	t.Helper()
+
+	if got := len(s.postings); got != 0 {
+		return fmt.Errorf("len(postings) = %d, want 0", got)
+	}
+
+	if got := len(s.expiration); got != 0 {
+		return fmt.Errorf("len(expiration) = %d, want 0", got)
+	}
+
+	if got := len(s.id2expiration); got != 0 {
+		return fmt.Errorf("len(id2expiration) = %d, want 0", got)
+	}
+
+	if got := len(s.id2labels); got != 0 {
+		return fmt.Errorf("len(id2labels) = %d, want 0", got)
+	}
+
+	if got := len(s.labels2id); got != 0 {
+		return fmt.Errorf("len(labels2id) = %d, want 0", got)
 	}
 
 	return nil
@@ -4950,7 +4978,14 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		wantMaxExpire := t0.Add(metricsTTL[n]).Add(updateDelay)
 
 		if store.id2expiration[id].After(wantMaxExpire) || store.id2expiration[id].Before(wantMinExpire) {
-			t.Errorf("id2expiration[%d] = %v, want between %v and %v", id, store.id2expiration[id], wantMinExpire, wantMaxExpire)
+			t.Errorf(
+				"id2expiration[%d (%s)] = %v, want between %v and %v",
+				id,
+				labels.String(),
+				store.id2expiration[id],
+				wantMinExpire,
+				wantMaxExpire,
+			)
 		}
 
 		if len(store.expiration) != 3 {
@@ -6503,26 +6538,9 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					}
 				}
 
-				if batchIdx == 4 { //nolint:nestif
-					// Ensure store is empty
-					if got := len(realStore.postings); got != 0 {
-						t.Errorf("len(postings) = %d, want 0", got)
-					}
-
-					if got := len(realStore.expiration); got != 0 {
-						t.Errorf("len(expiration) = %d, want 0", got)
-					}
-
-					if got := len(realStore.id2expiration); got != 0 {
-						t.Errorf("len(id2expiration) = %d, want 0", got)
-					}
-
-					if got := len(realStore.id2labels); got != 0 {
-						t.Errorf("len(id2labels) = %d, want 0", got)
-					}
-
-					if got := len(realStore.labels2id); got != 0 {
-						t.Errorf("len(labels2id) = %d, want 0", got)
+				if batchIdx == 4 {
+					if err := realStore.verifyStoreEmpty(t); err != nil {
+						t.Error(err)
 					}
 				}
 			}
