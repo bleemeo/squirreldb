@@ -3975,7 +3975,10 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	current := startShard
 
 	for current <= endShard {
-		results = append(results, current)
+		if returnAll || existingShards.Contains(uint64(current)) {
+			results = append(results, current)
+		}
+
 		current += shardSize
 	}
 

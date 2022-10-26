@@ -3748,33 +3748,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			t.Errorf("getTimeShards(returnAll=true) error = %v", err)
 		}
 
-		shards = shardsAll
-
 		t.Run(tt.name+" shardsAll", func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
-			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
-
-				return
-			}
-			if tt.wantLen == 0 {
-				// Avoid requirement to set tt.wantLen on simple test
-				tt.wantLen = len(tt.want)
-			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
-			}
-			got = got[:len(tt.want)]
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
-			}
-		})
-
-		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -6042,7 +6017,7 @@ func expirationLonglivedRndCheck(
 	return errs.MaybeUnwrap()
 }
 
-func Test_getTimeShards(t *testing.T) {
+func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 	type args struct {
 		start time.Time
 		end   time.Time
@@ -6056,28 +6031,17 @@ func Test_getTimeShards(t *testing.T) {
 
 	now := time.Now()
 	reference := time.Date(2020, 10, 15, 18, 40, 0, 0, time.UTC)
-	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
-	base := time.Unix(int64(baseTS)*3600, 0)
+	baseShardID := int32(reference.Unix()/3600) / shardSize * shardSize
+	base := time.Unix(int64(baseShardID)*3600, 0)
 
-	index, err := initialize(
-		context.Background(),
-		&mockStore{},
-		Options{
-			DefaultTimeToLive: 365 * 24 * time.Hour,
-			LockFactory:       &mockLockFactory{},
-			Cluster:           &dummy.LocalCluster{},
-		},
-		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	nowShard := int32(now.Unix()/3600) / shardSize * shardSize
 
 	tests := []struct {
-		name string
-		args args
-		want []int32
+		name           string
+		args           args
+		existingShards []int32
+		want           []int32
+		wantReturnAll  []int32
 	}{
 		{
 			name: "now",
@@ -6085,7 +6049,29 @@ func Test_getTimeShards(t *testing.T) {
 				start: now,
 				end:   now,
 			},
-			want: []int32{int32(now.Unix()/3600) / shardSize * shardSize},
+			existingShards: []int32{nowShard - shardSize, nowShard, nowShard + shardSize},
+			want:           []int32{nowShard},
+			wantReturnAll:  []int32{nowShard},
+		},
+		{
+			name: "now-empty-index",
+			args: args{
+				start: now,
+				end:   now,
+			},
+			existingShards: []int32{},
+			want:           []int32{},
+			wantReturnAll:  []int32{nowShard},
+		},
+		{
+			name: "now-not-existing",
+			args: args{
+				start: now,
+				end:   now,
+			},
+			existingShards: []int32{nowShard - shardSize, nowShard + shardSize},
+			want:           []int32{},
+			wantReturnAll:  []int32{nowShard},
 		},
 		{
 			name: "base",
@@ -6093,7 +6079,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base,
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			name: "reference",
@@ -6101,16 +6089,20 @@ func Test_getTimeShards(t *testing.T) {
 				start: reference,
 				end:   reference,
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
-			// This test assume that reference+9h do NOT change its baseTime
+			// This test assume that reference+2h do NOT change its baseTime
 			name: "reference+2h",
 			args: args{
 				start: reference,
 				end:   reference.Add(2 * time.Hour),
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			name: "reference+postingShardSize",
@@ -6118,7 +6110,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: reference,
 				end:   reference.Add(postingShardSize),
 			},
-			want: []int32{baseTS, baseTS + shardSize},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID, baseShardID + shardSize},
+			wantReturnAll:  []int32{baseShardID, baseShardID + shardSize},
 		},
 		{
 			name: "base+postingShardSize",
@@ -6126,7 +6120,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base.Add(postingShardSize),
 			},
-			want: []int32{baseTS, baseTS + shardSize},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID, baseShardID + shardSize},
+			wantReturnAll:  []int32{baseShardID, baseShardID + shardSize},
 		},
 		{
 			name: "base+postingShardSize- 1seconds",
@@ -6134,7 +6130,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base.Add(postingShardSize).Add(-time.Second),
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			// This test assume postingShardSize is at least > 2h
@@ -6143,31 +6141,105 @@ func Test_getTimeShards(t *testing.T) {
 				start: time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC),
 				end:   time.Date(1970, 1, 1, 1, 59, 0, 0, time.UTC),
 			},
-			want: []int32{0},
+			existingShards: []int32{0},
+			want:           []int32{0},
+			wantReturnAll:  []int32{0},
+		},
+		{
+			name: "reference_5_postingShardSize_wide",
+			args: args{
+				start: reference.Add(-2 * postingShardSize),
+				end:   reference.Add(2 * postingShardSize),
+			},
+			existingShards: []int32{baseShardID - 2*shardSize, baseShardID, baseShardID + shardSize, baseShardID + 10*shardSize},
+			want:           []int32{baseShardID - 2*shardSize, baseShardID, baseShardID + shardSize},
+			wantReturnAll: []int32{
+				baseShardID - 2*shardSize, baseShardID - shardSize, baseShardID, baseShardID + shardSize, baseShardID + 2*shardSize,
+			},
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
+
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
+			t.Parallel()
+
+			index, err := initialize(
+				context.Background(),
+				&mockStore{},
+				Options{
+					DefaultTimeToLive: 365 * 24 * time.Hour,
+					LockFactory:       &mockLockFactory{},
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				log.With().Str("component", "index").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(tt.existingShards) > 0 {
+				newShard := make([]uint64, 0, len(tt.existingShards))
+
+				for _, v := range tt.existingShards {
+					newShard = append(newShard, uint64(v))
+				}
+
+				_, err := index.postingUpdate(context.Background(), postingUpdateRequest{
+					Shard: globalShardNumber,
+					Label: labels.Label{
+						Name:  existingShardsLabel,
+						Value: existingShardsLabel,
+					},
+					AddIDs: newShard,
+				})
+				if err != nil && !errors.Is(err, errBitmapEmpty) {
+					t.Fatal(err)
+				}
+			}
+
+			gotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
 			if err != nil {
 				t.Error(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("getTimeShards() = %v, want %v", got, tt.want)
+
+			gotNotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, false)
+			if err != nil {
+				t.Error(err)
+			}
+
+			if diff := cmp.Diff(tt.wantReturnAll, gotAll, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("getTimeShards(returnall) mismatch: (-want +got)\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tt.want, gotNotAll, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("getTimeShards() mismatch: (-want +got)\n%s", diff)
+			}
+
+			got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, shard := range got {
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards(returnall)[%d] = %v, want != %v", i, shard, globalShardNumber)
+				}
+			}
+
+			got, err = index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), false)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, shard := range got {
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
+				}
 			}
 		})
-	}
-
-	got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	for i, shard := range got {
-		if shard == globalShardNumber {
-			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
-		}
 	}
 }
 
