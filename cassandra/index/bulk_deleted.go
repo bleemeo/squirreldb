@@ -13,7 +13,7 @@ import (
 
 type deleter struct {
 	c                       *CassandraIndex
-	labelToPostingUpdates   map[string]map[string]int
+	labelToPostingUpdates   map[labels.Label]int
 	deleteLabels            []string
 	deleteIDs               []uint64
 	unshardedPostingUpdates []postingUpdateRequest
@@ -22,7 +22,7 @@ type deleter struct {
 
 func newBulkDeleter(c *CassandraIndex) *deleter {
 	return &deleter{
-		labelToPostingUpdates: make(map[string]map[string]int),
+		labelToPostingUpdates: make(map[labels.Label]int),
 		c:                     c,
 	}
 }
@@ -57,19 +57,13 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 	}
 
 	for _, label := range labelsList {
-		m, ok := d.labelToPostingUpdates[label.Name]
-		if !ok {
-			m = make(map[string]int)
-			d.labelToPostingUpdates[label.Name] = m
-		}
-
-		idx, ok := m[label.Value]
+		idx, ok := d.labelToPostingUpdates[label]
 		if !ok {
 			idx = len(d.unshardedPostingUpdates)
 			d.unshardedPostingUpdates = append(d.unshardedPostingUpdates, postingUpdateRequest{
 				Label: label,
 			})
-			m[label.Value] = idx
+			d.labelToPostingUpdates[label] = idx
 		}
 
 		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id))
@@ -90,7 +84,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 //   - the remote the id from all postings, making the ID free
 //
 // Note: it's not this function which clear the expiration table, this is done elsewhere.
-func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
+func (d *deleter) Delete(ctx context.Context) error {
 	if len(d.deleteIDs) == 0 {
 		return nil
 	}
@@ -144,19 +138,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 		return err
 	}
 
-	var l sync.Mutex
-
-	shardsListUpdate := postingUpdateRequest{
-		Shard: globalShardNumber,
-		Label: labels.Label{
-			Name:  existingShardsLabel,
-			Value: existingShardsLabel,
-		},
-	}
-
-	shardedUpdates := make([]postingUpdateRequest, 0, len(d.unshardedPostingUpdates)*int(shards.Count()))
-	presenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
-	maybePresenceUpdates := make([]postingUpdateRequest, 0, len(maybePresent))
+	shardDeleter := newPostingsInShardDeleter(d.c)
 	allDeleteIDs := roaring.NewBitmap(d.deleteIDs...)
 
 	for _, shard := range shards.Slice() {
@@ -168,7 +150,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
 			// deleting it from existingShardsLabel.
 			// Cleanup entry in existingShardsLabel
-			shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(shard))
+			shardDeleter.ShardsListUpdate.RemoveIDs = append(shardDeleter.ShardsListUpdate.RemoveIDs, uint64(shard))
 
 			continue
 		}
@@ -177,7 +159,7 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			continue
 		}
 
-		presenceUpdates = append(presenceUpdates, postingUpdateRequest{
+		shardDeleter.PresenceUpdates = append(shardDeleter.PresenceUpdates, postingUpdateRequest{
 			Shard: shard,
 			Label: labels.Label{
 				Name:  allPostingLabel,
@@ -193,10 +175,10 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 			}
 
 			req.Shard = shard
-			shardedUpdates = append(shardedUpdates, req)
+			shardDeleter.PostingUpdates = append(shardDeleter.PostingUpdates, req)
 		}
 
-		maybePresenceUpdates = append(maybePresenceUpdates, postingUpdateRequest{
+		shardDeleter.MaybePresenceUpdates = append(shardDeleter.MaybePresenceUpdates, postingUpdateRequest{
 			Shard: shard,
 			Label: labels.Label{
 				Name:  maybePostingLabel,
@@ -208,114 +190,9 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 
 	d.c.invalidatePostings(ctx, d.invalidateKey)
 
-	err = d.c.concurrentTasks(
-		ctx,
-		concurrentInsert,
-		func(ctx context.Context, work chan<- func() error) error {
-			for _, req := range presenceUpdates {
-				req := req
-				task := func() error {
-					bitmap, err := d.c.postingUpdate(ctx, req)
-					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-						return err
-					}
-
-					d.c.lookupIDMutex.Lock()
-					if bitmap == nil || errors.Is(err, errBitmapEmpty) {
-						delete(d.c.idInShard, req.Shard)
-					} else {
-						d.c.idInShard[req.Shard] = bitmap
-					}
-					d.c.lookupIDMutex.Unlock()
-
-					return nil
-				}
-				select {
-				case work <- task:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-
-			return nil
-		},
-	)
+	err = shardDeleter.Delete(ctx)
 	if err != nil {
 		return err
-	}
-
-	err = d.c.concurrentTasks(
-		ctx,
-		concurrentInsert,
-		func(ctx context.Context, work chan<- func() error) error {
-			for _, req := range shardedUpdates {
-				req := req
-				task := func() error {
-					_, err := d.c.postingUpdate(ctx, req)
-					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-						return err
-					}
-
-					return nil
-				}
-				select {
-				case work <- task:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-
-			return nil
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	err = d.c.concurrentTasks(
-		ctx,
-		concurrentInsert,
-		func(ctx context.Context, work chan<- func() error) error {
-			for _, req := range maybePresenceUpdates {
-				req := req
-				task := func() error {
-					it, err := d.c.postingUpdate(ctx, req)
-					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-						return err
-					}
-
-					// it is nil iff it's empty (or an error occure)
-					if it == nil || errors.Is(err, errBitmapEmpty) {
-						l.Lock()
-						shardsListUpdate.RemoveIDs = append(shardsListUpdate.RemoveIDs, uint64(req.Shard))
-						l.Unlock()
-					}
-
-					return nil
-				}
-				select {
-				case work <- task:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-
-			return nil
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if len(shardsListUpdate.RemoveIDs) > 0 {
-		_, err := d.c.postingUpdate(ctx, shardsListUpdate)
-		if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
-			return err
-		}
 	}
 
 	err = d.c.concurrentTasks(
@@ -353,6 +230,145 @@ func (d *deleter) Delete(ctx context.Context) error { //nolint:maintidx
 	})
 	if err != nil && !errors.Is(err, errBitmapEmpty) && !errors.Is(err, gocql.ErrNotFound) {
 		return err
+	}
+
+	return nil
+}
+
+type postingsInShardDeleter struct {
+	l                    sync.Mutex
+	c                    *CassandraIndex
+	PostingUpdates       []postingUpdateRequest
+	PresenceUpdates      []postingUpdateRequest
+	MaybePresenceUpdates []postingUpdateRequest
+	ShardsListUpdate     postingUpdateRequest
+}
+
+func newPostingsInShardDeleter(c *CassandraIndex) *postingsInShardDeleter {
+	return &postingsInShardDeleter{
+		c: c,
+		ShardsListUpdate: postingUpdateRequest{
+			Shard: globalShardNumber,
+			Label: labels.Label{
+				Name:  existingShardsLabel,
+				Value: existingShardsLabel,
+			},
+		},
+	}
+}
+
+// Delete apply the deletion requested in all Update fields.
+// Delete isn't thread safe and shouldn't be called twice.
+// ShardsListUpdate fields is mutated.
+func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
+	err := d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range d.PresenceUpdates {
+				req := req
+				task := func() error {
+					bitmap, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					d.c.lookupIDMutex.Lock()
+					if bitmap == nil || errors.Is(err, errBitmapEmpty) {
+						delete(d.c.idInShard, req.Shard)
+					} else {
+						d.c.idInShard[req.Shard] = bitmap
+					}
+					d.c.lookupIDMutex.Unlock()
+
+					return nil
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range d.PostingUpdates {
+				req := req
+				task := func() error {
+					_, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					return nil
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	err = d.c.concurrentTasks(
+		ctx,
+		concurrentInsert,
+		func(ctx context.Context, work chan<- func() error) error {
+			for _, req := range d.MaybePresenceUpdates {
+				req := req
+				task := func() error {
+					it, err := d.c.postingUpdate(ctx, req)
+					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+						return err
+					}
+
+					// it is nil iff it's empty (or an error occure)
+					if it == nil || errors.Is(err, errBitmapEmpty) {
+						d.l.Lock()
+						d.ShardsListUpdate.RemoveIDs = append(d.ShardsListUpdate.RemoveIDs, uint64(req.Shard))
+						d.l.Unlock()
+					}
+
+					return nil
+				}
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	if len(d.ShardsListUpdate.RemoveIDs) > 0 {
+		_, err := d.c.postingUpdate(ctx, d.ShardsListUpdate)
+		if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
+			return err
+		}
 	}
 
 	return nil
