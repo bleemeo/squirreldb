@@ -367,6 +367,11 @@ func SetTestEnvironment() {
 		os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
 	}
 
+	if _, ok := os.LookupEnv("SQUIRRELDB_TELEMETRY_ENABLED"); !ok {
+		// If not explicitly set, disable telemetry.
+		os.Setenv("SQUIRRELDB_TELEMETRY_ENABLED", "false")
+	}
+
 	log.Logger = logger.NewTestLogger()
 }
 
