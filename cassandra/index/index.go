@@ -81,8 +81,8 @@ const (
 
 //nolint:gochecknoglobals
 var (
-	minTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
-	maxTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
+	indexMinValidTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	indexMaxValidTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
 var (
@@ -2921,7 +2921,28 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
 	}
 
+	err := c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
+
+		c.lookupIDMutex.Lock()
+
+		for _, v := range expireUpdates {
+			v2 := c.expirationUpdateRequests[v.Day]
+			v2.AddIDs = append(v2.AddIDs, v.AddIDs...)
+			v2.RemoveIDs = append(v2.RemoveIDs, v.RemoveIDs...)
+			c.expirationUpdateRequests[v.Day] = v2
+		}
+
+		c.lookupIDMutex.Unlock()
+	}
+}
+
+func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
+	ctx context.Context, expireUpdates []expirationUpdateRequest,
+) error {
 	c.newMetricLock.Lock()
+	defer c.newMetricLock.Unlock()
 
 	err := c.concurrentTasks(
 		ctx,
@@ -2954,22 +2975,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		},
 	)
 
-	c.newMetricLock.Unlock()
-
-	if err != nil {
-		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
-
-		c.lookupIDMutex.Lock()
-
-		for _, v := range expireUpdates {
-			v2 := c.expirationUpdateRequests[v.Day]
-			v2.AddIDs = append(v2.AddIDs, v.AddIDs...)
-			v2.RemoveIDs = append(v2.RemoveIDs, v.RemoveIDs...)
-			c.expirationUpdateRequests[v.Day] = v2
-		}
-
-		c.lookupIDMutex.Unlock()
-	}
+	return err
 }
 
 // InternalMaxTTLUpdateDelay return the highest delay between TTL update.
@@ -3969,7 +3975,10 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	current := startShard
 
 	for current <= endShard {
-		results = append(results, current)
+		if returnAll || existingShards.Contains(uint64(current)) {
+			results = append(results, current)
+		}
+
 		current += shardSize
 	}
 
@@ -4565,19 +4574,19 @@ func matcherMatches(matchers []*labels.Matcher, lbls labels.Labels) bool {
 }
 
 func validatedTime(start time.Time, end time.Time) error {
-	if start.Before(minTime) {
+	if start.Before(indexMinValidTime) {
 		return fmt.Errorf("%w: start time is too early", errTimeOutOfRange)
 	}
 
-	if start.After(maxTime) {
+	if start.After(indexMaxValidTime) {
 		return fmt.Errorf("%w: start time is too late", errTimeOutOfRange)
 	}
 
-	if end.Before(minTime) {
+	if end.Before(indexMinValidTime) {
 		return fmt.Errorf("%w: end time is too early", errTimeOutOfRange)
 	}
 
-	if end.After(maxTime) {
+	if end.After(indexMaxValidTime) {
 		return fmt.Errorf("%w: end time is too late", errTimeOutOfRange)
 	}
 

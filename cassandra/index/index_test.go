@@ -190,6 +190,9 @@ func (s *mockStore) Init(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// verifyStore check that metric exist in the store with expected metric expiration.
+// len(metrics) must be == to len(expiration). If you don't want to check expiration of
+// a metrics (but still check it's present), use zero value of time.Time for the expiration.
 func (s *mockStore) verifyStore(
 	t *testing.T,
 	now time.Time,
@@ -210,7 +213,7 @@ func (s *mockStore) verifyStore(
 		wantMaxExpire := expiration[i].Add(updateDelay)
 
 		if !ok {
-			if now.After(expiration[i]) {
+			if !expiration[i].IsZero() && now.After(expiration[i]) {
 				continue
 			}
 
@@ -223,10 +226,15 @@ func (s *mockStore) verifyStore(
 			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
 		}
 
+		if expiration[i].IsZero() {
+			continue
+		}
+
 		if s.id2expiration[id].After(wantMaxExpire) || s.id2expiration[id].Before(wantMinExpire) {
 			return fmt.Errorf(
-				"id2expiration[%d] = %v, want between %v and %v",
+				"id2expiration[%d (%s)] = %v, want between %v and %v",
 				id,
+				metricLabels.String(),
 				s.id2expiration[id],
 				wantMinExpire,
 				wantMaxExpire,
@@ -236,6 +244,147 @@ func (s *mockStore) verifyStore(
 		if now.After(wantMaxExpire) && expiredMustBeDeleted {
 			return fmt.Errorf("metric %s is not deleted but expired", key)
 		}
+	}
+
+	return nil
+}
+
+// getPresencePostings return the maybePresent & allPosting.
+func (s *mockStore) getPresencePostings(shard int32) (*roaring.Bitmap, *roaring.Bitmap, error) {
+	maybePresent := roaring.NewBTreeBitmap()
+	allPosting := roaring.NewBTreeBitmap()
+
+	// The only error possible for SelectPostingByNameValue is not found. Ignore such error
+	bitset, err := s.SelectPostingByNameValue(context.Background(), shard, maybePostingLabel, maybePostingLabel)
+	if err == nil {
+		err = maybePresent.UnmarshalBinary(bitset)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"UnmarshalBinary maybePosting for shard %s (%d): %w",
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+				err,
+			)
+		}
+	}
+
+	bitset, err = s.SelectPostingByNameValue(context.Background(), shard, allPostingLabel, allPostingLabel)
+	if err == nil {
+		err = allPosting.UnmarshalBinary(bitset)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"UnmarshalBinary allPostingLabel for shard %s (%d): %w",
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+				err,
+			)
+		}
+	}
+
+	return maybePresent, allPosting, nil
+}
+
+// verifyShard ensure that given metrics exists in a specific shard. Only presentPosting & maybe present is checked.
+func (s *mockStore) verifyShard(
+	t *testing.T,
+	shard int32,
+	metricsPresent []labels.Labels,
+	metricsAbsent []labels.Labels,
+) error {
+	t.Helper()
+
+	var errs prometheus.MultiError
+
+	maybePresent, allPosting, err := s.getPresencePostings(shard)
+	if err != nil {
+		return err
+	}
+
+	for _, metricLabels := range metricsPresent {
+		key := sortLabels(metricLabels).String()
+		id, ok := s.labels2id[key]
+
+		if !ok {
+			errs = append(errs, fmt.Errorf("metric %s isn't in labels2id", key))
+
+			continue
+		}
+
+		if !maybePresent.Contains(uint64(id)) {
+			errs = append(errs, fmt.Errorf(
+				"metric %s is absent from maybePosting of shard %s (%d)",
+				metricLabels.String(),
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+			))
+		}
+
+		if !allPosting.Contains(uint64(id)) {
+			errs = append(errs, fmt.Errorf(
+				"metric %s is absent from allPostingLabel of shard %s (%d)",
+				metricLabels.String(),
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+			))
+		}
+	}
+
+	for _, metricLabels := range metricsAbsent {
+		key := sortLabels(metricLabels).String()
+		id, ok := s.labels2id[key]
+
+		if !ok {
+			continue
+		}
+
+		if maybePresent.Contains(uint64(id)) {
+			errs = append(errs, fmt.Errorf(
+				"metric %s is present in maybePosting of shard %s (%d)",
+				metricLabels.String(),
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+			))
+		}
+
+		if allPosting.Contains(uint64(id)) {
+			errs = append(errs, fmt.Errorf(
+				"metric %s is present in allPostingLabel of shard %s (%d)",
+				metricLabels.String(),
+				timeForShard(shard).Format(shardDateFormat),
+				shard,
+			))
+		}
+	}
+
+	if errs != nil {
+		return errs
+	}
+
+	return nil
+}
+
+// verifyStoreEmpty ensure that the store is completly empty.
+func (s *mockStore) verifyStoreEmpty(t *testing.T) error {
+	t.Helper()
+
+	if got := len(s.postings); got != 0 {
+		return fmt.Errorf("len(postings) = %d, want 0", got)
+	}
+
+	if got := len(s.expiration); got != 0 {
+		return fmt.Errorf("len(expiration) = %d, want 0", got)
+	}
+
+	if got := len(s.id2expiration); got != 0 {
+		return fmt.Errorf("len(id2expiration) = %d, want 0", got)
+	}
+
+	if got := len(s.id2labels); got != 0 {
+		return fmt.Errorf("len(id2labels) = %d, want 0", got)
+	}
+
+	if got := len(s.labels2id); got != 0 {
+		return fmt.Errorf("len(labels2id) = %d, want 0", got)
 	}
 
 	return nil
@@ -621,6 +770,19 @@ func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest
 	}
 
 	return results
+}
+
+func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
+	result := make([]labels.Labels, 0, len(input))
+
+	for _, metric := range input {
+		builder := labels.NewBuilder(metric)
+		builder.Del(timeToLiveLabelName)
+
+		result = append(result, builder.Labels())
+	}
+
+	return result
 }
 
 func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
@@ -3586,33 +3748,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			t.Errorf("getTimeShards(returnAll=true) error = %v", err)
 		}
 
-		shards = shardsAll
-
 		t.Run(tt.name+" shardsAll", func(t *testing.T) {
 			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
-			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
-
-				return
-			}
-			if tt.wantLen == 0 {
-				// Avoid requirement to set tt.wantLen on simple test
-				tt.wantLen = len(tt.want)
-			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
-			}
-			got = got[:len(tt.want)]
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
-			}
-		})
-
-		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -4698,13 +4835,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	batchSize := 100
 	workerCount := 4
+	group, _ := errgroup.WithContext(context.Background())
 
 	for n := 0; n < workerCount; n++ {
 		n := n
 
-		t.Run(fmt.Sprintf("worker-%d", n), func(t *testing.T) {
-			t.Parallel()
-
+		group.Go(func() error {
 			index := index1
 
 			if n%2 == 1 {
@@ -4723,12 +4859,18 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
 				if err != nil {
-					t.Fatal(err)
+					return err
 				}
 
 				current = idxEnd
 			}
+
+			return nil
 		})
+	}
+
+	if err := group.Wait(); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
@@ -4745,10 +4887,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Errorf("Index don't have the same IDs")
 	}
 
-	for index1.RunOnce(context.Background(), t5) {
+	if err := executeRunOnce(t5, index1, 1000, t6); err != nil {
+		t.Fatal(err)
 	}
 
-	for index2.RunOnce(context.Background(), t5) {
+	if err := executeRunOnce(t5, index2, 1000, t6); err != nil {
+		t.Fatal(err)
 	}
 
 	labelsList = []labels.Labels{
@@ -4779,7 +4923,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
 	}
 
-	for index1.RunOnce(context.Background(), t6) {
+	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
@@ -4792,7 +4937,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Fatal(err)
 	}
 
-	for index2.RunOnce(context.Background(), t6) {
+	if err := executeRunOnce(t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
 	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
@@ -4941,7 +5087,14 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		wantMaxExpire := t0.Add(metricsTTL[n]).Add(updateDelay)
 
 		if store.id2expiration[id].After(wantMaxExpire) || store.id2expiration[id].Before(wantMinExpire) {
-			t.Errorf("id2expiration[%d] = %v, want between %v and %v", id, store.id2expiration[id], wantMinExpire, wantMaxExpire)
+			t.Errorf(
+				"id2expiration[%d (%s)] = %v, want between %v and %v",
+				id,
+				labels.String(),
+				store.id2expiration[id],
+				wantMinExpire,
+				wantMaxExpire,
+			)
 		}
 
 		if len(store.expiration) != 3 {
@@ -5296,7 +5449,575 @@ func Test_expiration_offset(t *testing.T) {
 	}
 }
 
-func Test_getTimeShards(t *testing.T) {
+// Test_expiration_longlived check that expiration also works when long-lived metrics exists
+// (that is metric that continue to exists for longer that their TTL).
+// Currently this tests is incomplete because today such metrics are never dropped. It test however
+// that metrics are still present when they must be still present (e.g. don't expire BEFORE the TTL at time of write).
+func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
+	shortestTTL := 1 * 24 * time.Hour
+	shortTTL := 7 * 24 * time.Hour
+	longTTL := 375 * 24 * time.Hour
+	defaultTTL := longTTL
+	step := 13 * time.Hour // mostly write 2 time per day, but not exactly aligned
+
+	rnd := rand.New(rand.NewSource(1568706164))
+
+	baseTime := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	// Duration of the phase will probably need to be updated, depending on implementation of purge.
+	// Currently phase duration assume metrics stay for twice their TTL + postingsShardSize
+	// Test have N phase:
+	// * phase1: all metrics are wrote (including temporary).
+	//           phase1 last 2*shortTTL+postingsShardSize time.
+	//           At ends of phase1, oldest shard don't contains metrics with shortTTL
+	//           At ends of phase1, oldest shard don't contains metrics with shortestTTL
+	//           At ends of phase1, oldest shard contains metrics with longTTL
+	// * phase2: temporary are no longer written. Metrics that change TTL swap their TTL.
+	//           phase2 last 2*shortTTL+postingsShardSize time.
+	//           At ends of phase2, oldest shard don't contains metrics that only use shortTTL
+	//           At ends of phase2, oldest shard still contains metrics with changed from long to short TTL.
+	// * phase3: continue as previous phase for 2*longTTL+postingsShardSize
+	//           At ends of phase3, all shards oldest that beginning of phase3 are empty
+	//           At ends of phase3, oldest non-empty shards only contains metrics with long TTL
+	// * phase4: no more write for 2*longTTL+postingsShardSize
+	//           At ends of phase4, index is empty.
+	// Also in all phase (but phase 4), few metrics are written with randomized TTL. The TTL change each new shard.
+	// For this metric, we don't check it disapear from shard but that it still in shard it must belong to.
+	phase1End := baseTime.Add(2*shortTTL + postingShardSize)
+	phase2End := phase1End.Add(2*shortTTL + postingShardSize)
+	phase3End := phase2End.Add(2*longTTL + postingShardSize)
+	phase4End := phase3End.Add(2*longTTL + postingShardSize)
+
+	metricsLongTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_used",
+			"item", "/",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName1",
+			"uniqueLabel1", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+	}
+
+	metricsRandomTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_used",
+			"item", "/dev/urandom",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueNameRnd",
+			"uniqueLabelRnd", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "more_random",
+			"device", "one",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "more_random",
+			"device", "two",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+	}
+
+	metricsShortTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_used",
+			"item", "/home",
+			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName2",
+			"uniqueLabel2", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		),
+	}
+
+	metricsShortestTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_used",
+			"item", "/home2",
+			"__ttl__", strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName0",
+			"uniqueLabel0", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
+		),
+	}
+
+	// TTL change switch between short & long TTL
+	metricsLongToShortTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_free",
+			"item", "/",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName3",
+			"uniqueLabel3", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+	}
+
+	metricsShortToLongTTL := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_free",
+			"item", "/home",
+			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName4",
+			"uniqueLabel4", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		),
+	}
+
+	metricsTemporary := []labels.Labels{
+		labels.FromStrings(
+			"__name__", "disk_total",
+			"item", "/srv",
+			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+		),
+		labels.FromStrings(
+			"__name__", "uniqueName5",
+			"uniqueLabel5", "samevalue",
+			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		),
+	}
+
+	store := &mockStore{}
+
+	index, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: defaultTTL,
+			LockFactory:       &mockLockFactory{},
+			States:            &mockState{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		log.With().Str("component", "index").Logger(),
+	)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Map index of metricsRandomTTL -> shardID -> expiration
+	rndExpirationByShard := make(map[int]map[int32]time.Time)
+	currentTime := baseTime
+	currentPhase := 1
+
+	for i := range metricsRandomTTL {
+		rndExpirationByShard[i] = make(map[int32]time.Time)
+	}
+
+	var currentShard int32
+
+	for currentTime.Before(phase4End) {
+		var metricToWrite []labels.Labels
+
+		nextShard := ShardForTime(currentTime.Unix())
+		if currentShard != nextShard {
+			for i := range metricsRandomTTL {
+				builder := labels.NewBuilder(metricsRandomTTL[i])
+				// randomize between shortestTTL & longTTL
+				rndSecond := shortestTTL.Seconds() + rnd.Float64()*(longTTL.Seconds()-shortestTTL.Seconds())
+				builder.Set("__ttl__", strconv.FormatInt(int64(rndSecond), 10))
+				metricsRandomTTL[i] = builder.Labels()
+
+				rndExpirationByShard[i][nextShard] = currentTime.Add(time.Duration(rndSecond) * time.Second)
+			}
+		}
+
+		currentShard = nextShard
+
+		switch currentPhase {
+		case 1:
+			metricToWrite = append(metricToWrite, metricsLongTTL...)
+			metricToWrite = append(metricToWrite, metricsShortTTL...)
+			metricToWrite = append(metricToWrite, metricsShortestTTL...)
+			metricToWrite = append(metricToWrite, metricsLongToShortTTL...)
+			metricToWrite = append(metricToWrite, metricsShortToLongTTL...)
+			metricToWrite = append(metricToWrite, metricsTemporary...)
+			metricToWrite = append(metricToWrite, metricsRandomTTL...)
+		case 2, 3:
+			metricToWrite = append(metricToWrite, metricsLongTTL...)
+			metricToWrite = append(metricToWrite, metricsShortTTL...)
+			metricToWrite = append(metricToWrite, metricsShortestTTL...)
+			metricToWrite = append(metricToWrite, metricsLongToShortTTL...)
+			metricToWrite = append(metricToWrite, metricsShortToLongTTL...)
+			metricToWrite = append(metricToWrite, metricsRandomTTL...)
+		}
+
+		rnd.Shuffle(len(metricToWrite), func(i, j int) {
+			metricToWrite[i], metricToWrite[j] = metricToWrite[j], metricToWrite[i]
+		})
+
+		_, _, err := index.lookupIDs(
+			context.Background(),
+			toLookupRequests(metricToWrite, currentTime),
+			currentTime,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		index.RunOnce(context.Background(), currentTime)
+
+		writeTime := currentTime
+		currentTime = currentTime.Add(step)
+
+		var nextPhase int
+
+		switch {
+		case currentTime.Before(phase1End):
+			nextPhase = 1
+		case currentTime.Before(phase2End):
+			nextPhase = 2
+		case currentTime.Before(phase3End):
+			nextPhase = 3
+		default:
+			nextPhase = 4
+		}
+
+		if currentPhase != nextPhase {
+			err = expirationLonglivedEndOfPhaseCheck(
+				t,
+				store,
+				index,
+				currentTime,
+				metricToWrite,
+				metricsLongToShortTTL,
+				metricsRandomTTL,
+				writeTime,
+				currentPhase,
+				phase1End,
+				longTTL,
+			)
+			if err != nil {
+				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+			}
+
+			err = expirationLonglivedRndCheck(
+				t,
+				store,
+				currentTime,
+				rndExpirationByShard,
+				metricsRandomTTL,
+			)
+			if err != nil {
+				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+			}
+		}
+
+		switch {
+		case currentPhase == 1 && nextPhase == 2:
+			// End of phase 1
+			oldestShard := ShardForTime(baseTime.Unix())
+
+			var (
+				absent  []labels.Labels
+				present []labels.Labels
+			)
+
+			absent = append(absent, metricsShortTTL...)
+			absent = append(absent, metricsShortestTTL...)
+			absent = append(absent, metricsShortToLongTTL...)
+
+			present = append(present, metricsLongTTL...)
+			present = append(present, metricsLongToShortTTL...)
+
+			// Purge of metrics is not yet implemented for long-lived TTL
+			absent = absent[:0]
+
+			err = store.verifyShard(
+				t,
+				oldestShard,
+				dropTTLFromMetricList(present),
+				dropTTLFromMetricList(absent),
+			)
+			if err != nil {
+				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+			}
+
+			// Update TTL of metrics
+			for i := range metricsLongToShortTTL {
+				builder := labels.NewBuilder(metricsLongToShortTTL[i])
+				builder.Set("__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10))
+				metricsLongToShortTTL[i] = builder.Labels()
+			}
+
+			for i := range metricsShortToLongTTL {
+				builder := labels.NewBuilder(metricsShortToLongTTL[i])
+				builder.Set("__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10))
+				metricsShortToLongTTL[i] = builder.Labels()
+			}
+		case currentPhase == 2 && nextPhase == 3:
+			// End of phase 2
+			oldestShard := ShardForTime(baseTime.Unix())
+
+			var (
+				absent  []labels.Labels
+				present []labels.Labels
+			)
+
+			absent = append(absent, metricsShortTTL...)
+			absent = append(absent, metricsShortestTTL...)
+			absent = append(absent, metricsShortToLongTTL...)
+
+			present = append(present, metricsLongTTL...)
+			present = append(present, metricsLongToShortTTL...)
+
+			// Purge of metrics is not yet implemented for long-lived TTL
+			absent = absent[:0]
+
+			err = store.verifyShard(
+				t,
+				oldestShard,
+				dropTTLFromMetricList(present),
+				dropTTLFromMetricList(absent),
+			)
+			if err != nil {
+				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+			}
+		case currentPhase == 3 && nextPhase == 4:
+			// End of phase 3
+			minShard := ShardForTime(currentTime.Unix())
+
+			for shard := range store.postings {
+				if shard < minShard && shard != globalShardNumber {
+					minShard = shard
+				}
+			}
+
+			shardCutoff := ShardForTime(phase2End.Unix())
+
+			//  Purge of metrics is not yet implemented for long-lived TTL (hence the "&& false")
+			if minShard <= shardCutoff && false {
+				t.Errorf(
+					"minShard = %s (%d), want greater than %s (%d)",
+					timeForShard(minShard).Format(shardDateFormat),
+					minShard,
+					timeForShard(shardCutoff).Format(shardDateFormat),
+					shardCutoff,
+				)
+			}
+
+			var (
+				absent  []labels.Labels
+				present []labels.Labels
+			)
+
+			absent = append(absent, metricsShortTTL...)
+			absent = append(absent, metricsShortestTTL...)
+			absent = append(absent, metricsTemporary...)
+			absent = append(absent, metricsLongToShortTTL...)
+
+			present = append(present, metricsLongTTL...)
+			present = append(present, metricsShortToLongTTL...)
+
+			// Purge of metrics is not yet implemented for long-lived TTL
+			absent = absent[:0]
+
+			err = store.verifyShard(
+				t,
+				minShard,
+				dropTTLFromMetricList(present),
+				dropTTLFromMetricList(absent),
+			)
+			if err != nil {
+				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+			}
+		}
+
+		currentPhase = nextPhase
+	}
+
+	if err := store.verifyStoreEmpty(t); err != nil {
+		t.Error(err)
+	}
+}
+
+func expirationLonglivedEndOfPhaseCheck(
+	t *testing.T,
+	store *mockStore,
+	index *CassandraIndex,
+	currentTime time.Time,
+	metricToWrite []labels.Labels,
+	metricsLongToShortTTL []labels.Labels,
+	metricsRandomTTL []labels.Labels,
+	writeTime time.Time,
+	currentPhase int,
+	phase1End time.Time,
+	longTTL time.Duration,
+) error {
+	t.Helper()
+
+	var errs prometheus.MultiError
+
+	wantedExpiration := make([]time.Time, 0, len(metricToWrite))
+
+	for _, metric := range metricToWrite {
+		ignoreExpiration := false
+
+		for _, m := range metricsRandomTTL {
+			if labels.Equal(metric, m) {
+				ignoreExpiration = true
+			}
+		}
+
+		if ignoreExpiration {
+			wantedExpiration = append(wantedExpiration, time.Time{})
+
+			continue
+		}
+
+		ttl, err := strconv.ParseInt(metric.Get("__ttl__"), 10, 0)
+		if err != nil {
+			return err
+		}
+
+		metricExpiration := writeTime.Add(time.Duration(ttl) * time.Second)
+
+		// From phase2 or more, if the metric belong to metricsLongToShortTTL,
+		// then the expiration is at least phase1End+longTTL
+		if currentPhase >= 2 {
+			isLongToShort := false
+			minExpiration := phase1End.Add(longTTL)
+
+			for _, m := range metricsLongToShortTTL {
+				if labels.Equal(metric, m) {
+					isLongToShort = true
+				}
+			}
+
+			if isLongToShort && metricExpiration.Before(minExpiration) {
+				metricExpiration = minExpiration
+			}
+		}
+
+		wantedExpiration = append(wantedExpiration, metricExpiration)
+	}
+
+	// At ends of any phase, index contains all metrics currently write
+	err := store.verifyStore(
+		t,
+		currentTime,
+		dropTTLFromMetricList(metricToWrite),
+		wantedExpiration,
+		true,
+	)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("at ends of phase %d: %w", currentPhase, err))
+	}
+
+	// At ends of any phase, the most recent shard contains all metrics currently write
+	err = store.verifyShard(
+		t,
+		ShardForTime(writeTime.Unix()),
+		dropTTLFromMetricList(metricToWrite),
+		nil,
+	)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("at ends of phase %d: %w", currentPhase, err))
+	}
+
+	buffer := bytes.NewBuffer(nil)
+
+	hadError, err := index.verify(
+		context.Background(),
+		currentTime,
+		buffer,
+		false,
+		false,
+	)
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	if hadError {
+		errs = append(errs, fmt.Errorf("at ends of phase %d, verify had error, message=%s", currentPhase, buffer.String()))
+	}
+
+	if errs != nil {
+		return errs
+	}
+
+	return nil
+}
+
+// expirationLonglivedRndCheck check that metric still exists in shard it didn't yet expired.
+// This function only check for present where is MUST be present, it don't look for absence where it
+// could be absent.
+func expirationLonglivedRndCheck(
+	t *testing.T,
+	store *mockStore,
+	currentTime time.Time,
+	rndExpirationByShard map[int]map[int32]time.Time,
+	metricsRandomTTL []labels.Labels,
+) error {
+	t.Helper()
+
+	var errs prometheus.MultiError
+
+	metricIDs := make([]uint64, len(metricsRandomTTL))
+
+	for i, metric := range dropTTLFromMetricList(metricsRandomTTL) {
+		id, ok := store.labels2id[metric.String()]
+		if !ok {
+			errs.Append(fmt.Errorf("metric %s isn't found in store", metric))
+		}
+
+		metricIDs[i] = uint64(id)
+	}
+
+	for idx, shardExpirations := range rndExpirationByShard {
+		for shard, expiration := range shardExpirations {
+			maybePresent, allPosting, err := store.getPresencePostings(shard)
+			if err != nil {
+				return err
+			}
+
+			if expiration.After(currentTime) {
+				continue
+			}
+
+			id := metricIDs[idx]
+			if id == 0 {
+				continue
+			}
+
+			if !maybePresent.Contains(id) {
+				errs.Append(fmt.Errorf(
+					"metric %s not present in maybePresent of shard %s (%d). It should expire after %s",
+					metricsRandomTTL[idx],
+					timeForShard(shard).Format(shardDateFormat),
+					shard,
+					expiration,
+				))
+			}
+
+			if !allPosting.Contains(id) {
+				errs.Append(fmt.Errorf(
+					"metric %s not present in allPosting of shard %s (%d). It should expire after %s",
+					metricsRandomTTL[idx],
+					timeForShard(shard).Format(shardDateFormat),
+					shard,
+					expiration,
+				))
+			}
+		}
+	}
+
+	return errs.MaybeUnwrap()
+}
+
+func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 	type args struct {
 		start time.Time
 		end   time.Time
@@ -5310,28 +6031,17 @@ func Test_getTimeShards(t *testing.T) {
 
 	now := time.Now()
 	reference := time.Date(2020, 10, 15, 18, 40, 0, 0, time.UTC)
-	baseTS := int32(reference.Unix()/3600) / shardSize * shardSize
-	base := time.Unix(int64(baseTS)*3600, 0)
+	baseShardID := int32(reference.Unix()/3600) / shardSize * shardSize
+	base := time.Unix(int64(baseShardID)*3600, 0)
 
-	index, err := initialize(
-		context.Background(),
-		&mockStore{},
-		Options{
-			DefaultTimeToLive: 365 * 24 * time.Hour,
-			LockFactory:       &mockLockFactory{},
-			Cluster:           &dummy.LocalCluster{},
-		},
-		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	nowShard := int32(now.Unix()/3600) / shardSize * shardSize
 
 	tests := []struct {
-		name string
-		args args
-		want []int32
+		name           string
+		args           args
+		existingShards []int32
+		want           []int32
+		wantReturnAll  []int32
 	}{
 		{
 			name: "now",
@@ -5339,7 +6049,29 @@ func Test_getTimeShards(t *testing.T) {
 				start: now,
 				end:   now,
 			},
-			want: []int32{int32(now.Unix()/3600) / shardSize * shardSize},
+			existingShards: []int32{nowShard - shardSize, nowShard, nowShard + shardSize},
+			want:           []int32{nowShard},
+			wantReturnAll:  []int32{nowShard},
+		},
+		{
+			name: "now-empty-index",
+			args: args{
+				start: now,
+				end:   now,
+			},
+			existingShards: []int32{},
+			want:           []int32{},
+			wantReturnAll:  []int32{nowShard},
+		},
+		{
+			name: "now-not-existing",
+			args: args{
+				start: now,
+				end:   now,
+			},
+			existingShards: []int32{nowShard - shardSize, nowShard + shardSize},
+			want:           []int32{},
+			wantReturnAll:  []int32{nowShard},
 		},
 		{
 			name: "base",
@@ -5347,7 +6079,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base,
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			name: "reference",
@@ -5355,16 +6089,20 @@ func Test_getTimeShards(t *testing.T) {
 				start: reference,
 				end:   reference,
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
-			// This test assume that reference+9h do NOT change its baseTime
+			// This test assume that reference+2h do NOT change its baseTime
 			name: "reference+2h",
 			args: args{
 				start: reference,
 				end:   reference.Add(2 * time.Hour),
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			name: "reference+postingShardSize",
@@ -5372,7 +6110,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: reference,
 				end:   reference.Add(postingShardSize),
 			},
-			want: []int32{baseTS, baseTS + shardSize},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID, baseShardID + shardSize},
+			wantReturnAll:  []int32{baseShardID, baseShardID + shardSize},
 		},
 		{
 			name: "base+postingShardSize",
@@ -5380,7 +6120,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base.Add(postingShardSize),
 			},
-			want: []int32{baseTS, baseTS + shardSize},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID, baseShardID + shardSize},
+			wantReturnAll:  []int32{baseShardID, baseShardID + shardSize},
 		},
 		{
 			name: "base+postingShardSize- 1seconds",
@@ -5388,7 +6130,9 @@ func Test_getTimeShards(t *testing.T) {
 				start: base,
 				end:   base.Add(postingShardSize).Add(-time.Second),
 			},
-			want: []int32{baseTS},
+			existingShards: []int32{baseShardID, baseShardID + shardSize},
+			want:           []int32{baseShardID},
+			wantReturnAll:  []int32{baseShardID},
 		},
 		{
 			// This test assume postingShardSize is at least > 2h
@@ -5397,31 +6141,105 @@ func Test_getTimeShards(t *testing.T) {
 				start: time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC),
 				end:   time.Date(1970, 1, 1, 1, 59, 0, 0, time.UTC),
 			},
-			want: []int32{0},
+			existingShards: []int32{0},
+			want:           []int32{0},
+			wantReturnAll:  []int32{0},
+		},
+		{
+			name: "reference_5_postingShardSize_wide",
+			args: args{
+				start: reference.Add(-2 * postingShardSize),
+				end:   reference.Add(2 * postingShardSize),
+			},
+			existingShards: []int32{baseShardID - 2*shardSize, baseShardID, baseShardID + shardSize, baseShardID + 10*shardSize},
+			want:           []int32{baseShardID - 2*shardSize, baseShardID, baseShardID + shardSize},
+			wantReturnAll: []int32{
+				baseShardID - 2*shardSize, baseShardID - shardSize, baseShardID, baseShardID + shardSize, baseShardID + 2*shardSize,
+			},
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
+
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
+			t.Parallel()
+
+			index, err := initialize(
+				context.Background(),
+				&mockStore{},
+				Options{
+					DefaultTimeToLive: 365 * 24 * time.Hour,
+					LockFactory:       &mockLockFactory{},
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				log.With().Str("component", "index").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(tt.existingShards) > 0 {
+				newShard := make([]uint64, 0, len(tt.existingShards))
+
+				for _, v := range tt.existingShards {
+					newShard = append(newShard, uint64(v))
+				}
+
+				_, err := index.postingUpdate(context.Background(), postingUpdateRequest{
+					Shard: globalShardNumber,
+					Label: labels.Label{
+						Name:  existingShardsLabel,
+						Value: existingShardsLabel,
+					},
+					AddIDs: newShard,
+				})
+				if err != nil && !errors.Is(err, errBitmapEmpty) {
+					t.Fatal(err)
+				}
+			}
+
+			gotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
 			if err != nil {
 				t.Error(err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("getTimeShards() = %v, want %v", got, tt.want)
+
+			gotNotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, false)
+			if err != nil {
+				t.Error(err)
+			}
+
+			if diff := cmp.Diff(tt.wantReturnAll, gotAll, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("getTimeShards(returnall) mismatch: (-want +got)\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tt.want, gotNotAll, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("getTimeShards() mismatch: (-want +got)\n%s", diff)
+			}
+
+			got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, shard := range got {
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards(returnall)[%d] = %v, want != %v", i, shard, globalShardNumber)
+				}
+			}
+
+			got, err = index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), false)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, shard := range got {
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
+				}
 			}
 		})
-	}
-
-	got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
-	if err != nil {
-		t.Error(err)
-	}
-
-	for i, shard := range got {
-		if shard == globalShardNumber {
-			t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
-		}
 	}
 }
 
@@ -6494,26 +7312,9 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					}
 				}
 
-				if batchIdx == 4 { //nolint:nestif
-					// Ensure store is empty
-					if got := len(realStore.postings); got != 0 {
-						t.Errorf("len(postings) = %d, want 0", got)
-					}
-
-					if got := len(realStore.expiration); got != 0 {
-						t.Errorf("len(expiration) = %d, want 0", got)
-					}
-
-					if got := len(realStore.id2expiration); got != 0 {
-						t.Errorf("len(id2expiration) = %d, want 0", got)
-					}
-
-					if got := len(realStore.id2labels); got != 0 {
-						t.Errorf("len(id2labels) = %d, want 0", got)
-					}
-
-					if got := len(realStore.labels2id); got != 0 {
-						t.Errorf("len(labels2id) = %d, want 0", got)
+				if batchIdx == 4 {
+					if err := realStore.verifyStoreEmpty(t); err != nil {
+						t.Error(err)
 					}
 				}
 			}
