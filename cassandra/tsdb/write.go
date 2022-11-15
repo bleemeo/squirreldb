@@ -18,8 +18,8 @@ import (
 
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
-// Write writes all specified metrics
-// metrics points should be sorted and deduplicated.
+// Write writes all specified metrics.
+// Metric points should be sorted and deduplicated.
 func (c *CassandraTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	return c.InternalWrite(ctx, metrics, 0)
 }

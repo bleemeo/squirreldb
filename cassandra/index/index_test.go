@@ -779,7 +779,7 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 		builder := labels.NewBuilder(metric)
 		builder.Del(timeToLiveLabelName)
 
-		result = append(result, builder.Labels())
+		result = append(result, builder.Labels(nil))
 	}
 
 	return result
@@ -5628,7 +5628,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				// randomize between shortestTTL & longTTL
 				rndSecond := shortestTTL.Seconds() + rnd.Float64()*(longTTL.Seconds()-shortestTTL.Seconds())
 				builder.Set("__ttl__", strconv.FormatInt(int64(rndSecond), 10))
-				metricsRandomTTL[i] = builder.Labels()
+				metricsRandomTTL[i] = builder.Labels(nil)
 
 				rndExpirationByShard[i][nextShard] = currentTime.Add(time.Duration(rndSecond) * time.Second)
 			}
@@ -5749,13 +5749,13 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			for i := range metricsLongToShortTTL {
 				builder := labels.NewBuilder(metricsLongToShortTTL[i])
 				builder.Set("__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10))
-				metricsLongToShortTTL[i] = builder.Labels()
+				metricsLongToShortTTL[i] = builder.Labels(nil)
 			}
 
 			for i := range metricsShortToLongTTL {
 				builder := labels.NewBuilder(metricsShortToLongTTL[i])
 				builder.Set("__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10))
-				metricsShortToLongTTL[i] = builder.Labels()
+				metricsShortToLongTTL[i] = builder.Labels(nil)
 			}
 		case currentPhase == 2 && nextPhase == 3:
 			// End of phase 2

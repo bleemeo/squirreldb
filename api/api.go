@@ -786,5 +786,5 @@ func textToLabels(text string) (labels.Labels, error) {
 		builder.Set(v.Name, v.Value)
 	}
 
-	return builder.Labels(), nil
+	return builder.Labels(nil), nil
 }

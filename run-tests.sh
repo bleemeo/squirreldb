@@ -117,7 +117,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/wait-stores"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/wait-stores"
 
 echo
 echo "== Running squirreldb-cassandra-lock-bench"
@@ -126,7 +127,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/squirreldb-cassandra-lock-bench/ $lock_opt"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-cassandra-lock-bench/ $lock_opt"
 
 echo
 echo "== Running squirreldb-cassandra-index-bench"
@@ -135,7 +137,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
 
 echo
 echo "== Running remote-storage-test"
@@ -144,7 +147,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/remote-storage-test/ $remote_store_opt"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/remote-storage-test/ $remote_store_opt"
 
 echo
 echo "== Running remote-storage-test2"
@@ -153,7 +157,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/remote-storage-test2/ $remote_store2_opt"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/remote-storage-test2/ $remote_store2_opt"
 
 echo
 echo "== Running squirreldb-cluster-redis"
@@ -161,7 +166,8 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e GORACE -e SQUIRRELDB_REDIS_ADDRESSES \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} sh -c "go run $race_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
 
 
 echo
