@@ -16,6 +16,8 @@ type Options struct {
 	Keyspace          string
 	Addresses         []string
 	ReplicationFactor int
+	Username          string
+	Password          string
 	Logger            zerolog.Logger
 }
 
@@ -24,6 +26,13 @@ func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
+
+	if options.Username != "" {
+		cluster.Authenticator = gocql.PasswordAuthenticator{
+			Username: options.Username,
+			Password: options.Password,
+		}
+	}
 
 	session, err := cluster.CreateSession()
 	if err != nil {

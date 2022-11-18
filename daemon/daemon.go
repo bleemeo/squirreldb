@@ -405,6 +405,8 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 			Addresses:         s.Config.Strings("cassandra.addresses"),
 			ReplicationFactor: s.Config.Int("cassandra.replication_factor"),
 			Keyspace:          s.Config.String("cassandra.keyspace"),
+			Username:          s.Config.String("cassandra.username"),
+			Password:          s.Config.String("cassandra.password"),
 			Logger:            s.Logger.With().Str("component", "session").Logger(),
 		}
 

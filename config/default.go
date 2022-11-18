@@ -7,6 +7,8 @@ var defaults = map[string]interface{}{
 	"cassandra.replication_factor":           1,
 	"cassandra.default_time_to_live":         "8760h", // 1 year
 	"cassandra.aggregate.intended_duration":  "1m",
+	"cassandra.username":                     "",
+	"cassandra.password":                     "",
 	"redis.addresses":                        []string{},
 	"listen_address":                         "localhost:9201",
 	"remote_storage.max_concurrent_requests": 0,
