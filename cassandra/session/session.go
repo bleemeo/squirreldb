@@ -16,9 +16,15 @@ type Options struct {
 	Keyspace          string
 	Addresses         []string
 	ReplicationFactor int
-	Username          string
-	Password          string
-	Logger            zerolog.Logger
+	// Cassandra credentials
+	Username string
+	Password string
+	// SSL options.
+	CertPath               string
+	KeyPath                string
+	CaPath                 string
+	EnableHostVerification bool
+	Logger                 zerolog.Logger
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
@@ -26,6 +32,15 @@ func New(options Options) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
+
+	if options.CertPath != "" || options.KeyPath != "" || options.CaPath != "" {
+		cluster.SslOpts = &gocql.SslOptions{
+			CertPath:               options.CertPath,
+			KeyPath:                options.KeyPath,
+			CaPath:                 options.CaPath,
+			EnableHostVerification: options.EnableHostVerification,
+		}
+	}
 
 	if options.Username != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{

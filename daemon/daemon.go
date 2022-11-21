@@ -402,12 +402,16 @@ func (s *SquirrelDB) CassandraSessionNoKeyspace() (*gocql.Session, error) {
 func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 	if s.cassandraSession == nil {
 		options := session.Options{
-			Addresses:         s.Config.Strings("cassandra.addresses"),
-			ReplicationFactor: s.Config.Int("cassandra.replication_factor"),
-			Keyspace:          s.Config.String("cassandra.keyspace"),
-			Username:          s.Config.String("cassandra.username"),
-			Password:          s.Config.String("cassandra.password"),
-			Logger:            s.Logger.With().Str("component", "session").Logger(),
+			Addresses:              s.Config.Strings("cassandra.addresses"),
+			ReplicationFactor:      s.Config.Int("cassandra.replication_factor"),
+			Keyspace:               s.Config.String("cassandra.keyspace"),
+			Username:               s.Config.String("cassandra.username"),
+			Password:               s.Config.String("cassandra.password"),
+			CertPath:               s.Config.String("cassandra.cert_path"),
+			KeyPath:                s.Config.String("cassandra.key_path"),
+			CaPath:                 s.Config.String("cassandra.ca_path"),
+			EnableHostVerification: s.Config.Bool("cassandra.enable_host_verification"),
+			Logger:                 s.Logger.With().Str("component", "session").Logger(),
 		}
 
 		session, keyspaceCreated, err := session.New(options)
