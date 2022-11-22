@@ -2,26 +2,48 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	goredis "github.com/go-redis/redis/v8"
 )
 
-// Client rovide a thin wrapper around Goredis client.
+var errNotPem = errors.New("not a PEM file")
+
+// Client provides a thin wrapper around Goredis client.
 // This wrapper will auto-detect if the address point to a Redis cluster or
 // a single instance client.
 // It does this by assuming the Redis is a cluster, but if that fail AND
 // single node query success then assume single instance.
 // When either cluster or single node is assumed, we don't retry discovery.
 type Client struct {
-	Addresses []string
+	opts Options
 
 	lastReload    time.Time
 	singleClient  *goredis.Client
 	clusterClient *goredis.ClusterClient
 	l             sync.Mutex
+}
+
+type Options struct {
+	Addresses   []string
+	Username    string
+	Password    string
+	SSL         bool
+	SSLInsecure bool
+	CertPath    string
+	KeyPath     string
+	CaPath      string
+}
+
+// New returns a redis client.
+func New(opts Options) *Client {
+	return &Client{opts: opts}
 }
 
 // Close dispatch Close to either cluster of single instance client.
@@ -213,14 +235,25 @@ func (c *Client) fixClient(ctx context.Context) error {
 	c.l.Lock()
 	defer c.l.Unlock()
 
+	tlsConfig, err := c.tlsConfig()
+	if err != nil {
+		return err
+	}
+
 	if c.singleClient == nil && c.clusterClient == nil {
 		c.clusterClient = goredis.NewClusterClient(&goredis.ClusterOptions{
-			Addrs: c.Addresses,
+			Addrs:     c.opts.Addresses,
+			Username:  c.opts.Username,
+			Password:  c.opts.Password,
+			TLSConfig: tlsConfig,
 		})
 
-		if len(c.Addresses) == 1 {
+		if len(c.opts.Addresses) == 1 {
 			c.singleClient = goredis.NewClient(&goredis.Options{
-				Addr: c.Addresses[0],
+				Addr:      c.opts.Addresses[0],
+				Username:  c.opts.Username,
+				Password:  c.opts.Password,
+				TLSConfig: tlsConfig,
 			})
 		}
 	}
@@ -239,8 +272,54 @@ func (c *Client) fixClient(ctx context.Context) error {
 	case singleErr == nil && infoErr != nil:
 		c.clusterClient = nil
 	default:
-		return fmt.Errorf("ping redis: %w", clusterErr)
+		return fmt.Errorf("ping redis: single node client: %w, cluster client: %s", singleErr, clusterErr)
 	}
 
 	return nil
+}
+
+func (c *Client) tlsConfig() (*tls.Config, error) {
+	if !c.opts.SSL {
+		return nil, nil //nolint:nilnil
+	}
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: c.opts.SSLInsecure, //nolint:gosec
+	}
+
+	if c.opts.CaPath != "" {
+		rootCAs, err := loadRootCAs(c.opts.CaPath)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load CA: %w", err)
+		}
+
+		tlsConfig.RootCAs = rootCAs
+	}
+
+	if c.opts.CertPath != "" || c.opts.KeyPath != "" {
+		mycert, err := tls.LoadX509KeyPair(c.opts.CertPath, c.opts.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load X509 key pair: %w", err)
+		}
+
+		tlsConfig.Certificates = append(tlsConfig.Certificates, mycert)
+	}
+
+	return tlsConfig, nil
+}
+
+func loadRootCAs(caFile string) (*x509.CertPool, error) {
+	rootCAs := x509.NewCertPool()
+
+	certs, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+
+	ok := rootCAs.AppendCertsFromPEM(certs)
+	if !ok {
+		return nil, errNotPem
+	}
+
+	return rootCAs, nil
 }
