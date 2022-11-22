@@ -86,8 +86,10 @@ else
     race_opt=""
 fi
 
+lock2_opt="--worker-processes 5 --worker-threads 1 --work-duration 250ms --worker-delay 500ms"
 if [ "${WITH_LONG}" = "1" ]; then
     lock_opt="--worker-processes 3 --run-time 90s"
+    lock2_opt="${lock2_opt} --run-time 90s"
     index_bench_opt="--bench.query 500 --bench.shard-end 10 --bench.shard-size 2000 --bench.worker-max-threads 5 --bench.worker-processes 2"
     remote_store_opt="--threads 3 --scale 10"
     remote_store2_opt="--test.processes 2 --test.run-duration 1m"
@@ -121,7 +123,7 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     sh -exc "go run $race_opt ./tests/wait-stores"
 
 echo
-echo "== Running squirreldb-cassandra-lock-bench"
+echo "== Running squirreldb-cassandra-lock-bench (threaded)"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e GORACE \
@@ -129,6 +131,16 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     --entrypoint '' \
     goreleaser/goreleaser:${GORELEASER_VERSION} \
     sh -exc "go run $race_opt ./tests/squirreldb-cassandra-lock-bench/ $lock_opt"
+
+echo
+echo "== Running squirreldb-cassandra-lock-bench (single thread, more processes)"
+docker run $docker_network --rm -e HOME=/go/pkg \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-cassandra-lock-bench/ $lock2_opt"
 
 echo
 echo "== Running squirreldb-cassandra-index-bench"
