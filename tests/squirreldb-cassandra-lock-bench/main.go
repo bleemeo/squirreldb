@@ -29,7 +29,7 @@ var (
 	workerDelay     = flag.Duration("worker-delay", 0, "Delay after a successful task and the next attempt for thread")
 	tryLockDelay    = flag.Duration("try-lock-duration", 15*time.Second, "If delay given to TryLock()")
 	recreateLock    = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
-	lockTTL         = flag.Duration("lock-ttl", 2*time.Second, "TTL of the locks")
+	lockTTL         = flag.Duration("lock-ttl", 5*time.Second, "TTL of the locks")
 	lockName        = flag.String("lock-name", "benchmarking-lock", "Name prefix of the lock")
 	count           = flag.Int("count", 1, "Number of different lock/task")
 )

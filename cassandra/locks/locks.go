@@ -100,8 +100,8 @@ func tableExists(session *gocql.Session) bool {
 func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
 	hostname, _ := os.Hostname()
 
-	if timeToLive < 2*time.Second {
-		c.logger.Warn().Msgf("Lock TTL = %v but should be at least 2s or two SquirrelDB may acquire the lock", timeToLive)
+	if timeToLive < 3*time.Second {
+		c.logger.Warn().Msgf("Lock TTL = %v but should be at least 3s or two SquirrelDB may acquire the lock", timeToLive)
 	}
 
 	l := &Lock{
