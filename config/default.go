@@ -8,6 +8,13 @@ var defaults = map[string]interface{}{
 	"cassandra.default_time_to_live":         "8760h", // 1 year
 	"cassandra.aggregate.intended_duration":  "1m",
 	"redis.addresses":                        []string{},
+	"redis.username":                         "",
+	"redis.password":                         "",
+	"redis.ssl":                              false,
+	"redis.ssl_insecure":                     false,
+	"redis.cert_path":                        "",
+	"redis.key_path":                         "",
+	"redis.ca_path":                          "",
 	"listen_address":                         "localhost:9201",
 	"remote_storage.max_concurrent_requests": 0,
 	"promql.max_evaluated_points":            0,

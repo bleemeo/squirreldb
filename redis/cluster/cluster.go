@@ -31,7 +31,7 @@ const (
 
 // Cluster implement types.Cluster using Redis pub/sub.
 type Cluster struct {
-	Addresses      []string
+	RedisOptions   client.Options
 	MetricRegistry prometheus.Registerer
 	Keyspace       string
 	Logger         zerolog.Logger
@@ -61,9 +61,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	}
 
 	c.redisChannel = c.Keyspace + pubsubName
-	c.client = &client.Client{
-		Addresses: c.Addresses,
-	}
+	c.client = client.New(c.RedisOptions)
 
 	cluster, err := c.client.IsCluster(ctx)
 	if err != nil {

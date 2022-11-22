@@ -27,8 +27,8 @@ const (
 )
 
 type Options struct {
-	Keyspace  string
-	Addresses []string
+	RedisOptions client.Options
+	Keyspace     string
 }
 
 type Redis struct {
@@ -60,9 +60,7 @@ const (
 // New creates a new Redis object.
 func New(ctx context.Context, reg prometheus.Registerer, options Options, logger zerolog.Logger) (*Redis, error) {
 	redis := &Redis{
-		client: &client.Client{
-			Addresses: options.Addresses,
-		},
+		client:  client.New(options.RedisOptions),
 		logger:  logger,
 		metrics: newMetrics(reg),
 	}

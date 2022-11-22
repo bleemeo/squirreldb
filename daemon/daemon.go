@@ -286,20 +286,18 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 // This method is intended for testing, where namespace prefix is overrided to "test:".
 // Currently it drop Redis keys that start with namespace prefix.
 func (s *SquirrelDB) DropTemporaryStore(ctx context.Context, forceNonTestKeyspace bool) error {
-	redisAddresses := s.Config.Strings("redis.addresses")
+	redisOpts := s.redisOptions()
 	prefix := s.Config.String("internal.redis_keyspace")
 
 	if prefix != "test:" && !forceNonTestKeyspace {
 		return fmt.Errorf("refuse to drop with prefix \"%s\" without forceNonTestKeyspace", prefix)
 	}
 
-	if len(redisAddresses) == 0 || redisAddresses[0] == "" {
+	if len(redisOpts.Addresses) == 0 || redisOpts.Addresses[0] == "" {
 		return nil
 	}
 
-	wrappedClient := &client.Client{
-		Addresses: redisAddresses,
-	}
+	wrappedClient := client.New(redisOpts)
 
 	defer wrappedClient.Close()
 
@@ -584,10 +582,10 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 // Cluster return an types.Cluster. The returned cluster should be closed after use.
 func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 	if s.ExistingCluster == nil {
-		redisAddresses := s.Config.Strings("redis.addresses")
-		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+		redisOpts := s.redisOptions()
+		if len(redisOpts.Addresses) > 0 && redisOpts.Addresses[0] != "" {
 			c := &cluster.Cluster{
-				Addresses:      redisAddresses,
+				RedisOptions:   redisOpts,
 				MetricRegistry: s.MetricRegistry,
 				Keyspace:       s.Config.String("internal.redis_keyspace"),
 				Logger:         s.Logger.With().Str("component", "cluster").Logger(),
@@ -865,11 +863,11 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
 	switch s.Config.String("internal.temporary_store") {
 	case "redis":
-		redisAddresses := s.Config.Strings("redis.addresses")
-		if len(redisAddresses) > 0 && redisAddresses[0] != "" {
+		redisOpts := s.redisOptions()
+		if len(redisOpts.Addresses) > 0 && redisOpts.Addresses[0] != "" {
 			options := redisTemporarystore.Options{
-				Addresses: redisAddresses,
-				Keyspace:  s.Config.String("internal.redis_keyspace"),
+				RedisOptions: redisOpts,
+				Keyspace:     s.Config.String("internal.redis_keyspace"),
 			}
 
 			tmp, err := redisTemporarystore.New(
@@ -895,6 +893,19 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 		}
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
+	}
+}
+
+func (s *SquirrelDB) redisOptions() client.Options {
+	return client.Options{
+		Addresses:   s.Config.Strings("redis.addresses"),
+		Username:    s.Config.String("redis.username"),
+		Password:    s.Config.String("redis.password"),
+		SSL:         s.Config.Bool("redis.ssl"),
+		SSLInsecure: s.Config.Bool("redis.ssl_insecure"),
+		CertPath:    s.Config.String("redis.cert_path"),
+		KeyPath:     s.Config.String("redis.key_path"),
+		CaPath:      s.Config.String("redis.ca_path"),
 	}
 }
 
