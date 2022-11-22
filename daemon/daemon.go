@@ -24,7 +24,6 @@ import (
 	"squirreldb/redis/client"
 	"squirreldb/redis/cluster"
 	redisTemporarystore "squirreldb/redis/temporarystore"
-	"squirreldb/retry"
 	"squirreldb/telemetry"
 	"squirreldb/types"
 	"sync"
@@ -519,6 +518,8 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 		},
 	}
 
+	var err error
+
 	ctxs := make([]context.Context, len(tasks))
 	cancels := make([]context.CancelFunc, len(tasks))
 	waitChan := make([]chan interface{}, len(tasks))
@@ -530,47 +531,42 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 		ctxs[i], cancels[i] = context.WithCancel(context.Background())
 
-		err := retry.Print(func() error {
-			waitChan[i] = make(chan interface{})
+		waitChan[i] = make(chan interface{})
 
-			go func() {
-				defer logger.ProcessPanic()
+		go func() {
+			defer logger.ProcessPanic()
 
-				task.Task.Run(ctxs[i], subReadiness)
-				close(waitChan[i])
-			}()
+			task.Task.Run(ctxs[i], subReadiness)
+			close(waitChan[i])
+		}()
 
-			err := <-subReadiness
-			if err != nil {
-				<-waitChan[i]
-			}
+		err = <-subReadiness
+		if err != nil {
+			break
+		}
 
-			return err
-		}, retry.NewExponentialBackOff(ctx, 30*time.Second),
-			s.Logger,
-			fmt.Sprintf("Starting %s", task.Name),
-		)
-
-		if ctx.Err() != nil {
-			if err == nil {
-				tasks = tasks[:i+1]
-			} else {
-				tasks = tasks[:i]
-			}
+		if ctx.Err() == nil {
+			s.Logger.Trace().Msgf("Task %s started", task.Name)
+		} else {
+			err = ctx.Err()
 
 			break
-		} else {
-			s.Logger.Trace().Msgf("Task %s started", task.Name)
 		}
 	}
 
-	s.api.Ready()
+	if err == nil {
+		s.api.Ready()
+	}
 
-	readiness <- ctx.Err()
+	readiness <- err
 
 	<-ctx.Done()
 
 	for i := len(tasks) - 1; i >= 0; i-- {
+		if cancels[i] == nil {
+			continue
+		}
+
 		cancels[i]()
 		<-waitChan[i]
 		s.Logger.Trace().Msgf("Task %s stopped", tasks[i].Name)

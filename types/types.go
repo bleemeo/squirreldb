@@ -12,8 +12,8 @@ import (
 
 // OldTask is a background worked that will be running until ctx is cancelled.
 // If readiness is not nil, when ready the task send one nil.
-// If an error occure, the task will send the error on the channel and return.
-// You are allowed to re-call Run() if an error is returned.
+// If an error occur, the task will send the error on the channel and return.
+// You are not allowed to re-call Run() if an error is returned.
 type OldTask interface {
 	Run(ctx context.Context, readiness chan error)
 }
