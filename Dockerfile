@@ -12,6 +12,9 @@ FROM alpine:3.16
 
 LABEL maintainer="Bleemeo Docker Maintainers <packaging-team@bleemeo.com>"
 
+RUN apk update && \
+    apk add --no-cache ca-certificates
+
 ENV SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201
 
 ENV SQUIRRELDB_INTERNAL_INSTALLATION_FORMAT="Docker"
