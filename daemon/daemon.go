@@ -4,8 +4,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
@@ -17,7 +17,7 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
-	"squirreldb/config"
+	"squirreldb/config2"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
 	"squirreldb/logger"
@@ -43,6 +43,8 @@ var (
 	Version = "unset"
 	Commit  string
 	Date    string
+
+	showVersion = flag.Bool("version", false, "Show version and exit")
 )
 
 const (
@@ -62,11 +64,10 @@ type MetricReadWriter interface {
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
-	Config                     *config.Config
-	ExistingCluster            types.Cluster
-	MetricRegistry             prometheus.Registerer
-	Logger                     zerolog.Logger
-	DebugDisableBackgroundTask bool
+	Config          config2.Config
+	ExistingCluster types.Cluster
+	MetricRegistry  prometheus.Registerer
+	Logger          zerolog.Logger
 
 	cassandraSession         *gocql.Session
 	lockFactory              LockFactory
@@ -89,8 +90,8 @@ var errBadConfig = errors.New("configuration validation failed")
 // is ready.
 // On error, we can retry calling Start() which will resume starting SquirrelDB.
 func (s *SquirrelDB) Start(ctx context.Context) error {
-	if s.DebugDisableBackgroundTask {
-		s.Logger.Warn().Msg("DebugDisableBackgroundTask is enabled. Don't use this on production.")
+	if s.Config.Internal.DisableBackgroundTask {
+		s.Logger.Warn().Msg("internal.disable_background_task is enabled. Don't use this on production.")
 	}
 
 	err := s.Init()
@@ -98,12 +99,12 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, err = s.Index(ctx, !s.DebugDisableBackgroundTask)
+	_, err = s.Index(ctx, !s.Config.Internal.DisableBackgroundTask)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.TSDB(ctx, !s.DebugDisableBackgroundTask)
+	_, err = s.TSDB(ctx, !s.Config.Internal.DisableBackgroundTask)
 	if err != nil {
 		return err
 	}
@@ -147,21 +148,17 @@ func (s *SquirrelDB) Stop() {
 	s.wg.Wait()
 }
 
-// ListenPort return the port listenning on. Should not be used before Start().
+// ListenPort return the port listening on. Should not be used before Start().
 // This is useful for tests that use port "0" to known the actual listenning port.
 func (s *SquirrelDB) ListenPort() int {
 	return s.api.ListenPort()
 }
 
-// Init initialize SquirrelDB Locks & State. It also validate configuration with cluster (need Cassandra access)
+// Init initialize SquirrelDB Locks & State.
 // Init could be retried.
 func (s *SquirrelDB) Init() error {
 	if s.MetricRegistry == nil {
 		s.MetricRegistry = prometheus.DefaultRegisterer
-	}
-
-	if !s.Config.Validate() {
-		return errBadConfig
 	}
 
 	return nil
@@ -225,44 +222,70 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 // Config return the configuration after validation.
 //
 //nolint:forbidigo // This function is allowed to use fmt.Print*
-func Config() (cfg *config.Config, err error) {
-	cfg, err = config.New(log.With().Str("component", "config").Logger())
+func Config() (config2.Config, error, error) {
+	flags, err := config2.ParseFlags()
 	if err != nil {
-		return nil, fmt.Errorf("can't load config: %w", err)
+		return config2.Config{}, nil, err
 	}
 
-	if cfg.Bool("help") {
-		cfg.FlagSet.PrintDefaults()
+	if showHelp, _ := flags.GetBool("help"); showHelp {
+		flags.PrintDefaults()
 		os.Exit(0)
 	}
 
-	if cfg.Bool("version") {
+	if showVersion, _ := flags.GetBool("version"); showVersion {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
 
-	if cfg.Bool("build-info") {
+	if showBuildInfo, _ := flags.GetBool("build-info"); showBuildInfo {
 		fmt.Printf("Built at %s using %s from commit %s\n", Date, runtime.Version(), Commit)
 		fmt.Printf("Version %s\n", Version)
 
 		os.Exit(0)
 	}
 
-	if !cfg.Validate() {
-		return cfg, errBadConfig
+	cfg, warnings, err := config2.Load(true, flags)
+	if err != nil {
+		return config2.Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}
 
-	return cfg, nil
+	if err := validateConfig(cfg); err != nil {
+		return cfg, nil, err
+	}
+
+	return cfg, warnings, nil
+}
+
+// validateConfig checks if the configuration is valid and consistent.
+func validateConfig(cfg config2.Config) error {
+	var warnings prometheus.MultiError
+
+	if cfg.Cassandra.Keyspace == "" {
+		warnings.Append(fmt.Errorf("%w: 'cassandra.keyspace' must be set", config2.ErrInvalidValue))
+	}
+
+	if cfg.Cassandra.ReplicationFactor <= 0 {
+		warnings.Append(fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", config2.ErrInvalidValue))
+	}
+
+	if cfg.Batch.Size <= 0 {
+		warnings.Append(fmt.Errorf("%w: 'batch.size' must be strictly greater than 0", config2.ErrInvalidValue))
+	}
+
+	if cfg.Cassandra.Aggregate.IntendedDuration <= 0 {
+		warnings.Append(fmt.Errorf("%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0", config2.ErrInvalidValue))
+	}
+
+	return warnings.MaybeUnwrap()
 }
 
 // DropCassandraData delete the Cassandra keyspace. If forceNonTestKeyspace also drop if the
 // keyspace is not "squirreldb_test".
 // This method is intended for testing, where keyspace is overrided to squirreldb_test.
 func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace bool) error {
-	keyspace := s.Config.String("cassandra.keyspace")
-
-	if keyspace != "squirreldb_test" && !forceNonTestKeyspace {
-		return fmt.Errorf("refuse to drop keyspace %s without forceNonTestKeyspace", keyspace)
+	if s.Config.Cassandra.Keyspace != "squirreldb_test" && !forceNonTestKeyspace {
+		return fmt.Errorf("refuse to drop keyspace %s without forceNonTestKeyspace", s.Config.Cassandra.Keyspace)
 	}
 
 	session, err := s.CassandraSessionNoKeyspace()
@@ -270,7 +293,7 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 		return err
 	}
 
-	err = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
+	err = session.Query("DROP KEYSPACE IF EXISTS " + s.Config.Cassandra.Keyspace).Exec()
 	if err != nil {
 		return fmt.Errorf("failed to drop keyspace: %w", err)
 	}
@@ -285,18 +308,17 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 // This method is intended for testing, where namespace prefix is overrided to "test:".
 // Currently it drop Redis keys that start with namespace prefix.
 func (s *SquirrelDB) DropTemporaryStore(ctx context.Context, forceNonTestKeyspace bool) error {
-	redisOpts := s.redisOptions()
-	prefix := s.Config.String("internal.redis_keyspace")
+	prefix := s.Config.Redis.Keyspace
 
 	if prefix != "test:" && !forceNonTestKeyspace {
 		return fmt.Errorf("refuse to drop with prefix \"%s\" without forceNonTestKeyspace", prefix)
 	}
 
-	if len(redisOpts.Addresses) == 0 || redisOpts.Addresses[0] == "" {
+	if len(s.Config.Redis.Addresses) == 0 || s.Config.Redis.Addresses[0] == "" {
 		return nil
 	}
 
-	wrappedClient := client.New(redisOpts)
+	wrappedClient := client.New(s.Config.Redis)
 
 	defer wrappedClient.Close()
 
@@ -384,7 +406,7 @@ func (s *SquirrelDB) SchemaLock() (types.TryLocker, error) {
 
 // CassandraSessionNoKeyspace return a Cassandra without keyspace selected.
 func (s *SquirrelDB) CassandraSessionNoKeyspace() (*gocql.Session, error) {
-	cluster := gocql.NewCluster(s.Config.Strings("cassandra.addresses")...)
+	cluster := gocql.NewCluster(s.Config.Cassandra.Addresses...)
 	cluster.Timeout = 10 * time.Second
 
 	session, err := cluster.CreateSession()
@@ -398,20 +420,10 @@ func (s *SquirrelDB) CassandraSessionNoKeyspace() (*gocql.Session, error) {
 // CassandraSession return the Cassandra session used for SquirrelDB.
 func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 	if s.cassandraSession == nil {
-		options := session.Options{
-			Addresses:              s.Config.Strings("cassandra.addresses"),
-			ReplicationFactor:      s.Config.Int("cassandra.replication_factor"),
-			Keyspace:               s.Config.String("cassandra.keyspace"),
-			Username:               s.Config.String("cassandra.username"),
-			Password:               s.Config.String("cassandra.password"),
-			CertPath:               s.Config.String("cassandra.cert_path"),
-			KeyPath:                s.Config.String("cassandra.key_path"),
-			CaPath:                 s.Config.String("cassandra.ca_path"),
-			EnableHostVerification: s.Config.Bool("cassandra.enable_host_verification"),
-			Logger:                 s.Logger.With().Str("component", "session").Logger(),
-		}
-
-		session, keyspaceCreated, err := session.New(options)
+		session, keyspaceCreated, err := session.New(
+			s.Config.Cassandra,
+			s.Logger.With().Str("component", "session").Logger(),
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -426,7 +438,7 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 // LockFactory return the Lock factory of SquirrelDB.
 func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 	if s.lockFactory == nil {
-		switch s.Config.String("internal.locks") {
+		switch s.Config.Internal.Locks {
 		case backendCassandra:
 			session, err := s.CassandraSession()
 			if err != nil {
@@ -449,7 +461,7 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 
 			s.lockFactory = &dummy.Locks{}
 		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.locks"))
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.Locks)
 		}
 	}
 
@@ -458,7 +470,7 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 
 func (s *SquirrelDB) States() (types.State, error) {
 	if s.states == nil {
-		switch s.Config.String("internal.states") {
+		switch s.Config.Internal.States {
 		case backendCassandra:
 			session, err := s.CassandraSession()
 			if err != nil {
@@ -483,7 +495,7 @@ func (s *SquirrelDB) States() (types.State, error) {
 
 			s.states = &dummy.States{}
 		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.states"))
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.States)
 		}
 	}
 
@@ -496,13 +508,13 @@ type namedTasks struct {
 }
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
-	s.api.ListenAddress = s.Config.String("listen_address")
+	s.api.ListenAddress = s.Config.ListenAddress
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
-	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.Int64("promql.max_evaluated_points"))
-	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.Int("promql.max_evaluated_series"))
-	s.api.MaxConcurrentRemoteRequests = s.Config.Int("remote_storage.max_concurrent_requests")
+	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.PromQL.MaxEvaluatedPoints)
+	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.PromQL.MaxEvaluatedSeries)
+	s.api.MaxConcurrentRemoteRequests = s.Config.RemoteStorage.MaxConcurrentRequests
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 
@@ -584,12 +596,11 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 // Cluster return an types.Cluster. The returned cluster should be closed after use.
 func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 	if s.ExistingCluster == nil {
-		redisOpts := s.redisOptions()
-		if len(redisOpts.Addresses) > 0 && redisOpts.Addresses[0] != "" {
+		if len(s.Config.Redis.Addresses) > 0 && s.Config.Redis.Addresses[0] != "" {
 			c := &cluster.Cluster{
-				RedisOptions:   redisOpts,
+				RedisOptions:   s.Config.Redis,
 				MetricRegistry: s.MetricRegistry,
-				Keyspace:       s.Config.String("internal.redis_keyspace"),
+				Keyspace:       s.Config.Redis.Keyspace,
 				Logger:         s.Logger.With().Str("component", "cluster").Logger(),
 			}
 
@@ -614,7 +625,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 	if s.index == nil { //nolint:nestif
 		var wrappedIndex types.Index
 
-		switch s.Config.String("internal.index") {
+		switch s.Config.Internal.Index {
 		case backendCassandra:
 			session, err := s.CassandraSession()
 			if err != nil {
@@ -637,7 +648,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			}
 
 			options := index.Options{
-				DefaultTimeToLive: s.Config.Duration("cassandra.default_time_to_live"),
+				DefaultTimeToLive: s.Config.Cassandra.DefaultTimeToLive,
 				LockFactory:       s.lockFactory,
 				States:            states,
 				SchemaLock:        schemaLock,
@@ -658,11 +669,11 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 			s.Logger.Warn().Msg("Using dummy for index (only do this for testing)")
 
 			wrappedIndex = &dummy.Index{
-				StoreMetricIDInMemory: s.Config.Bool("internal.dummy_index_check_conflict"),
-				FixedValue:            types.MetricID(s.Config.Int64("internal.dummy_index_fixed_id")),
+				StoreMetricIDInMemory: s.Config.Internal.IndexDummyCheckConflict,
+				FixedValue:            types.MetricID(s.Config.Internal.IndexDummyFixedID),
 			}
 		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.index"))
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.Index)
 		}
 
 		mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
@@ -692,7 +703,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 // TSDB return the metric persistent store. If started is true the tsdb is started.
 func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (MetricReadWriter, error) {
 	if s.persistentStore == nil { //nolint:nestif
-		switch s.Config.String("internal.tsdb") {
+		switch s.Config.Internal.TSDB {
 		case backendCassandra:
 			session, err := s.CassandraSession()
 			if err != nil {
@@ -720,8 +731,8 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 			}
 
 			options := tsdb.Options{
-				DefaultTimeToLive:         s.Config.Duration("cassandra.default_time_to_live"),
-				AggregateIntendedDuration: s.Config.Duration("cassandra.aggregate.intended_duration"),
+				DefaultTimeToLive:         s.Config.Cassandra.DefaultTimeToLive,
+				AggregateIntendedDuration: s.Config.Cassandra.Aggregate.IntendedDuration,
 				SchemaLock:                schemaLock,
 			}
 
@@ -745,7 +756,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 
 			s.persistentStore = &dummy.DiscardTSDB{}
 		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.tsdb"))
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.TSDB)
 		}
 	}
 
@@ -760,7 +771,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 }
 
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {
-	if !s.Config.Bool("telemetry.enabled") {
+	if !s.Config.Internal.Telemetry.Enabled {
 		return nil
 	}
 
@@ -790,17 +801,15 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	defer lock.Unlock()
 
 	addFacts := map[string]string{
-		"installation_format": s.Config.String("internal.installation.format"),
+		"installation_format": s.Config.Internal.Installation.Format,
 		"cluster_id":          clusterID,
 		"version":             Version,
 	}
 
 	runOption := map[string]string{
-		"filepath": s.Config.String("telemetry.id.path"),
-		"url":      s.Config.String("telemetry.address"),
+		"filepath": s.Config.Internal.Telemetry.ID.Path,
+		"url":      s.Config.Internal.Telemetry.Address,
 	}
-
-	rand.Seed(time.Now().UnixNano())
 
 	tlm := telemetry.New(addFacts, runOption, s.Logger.With().Str("component", "telemetry").Logger())
 	tlm.Start(ctx)
@@ -815,7 +824,7 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 			return nil, err
 		}
 
-		tenantLabelName := s.Config.String("promql.tenant_label_name")
+		tenantLabelName := s.Config.PromQL.TenantLabelName
 		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
 
 		s.mutableLabelProcessor = labelProcessor
@@ -828,7 +837,7 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 	if s.mutableLabelProvider == nil {
 		var store mutable.Store
 
-		switch s.Config.String("internal.mutable_labels_provider") {
+		switch s.Config.Internal.MutableLabelsProvider {
 		case backendCassandra:
 			session, err := s.CassandraSession()
 			if err != nil {
@@ -844,7 +853,7 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 
 			store = dummy.NewMutableLabelStore(dummy.MutableLabels{})
 		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.String("internal.mutable_labels_provider"))
+			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.MutableLabelsProvider)
 		}
 
 		cluster, err := s.Cluster(ctx)
@@ -863,13 +872,12 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 }
 
 func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan error) {
-	switch s.Config.String("internal.temporary_store") {
+	switch s.Config.Internal.TemporaryStore {
 	case "redis":
-		redisOpts := s.redisOptions()
-		if len(redisOpts.Addresses) > 0 && redisOpts.Addresses[0] != "" {
+		if len(s.Config.Redis.Addresses) > 0 && s.Config.Redis.Addresses[0] != "" {
 			options := redisTemporarystore.Options{
-				RedisOptions: redisOpts,
-				Keyspace:     s.Config.String("internal.redis_keyspace"),
+				RedisOptions: s.Config.Redis,
+				Keyspace:     s.Config.Redis.Keyspace,
 			}
 
 			tmp, err := redisTemporarystore.New(
@@ -894,28 +902,13 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 			mem.Run(ctx)
 		}
 	default:
-		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.temporary_store"))
-	}
-}
-
-func (s *SquirrelDB) redisOptions() client.Options {
-	return client.Options{
-		Addresses:   s.Config.Strings("redis.addresses"),
-		Username:    s.Config.String("redis.username"),
-		Password:    s.Config.String("redis.password"),
-		SSL:         s.Config.Bool("redis.ssl"),
-		SSLInsecure: s.Config.Bool("redis.ssl_insecure"),
-		CertPath:    s.Config.String("redis.cert_path"),
-		KeyPath:     s.Config.String("redis.key_path"),
-		CaPath:      s.Config.String("redis.ca_path"),
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.Internal.TemporaryStore)
 	}
 }
 
 func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
-	switch s.Config.String("internal.store") {
+	switch s.Config.Internal.Store {
 	case backendBatcher:
-		squirrelBatchSize := s.Config.Duration("batch.size")
-
 		var wg sync.WaitGroup
 
 		subCtx, cancel := context.WithCancel(context.Background())
@@ -942,7 +935,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 
 		batch := batch.New(
 			s.MetricRegistry,
-			squirrelBatchSize,
+			s.Config.Batch.Size,
 			s.temporaryStore,
 			s.persistentStore,
 			s.persistentStore,
@@ -965,6 +958,6 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 
 		<-ctx.Done()
 	default:
-		readiness <- fmt.Errorf("unknown backend: %v", s.Config.String("internal.store"))
+		readiness <- fmt.Errorf("unknown backend: %v", s.Config.Internal.Store)
 	}
 }

@@ -1,7 +1,6 @@
 package config
 
 import (
-	goflag "flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/posflag"
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 )
@@ -50,21 +48,9 @@ func New(logger zerolog.Logger) (*Config, error) {
 		return nil, fmt.Errorf("read option from environment: %w", err)
 	}
 
-	flagSet := flagSetFromFlags(flags)
-
-	if err := flagSet.Parse(os.Args); err != nil {
-		return nil, fmt.Errorf("parse command line arguments: %w", err)
-	}
-
-	err = instance.Load(posflag.Provider(flagSet, delimiter, instance), nil)
-	if err != nil {
-		return nil, fmt.Errorf("parse command line arguments: %w", err)
-	}
-
 	config := &Config{
-		Koanf:   instance,
-		FlagSet: flagSet,
-		logger:  logger,
+		Koanf:  instance,
+		logger: logger,
 	}
 
 	return config, nil
@@ -95,67 +81,4 @@ func string2Duration(value string) time.Duration {
 	}
 
 	return 0
-}
-
-// Validate checks if the configuration is valid and consistent.
-func (c *Config) Validate() bool {
-	keyspace := c.String("cassandra.keyspace")
-	replicationFactor := c.Int("cassandra.replication_factor")
-	batchSize := c.Duration("batch.size")
-	aggregateIntendedDuration := c.Duration("cassandra.aggregate.intended_duration")
-	valid := true
-
-	if keyspace == "" {
-		valid = false
-
-		c.logger.Error().Msg("'cassandra.keyspace' must be set")
-	}
-
-	if replicationFactor <= 0 {
-		valid = false
-
-		c.logger.Error().Msg("'cassandra.replication_factor' must be strictly greater than 0")
-	}
-
-	if batchSize <= 0 {
-		valid = false
-
-		c.logger.Error().Msg("'batch.size' must be strictly greater than 0")
-	}
-
-	if aggregateIntendedDuration <= 0 {
-		valid = false
-
-		c.logger.Error().Msg("'cassandra.aggregate.intended_duration' must be strictly greater than 0")
-	}
-
-	return valid
-}
-
-// Returns a flag set generated from a flag list.
-func flagSetFromFlags(flags []flag) *pflag.FlagSet {
-	flagSet := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
-
-	for _, flag := range flags {
-		switch value := flag.value.(type) {
-		case bool:
-			flagSet.BoolP(flag.name, flag.short, value, flag.usage)
-		case float64:
-			flagSet.Float64P(flag.name, flag.short, value, flag.usage)
-		case int:
-			flagSet.IntP(flag.name, flag.short, value, flag.usage)
-		case string:
-			flagSet.StringP(flag.name, flag.short, value, flag.usage)
-		case []string:
-			flagSet.StringSliceP(flag.name, flag.short, value, flag.usage)
-		}
-
-		if flag.hidden {
-			_ = flagSet.MarkHidden(flag.name)
-		}
-	}
-
-	flagSet.AddGoFlagSet(goflag.CommandLine)
-
-	return flagSet
 }

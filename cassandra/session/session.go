@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"squirreldb/config2"
 	"strconv"
 	"strings"
 	"time"
@@ -12,32 +13,17 @@ import (
 	"github.com/rs/zerolog"
 )
 
-type Options struct {
-	Keyspace          string
-	Addresses         []string
-	ReplicationFactor int
-	// Cassandra credentials
-	Username string
-	Password string
-	// SSL options.
-	CertPath               string
-	KeyPath                string
-	CaPath                 string
-	EnableHostVerification bool
-	Logger                 zerolog.Logger
-}
-
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
-func New(options Options) (*gocql.Session, bool, error) {
+func New(options config2.Cassandra, logger zerolog.Logger) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
 
-	if options.CertPath != "" || options.KeyPath != "" || options.CaPath != "" {
+	if options.CertPath != "" || options.KeyPath != "" || options.CAPath != "" {
 		cluster.SslOpts = &gocql.SslOptions{
 			CertPath:               options.CertPath,
 			KeyPath:                options.KeyPath,
-			CaPath:                 options.CaPath,
+			CaPath:                 options.CAPath,
 			EnableHostVerification: options.EnableHostVerification,
 		}
 	}
@@ -75,7 +61,7 @@ func New(options Options) (*gocql.Session, bool, error) {
 			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
-			options.Logger.Debug().Msgf("Keyspace %s created", options.Keyspace)
+			logger.Debug().Msgf("Keyspace %s created", options.Keyspace)
 		}
 	}
 
