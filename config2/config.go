@@ -18,14 +18,12 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	EnvGloutonConfigFiles = "SQUIRRELDB_CONFIG_FILES"
-	envPrefix             = "SQUIRRELDB_"
-	delimiter             = "."
+	envPrefix = "SQUIRRELDB_"
+	delimiter = "."
 )
 
 var (
@@ -37,35 +35,32 @@ type Warnings error
 
 // Load loads the configuration from files and directories to a struct.
 // Returns the config, warnings and an error.
-func Load(withDefault bool, flags *pflag.FlagSet, paths ...string) (Config, Warnings, error) {
+func Load(withDefault bool, paths ...string) (Config, Warnings, error) {
 	// If no config was given with flags or env variables, fallback on the default files.
 	if len(paths) == 0 || len(paths) == 1 && paths[0] == "" {
 		paths = DefaultPaths()
 	}
 
-	cfg, warnings, err := loadToStruct(withDefault, flags, paths...)
+	cfg, warnings, err := loadToStruct(withDefault, paths...)
+
+	fmt.Println(cfg.Cassandra.Addresses)
 
 	return cfg, warnings.MaybeUnwrap(), err
 }
 
-func loadToStruct(withDefault bool, flags *pflag.FlagSet, paths ...string) (Config, prometheus.MultiError, error) {
-	// Override config files if the files were given from the env.
-	if envFiles := os.Getenv(EnvGloutonConfigFiles); envFiles != "" {
-		paths = strings.Split(envFiles, ",")
-	}
-
-	k, warnings, err := load(withDefault, flags, paths...)
+func loadToStruct(withDefault bool, paths ...string) (Config, prometheus.MultiError, error) {
+	k, warnings, err := load(withDefault, paths...)
 
 	var config Config
 
 	unmarshalConf := koanf.UnmarshalConf{
 		DecoderConfig: &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
-				mapstructure.StringToTimeDurationHookFunc(),
 				mapstructure.StringToSliceHookFunc(","),
 				mapstructure.TextUnmarshallerHookFunc(),
-				stringToMapHookFunc(),
+				mapstructure.StringToTimeDurationHookFunc(),
 				intToTimeDurationHookFunc(),
+				stringToMapHookFunc(),
 			),
 			Metadata:         nil,
 			ErrorUnused:      true,
@@ -82,7 +77,7 @@ func loadToStruct(withDefault bool, flags *pflag.FlagSet, paths ...string) (Conf
 }
 
 // load the configuration from files and directories.
-func load(withDefault bool, flags *pflag.FlagSet, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
+func load(withDefault bool, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
 	fileEnvKoanf, warnings, errors := loadPaths(paths)
 
 	// Load config from environment variables.
@@ -112,8 +107,15 @@ func load(withDefault bool, flags *pflag.FlagSet, paths ...string) (*koanf.Koanf
 	warning = k.Load(confmap.Provider(fileEnvKoanf.All(), delimiter), nil, mergeFunc(mergo.WithOverride))
 	warnings.Append(warning)
 
-	// Overwrite config with command line args.
-	warning = k.Load(posflag.Provider(flags, delimiter, k), nil, mergeFunc(mergo.WithOverride))
+	// Parse the config flags again without the command flags because the command flags
+	// would create warnings about invalid keys when the config is converted to a struct.
+	flagSet := flagSetFromFlags(configFlags())
+
+	// The error can be safely ignored as the flags were already parsed in the daemon.
+	_ = flagSet.Parse(os.Args)
+
+	// Overwrite the config with the command line args.
+	warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil, mergeFunc(mergo.WithOverride))
 	warnings.Append(warning)
 
 	return k, warnings, errors.MaybeUnwrap()

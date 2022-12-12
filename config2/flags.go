@@ -16,8 +16,7 @@ type flag struct {
 	hidden bool
 }
 
-//nolint:gochecknoglobals
-func flags(defaultCfg Config) []flag {
+func commandFlags() []flag {
 	return []flag{
 		{
 			name:  "help",
@@ -37,6 +36,13 @@ func flags(defaultCfg Config) []flag {
 			value: false,
 			usage: "Show build-info and exit",
 		},
+	}
+}
+
+func configFlags() []flag {
+	defaultCfg := DefaultConfig()
+
+	return []flag{
 		{
 			name:  "internal.disable_background_task",
 			short: "",
@@ -66,7 +72,7 @@ func flags(defaultCfg Config) []flag {
 
 // ParseFlags returns the parsed flags.
 func ParseFlags() (*pflag.FlagSet, error) {
-	flagSet := flagSetFromFlags(flags(DefaultConfig()))
+	flagSet := flagSetFromFlags(append(commandFlags(), configFlags()...))
 
 	if err := flagSet.Parse(os.Args); err != nil {
 		return nil, fmt.Errorf("parse command line arguments: %w", err)

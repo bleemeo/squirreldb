@@ -4,7 +4,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -43,8 +42,6 @@ var (
 	Version = "unset"
 	Commit  string
 	Date    string
-
-	showVersion = flag.Bool("version", false, "Show version and exit")
 )
 
 const (
@@ -245,7 +242,7 @@ func Config() (config2.Config, error, error) {
 		os.Exit(0)
 	}
 
-	cfg, warnings, err := config2.Load(true, flags)
+	cfg, warnings, err := config2.Load(true)
 	if err != nil {
 		return config2.Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}
