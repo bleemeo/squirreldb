@@ -1,7 +1,6 @@
 package config2
 
 import (
-	goflag "flag"
 	"fmt"
 	"os"
 
@@ -103,8 +102,6 @@ func flagSetFromFlags(flags []flag) *pflag.FlagSet {
 			_ = flagSet.MarkHidden(flag.name)
 		}
 	}
-
-	flagSet.AddGoFlagSet(goflag.CommandLine)
 
 	return flagSet
 }

@@ -46,13 +46,12 @@ func stringToMapHookFunc() mapstructure.DecodeHookFuncType {
 // intToTimeDurationHookFunc convert int to seconds.
 func intToTimeDurationHookFunc() mapstructure.DecodeHookFunc {
 	return func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
-		if source.Kind() != reflect.Int {
-			return data, nil
-		}
-		if target != reflect.TypeOf(time.Duration(5)) {
+		if source.Kind() != reflect.Int || target != reflect.TypeOf(time.Duration(5)) {
 			return data, nil
 		}
 
-		return time.Duration(data.(int)) * time.Second, nil
+		intData, _ := data.(int)
+
+		return time.Duration(intData) * time.Second, nil
 	}
 }

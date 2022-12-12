@@ -21,7 +21,7 @@ type Internal struct {
 	IndexDummyFixedID       int          `yaml:"index_dummy_fixed_id"`
 	Installation            Installation `yaml:"installation"`
 	TSDB                    string       `yaml:"tsdb"`
-	TemporaryStore          string       `yaml:"redis"`
+	TemporaryStore          string       `yaml:"temporary_store"`
 	Locks                   string       `yaml:"locks"`
 	States                  string       `yaml:"states"`
 	Store                   string       `yaml:"store"`

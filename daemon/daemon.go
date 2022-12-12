@@ -81,8 +81,6 @@ type SquirrelDB struct {
 	cassandraKeyspaceCreated bool
 }
 
-var errBadConfig = errors.New("configuration validation failed")
-
 // Start will run SquirrelDB and Init()ializing it. It return when SquirrelDB
 // is ready.
 // On error, we can retry calling Start() which will resume starting SquirrelDB.
@@ -263,7 +261,8 @@ func validateConfig(cfg config2.Config) error {
 	}
 
 	if cfg.Cassandra.ReplicationFactor <= 0 {
-		warnings.Append(fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", config2.ErrInvalidValue))
+		err := fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", config2.ErrInvalidValue)
+		warnings.Append(err)
 	}
 
 	if cfg.Batch.Size <= 0 {
@@ -271,7 +270,11 @@ func validateConfig(cfg config2.Config) error {
 	}
 
 	if cfg.Cassandra.Aggregate.IntendedDuration <= 0 {
-		warnings.Append(fmt.Errorf("%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0", config2.ErrInvalidValue))
+		err := fmt.Errorf(
+			"%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0",
+			config2.ErrInvalidValue,
+		)
+		warnings.Append(err)
 	}
 
 	return warnings.MaybeUnwrap()

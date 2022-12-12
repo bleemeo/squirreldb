@@ -35,21 +35,19 @@ type Warnings error
 
 // Load loads the configuration from files and directories to a struct.
 // Returns the config, warnings and an error.
-func Load(withDefault bool, paths ...string) (Config, Warnings, error) {
+func Load(withDefaultAndFlags bool, paths ...string) (Config, Warnings, error) {
 	// If no config was given with flags or env variables, fallback on the default files.
 	if len(paths) == 0 || len(paths) == 1 && paths[0] == "" {
 		paths = DefaultPaths()
 	}
 
-	cfg, warnings, err := loadToStruct(withDefault, paths...)
-
-	fmt.Println(cfg.Cassandra.Addresses)
+	cfg, warnings, err := loadToStruct(withDefaultAndFlags, paths...)
 
 	return cfg, warnings.MaybeUnwrap(), err
 }
 
-func loadToStruct(withDefault bool, paths ...string) (Config, prometheus.MultiError, error) {
-	k, warnings, err := load(withDefault, paths...)
+func loadToStruct(withDefaultAndFlags bool, paths ...string) (Config, prometheus.MultiError, error) {
+	k, warnings, err := load(withDefaultAndFlags, paths...)
 
 	var config Config
 
@@ -77,7 +75,7 @@ func loadToStruct(withDefault bool, paths ...string) (Config, prometheus.MultiEr
 }
 
 // load the configuration from files and directories.
-func load(withDefault bool, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
+func load(withDefaultAndFlags bool, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
 	fileEnvKoanf, warnings, errors := loadPaths(paths)
 
 	// Load config from environment variables.
@@ -97,7 +95,7 @@ func load(withDefault bool, paths ...string) (*koanf.Koanf, prometheus.MultiErro
 	// Load default values.
 	k := koanf.New(delimiter)
 
-	if withDefault {
+	if withDefaultAndFlags {
 		warning = k.Load(structsProvider(DefaultConfig(), "yaml"), nil)
 		warnings.Append(warning)
 	}
@@ -107,16 +105,18 @@ func load(withDefault bool, paths ...string) (*koanf.Koanf, prometheus.MultiErro
 	warning = k.Load(confmap.Provider(fileEnvKoanf.All(), delimiter), nil, mergeFunc(mergo.WithOverride))
 	warnings.Append(warning)
 
-	// Parse the config flags again without the command flags because the command flags
-	// would create warnings about invalid keys when the config is converted to a struct.
-	flagSet := flagSetFromFlags(configFlags())
+	if withDefaultAndFlags {
+		// Parse the config flags again without the command flags because the command flags
+		// would create warnings about invalid keys when the config is converted to a struct.
+		flagSet := flagSetFromFlags(configFlags())
 
-	// The error can be safely ignored as the flags were already parsed in the daemon.
-	_ = flagSet.Parse(os.Args)
+		// The error can be safely ignored as the flags were already parsed in the daemon.
+		_ = flagSet.Parse(os.Args)
 
-	// Overwrite the config with the command line args.
-	warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil, mergeFunc(mergo.WithOverride))
-	warnings.Append(warning)
+		// Overwrite the config with the command line args.
+		warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil, mergeFunc(mergo.WithOverride))
+		warnings.Append(warning)
+	}
 
 	return k, warnings, errors.MaybeUnwrap()
 }
@@ -137,7 +137,11 @@ func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
 		envKey := toEnvKey(key)
 
 		if oldKey, exists := envToKey[envKey]; exists {
-			panic(fmt.Sprintf("Conflict between config keys, %s and %s both corresponds to the variable %s", oldKey, key, envKey))
+			err := fmt.Sprintf(
+				"Conflict between config keys, %s and %s both corresponds to the variable %s",
+				oldKey, key, envKey,
+			)
+			panic(err)
 		}
 
 		envToKey[envKey] = key
