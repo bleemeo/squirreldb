@@ -229,7 +229,7 @@ func Config() (config.Config, error, error) {
 	}
 
 	if showVersion, _ := flags.GetBool("version"); showVersion {
-		fmt.Println(Version)
+		fmt.Printf("Version %s\n", Version)
 		os.Exit(0)
 	}
 
@@ -240,7 +240,9 @@ func Config() (config.Config, error, error) {
 		os.Exit(0)
 	}
 
-	cfg, warnings, err := config.Load(true)
+	configFiles, _ := flags.GetStringSlice("config")
+
+	cfg, warnings, err := config.Load(true, configFiles...)
 	if err != nil {
 		return config.Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}

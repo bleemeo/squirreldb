@@ -140,9 +140,9 @@ func TestFlags(t *testing.T) {
 
 	// Value set from config, env and flag, only the flag should be kept.
 	expectedConfig.Redis.Addresses = []string{"192.168.0.4:6379"}
+	args := []string{"--redis.addresses", "192.168.0.4:6379"}
 
 	t.Setenv("SQUIRRELDB_REDIS_ADDRESSES", "192.168.0.3:9042")
-	args := []string{"--redis.addresses", "192.168.0.4:6379"}
 
 	config, warnings, err := loadToStruct(true, args, "testdata/flags.conf")
 	if warnings != nil {

@@ -36,6 +36,12 @@ func commandFlags() []flag {
 			value: false,
 			usage: "Show build-info and exit",
 		},
+		{
+			name:  "config",
+			short: "c",
+			value: defaultPaths(),
+			usage: "Files and folders from which to load the configuration",
+		},
 	}
 }
 

@@ -2,8 +2,8 @@ package config
 
 import "time"
 
-// DefaultPaths returns the default paths used to search for config files.
-func DefaultPaths() []string {
+// defaultPaths returns the default paths used to search for config files.
+func defaultPaths() []string {
 	return []string{
 		"squirreldb.conf",
 	}

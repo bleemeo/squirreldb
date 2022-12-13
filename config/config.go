@@ -36,11 +36,6 @@ type Warnings error
 // Load loads the configuration from files and directories to a struct.
 // Returns the config, warnings and an error.
 func Load(withDefaultAndFlags bool, paths ...string) (Config, Warnings, error) {
-	// If no config was given with flags or env variables, fallback on the default files.
-	if len(paths) == 0 || len(paths) == 1 && paths[0] == "" {
-		paths = DefaultPaths()
-	}
-
 	cfg, warnings, err := loadToStruct(withDefaultAndFlags, os.Args, paths...)
 
 	return cfg, warnings.MaybeUnwrap(), err
