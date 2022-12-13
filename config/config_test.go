@@ -83,7 +83,7 @@ func TestStructuredConfig(t *testing.T) {
 		},
 	}
 
-	config, warnings, err := loadToStruct(false, "testdata/full.conf")
+	config, warnings, err := loadToStruct(false, nil, "testdata/full.conf")
 	if warnings != nil {
 		t.Fatalf("Warning while loading config: %s", warnings)
 	}
@@ -115,7 +115,7 @@ func TestMergeWithDefault(t *testing.T) {
 	t.Setenv("SQUIRRELDB_CASSANDRA_ADDRESSES", "")
 	t.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb")
 
-	config, warnings, err := loadToStruct(true, "testdata/merge")
+	config, warnings, err := loadToStruct(true, nil, "testdata/merge")
 	if warnings != nil {
 		t.Fatalf("Warning while loading config: %s", warnings)
 	}
@@ -125,7 +125,36 @@ func TestMergeWithDefault(t *testing.T) {
 	}
 
 	if diff := cmp.Diff(expectedConfig, config); diff != "" {
-		t.Fatalf("Default value modified:\n%s", diff)
+		t.Fatalf("Unexpected config:\n%s", diff)
+	}
+}
+
+// TestFlags tests that flags values are passed correctly in the config
+// and that default flag values are not kept if a setting is set.
+func TestFlags(t *testing.T) {
+	expectedConfig := DefaultConfig()
+
+	// Values set from config file.
+	expectedConfig.Internal.DisableBackgroundTask = true
+	expectedConfig.Cassandra.Addresses = []string{"192.168.0.2:9042"}
+
+	// Value set from config, env and flag, only the flag should be kept.
+	expectedConfig.Redis.Addresses = []string{"192.168.0.4:6379"}
+
+	t.Setenv("SQUIRRELDB_REDIS_ADDRESSES", "192.168.0.3:9042")
+	args := []string{"--redis.addresses", "192.168.0.4:6379"}
+
+	config, warnings, err := loadToStruct(true, args, "testdata/flags.conf")
+	if warnings != nil {
+		t.Fatalf("Warning while loading config: %s", warnings)
+	}
+
+	if err != nil {
+		t.Fatalf("Failed to load config: %s", err)
+	}
+
+	if diff := cmp.Diff(expectedConfig, config); diff != "" {
+		t.Fatalf("Unexpected config:\n%s", diff)
 	}
 }
 
@@ -215,7 +244,7 @@ func TestLoad(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			config, warnings, err := loadToStruct(false, test.Files...)
+			config, warnings, err := loadToStruct(false, nil, test.Files...)
 			if diff := cmp.Diff(test.WantError, err); diff != "" {
 				t.Fatalf("Unexpected error for files %s\n%s", test.Files, diff)
 			}

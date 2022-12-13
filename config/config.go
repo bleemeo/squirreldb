@@ -41,13 +41,13 @@ func Load(withDefaultAndFlags bool, paths ...string) (Config, Warnings, error) {
 		paths = DefaultPaths()
 	}
 
-	cfg, warnings, err := loadToStruct(withDefaultAndFlags, paths...)
+	cfg, warnings, err := loadToStruct(withDefaultAndFlags, os.Args, paths...)
 
 	return cfg, warnings.MaybeUnwrap(), err
 }
 
-func loadToStruct(withDefaultAndFlags bool, paths ...string) (Config, prometheus.MultiError, error) {
-	k, warnings, err := load(withDefaultAndFlags, paths...)
+func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Config, prometheus.MultiError, error) {
+	k, warnings, err := load(withDefaultAndFlags, args, paths...)
 
 	var config Config
 
@@ -75,7 +75,7 @@ func loadToStruct(withDefaultAndFlags bool, paths ...string) (Config, prometheus
 }
 
 // load the configuration from files and directories.
-func load(withDefaultAndFlags bool, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
+func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
 	fileEnvKoanf, warnings, errors := loadPaths(paths)
 
 	// Load config from environment variables.
@@ -106,15 +106,15 @@ func load(withDefaultAndFlags bool, paths ...string) (*koanf.Koanf, prometheus.M
 	warnings.Append(warning)
 
 	if withDefaultAndFlags {
-		// Parse the config flags again without the command flags because the command flags
-		// would create warnings about invalid keys when the config is converted to a struct.
+		// Parse the config flags without the command flags because the command flags would
+		// create warnings about invalid keys when the config is converted to a struct.
 		flagSet := flagSetFromFlags(configFlags())
 
 		// The error can be safely ignored as the flags were already parsed in the daemon.
-		_ = flagSet.Parse(os.Args)
+		_ = flagSet.Parse(args)
 
-		// Overwrite the config with the command line args.
-		warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil, mergeFunc(mergo.WithOverride))
+		// Overwrite the config with the command line args set explicitly.
+		warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil)
 		warnings.Append(warning)
 	}
 

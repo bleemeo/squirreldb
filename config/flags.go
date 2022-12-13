@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 )
 
@@ -96,6 +97,8 @@ func flagSetFromFlags(flags []flag) *pflag.FlagSet {
 			flagSet.StringP(flag.name, flag.short, value, flag.usage)
 		case []string:
 			flagSet.StringSliceP(flag.name, flag.short, value, flag.usage)
+		default:
+			log.Fatal().Msgf(`Flag "%s" has unsupported type %T`, flag.name, value)
 		}
 
 		if flag.hidden {
