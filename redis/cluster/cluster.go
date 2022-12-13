@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"squirreldb/logger"
 	"squirreldb/redis/client"
 	"sync"
@@ -32,7 +32,7 @@ const (
 
 // Cluster implement types.Cluster using Redis pub/sub.
 type Cluster struct {
-	RedisOptions   config2.Redis
+	RedisOptions   config.Redis
 	MetricRegistry prometheus.Registerer
 	Keyspace       string
 	Logger         zerolog.Logger

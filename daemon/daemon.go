@@ -16,7 +16,7 @@ import (
 	"squirreldb/cassandra/session"
 	"squirreldb/cassandra/states"
 	"squirreldb/cassandra/tsdb"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"squirreldb/dummy"
 	"squirreldb/dummy/temporarystore"
 	"squirreldb/logger"
@@ -61,7 +61,7 @@ type MetricReadWriter interface {
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
-	Config          config2.Config
+	Config          config.Config
 	ExistingCluster types.Cluster
 	MetricRegistry  prometheus.Registerer
 	Logger          zerolog.Logger
@@ -217,10 +217,10 @@ func RunWithSignalHandler(f func(context.Context) error) error {
 // Config return the configuration after validation.
 //
 //nolint:forbidigo // This function is allowed to use fmt.Print*
-func Config() (config2.Config, error, error) {
-	flags, err := config2.ParseFlags()
+func Config() (config.Config, error, error) {
+	flags, err := config.ParseFlags()
 	if err != nil {
-		return config2.Config{}, nil, err
+		return config.Config{}, nil, err
 	}
 
 	if showHelp, _ := flags.GetBool("help"); showHelp {
@@ -240,9 +240,9 @@ func Config() (config2.Config, error, error) {
 		os.Exit(0)
 	}
 
-	cfg, warnings, err := config2.Load(true)
+	cfg, warnings, err := config.Load(true)
 	if err != nil {
-		return config2.Config{}, nil, fmt.Errorf("can't load config: %w", err)
+		return config.Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}
 
 	if err := validateConfig(cfg); err != nil {
@@ -253,26 +253,26 @@ func Config() (config2.Config, error, error) {
 }
 
 // validateConfig checks if the configuration is valid and consistent.
-func validateConfig(cfg config2.Config) error {
+func validateConfig(cfg config.Config) error {
 	var warnings prometheus.MultiError
 
 	if cfg.Cassandra.Keyspace == "" {
-		warnings.Append(fmt.Errorf("%w: 'cassandra.keyspace' must be set", config2.ErrInvalidValue))
+		warnings.Append(fmt.Errorf("%w: 'cassandra.keyspace' must be set", config.ErrInvalidValue))
 	}
 
 	if cfg.Cassandra.ReplicationFactor <= 0 {
-		err := fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", config2.ErrInvalidValue)
+		err := fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", config.ErrInvalidValue)
 		warnings.Append(err)
 	}
 
 	if cfg.Batch.Size <= 0 {
-		warnings.Append(fmt.Errorf("%w: 'batch.size' must be strictly greater than 0", config2.ErrInvalidValue))
+		warnings.Append(fmt.Errorf("%w: 'batch.size' must be strictly greater than 0", config.ErrInvalidValue))
 	}
 
 	if cfg.Cassandra.Aggregate.IntendedDuration <= 0 {
 		err := fmt.Errorf(
 			"%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0",
-			config2.ErrInvalidValue,
+			config.ErrInvalidValue,
 		)
 		warnings.Append(err)
 	}

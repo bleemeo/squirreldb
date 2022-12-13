@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +14,7 @@ import (
 )
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
-func New(options config2.Cassandra, logger zerolog.Logger) (*gocql.Session, bool, error) {
+func New(options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All

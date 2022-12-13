@@ -7,7 +7,7 @@ import (
 	"os"
 	"sort"
 	"squirreldb/cassandra/index"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"squirreldb/daemon"
 	"squirreldb/dummy"
 	"squirreldb/types"
@@ -80,7 +80,7 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cfg config2.Config, rnd *rand.Rand) error { //nolint:maintidx
+func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nolint:maintidx
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())

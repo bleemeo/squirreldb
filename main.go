@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"squirreldb/daemon"
 	"squirreldb/logger"
 	"time"
@@ -26,7 +26,7 @@ var (
 // setupSentryLogger sets the default zerolog logger to a Sentry logger, or a simple
 // console logger if Sentry is disabled. The closer returned should be closed at the
 // end of the program to flush the events to Sentry.
-func setupSentryLogger(cfg config2.Config) io.Closer {
+func setupSentryLogger(cfg config.Config) io.Closer {
 	consoleWriter := logger.NewConsoleWriter(cfg.Log.DisableColor)
 	logLevel := zerolog.Level(cfg.Log.Level)
 	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))

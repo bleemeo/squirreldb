@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"squirreldb/config2"
+	"squirreldb/config"
 	"sync"
 	"time"
 
@@ -23,7 +23,7 @@ var errNotPem = errors.New("not a PEM file")
 // single node query success then assume single instance.
 // When either cluster or single node is assumed, we don't retry discovery.
 type Client struct {
-	opts config2.Redis
+	opts config.Redis
 
 	lastReload    time.Time
 	singleClient  *goredis.Client
@@ -32,7 +32,7 @@ type Client struct {
 }
 
 // New returns a redis client.
-func New(opts config2.Redis) *Client {
+func New(opts config.Redis) *Client {
 	return &Client{opts: opts}
 }
 
