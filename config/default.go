@@ -56,6 +56,13 @@ func DefaultConfig() Config {
 		Sentry: Sentry{
 			DSN: "",
 		},
+		Telemetry: Telemetry{
+			Enabled: true,
+			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
+			ID: ID{
+				Path: "./telemetry.json",
+			},
+		},
 		Internal: Internal{
 			Index:                   "cassandra",
 			IndexDummyCheckConflict: true,
@@ -70,13 +77,6 @@ func DefaultConfig() Config {
 			Store:                 "batcher",
 			MutableLabelsProvider: "cassandra",
 			DisableBackgroundTask: false,
-			Telemetry: Telemetry{
-				Enabled: true,
-				Address: "https://telemetry.bleemeo.com/v1/telemetry/",
-				ID: ID{
-					Path: "./telemetry.json",
-				},
-			},
 		},
 	}
 }

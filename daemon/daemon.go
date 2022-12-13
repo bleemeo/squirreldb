@@ -377,10 +377,10 @@ func SetTestEnvironment() {
 		os.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb_test")
 	}
 
-	if _, ok := os.LookupEnv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE"); !ok {
+	if _, ok := os.LookupEnv("SQUIRRELDB_REDIS_KEYSPACE"); !ok {
 		// If not explicitly changed, use test: as namespace. We do
 		// not want to touch real data
-		os.Setenv("SQUIRRELDB_INTERNAL_REDIS_KEYSPACE", "test:")
+		os.Setenv("SQUIRRELDB_REDIS_KEYSPACE", "test:")
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
@@ -773,7 +773,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 }
 
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {
-	if !s.Config.Internal.Telemetry.Enabled {
+	if !s.Config.Telemetry.Enabled {
 		return nil
 	}
 
@@ -809,8 +809,8 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	}
 
 	runOption := map[string]string{
-		"filepath": s.Config.Internal.Telemetry.ID.Path,
-		"url":      s.Config.Internal.Telemetry.Address,
+		"filepath": s.Config.Telemetry.ID.Path,
+		"url":      s.Config.Telemetry.Address,
 	}
 
 	tlm := telemetry.New(addFacts, runOption, s.Logger.With().Str("component", "telemetry").Logger())

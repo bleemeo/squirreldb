@@ -13,6 +13,7 @@ type Config struct {
 	Log           Log           `yaml:"log"`
 	Sentry        Sentry        `yaml:"sentry"`
 	Internal      Internal      `yaml:"internal"`
+	Telemetry     Telemetry     `yaml:"telemetry"`
 }
 
 type Internal struct {
@@ -27,7 +28,6 @@ type Internal struct {
 	Store                   string       `yaml:"store"`
 	MutableLabelsProvider   string       `yaml:"mutable_labels_provider"`
 	DisableBackgroundTask   bool         `yaml:"disable_background_task"`
-	Telemetry               Telemetry    `yaml:"telemetry"`
 }
 
 type Telemetry struct {

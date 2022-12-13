@@ -73,12 +73,12 @@ func TestStructuredConfig(t *testing.T) {
 			Store:                 "batcher",
 			MutableLabelsProvider: "cassandra",
 			DisableBackgroundTask: true,
-			Telemetry: Telemetry{
-				Address: "http://example.com",
-				Enabled: true,
-				ID: ID{
-					Path: "my_id",
-				},
+		},
+		Telemetry: Telemetry{
+			Address: "http://example.com",
+			Enabled: true,
+			ID: ID{
+				Path: "my_id",
 			},
 		},
 	}
@@ -104,7 +104,7 @@ func TestStructuredConfig(t *testing.T) {
 // Environment variables always overwrite the existing config.
 func TestMergeWithDefault(t *testing.T) {
 	expectedConfig := DefaultConfig()
-	expectedConfig.Internal.Telemetry.Enabled = false
+	expectedConfig.Telemetry.Enabled = false
 	expectedConfig.Redis.SSLInsecure = true
 	expectedConfig.Redis.CertPath = "a"
 	expectedConfig.Redis.CAPath = "c"

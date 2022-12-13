@@ -1,6 +1,7 @@
 package config
 
 import (
+	goflag "flag"
 	"fmt"
 	"os"
 
@@ -79,6 +80,9 @@ func configFlags() []flag {
 // ParseFlags returns the parsed flags.
 func ParseFlags() (*pflag.FlagSet, error) {
 	flagSet := flagSetFromFlags(append(commandFlags(), configFlags()...))
+
+	// Add flags used in tests.
+	flagSet.AddGoFlagSet(goflag.CommandLine)
 
 	if err := flagSet.Parse(os.Args); err != nil {
 		return nil, fmt.Errorf("parse command line arguments: %w", err)
