@@ -338,3 +338,13 @@ func (s *failingStore) DeletePostings(ctx context.Context, shard int32, name str
 
 	return s.callShouldFailAfter(ctx, "DeletePostings", err)
 }
+
+func (s *failingStore) DeletePostingsByNames(ctx context.Context, shard int32, names []string) error {
+	if err := s.callShouldFailBefore(ctx, "DeletePostingsByNames"); err != nil {
+		return err
+	}
+
+	err := s.realStore.DeletePostingsByNames(ctx, shard, names)
+
+	return s.callShouldFailAfter(ctx, "DeletePostingsByNames", err)
+}

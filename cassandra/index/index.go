@@ -52,8 +52,8 @@ const (
 )
 
 // Update TTL of index entries in Cassandra every update delay.
-// The actual TTL used in Cassanra is the metric data TTL + update delay.
-// With long delay, the will be less updates on Cassandra, but entry will stay
+// The actual TTL used in Cassandra is the metric data TTL + update delay.
+// With long delay, there will be less updates on Cassandra, but entries will stay
 // longer before being expired.
 // This delay will have between 0 and cassandraTTLUpdateJitter added to avoid
 // all update to happen at the same time.
@@ -184,6 +184,7 @@ type storeImpl interface {
 	DeleteID2Labels(ctx context.Context, id types.MetricID) error
 	DeleteExpiration(ctx context.Context, day time.Time) error
 	DeletePostings(ctx context.Context, shard int32, name string, value string) error
+	DeletePostingsByNames(ctx context.Context, shard int32, names []string) error
 }
 
 const (
@@ -191,10 +192,11 @@ const (
 	allPostingLabel       = "__all|metrics__"
 	postinglabelName      = "__label|names__" // kept known labels name as label value
 	// ID are added in two-phase in postings. This one is updated first. See updatePostings.
-	maybePostingLabel   = "__maybe|metrics__"
-	existingShardsLabel = "__shard|exists__" // We store existings shards in postings
-	postingShardSize    = 7 * 24 * time.Hour
-	shardDateFormat     = "2006-01-02"
+	maybePostingLabel    = "__maybe|metrics__"
+	existingShardsLabel  = "__shard|exists__" // We store existings shards in postings
+	expirationShardLabel = "__shard|expiration"
+	postingShardSize     = 7 * 24 * time.Hour
+	shardDateFormat      = "2006-01-02"
 	// Index is shard by time for postings. The shard number (an int32) is the
 	// rounded to postingShardSize number of hours since epoc (1970).
 	// The globalShardNumber value is an impossible value for normal shard,
@@ -2094,6 +2096,13 @@ func (c *CassandraIndex) lookupIDsFromCache(
 		labelsKey := req.Labels.Hash()
 		data, found := c.getIDData(labelsKey, req.Labels)
 
+		shards, err := c.getTimeShards(ctx, req.Start, req.End, true)
+		if err != nil {
+			c.lookupIDMutex.Unlock()
+
+			return nil, nil, err
+		}
+
 		if found && data.cassandraEntryExpiration.Before(now.Add(2*backgroundCheckInterval)) {
 			// This entry will expire soon. To reduce risk of using invalid cache (due to race
 			// condition with another SquirrelDB delete metrics), first refresh the expiration,
@@ -2110,6 +2119,13 @@ func (c *CassandraIndex) lookupIDsFromCache(
 				return nil, nil, err
 			}
 
+			err := c.updateShardsExpiration(ctx, now, shards, ttl, cassandraExpiration)
+			if err != nil {
+				c.lookupIDMutex.Unlock()
+
+				return nil, nil, err
+			}
+
 			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id))
 			found = false
 		}
@@ -2118,11 +2134,6 @@ func (c *CassandraIndex) lookupIDsFromCache(
 			data = idData{
 				unsortedLabels: req.Labels,
 			}
-		}
-
-		shards, err := c.getTimeShards(ctx, req.Start, req.End, true)
-		if err != nil {
-			return nil, nil, err
 		}
 
 		entries[i] = lookupEntry{
@@ -2150,6 +2161,85 @@ func (c *CassandraIndex) lookupIDsFromCache(
 	}
 
 	return entries, labelsToIndices, nil
+}
+
+// updateShardsExpiration updates the shards expiration if
+// the new expiration is after the current expiration.
+func (c *CassandraIndex) updateShardsExpiration(
+	ctx context.Context,
+	now time.Time,
+	shards []int32,
+	ttl int64,
+	expiration time.Time,
+) error {
+	var warnings prometheus.MultiError
+
+	for _, shard := range shards {
+		// Get current shard expiration.
+		shardLabels := labels.Labels{
+			{
+				Name:  expirationShardLabel,
+				Value: strconv.Itoa(int(shard)),
+			},
+		}
+		shardLabelsString := shardLabels.String()
+
+		labelsToID, err := c.store.SelectLabelsList2ID(ctx, []string{shardLabelsString})
+		if err != nil {
+			warnings.Append(fmt.Errorf("select labels2id: %w", err))
+
+			continue
+		}
+
+		expirationID, ok := labelsToID[shardLabelsString]
+		if !ok {
+			// The shard expiration metric does not exist, create it.
+			expirationEntry := lookupEntry{
+				sortedLabels:       shardLabels,
+				sortedLabelsString: shardLabels.String(),
+				ttl:                ttl,
+			}
+
+			_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
+			if err != nil {
+				warnings.Append(fmt.Errorf("create shard expiration metric: %w", err))
+
+				continue
+			}
+
+			continue
+		}
+
+		_, idToExpiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{expirationID})
+		if err != nil {
+			warnings.Append(fmt.Errorf("select id2labels: %w", err))
+
+			continue
+		}
+
+		currentExpiration, ok := idToExpiration[expirationID]
+		if !ok {
+			// The metric is present in labels2ID but not in IDsToLabel.
+			// This is not possible because when the metric is created it's first
+			// inserted in IDsToLabel.
+
+			// TODO: How to handle this case?
+
+			continue
+		}
+
+		// Update the expiration if its after the current expiration.
+		if expiration.After(currentExpiration) {
+			err := c.refreshExpiration(ctx, expirationID, currentExpiration, expiration)
+			if err != nil {
+				warnings.Append(fmt.Errorf("refresh shard expiration: %w", err))
+
+				continue
+			}
+		}
+	}
+
+	return warnings.MaybeUnwrap()
 }
 
 func (c *CassandraIndex) refreshExpiration(
@@ -2247,35 +2337,35 @@ type lookupEntry struct {
 
 // createMetrics creates a new metric IDs associated with provided request
 // The lock is assumed to be held.
-// Some care should be taken to avoid assigned the same ID from two SquirrelDB instance, so:
+// Some care should be taken to avoid assigning the same ID from two SquirrelDB instance, so:
 //
-// * To avoid race-condition, redo a check that metrics is not yet registered now that lock is acquired
+// * To avoid race-condition, redo a check that metrics are not yet registered now that the lock is acquired
 // * Read the all-metric postings. From there we find a free ID
 // * Update Cassandra tables to store this new metrics. The insertion is done in the following order:
 //   - First an entry is added to the expiration table. This ensure that in case of crash in this process,
 //     the ID will eventually be freed.
-//   - Then it update:
-//   - the all-metric postings. This effectively reseve the ID.
-//   - the id2labels tables (it give informations needed to cleanup other postings)
-//   - finally insert in labels2id, which is done as last because it's this table that determine that
-//     a metrics didn't exists
+//   - Then it updates:
+//   - the all-metric postings. This effectively reserve the ID.
+//   - the id2labels tables (it gives informations needed to cleanup other postings)
+//   - finally insert in labels2id, which is done last because it's this table that determines if
+//     a metrics exists.
 //
-// If the above process crash and partially write some value, it still in a good state because:
-//   - For the insertion, it's the last entry (in labels2id) that matter.
-//     The creation will be retried when point is retried
+// If the above process crashes and partially writes some values, it's still in a good state because:
+//   - For the insertion, it's the last entry (in labels2id) that matters.
+//     The creation will be retried when the point is retried.
 //   - For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen),
-//     since no data points could be wrote and empty result are stipped, they won't be in results
-//   - For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels...
+//     since no data points could be written and empty result are stripped, they won't be in results.
+//   - For writing using __metric_id__ labels, it may indeed succeed if the partial write reached id2labels...
 //     BUT to have the metric ID, client must first do a succesfull read to get the ID. So this shouldn't happen.
 //
-// The expiration tables is used to known which metrics are likely to expire on a give date.
-// They are grouped by day (that is, the tables contains on row per day, each row being the day
+// The expiration tables are used to know which metrics are likely to expire on a given date.
+// They are grouped by day (that is, the tables contain one row per day, each row being the day
 // and the list of metric IDs that may expire on this day).
-// A background process will process each past day from this tables and for each metrics:
+// A background process will process each past day from these tables and for each metrics:
 //   - Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points.
 //     It does this check using a field of the table id2labels which is refreshed.
 //   - If expired, delete entry for this metric from the index (the opposite of creation)
-//   - Of not expired, add the metric IDs to the new expiration day in the table.
+//   - If not expired, add the metric IDs to the new expiration day in the table.
 //   - Once finished, delete the processed day.
 func (c *CassandraIndex) createMetrics(
 	ctx context.Context,
@@ -3337,6 +3427,23 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			continue
 		}
 
+		// If the metric represents a shard expiration, delete the shard.
+		shardStr := idToLabels[id].Get(expirationShardLabel)
+		if shardStr != "" {
+			shardInt, err := strconv.Atoi(shardStr)
+			if err != nil {
+				return fmt.Errorf("convert shard expiration label to int: %w", err)
+			}
+
+			// There is no overflow when converting to int32 because the shard was int32 when inserted.
+			shard := int32(shardInt) //nolint:gosec
+
+			err = c.deleteShard(ctx, shard)
+			if err != nil {
+				return fmt.Errorf("delete shard %s: %w", timeForShard(shard), err)
+			}
+		}
+
 		bulkDelete.PrepareDelete(id, idToLabels[id], false)
 	}
 
@@ -3377,6 +3484,53 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 	c.metrics.ExpireMetricDelete.Add(float64(len(bulkDelete.deleteIDs)))
 	c.metrics.ExpireMetric.Add(float64(len(ids)))
+
+	return nil
+}
+
+// deleteShard deletes all postings associated to a shard.
+func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
+	c.logger.Debug().Msgf("Deleting shard %s", timeForShard(shard))
+
+	// We can't run a query like "DELETE from index_postings WHERE shard = 283752"
+	// because our partition key is (shard, name), so we have to know the label names to delete.
+
+	// Delete all labels except postinglabelName which will be deleted only after the
+	// other labels are successfully deleted to be able to recover if the delete failed.
+	labelsToDelete := []string{allPostingLabel, maybePostingLabel}
+
+	// Find all label names to delete.
+	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	for iter.HasNext() {
+		labelName, _ := iter.Next()
+		labelsToDelete = append(labelsToDelete, labelName)
+	}
+
+	err := c.store.DeletePostingsByNames(ctx, shard, labelsToDelete)
+	if err != nil {
+		return fmt.Errorf("delete labels from postings: %w", err)
+	}
+
+	// Delete postinglabelName separately.
+	err = c.store.DeletePostingsByNames(ctx, shard, []string{postinglabelName})
+	if err != nil {
+		return fmt.Errorf("delete special labels from postings: %w", err)
+	}
+
+	// Remove the shard from existing shards.
+	updateRequest := postingUpdateRequest{
+		Shard: globalShardNumber,
+		Label: labels.Label{
+			Name:  existingShardsLabel,
+			Value: existingShardsLabel,
+		},
+		RemoveIDs: []uint64{uint64(shard)},
+	}
+
+	_, err = c.postingUpdate(ctx, updateRequest)
+	if err != nil {
+		return fmt.Errorf("remove existing shards: %w", err)
+	}
 
 	return nil
 }
@@ -4377,6 +4531,19 @@ func (s cassandraStore) DeletePostings(ctx context.Context, shard int32, name st
 	return s.session.Query(
 		"DELETE FROM index_postings WHERE shard = ? AND name = ? AND value = ?",
 		shard, name, value,
+	).WithContext(ctx).Exec()
+}
+
+func (s cassandraStore) DeletePostingsByNames(ctx context.Context, shard int32, names []string) error {
+	start := time.Now()
+
+	defer func() {
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
+	}()
+
+	return s.session.Query(
+		"DELETE FROM index_postings WHERE shard = ? AND name IN ?",
+		shard, names,
 	).WithContext(ctx).Exec()
 }
 

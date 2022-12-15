@@ -758,6 +758,37 @@ func (s *mockStore) DeletePostings(ctx context.Context, shard int32, name string
 	return ctx.Err()
 }
 
+func (s *mockStore) DeletePostingsByNames(ctx context.Context, shard int32, names []string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.queryCount++
+
+	if shard == 0 {
+		panic("uninitialized shard value")
+	}
+
+	postings, ok := s.postings[shard]
+	if !ok {
+		return gocql.ErrNotFound
+	}
+
+	for _, name := range names {
+		_, ok := postings[name]
+		if !ok {
+			return gocql.ErrNotFound
+		}
+
+		delete(postings, name)
+
+		if len(postings) == 0 {
+			delete(s.postings, shard)
+		}
+	}
+
+	return ctx.Err()
+}
+
 func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest {
 	results := make([]types.LookupRequest, len(list))
 
