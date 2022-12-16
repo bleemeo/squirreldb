@@ -2213,13 +2213,14 @@ func (c *CassandraIndex) updateShardsExpiration(
 
 		currentExpiration, ok := idToExpiration[expirationID]
 		if !ok {
-			// The metric is present in labels2ID but not in IDsToLabel.
-			// This is not possible because when the metric is created it's first
+			// The metric is present in labels2id but not in id2labels.
+			// This should not be possible because when the metric is created it's first
 			// inserted in IDsToLabel.
 
-			// TODO: How to handle this case?
+			c.logger.Warn().Msgf("Failed to get current expiration for shard %s, forcing expiration update", timeForShard(shard))
 
-			continue
+			// Force expiration update.
+			currentExpiration = time.Time{}
 		}
 
 		// Update the expiration if its after the current expiration.
