@@ -363,7 +363,7 @@ func (s *mockStore) verifyShard(
 	return nil
 }
 
-// verifyStoreEmpty ensure that the store is completly empty.
+// verifyStoreEmpty ensure that the store is completely empty.
 func (s *mockStore) verifyStoreEmpty(t *testing.T) error {
 	t.Helper()
 
@@ -5182,10 +5182,10 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
 	}
 
-	index.applyExpirationUpdateRequests(context.Background())
+	index.applyExpirationUpdateRequests(context.Background(), t1)
 	// metrics[3] was moved to a new expiration slot
-	if len(store.expiration) != 4 {
-		t.Errorf("len(store.expiration) = %v, want 4", len(store.expiration))
+	if len(store.expiration) != 5 {
+		t.Errorf("len(store.expiration) = %v, want 5", len(store.expiration))
 	}
 
 	for _, id := range []types.MetricID{metricsID[2], metricsID[3]} {
@@ -5482,8 +5482,8 @@ func Test_expiration_offset(t *testing.T) {
 
 // Test_expiration_longlived check that expiration also works when long-lived metrics exists
 // (that is metric that continue to exists for longer that their TTL).
-// Currently this tests is incomplete because today such metrics are never dropped. It test however
-// that metrics are still present when they must be still present (e.g. don't expire BEFORE the TTL at time of write).
+// It test that metrics are still present when they must be still present
+// (e.g. don't expire BEFORE the TTL at time of write).
 func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	shortestTTL := 1 * 24 * time.Hour
 	shortTTL := 7 * 24 * time.Hour
@@ -5497,20 +5497,20 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	// Duration of the phase will probably need to be updated, depending on implementation of purge.
 	// Currently phase duration assume metrics stay for twice their TTL + postingsShardSize
 	// Test have N phase:
-	// * phase1: all metrics are wrote (including temporary).
-	//           phase1 last 2*shortTTL+postingsShardSize time.
-	//           At ends of phase1, oldest shard don't contains metrics with shortTTL
-	//           At ends of phase1, oldest shard don't contains metrics with shortestTTL
-	//           At ends of phase1, oldest shard contains metrics with longTTL
+	// * phase1: all metrics are written (including temporary).
+	//           phase1 lasts 2*shortTTL+postingsShardSize time.
+	//           At the end of phase1, oldest shard don't contains metrics with shortTTL
+	//           At the end of phase1, oldest shard don't contains metrics with shortestTTL
+	//           At the end of phase1, oldest shard contains metrics with longTTL
 	// * phase2: temporary are no longer written. Metrics that change TTL swap their TTL.
 	//           phase2 last 2*shortTTL+postingsShardSize time.
-	//           At ends of phase2, oldest shard don't contains metrics that only use shortTTL
-	//           At ends of phase2, oldest shard still contains metrics with changed from long to short TTL.
+	//           At the end of phase2, oldest shard don't contains metrics that only use shortTTL
+	//           At the end of phase2, oldest shard still contains metrics with changed from long to short TTL.
 	// * phase3: continue as previous phase for 2*longTTL+postingsShardSize
-	//           At ends of phase3, all shards oldest that beginning of phase3 are empty
-	//           At ends of phase3, oldest non-empty shards only contains metrics with long TTL
+	//           At the end of phase3, all shards oldest that beginning of phase3 are empty
+	//           At the end of phase3, oldest non-empty shards only contains metrics with long TTL
 	// * phase4: no more write for 2*longTTL+postingsShardSize
-	//           At ends of phase4, index is empty.
+	//           At the end of phase4, index is empty.
 	// Also in all phase (but phase 4), few metrics are written with randomized TTL. The TTL change each new shard.
 	// For this metric, we don't check it disapear from shard but that it still in shard it must belong to.
 	phase1End := baseTime.Add(2*shortTTL + postingShardSize)
@@ -5731,7 +5731,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				longTTL,
 			)
 			if err != nil {
-				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+				t.Fatalf("at end of phase %d: %v", currentPhase, err)
 			}
 
 			err = expirationLonglivedRndCheck(
@@ -5742,7 +5742,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				metricsRandomTTL,
 			)
 			if err != nil {
-				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+				t.Fatalf("at end of phase %d: %v", currentPhase, err)
 			}
 		}
 
@@ -5751,29 +5751,25 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			// End of phase 1
 			oldestShard := ShardForTime(baseTime.Unix())
 
-			var (
-				absent  []labels.Labels
-				present []labels.Labels
-			)
-
-			absent = append(absent, metricsShortTTL...)
-			absent = append(absent, metricsShortestTTL...)
-			absent = append(absent, metricsShortToLongTTL...)
+			var present []labels.Labels
 
 			present = append(present, metricsLongTTL...)
 			present = append(present, metricsLongToShortTTL...)
 
-			// Purge of metrics is not yet implemented for long-lived TTL
-			absent = absent[:0]
+			// The shard is older than these metric's TTL but they are still in the
+			// shard because the shard only expires when all metrics in it have expired.
+			present = append(present, metricsShortTTL...)
+			present = append(present, metricsShortestTTL...)
+			present = append(present, metricsShortToLongTTL...)
 
 			err = store.verifyShard(
 				t,
 				oldestShard,
 				dropTTLFromMetricList(present),
-				dropTTLFromMetricList(absent),
+				nil,
 			)
 			if err != nil {
-				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+				t.Fatalf("at end of phase %d: %v", currentPhase, err)
 			}
 
 			// Update TTL of metrics
@@ -5792,29 +5788,25 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			// End of phase 2
 			oldestShard := ShardForTime(baseTime.Unix())
 
-			var (
-				absent  []labels.Labels
-				present []labels.Labels
-			)
-
-			absent = append(absent, metricsShortTTL...)
-			absent = append(absent, metricsShortestTTL...)
-			absent = append(absent, metricsShortToLongTTL...)
+			var present []labels.Labels
 
 			present = append(present, metricsLongTTL...)
 			present = append(present, metricsLongToShortTTL...)
 
-			// Purge of metrics is not yet implemented for long-lived TTL
-			absent = absent[:0]
+			// The shard is older than these metric's TTL but they are still in the
+			// shard because the shard only expires when all metrics in it have expired.
+			present = append(present, metricsShortTTL...)
+			present = append(present, metricsShortestTTL...)
+			present = append(present, metricsShortToLongTTL...)
 
 			err = store.verifyShard(
 				t,
 				oldestShard,
 				dropTTLFromMetricList(present),
-				dropTTLFromMetricList(absent),
+				nil,
 			)
 			if err != nil {
-				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+				t.Fatalf("at end of phase %d: %v", currentPhase, err)
 			}
 		case currentPhase == 3 && nextPhase == 4:
 			// End of phase 3
@@ -5828,8 +5820,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 			shardCutoff := ShardForTime(phase2End.Unix())
 
-			//  Purge of metrics is not yet implemented for long-lived TTL (hence the "&& false")
-			if minShard <= shardCutoff && false {
+			if minShard <= shardCutoff {
 				t.Errorf(
 					"minShard = %s (%d), want greater than %s (%d)",
 					timeForShard(minShard).Format(shardDateFormat),
@@ -5839,21 +5830,19 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				)
 			}
 
-			var (
-				absent  []labels.Labels
-				present []labels.Labels
-			)
-
-			absent = append(absent, metricsShortTTL...)
-			absent = append(absent, metricsShortestTTL...)
-			absent = append(absent, metricsTemporary...)
-			absent = append(absent, metricsLongToShortTTL...)
+			var present []labels.Labels
 
 			present = append(present, metricsLongTTL...)
 			present = append(present, metricsShortToLongTTL...)
 
-			// Purge of metrics is not yet implemented for long-lived TTL
-			absent = absent[:0]
+			// The shard is older than these metric's TTL but they are still in the
+			// shard because the shard only expires when all metrics in it have expired.
+			present = append(present, metricsShortTTL...)
+			present = append(present, metricsShortestTTL...)
+			present = append(present, metricsShortToLongTTL...)
+
+			// Temporary metrics are absent because they have expired.
+			absent := metricsTemporary
 
 			err = store.verifyShard(
 				t,
@@ -5862,7 +5851,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				dropTTLFromMetricList(absent),
 			)
 			if err != nil {
-				t.Fatalf("at ends of phase %d: %v", currentPhase, err)
+				t.Fatalf("at end of phase %d: %v", currentPhase, err)
 			}
 		}
 
@@ -5935,7 +5924,7 @@ func expirationLonglivedEndOfPhaseCheck(
 		wantedExpiration = append(wantedExpiration, metricExpiration)
 	}
 
-	// At ends of any phase, index contains all metrics currently write
+	// At the end of any phase, index contains all metrics currently written
 	err := store.verifyStore(
 		t,
 		currentTime,
@@ -5944,10 +5933,10 @@ func expirationLonglivedEndOfPhaseCheck(
 		true,
 	)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("at ends of phase %d: %w", currentPhase, err))
+		errs = append(errs, fmt.Errorf("at end of phase %d: %w", currentPhase, err))
 	}
 
-	// At ends of any phase, the most recent shard contains all metrics currently write
+	// At the end of any phase, the most recent shard contains all metrics currently write
 	err = store.verifyShard(
 		t,
 		ShardForTime(writeTime.Unix()),
@@ -5955,7 +5944,7 @@ func expirationLonglivedEndOfPhaseCheck(
 		nil,
 	)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("at ends of phase %d: %w", currentPhase, err))
+		errs = append(errs, fmt.Errorf("at end of phase %d: %w", currentPhase, err))
 	}
 
 	buffer := bytes.NewBuffer(nil)
@@ -5972,7 +5961,7 @@ func expirationLonglivedEndOfPhaseCheck(
 	}
 
 	if hadError {
-		errs = append(errs, fmt.Errorf("at ends of phase %d, verify had error, message=%s", currentPhase, buffer.String()))
+		errs = append(errs, fmt.Errorf("at end of phase %d, verify had error, message=%s", currentPhase, buffer.String()))
 	}
 
 	if errs != nil {
@@ -5982,9 +5971,9 @@ func expirationLonglivedEndOfPhaseCheck(
 	return nil
 }
 
-// expirationLonglivedRndCheck check that metric still exists in shard it didn't yet expired.
-// This function only check for present where is MUST be present, it don't look for absence where it
-// could be absent.
+// expirationLonglivedRndCheck check that metrics still exist in shard if they are not expired.
+// This function only checks if metrics are present, it doesn't check that they are absent
+// when they expired.
 func expirationLonglivedRndCheck(
 	t *testing.T,
 	store *mockStore,
@@ -6014,7 +6003,7 @@ func expirationLonglivedRndCheck(
 				return err
 			}
 
-			if expiration.After(currentTime) {
+			if currentTime.After(expiration) {
 				continue
 			}
 

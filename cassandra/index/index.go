@@ -322,7 +322,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 // for squirreldb-cassandra-index-bench program.
 func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 	c.expire(now)
-	c.applyExpirationUpdateRequests(ctx)
+	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)
 
 	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
@@ -2119,13 +2119,6 @@ func (c *CassandraIndex) lookupIDsFromCache(
 				return nil, nil, err
 			}
 
-			err := c.updateShardsExpiration(ctx, now, shards, ttl, cassandraExpiration)
-			if err != nil {
-				c.lookupIDMutex.Unlock()
-
-				return nil, nil, err
-			}
-
 			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id))
 			found = false
 		}
@@ -2169,7 +2162,6 @@ func (c *CassandraIndex) updateShardsExpiration(
 	ctx context.Context,
 	now time.Time,
 	shards []int32,
-	ttl int64,
 	expiration time.Time,
 ) error {
 	var warnings prometheus.MultiError
@@ -2194,6 +2186,8 @@ func (c *CassandraIndex) updateShardsExpiration(
 		expirationID, ok := labelsToID[shardLabelsString]
 		if !ok {
 			// The shard expiration metric does not exist, create it.
+			ttl := int64(expiration.Sub(now).Seconds())
+
 			expirationEntry := lookupEntry{
 				sortedLabels:       shardLabels,
 				sortedLabelsString: shardLabels.String(),
@@ -2983,7 +2977,7 @@ func (c *CassandraIndex) expire(now time.Time) {
 	c.metrics.CacheSize.WithLabelValues("lookup-id").Set(float64(size))
 }
 
-func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
+func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now time.Time) {
 	c.lookupIDMutex.Lock()
 
 	start := time.Now()
@@ -3011,7 +3005,21 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
 	}
 
-	err := c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	// Update current shard expiration.
+	maxExpiration := time.Time{}
+	for _, update := range expireUpdates {
+		if update.Day.After(maxExpiration) {
+			maxExpiration = update.Day
+		}
+	}
+
+	shardsToUpdate := []int32{ShardForTime(now.Unix())}
+	err := c.updateShardsExpiration(ctx, now, shardsToUpdate, maxExpiration)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Update of shard expiration failed")
+	}
+
+	err = c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
 
@@ -3357,13 +3365,13 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 	return true, nil
 }
 
-// cassandraCheckExpire actually check for metric expired or not, and perform changes.
-// It assume that Cassandra lock expireMetricLockName is taken
+// cassandraCheckExpire actually checks for metric expired or not, and perform changes.
+// It assumes that Cassandra lock expireMetricLockName is taken.
 //
-// This method perform changes at the end, because changes will require the Cassandra lock newMetricLockName,
+// This method performs changes at the end, because changes will require the Cassandra lock newMetricLockName,
 // and we want to hold this lock only a very short time.
 //
-// This purge will also remove entry from the in-memory cache.
+// This purge will also remove entries from the in-memory cache.
 func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64, now time.Time) error {
 	var expireUpdates []expirationUpdateRequest
 
@@ -3490,7 +3498,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 // deleteShard deletes all postings associated to a shard.
 func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
-	c.logger.Debug().Msgf("Deleting shard %s", timeForShard(shard))
+	c.logger.Info().Msgf("Deleting shard %s", timeForShard(shard))
 
 	// We can't run a query like "DELETE from index_postings WHERE shard = 283752"
 	// because our partition key is (shard, name), so we have to know the label names to delete.
@@ -3507,13 +3515,15 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 	}
 
 	err := c.deletePostingsByNames(ctx, shard, labelsToDelete)
-	if err != nil {
+
+	// If the postings were not found it means they were already deleted.
+	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 		return fmt.Errorf("delete labels from postings: %w", err)
 	}
 
 	// Delete postinglabelName separately.
 	err = c.deletePostingsByNames(ctx, shard, []string{postinglabelName})
-	if err != nil {
+	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 		return fmt.Errorf("delete special labels from postings: %w", err)
 	}
 
@@ -3528,6 +3538,10 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 	}
 
 	_, err = c.postingUpdate(ctx, updateRequest)
+	if errors.Is(err, errBitmapEmpty) {
+		err = nil
+	}
+
 	if err != nil {
 		return fmt.Errorf("remove existing shards: %w", err)
 	}
@@ -3664,7 +3678,10 @@ func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateReq
 	}
 
 	if !bitmap.Any() {
-		if err := c.store.DeletePostings(ctx, job.Shard, job.Label.Name, job.Label.Value); err != nil {
+		err := c.store.DeletePostings(ctx, job.Shard, job.Label.Name, job.Label.Value)
+
+		// If the postings were not found it means they were already deleted.
+		if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 			return nil, fmt.Errorf("drop posting: %w", err)
 		}
 
