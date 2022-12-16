@@ -3506,13 +3506,13 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 		labelsToDelete = append(labelsToDelete, labelName)
 	}
 
-	err := c.store.DeletePostingsByNames(ctx, shard, labelsToDelete)
+	err := c.deletePostingsByNames(ctx, shard, labelsToDelete)
 	if err != nil {
 		return fmt.Errorf("delete labels from postings: %w", err)
 	}
 
 	// Delete postinglabelName separately.
-	err = c.store.DeletePostingsByNames(ctx, shard, []string{postinglabelName})
+	err = c.deletePostingsByNames(ctx, shard, []string{postinglabelName})
 	if err != nil {
 		return fmt.Errorf("delete special labels from postings: %w", err)
 	}
@@ -3533,6 +3533,47 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 	}
 
 	return nil
+}
+
+// deletePostingsByNames is a thin wrapper around store DeletePostingsByNames.
+// It handle submitting parallel queries when len(names) is too big.
+func (c *CassandraIndex) deletePostingsByNames(
+	ctx context.Context,
+	shard int32,
+	names []string,
+) error {
+	if len(names) < maxCQLInValue {
+		return c.store.DeletePostingsByNames(ctx, shard, names)
+	}
+
+	err := c.concurrentTasks(
+		ctx,
+		concurrentRead,
+		func(ctx context.Context, work chan<- func() error) error {
+			for start := 0; start < len(names); start += maxCQLInValue {
+				end := start + maxCQLInValue
+				if end > len(names) {
+					end = len(names)
+				}
+
+				subNames := names[start:end]
+
+				task := func() error {
+					return c.store.DeletePostingsByNames(ctx, shard, subNames)
+				}
+
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+
+	return err
 }
 
 // Run tasks concurrently with at most concurrency task in parallel.
