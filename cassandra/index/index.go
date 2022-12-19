@@ -90,7 +90,7 @@ var (
 	errBitmapEmpty              = errors.New("the result bitmap is empty")
 	errNotASimpleRegex          = errors.New("not a simple regex")
 	errNewMetricLockNotAcquired = errors.New("newMetricLock is not acquired")
-	errNoMetricCreated          = errors.New("no metric created")
+	errMetricDoesNotExist       = errors.New("metric doesn't exist")
 )
 
 type idData struct {
@@ -651,14 +651,20 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 			labelNamesCount++
 		}
 
+		shardExpiration, _, err := c.getShardExpiration(ctx, int32(shard))
+		if err != nil {
+			return err
+		}
+
 		fmt.Fprintf(
 			w,
-			"Shard %s (ID %d) has %d metrics (and %d in maybePosting). It has %d label names\n",
+			"Shard %s (ID %d) has %d metrics (and %d in maybePosting), %d label names and expires at %s\n",
 			TimeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			postingShard.Count(),
 			maybepostingShard.Count(),
 			labelNamesCount,
+			shardExpiration,
 		)
 	}
 
@@ -2171,7 +2177,12 @@ func (c *CassandraIndex) UpdateShardExpiration(
 	newExpiration time.Time,
 ) error {
 	// Get current shard expiration.
-	currentExpiration, expirationID, err := c.getOrCreateShardExpiration(ctx, now, shard, newExpiration)
+	currentExpiration, expirationID, err := c.getShardExpiration(ctx, shard)
+	if errors.Is(err, errMetricDoesNotExist) {
+		// The shard expiration metric does not exist, create it.
+		return c.createShardExpirationMetric(ctx, now, shard, newExpiration)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -2190,13 +2201,20 @@ func (c *CassandraIndex) UpdateShardExpiration(
 	return nil
 }
 
-// getOrCreateShardExpiration returns the expiration and metric ID for a shard.
-// The expiration metric is created if it doesn't exist yet.
-func (c *CassandraIndex) getOrCreateShardExpiration(
+// labelsForShardExpiration returns the labels for the shard expiration metric.
+func labelsForShardExpiration(shard int32) labels.Labels {
+	return labels.Labels{
+		{
+			Name:  ExpirationShardLabel,
+			Value: strconv.Itoa(int(shard)),
+		},
+	}
+}
+
+// getShardExpiration returns the expiration and metric ID for a shard.
+func (c *CassandraIndex) getShardExpiration(
 	ctx context.Context,
-	now time.Time,
 	shard int32,
-	expiration time.Time,
 ) (time.Time, types.MetricID, error) {
 	// Try to get the expiration from the cache.
 	currentExpiration, expirationID, found := c.shardExpirationCache.Get(shard)
@@ -2205,13 +2223,7 @@ func (c *CassandraIndex) getOrCreateShardExpiration(
 	}
 
 	// Get the shard expiration metric ID from the shard label.
-	shardLabels := labels.Labels{
-		{
-			Name:  ExpirationShardLabel,
-			Value: strconv.Itoa(int(shard)),
-		},
-	}
-	shardLabelsString := shardLabels.String()
+	shardLabelsString := labelsForShardExpiration(shard).String()
 
 	labelsToID, err := c.store.SelectLabelsList2ID(ctx, []string{shardLabelsString})
 	if err != nil {
@@ -2220,11 +2232,7 @@ func (c *CassandraIndex) getOrCreateShardExpiration(
 
 	expirationID, ok := labelsToID[shardLabelsString]
 	if !ok {
-		// The shard expiration metric does not exist, create it.
-		expirationID, err = c.createShardExpirationMetric(ctx, now, shardLabels, expiration)
-		if err != nil {
-			return time.Time{}, 0, err
-		}
+		return time.Time{}, 0, errMetricDoesNotExist
 	}
 
 	// Get the metric expiration from the metric ID.
@@ -2255,14 +2263,15 @@ func (c *CassandraIndex) getOrCreateShardExpiration(
 func (c *CassandraIndex) createShardExpirationMetric(
 	ctx context.Context,
 	now time.Time,
-	shardLabels labels.Labels,
+	shard int32,
 	expiration time.Time,
-) (types.MetricID, error) {
-	c.logger.Debug().Msgf("Creating shard expiration metric %s with expiration %s", shardLabels.String(), expiration)
+) error {
+	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", TimeForShard(shard), expiration)
 
 	// Choose the TTL to make the metric expire at the given expiration.
 	ttl := int64(expiration.Sub(now).Seconds())
 
+	shardLabels := labelsForShardExpiration(shard)
 	expirationEntry := lookupEntry{
 		sortedLabels:       shardLabels,
 		sortedLabelsString: shardLabels.String(),
@@ -2271,25 +2280,21 @@ func (c *CassandraIndex) createShardExpirationMetric(
 
 	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
 		if ctx.Err() != nil {
-			return 0, ctx.Err()
+			return ctx.Err()
 		}
 
-		return 0, errNewMetricLockNotAcquired
+		return errNewMetricLockNotAcquired
 	}
 
-	metrics, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
+	_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
 
 	c.newMetricLock.Unlock()
 
 	if err != nil {
-		return 0, fmt.Errorf("create shard expiration metric: %w", err)
+		return fmt.Errorf("create shard expiration metric: %w", err)
 	}
 
-	if len(metrics) == 0 {
-		return 0, errNoMetricCreated
-	}
-
-	return metrics[0].id, nil
+	return nil
 }
 
 func (c *CassandraIndex) refreshExpiration(
