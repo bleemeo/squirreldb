@@ -5020,16 +5020,16 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	t1 := t0.Add(updateDelay).Add(implementationDelay)
 	// At t2, the non-refreshed entry expired and is deleted
 	// At t2, also refresh the longTTL entry but with 2-days TTL. This will NOT update the expiration date
-	t2 := t0.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	t2 := t1.Add(shortTTL).Add(implementationDelay)
 	// At t3, the entry refreshed at t1 expired and is deleted
 	// At t3, also insert expireBatchSize + 10 metrics with shortTTL
-	t3 := t1.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	t3 := t2.Add(shortTTL).Add(implementationDelay)
 	// At t4, check that nothing happened
-	t4 := t3.Add(updateDelay).Add(shortTTL - time.Hour)
+	t4 := t3.Add(shortTTL - time.Second)
 	// At t5, metrics added at t3 have expired and are deleted
-	t5 := t3.Add(updateDelay).Add(shortTTL).Add(implementationDelay)
+	t5 := t4.Add(24 * time.Hour).Add(implementationDelay)
 	// At t6, all metrics are expired and deleted
-	t6 := t2.Add(updateDelay).Add(longTTL).Add(implementationDelay)
+	t6 := t5.Add(updateDelay).Add(longTTL).Add(implementationDelay)
 
 	metrics := []map[string]string{
 		{
@@ -5499,20 +5499,21 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	// Test have N phase:
 	// * phase1: all metrics are written (including temporary).
 	//           phase1 lasts 2*shortTTL+postingsShardSize time.
-	//           At the end of phase1, oldest shard don't contains metrics with shortTTL
-	//           At the end of phase1, oldest shard don't contains metrics with shortestTTL
-	//           At the end of phase1, oldest shard contains metrics with longTTL
+	//           At the end of phase1, the oldest shard contains metrics with longTTL.
+	// 			 It also still contains metrics with shortTTL and shortestTTL even if they have expired
+	// 			 because currently we only expire a shard after all metrics in it have expired.
 	// * phase2: temporary are no longer written. Metrics that change TTL swap their TTL.
 	//           phase2 last 2*shortTTL+postingsShardSize time.
-	//           At the end of phase2, oldest shard don't contains metrics that only use shortTTL
-	//           At the end of phase2, oldest shard still contains metrics with changed from long to short TTL.
+	//           At the end of phase2, the oldest shard contains metrics with changed from long to short TTL.
+	// 			 It also still contains metrics with shortTTL and shortestTTL even if they have expired
+	// 			 because currently we only expire a shard after all metrics in it have expired.
 	// * phase3: continue as previous phase for 2*longTTL+postingsShardSize
-	//           At the end of phase3, all shards oldest that beginning of phase3 are empty
-	//           At the end of phase3, oldest non-empty shards only contains metrics with long TTL
+	//           At the end of phase3, all shards oldest that beginning of phase3 are empty.
+	//           At the end of phase3, oldest non-empty shards only contains metrics with long TTL.
 	// * phase4: no more write for 2*longTTL+postingsShardSize
 	//           At the end of phase4, index is empty.
 	// Also in all phase (but phase 4), few metrics are written with randomized TTL. The TTL change each new shard.
-	// For this metric, we don't check it disapear from shard but that it still in shard it must belong to.
+	// For this metric, we don't check if it's deleted from the shard but that it's still in the shard it belongs to.
 	phase1End := baseTime.Add(2*shortTTL + postingShardSize)
 	phase2End := phase1End.Add(2*shortTTL + postingShardSize)
 	phase3End := phase2End.Add(2*longTTL + postingShardSize)
@@ -5753,14 +5754,11 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 			var present []labels.Labels
 
+			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
+			// are currently still in the shard because the shard only expires when all metrics in it
+			// have expired. We don't check if they are present because they don't need to be present.
 			present = append(present, metricsLongTTL...)
 			present = append(present, metricsLongToShortTTL...)
-
-			// The shard is older than these metric's TTL but they are still in the
-			// shard because the shard only expires when all metrics in it have expired.
-			present = append(present, metricsShortTTL...)
-			present = append(present, metricsShortestTTL...)
-			present = append(present, metricsShortToLongTTL...)
 
 			err = store.verifyShard(
 				t,
@@ -5790,14 +5788,11 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 			var present []labels.Labels
 
+			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
+			// are currently still in the shard because the shard only expires when all metrics in it
+			// have expired. We don't check if they are present because they don't need to be present.
 			present = append(present, metricsLongTTL...)
 			present = append(present, metricsLongToShortTTL...)
-
-			// The shard is older than these metric's TTL but they are still in the
-			// shard because the shard only expires when all metrics in it have expired.
-			present = append(present, metricsShortTTL...)
-			present = append(present, metricsShortestTTL...)
-			present = append(present, metricsShortToLongTTL...)
 
 			err = store.verifyShard(
 				t,
@@ -5832,13 +5827,10 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 			var present []labels.Labels
 
+			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
+			// are currently still in the shard because the shard only expires when all metrics in it
+			// have expired. We don't check if they are present because they don't need to be present.
 			present = append(present, metricsLongTTL...)
-			present = append(present, metricsShortToLongTTL...)
-
-			// The shard is older than these metric's TTL but they are still in the
-			// shard because the shard only expires when all metrics in it have expired.
-			present = append(present, metricsShortTTL...)
-			present = append(present, metricsShortestTTL...)
 			present = append(present, metricsShortToLongTTL...)
 
 			// Temporary metrics are absent because they have expired.

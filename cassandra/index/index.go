@@ -3015,6 +3015,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 	}
 
 	shardsToUpdate := []int32{ShardForTime(now.Unix())}
+
 	err := c.updateShardsExpiration(ctx, now, shardsToUpdate, maxExpiration)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("Update of shard expiration failed")
