@@ -2216,7 +2216,6 @@ func (c *CassandraIndex) updateShardsExpiration(
 			// The metric is present in labels2id but not in id2labels.
 			// This should not be possible because when the metric is created it's first
 			// inserted in IDsToLabel.
-
 			c.logger.Warn().Msgf("Failed to get current expiration for shard %s, forcing expiration update", timeForShard(shard))
 
 			// Force expiration update.
@@ -3514,6 +3513,10 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 	for iter.HasNext() {
 		labelName, _ := iter.Next()
 		labelsToDelete = append(labelsToDelete, labelName)
+	}
+
+	if iter.Err() != nil {
+		return fmt.Errorf("select postings by name: %w", iter.Err())
 	}
 
 	err := c.deletePostingsByNames(ctx, shard, labelsToDelete)
