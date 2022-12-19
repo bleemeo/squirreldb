@@ -8,6 +8,7 @@ import (
 	"squirreldb/types"
 	"time"
 
+	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
 )
@@ -263,6 +264,51 @@ func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
 	}
 
 	return false
+}
+
+// UpdateShardExpiration implements the IndexShardExpirationUpdater interface used in commands.
+func (i *indexWrapper) UpdateShardExpiration(
+	ctx context.Context,
+	now time.Time,
+	shard int32,
+	newExpiration time.Time,
+) error {
+	if updater, ok := i.index.(types.IndexShardExpirationUpdater); ok {
+		return updater.UpdateShardExpiration(ctx, now, shard, newExpiration)
+	}
+
+	return errNotImplemented
+}
+
+// UpdateShardExpiration implements the IndexShardExpirationUpdater interface used in commands.
+func (i *indexWrapper) ApplyExpirationUpdateRequests(ctx context.Context, now time.Time) {
+	if updater, ok := i.index.(types.IndexShardExpirationUpdater); ok {
+		updater.ApplyExpirationUpdateRequests(ctx, now)
+	}
+}
+
+// UpdateShardExpiration implements the IndexShardExpirationUpdater interface used in commands.
+func (i *indexWrapper) DeleteShard(ctx context.Context, shard int32) error {
+	if updater, ok := i.index.(types.IndexShardExpirationUpdater); ok {
+		return updater.DeleteShard(ctx, shard)
+	}
+
+	return errNotImplemented
+}
+
+// UpdateShardExpiration implements the IndexShardExpirationUpdater interface used in commands.
+func (i *indexWrapper) Postings(
+	ctx context.Context,
+	shards []int32,
+	name string,
+	value string,
+	useCache bool,
+) (*roaring.Bitmap, error) {
+	if updater, ok := i.index.(types.IndexShardExpirationUpdater); ok {
+		return updater.Postings(ctx, shards, name, value, useCache)
+	}
+
+	return nil, errNotImplemented
 }
 
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.

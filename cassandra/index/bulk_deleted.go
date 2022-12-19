@@ -40,7 +40,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 
 	for _, lbl := range sortedLabels {
 		d.invalidateKey = append(d.invalidateKey, postingsCacheKey{
-			Shard: globalShardNumber,
+			Shard: GlobalShardNumber,
 			Name:  lbl.Name,
 			Value: lbl.Value,
 		})
@@ -128,7 +128,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 		return err
 	}
 
-	shards, err := d.c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
+	shards, err := d.c.Postings(ctx, []int32{GlobalShardNumber}, ExistingShardsLabel, ExistingShardsLabel, false)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 	}
 
 	_, err = d.c.postingUpdate(ctx, postingUpdateRequest{
-		Shard:     globalShardNumber,
+		Shard:     GlobalShardNumber,
 		Label:     labels.Label{Name: globalAllPostingLabel, Value: globalAllPostingLabel},
 		RemoveIDs: d.deleteIDs,
 	})
@@ -248,10 +248,10 @@ func newPostingsInShardDeleter(c *CassandraIndex) *postingsInShardDeleter {
 	return &postingsInShardDeleter{
 		c: c,
 		ShardsListUpdate: postingUpdateRequest{
-			Shard: globalShardNumber,
+			Shard: GlobalShardNumber,
 			Label: labels.Label{
-				Name:  existingShardsLabel,
-				Value: existingShardsLabel,
+				Name:  ExistingShardsLabel,
+				Value: ExistingShardsLabel,
 			},
 		},
 	}
