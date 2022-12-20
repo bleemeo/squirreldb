@@ -652,7 +652,10 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		}
 
 		shardExpiration, _, err := c.getShardExpiration(ctx, int32(shard))
-		if err != nil {
+
+		// Some shard expiration metrics may not exist if the shard were created before the
+		// expiration was introduced. In this case the expiration will be shown at 0001-01-01 00:00:00.
+		if err != nil && !errors.Is(err, errMetricDoesNotExist) {
 			return err
 		}
 
