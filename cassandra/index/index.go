@@ -328,7 +328,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 // for squirreldb-cassandra-index-bench program.
 func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 	c.expire(now)
-	c.ApplyExpirationUpdateRequests(ctx, now)
+	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)
 
 	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
@@ -461,7 +461,7 @@ func (c *CassandraIndex) DumpByExpirationDate(ctx context.Context, w io.Writer, 
 }
 
 func (c *CassandraIndex) DumpByShard(ctx context.Context, w io.Writer, shard time.Time) error {
-	allPosting, err := c.Postings(ctx, []int32{ShardForTime(shard.Unix())}, allPostingLabel, allPostingLabel, false)
+	allPosting, err := c.Postings(ctx, []int32{shardForTime(shard.Unix())}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return fmt.Errorf("unable to get metric expiration list: %w", err)
 	}
@@ -483,7 +483,7 @@ func (c *CassandraIndex) DumpByPosting(
 	name string,
 	value string,
 ) error {
-	shardID := ShardForTime(shard.Unix())
+	shardID := shardForTime(shard.Unix())
 	if shard.IsZero() {
 		shardID = GlobalShardNumber
 	}
@@ -662,7 +662,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has %d metrics (and %d in maybePosting), %d label names and expires at %s\n",
-			TimeForShard(int32(shard)).Format(shardDateFormat),
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			postingShard.Count(),
 			maybepostingShard.Count(),
@@ -743,7 +743,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has the metric in posting=%v, maybePosting=%v\n",
-			TimeForShard(int32(shard)).Format(shardDateFormat),
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			inPosting,
 			inMaybe,
@@ -767,11 +767,11 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 				fmt.Fprintf(
 					w,
 					"Shard %s: the following postings are missing: %s\n",
-					TimeForShard(int32(shard)).Format(shardDateFormat),
+					timeForShard(int32(shard)).Format(shardDateFormat),
 					strings.Join(missingPostings, ", "),
 				)
 			} else {
-				fmt.Fprintf(w, "Shard %s: all postings are present\n", TimeForShard(int32(shard)).Format(shardDateFormat))
+				fmt.Fprintf(w, "Shard %s: all postings are present\n", timeForShard(int32(shard)).Format(shardDateFormat))
 			}
 		}
 	}
@@ -910,7 +910,7 @@ func (c *CassandraIndex) verify(
 
 	for _, shard := range shards.Slice() {
 		shard := int32(shard)
-		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", TimeForShard(shard).Format(shardDateFormat), shard)
+		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
 		shardHadIssue, err := c.verifyShard(ctx, w, doFix, shard, allPosting)
 		if err != nil {
@@ -946,7 +946,7 @@ func (c *CassandraIndex) verifyMissingShard(
 			return 0, shards, ctx.Err()
 		}
 
-		queryShard := []int32{ShardForTime(current.Unix())}
+		queryShard := []int32{shardForTime(current.Unix())}
 
 		it, err := c.Postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
@@ -959,7 +959,7 @@ func (c *CassandraIndex) verifyMissingShard(
 			fmt.Fprintf(
 				w,
 				"Shard %s for time %v isn't in all shards",
-				TimeForShard(queryShard[0]).Format(shardDateFormat),
+				timeForShard(queryShard[0]).Format(shardDateFormat),
 				current.String(),
 			)
 
@@ -990,7 +990,7 @@ func (c *CassandraIndex) verifyMissingShard(
 		if it == nil || !it.Any() {
 			errorCount++
 
-			fmt.Fprintf(w, "Shard %s is listed in all shards but don't exists\n", TimeForShard(shard).Format(shardDateFormat))
+			fmt.Fprintf(w, "Shard %s is listed in all shards but don't exists\n", timeForShard(shard).Format(shardDateFormat))
 
 			if doFix {
 				_, err = shards.RemoveN(uint64(shard))
@@ -1231,7 +1231,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		fmt.Fprintf(
 			w,
 			"shard %s is empty (automatic cleanup may fix this)!\n",
-			TimeForShard(shard).Format(shardDateFormat),
+			timeForShard(shard).Format(shardDateFormat),
 		)
 	}
 
@@ -1241,7 +1241,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		fmt.Fprintf(
 			w,
 			"shard %s is empty!\n",
-			TimeForShard(shard).Format(shardDateFormat),
+			timeForShard(shard).Format(shardDateFormat),
 		)
 	}
 
@@ -1259,7 +1259,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		fmt.Fprintf(
 			w,
 			"shard %s: ID %d is present in localAll but not in localMaybe!\n",
-			TimeForShard(shard).Format(shardDateFormat),
+			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
@@ -1297,7 +1297,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		fmt.Fprintf(
 			w,
 			"shard %s: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
-			TimeForShard(shard).Format(shardDateFormat),
+			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
@@ -1408,7 +1408,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 			fmt.Fprintf(
 				w,
 				"shard %s: postinglabelName has extra name=%s\n",
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				labelValue,
 			)
 
@@ -1466,7 +1466,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 				fmt.Fprintf(
 					w,
 					"shard %s: extra posting for %s=%s exists (with %d IDs)\n",
-					TimeForShard(shard).Format(shardDateFormat),
+					timeForShard(shard).Format(shardDateFormat),
 					name,
 					labelValue,
 					tmp.Count(),
@@ -1501,7 +1501,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					fmt.Fprintf(
 						w,
 						"shard %s: missing ID %d in posting for %s=%s\n",
-						TimeForShard(shard).Format(shardDateFormat),
+						timeForShard(shard).Format(shardDateFormat),
 						id,
 						name,
 						labelValue,
@@ -1535,7 +1535,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					fmt.Fprintf(
 						w,
 						"shard %s: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
-						TimeForShard(shard).Format(shardDateFormat),
+						timeForShard(shard).Format(shardDateFormat),
 						id,
 						name,
 						labelValue,
@@ -1575,7 +1575,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					fmt.Fprintf(
 						w,
 						"shard %s: posting for %s=%s has ID %d which is not in %s!\n",
-						TimeForShard(shard).Format(shardDateFormat),
+						timeForShard(shard).Format(shardDateFormat),
 						name,
 						labelValue,
 						id,
@@ -1592,7 +1592,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		fmt.Fprintf(
 			w,
 			"shard %s: posting %s=%s was expected to exists\n",
-			TimeForShard(shard).Format(shardDateFormat),
+			timeForShard(shard).Format(shardDateFormat),
 			lbl.Name,
 			lbl.Value,
 		)
@@ -2171,9 +2171,9 @@ func (c *CassandraIndex) lookupIDsFromCache(
 	return entries, labelsToIndices, nil
 }
 
-// UpdateShardExpiration updates the shards expiration if
+// updateShardExpiration updates the shards expiration if
 // the new expiration is after the current expiration.
-func (c *CassandraIndex) UpdateShardExpiration(
+func (c *CassandraIndex) updateShardExpiration(
 	ctx context.Context,
 	now time.Time,
 	shard int32,
@@ -2267,7 +2267,7 @@ func (c *CassandraIndex) getShardExpirationFromStore(
 		// The metric is present in labels2id but not in id2labels.
 		// This should not be possible because when the metric is created it's first
 		// inserted in IDsToLabel.
-		c.logger.Warn().Msgf("Failed to get current expiration for shard %s, forcing expiration update", TimeForShard(shard))
+		c.logger.Warn().Msgf("Failed to get current expiration for shard %s, forcing expiration update", timeForShard(shard))
 
 		// Force expiration update and don't set the expiration in the cache.
 		currentExpiration = time.Time{}
@@ -2285,7 +2285,7 @@ func (c *CassandraIndex) createShardExpirationMetric(
 	shard int32,
 	expiration time.Time,
 ) error {
-	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", TimeForShard(shard), expiration)
+	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", timeForShard(shard), expiration)
 
 	// Choose the TTL to make the metric expire at the given expiration.
 	ttl := int64(expiration.Sub(now).Seconds())
@@ -3057,7 +3057,7 @@ func (c *CassandraIndex) expire(now time.Time) {
 	c.metrics.CacheSize.WithLabelValues("lookup-id").Set(float64(size))
 }
 
-func (c *CassandraIndex) ApplyExpirationUpdateRequests(ctx context.Context, now time.Time) {
+func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now time.Time) {
 	c.lookupIDMutex.Lock()
 
 	start := time.Now()
@@ -3093,7 +3093,7 @@ func (c *CassandraIndex) ApplyExpirationUpdateRequests(ctx context.Context, now 
 		}
 	}
 
-	err := c.UpdateShardExpiration(ctx, now, ShardForTime(now.Unix()), maxExpiration)
+	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("Update of shard expiration failed")
 	}
@@ -3529,9 +3529,9 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			// There is no overflow when converting to int32 because the shard was int32 when inserted.
 			shard := int32(shardInt) //nolint:gosec
 
-			err = c.DeleteShard(ctx, shard)
+			err = c.deleteShard(ctx, shard)
 			if err != nil {
-				return fmt.Errorf("delete shard %s: %w", TimeForShard(shard), err)
+				return fmt.Errorf("delete shard %s: %w", timeForShard(shard), err)
 			}
 		}
 
@@ -3579,9 +3579,9 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 	return nil
 }
 
-// DeleteShard deletes all postings associated to a shard.
-func (c *CassandraIndex) DeleteShard(ctx context.Context, shard int32) error {
-	c.logger.Info().Msgf("Deleting shard %s", TimeForShard(shard))
+// deleteShard deletes all postings associated to a shard.
+func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
+	c.logger.Info().Msgf("Deleting shard %s", timeForShard(shard))
 
 	// We can't run a query like "DELETE from index_postings WHERE shard = 283752"
 	// because our partition key is (shard, name), so we have to know the label names to delete.
@@ -3649,7 +3649,7 @@ func (c *CassandraIndex) deletePostingsByNames(
 
 	err := c.concurrentTasks(
 		ctx,
-		concurrentRead,
+		concurrentDelete,
 		func(ctx context.Context, work chan<- func() error) error {
 			for start := 0; start < len(names); start += maxCQLInValue {
 				end := start + maxCQLInValue
@@ -4224,16 +4224,16 @@ func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day tim
 	return tmp, err
 }
 
-// ShardForTime return the shard number for give timestamp (second from epoc)
+// shardForTime return the shard number for give timestamp (second from epoc)
 // The shard number should only be useful for debugging or InternalUpdatePostingShards.
-func ShardForTime(ts int64) int32 {
+func shardForTime(ts int64) int32 {
 	shardSize := int32(postingShardSize.Hours())
 
 	return (int32(ts/3600) / shardSize) * shardSize
 }
 
-// TimeForShard return the time for given shard ID.
-func TimeForShard(shard int32) time.Time {
+// timeForShard return the time for given shard ID.
+func timeForShard(shard int32) time.Time {
 	return time.Unix(int64(shard)*3600, 0)
 }
 
@@ -4243,8 +4243,8 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	}
 
 	shardSize := int32(postingShardSize.Hours())
-	startShard := ShardForTime(start.Unix())
-	endShard := ShardForTime(end.Unix())
+	startShard := shardForTime(start.Unix())
+	endShard := shardForTime(end.Unix())
 
 	var (
 		existingShards *roaring.Bitmap
@@ -4303,16 +4303,13 @@ func (c *CassandraIndex) selectLabelsList2ID(
 		ctx,
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
-			start := 0
-			for start < len(sortedLabelsListString) {
+			for start := 0; start < len(sortedLabelsListString); start += maxCQLInValue {
 				end := start + maxCQLInValue
 				if end > len(sortedLabelsListString) {
 					end = len(sortedLabelsListString)
 				}
 
 				subSortedLabelsListString := sortedLabelsListString[start:end]
-
-				start += maxCQLInValue
 
 				task := func() error {
 					tmp, err := c.store.SelectLabelsList2ID(ctx, subSortedLabelsListString)
@@ -4367,16 +4364,13 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 		ctx,
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
-			start := 0
-			for start < len(ids) {
+			for start := 0; start < len(ids); start += maxCQLInValue {
 				end := start + maxCQLInValue
 				if end > len(ids) {
 					end = len(ids)
 				}
 
 				subIds := ids[start:end]
-
-				start += maxCQLInValue
 
 				task := func() error {
 					tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
@@ -4486,7 +4480,7 @@ func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl, throt
 		time.Sleep(throttleDelay)
 	}
 
-	c.ApplyExpirationUpdateRequests(ctx, time.Now())
+	c.applyExpirationUpdateRequests(ctx, time.Now())
 
 	return nil
 }
@@ -4495,7 +4489,7 @@ func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl, throt
 // The shard is deleted if the expiration is in the past.
 func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, ttl time.Duration) error {
 	now := time.Now()
-	shardTime := TimeForShard(shard)
+	shardTime := timeForShard(shard)
 
 	log.Trace().Msgf("Processing shard %s", shardTime)
 
@@ -4503,7 +4497,7 @@ func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, t
 	expiration := shardTime.Add(ttl)
 
 	if expiration.Before(now) {
-		err := c.DeleteShard(ctx, shard)
+		err := c.deleteShard(ctx, shard)
 		if err != nil {
 			return err
 		}
@@ -4511,7 +4505,7 @@ func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, t
 		return nil
 	}
 
-	return c.UpdateShardExpiration(ctx, now, shard, expiration)
+	return c.updateShardExpiration(ctx, now, shard, expiration)
 }
 
 func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {

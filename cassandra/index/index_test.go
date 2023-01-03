@@ -261,7 +261,7 @@ func (s *mockStore) getPresencePostings(shard int32) (*roaring.Bitmap, *roaring.
 		if err != nil {
 			return nil, nil, fmt.Errorf(
 				"UnmarshalBinary maybePosting for shard %s (%d): %w",
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 				err,
 			)
@@ -274,7 +274,7 @@ func (s *mockStore) getPresencePostings(shard int32) (*roaring.Bitmap, *roaring.
 		if err != nil {
 			return nil, nil, fmt.Errorf(
 				"UnmarshalBinary allPostingLabel for shard %s (%d): %w",
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 				err,
 			)
@@ -314,7 +314,7 @@ func (s *mockStore) verifyShard(
 			errs = append(errs, fmt.Errorf(
 				"metric %s is absent from maybePosting of shard %s (%d)",
 				metricLabels.String(),
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 			))
 		}
@@ -323,7 +323,7 @@ func (s *mockStore) verifyShard(
 			errs = append(errs, fmt.Errorf(
 				"metric %s is absent from allPostingLabel of shard %s (%d)",
 				metricLabels.String(),
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 			))
 		}
@@ -341,7 +341,7 @@ func (s *mockStore) verifyShard(
 			errs = append(errs, fmt.Errorf(
 				"metric %s is present in maybePosting of shard %s (%d)",
 				metricLabels.String(),
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 			))
 		}
@@ -350,7 +350,7 @@ func (s *mockStore) verifyShard(
 			errs = append(errs, fmt.Errorf(
 				"metric %s is present in allPostingLabel of shard %s (%d)",
 				metricLabels.String(),
-				TimeForShard(shard).Format(shardDateFormat),
+				timeForShard(shard).Format(shardDateFormat),
 				shard,
 			))
 		}
@@ -1409,7 +1409,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 
 func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	now := time.Now()
-	shards := []int32{ShardForTime(now.Unix())}
+	shards := []int32{shardForTime(now.Unix())}
 	metrics1 := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
 			"__name__": "up",
@@ -5182,7 +5182,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
 	}
 
-	index.ApplyExpirationUpdateRequests(context.Background(), t1)
+	index.applyExpirationUpdateRequests(context.Background(), t1)
 	// metrics[3] was moved to a new expiration slot
 	if len(store.expiration) != 5 {
 		t.Errorf("len(store.expiration) = %v, want 5", len(store.expiration))
@@ -5653,7 +5653,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	for currentTime.Before(phase4End) {
 		var metricToWrite []labels.Labels
 
-		nextShard := ShardForTime(currentTime.Unix())
+		nextShard := shardForTime(currentTime.Unix())
 		if currentShard != nextShard {
 			for i := range metricsRandomTTL {
 				builder := labels.NewBuilder(metricsRandomTTL[i])
@@ -5750,7 +5750,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		switch {
 		case currentPhase == 1 && nextPhase == 2:
 			// End of phase 1
-			oldestShard := ShardForTime(baseTime.Unix())
+			oldestShard := shardForTime(baseTime.Unix())
 
 			var present []labels.Labels
 
@@ -5784,7 +5784,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			}
 		case currentPhase == 2 && nextPhase == 3:
 			// End of phase 2
-			oldestShard := ShardForTime(baseTime.Unix())
+			oldestShard := shardForTime(baseTime.Unix())
 
 			var present []labels.Labels
 
@@ -5805,7 +5805,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			}
 		case currentPhase == 3 && nextPhase == 4:
 			// End of phase 3
-			minShard := ShardForTime(currentTime.Unix())
+			minShard := shardForTime(currentTime.Unix())
 
 			for shard := range store.postings {
 				if shard < minShard && shard != GlobalShardNumber {
@@ -5813,14 +5813,14 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			shardCutoff := ShardForTime(phase2End.Unix())
+			shardCutoff := shardForTime(phase2End.Unix())
 
 			if minShard <= shardCutoff {
 				t.Errorf(
 					"minShard = %s (%d), want greater than %s (%d)",
-					TimeForShard(minShard).Format(shardDateFormat),
+					timeForShard(minShard).Format(shardDateFormat),
 					minShard,
-					TimeForShard(shardCutoff).Format(shardDateFormat),
+					timeForShard(shardCutoff).Format(shardDateFormat),
 					shardCutoff,
 				)
 			}
@@ -5931,7 +5931,7 @@ func expirationLonglivedEndOfPhaseCheck(
 	// At the end of any phase, the most recent shard contains all metrics currently write
 	err = store.verifyShard(
 		t,
-		ShardForTime(writeTime.Unix()),
+		shardForTime(writeTime.Unix()),
 		dropTTLFromMetricList(metricToWrite),
 		nil,
 	)
@@ -6008,7 +6008,7 @@ func expirationLonglivedRndCheck(
 				errs.Append(fmt.Errorf(
 					"metric %s not present in maybePresent of shard %s (%d). It should expire after %s",
 					metricsRandomTTL[idx],
-					TimeForShard(shard).Format(shardDateFormat),
+					timeForShard(shard).Format(shardDateFormat),
 					shard,
 					expiration,
 				))
@@ -6018,7 +6018,7 @@ func expirationLonglivedRndCheck(
 				errs.Append(fmt.Errorf(
 					"metric %s not present in allPosting of shard %s (%d). It should expire after %s",
 					metricsRandomTTL[idx],
-					TimeForShard(shard).Format(shardDateFormat),
+					timeForShard(shard).Format(shardDateFormat),
 					shard,
 					expiration,
 				))
@@ -6871,7 +6871,7 @@ func Test_timeForShard(t *testing.T) {
 	for _, tt := range tests {
 		name := tt.inputTime.Format(time.RFC3339)
 		t.Run(name, func(t *testing.T) {
-			if got := TimeForShard(ShardForTime(tt.inputTime.Unix())); !got.Equal(tt.want) {
+			if got := timeForShard(shardForTime(tt.inputTime.Unix())); !got.Equal(tt.want) {
 				t.Errorf("timeForShard() = %s, want %s", got, tt.want)
 			}
 		})
