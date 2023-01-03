@@ -2201,6 +2201,8 @@ func (c *CassandraIndex) updateShardExpiration(
 		return fmt.Errorf("refresh shard expiration: %w", err)
 	}
 
+	c.shardExpirationCache.Set(shard, newExpiration, expirationID)
+
 	return nil
 }
 
