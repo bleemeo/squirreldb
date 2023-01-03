@@ -3087,20 +3087,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
 	}
 
-	// Update current shard expiration.
-	maxExpiration := time.Time{}
-	for _, update := range expireUpdates {
-		if update.Day.After(maxExpiration) {
-			maxExpiration = update.Day
-		}
-	}
-
-	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
-	if err != nil {
-		c.logger.Warn().Err(err).Msg("Update of shard expiration failed")
-	}
-
-	err = c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	err := c.applyExpirationUpdateRequestsLock(ctx, now, expireUpdates)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
 
@@ -3118,12 +3105,27 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 }
 
 func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
-	ctx context.Context, expireUpdates []expirationUpdateRequest,
+	ctx context.Context,
+	now time.Time,
+	expireUpdates []expirationUpdateRequest,
 ) error {
+	// Update current shard expiration with the highest expiration.
+	maxExpiration := time.Time{}
+	for _, update := range expireUpdates {
+		if update.Day.After(maxExpiration) {
+			maxExpiration = update.Day
+		}
+	}
+
+	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
+	if err != nil {
+		return fmt.Errorf("update shard expiration: %w", err)
+	}
+
 	c.newMetricLock.Lock()
 	defer c.newMetricLock.Unlock()
 
-	err := c.concurrentTasks(
+	err = c.concurrentTasks(
 		ctx,
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
