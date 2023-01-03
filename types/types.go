@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
@@ -80,22 +79,8 @@ type IndexRunner interface {
 	RunOnce(ctx context.Context, now time.Time) bool
 }
 
-type IndexShardExpirationUpdater interface {
-	UpdateShardExpiration(
-		ctx context.Context,
-		now time.Time,
-		shard int32,
-		newExpiration time.Time,
-	) error
-	ApplyExpirationUpdateRequests(ctx context.Context, now time.Time)
-	DeleteShard(ctx context.Context, shard int32) error
-	Postings(
-		ctx context.Context,
-		shards []int32,
-		name string,
-		value string,
-		useCache bool,
-	) (*roaring.Bitmap, error)
+type IndexInternalShardExpirer interface {
+	InternalUpdateAllShards(ctx context.Context, ttl, throttleDelay time.Duration) error
 }
 
 type MetricsSet interface {
