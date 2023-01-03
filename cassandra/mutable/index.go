@@ -266,9 +266,9 @@ func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
 }
 
 // InternalUpdateAllShards implements the IndexInternalShardExpirer interface.
-func (i *indexWrapper) InternalUpdateAllShards(ctx context.Context, ttl, throttleDelay time.Duration) error {
+func (i *indexWrapper) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
 	if expirerer, ok := i.index.(types.IndexInternalShardExpirer); ok {
-		return expirerer.InternalUpdateAllShards(ctx, ttl, throttleDelay)
+		return expirerer.InternalUpdateAllShards(ctx, ttl)
 	}
 
 	return errNotImplemented

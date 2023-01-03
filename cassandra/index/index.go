@@ -4456,8 +4456,7 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 
 // InternalUpdateAllShards updates the expiration of all shards.
 // Shards older than the TTL will be deleted, other shard will have their expiration created or updated.
-// It waits for throttleDelay between shard updates to reduce the load on Cassandra.
-func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl, throttleDelay time.Duration) error {
+func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
 	// Get all known shards.
 	shardBitmap, err := c.getExistingShards(ctx, true)
 	if err != nil {
@@ -4476,8 +4475,6 @@ func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl, throt
 		if err != nil {
 			return fmt.Errorf("update shard: %w", err)
 		}
-
-		time.Sleep(throttleDelay)
 	}
 
 	c.applyExpirationUpdateRequests(ctx, time.Now())
@@ -4491,7 +4488,7 @@ func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, t
 	now := time.Now()
 	shardTime := timeForShard(shard)
 
-	log.Trace().Msgf("Processing shard %s", shardTime)
+	log.Info().Msgf("Processing shard %s", shardTime)
 
 	// The expiration is calculated from the shard time.
 	expiration := shardTime.Add(ttl)

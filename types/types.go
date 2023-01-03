@@ -80,7 +80,7 @@ type IndexRunner interface {
 }
 
 type IndexInternalShardExpirer interface {
-	InternalUpdateAllShards(ctx context.Context, ttl, throttleDelay time.Duration) error
+	InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error
 }
 
 type MetricsSet interface {
