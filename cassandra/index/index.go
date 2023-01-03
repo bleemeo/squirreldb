@@ -651,7 +651,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 			labelNamesCount++
 		}
 
-		shardExpiration, _, err := c.getShardExpiration(ctx, int32(shard))
+		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard))
 
 		// Some shard expiration metrics may not exist if the shard were created before the
 		// expiration was introduced. In this case the expiration will be shown at 0001-01-01 00:00:00.
@@ -2215,6 +2215,7 @@ func labelsForShardExpiration(shard int32) labels.Labels {
 }
 
 // getShardExpiration returns the expiration and metric ID for a shard.
+// It uses the shard expiration cache, or the store if the shard is not in the cache.
 func (c *CassandraIndex) getShardExpiration(
 	ctx context.Context,
 	shard int32,
@@ -2225,6 +2226,23 @@ func (c *CassandraIndex) getShardExpiration(
 		return currentExpiration, expirationID, nil
 	}
 
+	// If it failed, get the expiration from the store and update the cache.
+	currentExpiration, expirationID, err := c.getShardExpirationFromStore(ctx, shard)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+
+	c.shardExpirationCache.Set(shard, currentExpiration, expirationID)
+
+	return currentExpiration, expirationID, nil
+}
+
+// getShardExpirationFromStore returns the expiration and metric ID for a shard
+// from the store. It doesn't use the cache.
+func (c *CassandraIndex) getShardExpirationFromStore(
+	ctx context.Context,
+	shard int32,
+) (time.Time, types.MetricID, error) {
 	// Get the shard expiration metric ID from the shard label.
 	shardLabelsString := labelsForShardExpiration(shard).String()
 
@@ -2244,7 +2262,7 @@ func (c *CassandraIndex) getShardExpiration(
 		return time.Time{}, 0, fmt.Errorf("select id2labels: %w", err)
 	}
 
-	currentExpiration, ok = idToExpiration[expirationID]
+	currentExpiration, ok := idToExpiration[expirationID]
 	if !ok {
 		// The metric is present in labels2id but not in id2labels.
 		// This should not be possible because when the metric is created it's first
@@ -2256,8 +2274,6 @@ func (c *CassandraIndex) getShardExpiration(
 
 		return currentExpiration, expirationID, nil
 	}
-
-	c.shardExpirationCache.Set(shard, currentExpiration, expirationID)
 
 	return currentExpiration, expirationID, nil
 }
