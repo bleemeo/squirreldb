@@ -81,7 +81,8 @@ const (
 
 //nolint:gochecknoglobals
 var (
-	indexMinValidTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Shards <= 0 are invalid.
+	indexMinValidTime = time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC)
 	indexMaxValidTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
@@ -3044,9 +3045,9 @@ func (c *CassandraIndex) expire(now time.Time) {
 
 		for _, idData := range idsData {
 			if idData.cacheExpirationTime.Before(now) {
-				// This may delete too many entry, but:
-				// 1) normally only 1 entry match the hash
-				// 2) it's a cache, we don't loss data
+				// This may delete too many entries, but:
+				// 1) normally only 1 entry matches the hash
+				// 2) it's a cache, we don't lose data
 				delete(c.labelsToID, key)
 
 				size -= len(idsData)

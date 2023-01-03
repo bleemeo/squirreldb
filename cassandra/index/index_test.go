@@ -6148,14 +6148,14 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 		},
 		{
 			// This test assume postingShardSize is at least > 2h
-			name: "epoc",
+			name: "first-valid-shard",
 			args: args{
-				start: time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC),
-				end:   time.Date(1970, 1, 1, 1, 59, 0, 0, time.UTC),
+				start: indexMinValidTime.Add(20 * time.Minute),
+				end:   indexMinValidTime.Add(time.Hour + 59*time.Minute),
 			},
-			existingShards: []int32{0},
-			want:           []int32{0},
-			wantReturnAll:  []int32{0},
+			existingShards: []int32{8736},
+			want:           []int32{8736},
+			wantReturnAll:  []int32{8736},
 		},
 		{
 			name: "reference_5_postingShardSize_wide",
@@ -6230,7 +6230,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				t.Errorf("getTimeShards() mismatch: (-want +got)\n%s", diff)
 			}
 
-			got, err := index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), true)
+			got, err := index.getTimeShards(context.Background(), indexMinValidTime, time.Now(), true)
 			if err != nil {
 				t.Error(err)
 			}
@@ -6241,7 +6241,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			got, err = index.getTimeShards(context.Background(), time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), time.Now(), false)
+			got, err = index.getTimeShards(context.Background(), indexMinValidTime, time.Now(), false)
 			if err != nil {
 				t.Error(err)
 			}

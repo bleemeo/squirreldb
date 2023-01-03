@@ -248,7 +248,8 @@ type shardExpirationCache struct {
 // Get the cached expiration for a shard, the metric ID where the shard
 // expiration is stored, and whether the shard was found in the cache.
 func (s *shardExpirationCache) Get(shard int32) (time.Time, types.MetricID, bool) {
-	if s.shard == shard {
+	// Shard 0 is considered invalid because we don't know if the cache is set.
+	if s.shard != 0 && s.shard == shard {
 		return s.expiration, s.metricID, true
 	}
 
