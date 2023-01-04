@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"squirreldb/config"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ var errNotPem = errors.New("not a PEM file")
 // single node query success then assume single instance.
 // When either cluster or single node is assumed, we don't retry discovery.
 type Client struct {
-	opts Options
+	opts config.Redis
 
 	lastReload    time.Time
 	singleClient  *goredis.Client
@@ -30,19 +31,8 @@ type Client struct {
 	l             sync.Mutex
 }
 
-type Options struct {
-	Addresses   []string
-	Username    string
-	Password    string
-	SSL         bool
-	SSLInsecure bool
-	CertPath    string
-	KeyPath     string
-	CaPath      string
-}
-
 // New returns a redis client.
-func New(opts Options) *Client {
+func New(opts config.Redis) *Client {
 	return &Client{opts: opts}
 }
 
@@ -287,8 +277,8 @@ func (c *Client) tlsConfig() (*tls.Config, error) {
 		InsecureSkipVerify: c.opts.SSLInsecure, //nolint:gosec
 	}
 
-	if c.opts.CaPath != "" {
-		rootCAs, err := loadRootCAs(c.opts.CaPath)
+	if c.opts.CAPath != "" {
+		rootCAs, err := loadRootCAs(c.opts.CAPath)
 		if err != nil {
 			return nil, fmt.Errorf("unable to load CA: %w", err)
 		}

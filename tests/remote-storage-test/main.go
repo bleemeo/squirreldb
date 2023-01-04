@@ -44,9 +44,13 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	cfg, err := daemon.Config()
+	cfg, warnings, err := daemon.Config()
 	if err != nil {
 		return err
+	}
+
+	if warnings != nil {
+		return warnings
 	}
 
 	readURL := *remoteRead

@@ -64,9 +64,13 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	cfg, err := daemon.Config()
+	cfg, warnings, err := daemon.Config()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get config")
+		return err
+	}
+
+	if warnings != nil {
+		return warnings
 	}
 
 	rand.Seed(*seed)
