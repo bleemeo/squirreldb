@@ -585,20 +585,8 @@ func (a API) indexUpdateShardExpirationHandler(w http.ResponseWriter, req *http.
 
 	ttl := time.Duration(ttlDays) * 24 * time.Hour
 
-	// Wait 5 seconds to let the user cancel the request if the provided TTL is bad.
-	a.Logger.Warn().Msgf("Updating all shards with TTL %s in 5 seconds if the request is not cancelled...", ttl)
-
-	time.Sleep(5 * time.Second)
-
-	ctx := req.Context()
-	if ctx.Err() != nil {
-		a.Logger.Warn().Msg("Shard expiration update cancelled")
-
-		return
-	}
-
 	if index, ok := a.Index.(types.IndexInternalShardExpirer); ok {
-		if err := index.InternalUpdateAllShards(ctx, ttl); err != nil {
+		if err := index.InternalUpdateAllShards(req.Context(), ttl); err != nil {
 			http.Error(w, fmt.Sprintf("Update shard failed: %v", err), http.StatusInternalServerError)
 
 			return
