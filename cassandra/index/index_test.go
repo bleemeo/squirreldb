@@ -5808,7 +5808,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			minShard := shardForTime(currentTime.Unix())
 
 			for shard := range store.postings {
-				if shard < minShard && shard != GlobalShardNumber {
+				if shard < minShard && shard != globalShardNumber {
 					minShard = shard
 				}
 			}
@@ -6200,10 +6200,10 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				}
 
 				_, err := index.postingUpdate(context.Background(), postingUpdateRequest{
-					Shard: GlobalShardNumber,
+					Shard: globalShardNumber,
 					Label: labels.Label{
-						Name:  ExistingShardsLabel,
-						Value: ExistingShardsLabel,
+						Name:  existingShardsLabel,
+						Value: existingShardsLabel,
 					},
 					AddIDs: newShard,
 				})
@@ -6236,8 +6236,8 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 			}
 
 			for i, shard := range got {
-				if shard == GlobalShardNumber {
-					t.Errorf("getTimeShards(returnall)[%d] = %v, want != %v", i, shard, GlobalShardNumber)
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards(returnall)[%d] = %v, want != %v", i, shard, globalShardNumber)
 				}
 			}
 
@@ -6247,8 +6247,8 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 			}
 
 			for i, shard := range got {
-				if shard == GlobalShardNumber {
-					t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, GlobalShardNumber)
+				if shard == globalShardNumber {
+					t.Errorf("getTimeShards()[%d] = %v, want != %v", i, shard, globalShardNumber)
 				}
 			}
 		})
