@@ -24,9 +24,13 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	cfg, err := daemon.Config()
+	cfg, warnings, err := daemon.Config()
 	if err != nil {
 		return err
+	}
+
+	if warnings != nil {
+		return warnings
 	}
 
 	squirreldb := &daemon.SquirrelDB{
@@ -34,10 +38,10 @@ func run(ctx context.Context) error {
 		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
-	replication := cfg.Int("cassandra.replication_factor")
+	replication := cfg.Cassandra.ReplicationFactor
 
 	msg := "Using Cassandra at %v with RF=%d. Redis at %v"
-	log.Printf(msg, cfg.Strings("cassandra.addresses"), replication, cfg.Strings("redis.addresses"))
+	log.Printf(msg, cfg.Cassandra.Addresses, replication, cfg.Redis.Addresses)
 
 	firstLoop := true
 

@@ -50,7 +50,7 @@ const (
 	postingsCacheTTL     = 15 * time.Minute
 )
 
-// Get return the non-expired cache entry or an nil list.
+// Get return the non-expired cache entry or a nil list.
 func (c *labelsLookupCache) Get(now time.Time, id types.MetricID) labels.Labels {
 	c.l.Lock()
 	defer c.l.Unlock()
@@ -234,4 +234,31 @@ func (c *postingsCache) get(now time.Time, shard int32, name string, value strin
 	}
 
 	return entry.value
+}
+
+// shardExpirationCache provides a cache for shard expirations.
+// Currently we only update the expiration of the current shard,
+// so we only need to cache one shard.
+type shardExpirationCache struct {
+	shard      int32
+	expiration time.Time
+	metricID   types.MetricID
+}
+
+// Get the cached expiration for a shard, the metric ID where the shard
+// expiration is stored, and whether the shard was found in the cache.
+func (s *shardExpirationCache) Get(shard int32) (time.Time, types.MetricID, bool) {
+	// Shard 0 is considered invalid because we don't know if the cache is set.
+	if s.shard != 0 && s.shard == shard {
+		return s.expiration, s.metricID, true
+	}
+
+	return time.Time{}, 0, false
+}
+
+// Set the expiration and metric ID for a shard.
+func (s *shardExpirationCache) Set(shard int32, expiration time.Time, metricID types.MetricID) {
+	s.shard = shard
+	s.expiration = expiration
+	s.metricID = metricID
 }

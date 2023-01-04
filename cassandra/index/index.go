@@ -52,8 +52,8 @@ const (
 )
 
 // Update TTL of index entries in Cassandra every update delay.
-// The actual TTL used in Cassanra is the metric data TTL + update delay.
-// With long delay, the will be less updates on Cassandra, but entry will stay
+// The actual TTL used in Cassandra is the metric data TTL + update delay.
+// With long delay, there will be less updates on Cassandra, but entries will stay
 // longer before being expired.
 // This delay will have between 0 and cassandraTTLUpdateJitter added to avoid
 // all update to happen at the same time.
@@ -81,14 +81,17 @@ const (
 
 //nolint:gochecknoglobals
 var (
-	indexMinValidTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Shards <= 0 are invalid.
+	indexMinValidTime = time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC)
 	indexMaxValidTime = time.Date(100000, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
 var (
-	errTimeOutOfRange  = errors.New("time out of range")
-	errBitmapEmpty     = errors.New("the result bitmap is empty")
-	errNotASimpleRegex = errors.New("not a simple regex")
+	errTimeOutOfRange           = errors.New("time out of range")
+	errBitmapEmpty              = errors.New("the result bitmap is empty")
+	errNotASimpleRegex          = errors.New("not a simple regex")
+	errNewMetricLockNotAcquired = errors.New("newMetricLock is not acquired")
+	errMetricDoesNotExist       = errors.New("metric doesn't exist")
 )
 
 type idData struct {
@@ -127,10 +130,11 @@ type CassandraIndex struct {
 	idInShardLastAccess      map[int32]time.Time
 	existingShards           *roaring.Bitmap
 
-	idsToLabels   *labelsLookupCache
-	postingsCache *postingsCache
-	metrics       *metrics
-	logger        zerolog.Logger
+	idsToLabels          *labelsLookupCache
+	postingsCache        *postingsCache
+	shardExpirationCache *shardExpirationCache
+	metrics              *metrics
+	logger               zerolog.Logger
 }
 
 func (c *CassandraIndex) getIDData(key uint64, unsortedLabels labels.Labels) (idData, bool) {
@@ -184,6 +188,7 @@ type storeImpl interface {
 	DeleteID2Labels(ctx context.Context, id types.MetricID) error
 	DeleteExpiration(ctx context.Context, day time.Time) error
 	DeletePostings(ctx context.Context, shard int32, name string, value string) error
+	DeletePostingsByNames(ctx context.Context, shard int32, names []string) error
 }
 
 const (
@@ -191,15 +196,18 @@ const (
 	allPostingLabel       = "__all|metrics__"
 	postinglabelName      = "__label|names__" // kept known labels name as label value
 	// ID are added in two-phase in postings. This one is updated first. See updatePostings.
-	maybePostingLabel   = "__maybe|metrics__"
-	existingShardsLabel = "__shard|exists__" // We store existings shards in postings
-	postingShardSize    = 7 * 24 * time.Hour
-	shardDateFormat     = "2006-01-02"
-	// Index is shard by time for postings. The shard number (an int32) is the
-	// rounded to postingShardSize number of hours since epoc (1970).
-	// The globalShardNumber value is an impossible value for normal shard,
+	maybePostingLabel = "__maybe|metrics__"
+	// existingShardsLabel is the label name used to store all known shards in postings.
+	existingShardsLabel = "__shard|exists__"
+	// expirationShardLabel is the label name used to store the expiration of a shard.
+	expirationShardLabel = "__shard|expiration"
+	postingShardSize     = 7 * 24 * time.Hour
+	shardDateFormat      = "2006-01-02"
+	// globalShardNumber value is an impossible value for a normal shard,
 	// because postingShardSize is a multiple of 2 hours making odd shard number
 	// impossible.
+	// Index is sharded by time for postings. The shard number (an int32) is the
+	// rounded to postingShardSize number of hours since epoc (1970).
 	globalShardNumber = -1
 )
 
@@ -249,6 +257,7 @@ func initialize(
 		postingsCache: &postingsCache{
 			cache: make(map[postingsCacheKey]postingEntry),
 		},
+		shardExpirationCache:     &shardExpirationCache{},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		expirationBackoff:        expBackoff,
 		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
@@ -320,7 +329,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 // for squirreldb-cassandra-index-bench program.
 func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
 	c.expire(now)
-	c.applyExpirationUpdateRequests(ctx)
+	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)
 
 	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
@@ -453,7 +462,7 @@ func (c *CassandraIndex) DumpByExpirationDate(ctx context.Context, w io.Writer, 
 }
 
 func (c *CassandraIndex) DumpByShard(ctx context.Context, w io.Writer, shard time.Time) error {
-	allPosting, err := c.postings(ctx, []int32{ShardForTime(shard.Unix())}, allPostingLabel, allPostingLabel, false)
+	allPosting, err := c.postings(ctx, []int32{shardForTime(shard.Unix())}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return fmt.Errorf("unable to get metric expiration list: %w", err)
 	}
@@ -475,7 +484,7 @@ func (c *CassandraIndex) DumpByPosting(
 	name string,
 	value string,
 ) error {
-	shardID := ShardForTime(shard.Unix())
+	shardID := shardForTime(shard.Unix())
 	if shard.IsZero() {
 		shardID = globalShardNumber
 	}
@@ -643,14 +652,23 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 			labelNamesCount++
 		}
 
+		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard))
+
+		// Some shard expiration metrics may not exist if the shard were created before the
+		// expiration was introduced. In this case the expiration will be shown at 0001-01-01 00:00:00.
+		if err != nil && !errors.Is(err, errMetricDoesNotExist) {
+			return err
+		}
+
 		fmt.Fprintf(
 			w,
-			"Shard %s (ID %d) has %d metrics (and %d in maybePosting). It has %d label names\n",
+			"Shard %s (ID %d) has %d metrics (and %d in maybePosting), %d label names and expires at %s\n",
 			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			postingShard.Count(),
 			maybepostingShard.Count(),
 			labelNamesCount,
+			shardExpiration,
 		)
 	}
 
@@ -929,7 +947,7 @@ func (c *CassandraIndex) verifyMissingShard(
 			return 0, shards, ctx.Err()
 		}
 
-		queryShard := []int32{ShardForTime(current.Unix())}
+		queryShard := []int32{shardForTime(current.Unix())}
 
 		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
@@ -2003,7 +2021,7 @@ func (c *CassandraIndex) lookupIDs(
 				return nil, nil, ctx.Err()
 			}
 
-			return nil, nil, errors.New("newMetricLock is not acquired")
+			return nil, nil, errNewMetricLockNotAcquired
 		}
 
 		done, err := c.createMetrics(ctx, now, pending, false)
@@ -2094,6 +2112,13 @@ func (c *CassandraIndex) lookupIDsFromCache(
 		labelsKey := req.Labels.Hash()
 		data, found := c.getIDData(labelsKey, req.Labels)
 
+		shards, err := c.getTimeShards(ctx, req.Start, req.End, true)
+		if err != nil {
+			c.lookupIDMutex.Unlock()
+
+			return nil, nil, err
+		}
+
 		if found && data.cassandraEntryExpiration.Before(now.Add(2*backgroundCheckInterval)) {
 			// This entry will expire soon. To reduce risk of using invalid cache (due to race
 			// condition with another SquirrelDB delete metrics), first refresh the expiration,
@@ -2118,11 +2143,6 @@ func (c *CassandraIndex) lookupIDsFromCache(
 			data = idData{
 				unsortedLabels: req.Labels,
 			}
-		}
-
-		shards, err := c.getTimeShards(ctx, req.Start, req.End, true)
-		if err != nil {
-			return nil, nil, err
 		}
 
 		entries[i] = lookupEntry{
@@ -2150,6 +2170,153 @@ func (c *CassandraIndex) lookupIDsFromCache(
 	}
 
 	return entries, labelsToIndices, nil
+}
+
+// updateShardExpiration updates the shards expiration if
+// the new expiration is after the current expiration.
+func (c *CassandraIndex) updateShardExpiration(
+	ctx context.Context,
+	now time.Time,
+	shard int32,
+	newExpiration time.Time,
+) error {
+	// Get current shard expiration.
+	currentExpiration, expirationID, err := c.getShardExpiration(ctx, shard)
+	if errors.Is(err, errMetricDoesNotExist) {
+		// The shard expiration metric does not exist, create it.
+		return c.createShardExpirationMetric(ctx, now, shard, newExpiration)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if currentExpiration.After(newExpiration) {
+		// Nothing to do, the current expiration is already after the new expiration.
+		return nil
+	}
+
+	// Update the shard expiration.
+	err = c.refreshExpiration(ctx, expirationID, currentExpiration, newExpiration)
+	if err != nil {
+		return fmt.Errorf("refresh shard expiration: %w", err)
+	}
+
+	c.shardExpirationCache.Set(shard, newExpiration, expirationID)
+
+	return nil
+}
+
+// labelsForShardExpiration returns the labels for the shard expiration metric.
+func labelsForShardExpiration(shard int32) labels.Labels {
+	return labels.Labels{
+		{
+			Name:  expirationShardLabel,
+			Value: strconv.Itoa(int(shard)),
+		},
+	}
+}
+
+// getShardExpiration returns the expiration and metric ID for a shard.
+// It uses the shard expiration cache, or the store if the shard is not in the cache.
+func (c *CassandraIndex) getShardExpiration(
+	ctx context.Context,
+	shard int32,
+) (time.Time, types.MetricID, error) {
+	// Try to get the expiration from the cache.
+	currentExpiration, expirationID, found := c.shardExpirationCache.Get(shard)
+	if found {
+		return currentExpiration, expirationID, nil
+	}
+
+	// If it failed, get the expiration from the store and update the cache.
+	currentExpiration, expirationID, err := c.getShardExpirationFromStore(ctx, shard)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+
+	c.shardExpirationCache.Set(shard, currentExpiration, expirationID)
+
+	return currentExpiration, expirationID, nil
+}
+
+// getShardExpirationFromStore returns the expiration and metric ID for a shard
+// from the store. It doesn't use the cache.
+func (c *CassandraIndex) getShardExpirationFromStore(
+	ctx context.Context,
+	shard int32,
+) (time.Time, types.MetricID, error) {
+	// Get the shard expiration metric ID from the shard label.
+	shardLabelsString := labelsForShardExpiration(shard).String()
+
+	labelsToID, err := c.store.SelectLabelsList2ID(ctx, []string{shardLabelsString})
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("select labels2id: %w", err)
+	}
+
+	expirationID, ok := labelsToID[shardLabelsString]
+	if !ok {
+		return time.Time{}, 0, errMetricDoesNotExist
+	}
+
+	// Get the metric expiration from the metric ID.
+	_, idToExpiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{expirationID})
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("select id2labels: %w", err)
+	}
+
+	currentExpiration, ok := idToExpiration[expirationID]
+	if !ok {
+		// The metric is present in labels2id but not in id2labels.
+		// This should not be possible because when the metric is created it's first
+		// inserted in IDsToLabel.
+		c.logger.Warn().Msgf("Failed to get current expiration for shard %s, forcing expiration update", timeForShard(shard))
+
+		// Force expiration update and don't set the expiration in the cache.
+		currentExpiration = time.Time{}
+
+		return currentExpiration, expirationID, nil
+	}
+
+	return currentExpiration, expirationID, nil
+}
+
+// createShardExpirationMetric creates a new metric for the shard expiration.
+func (c *CassandraIndex) createShardExpirationMetric(
+	ctx context.Context,
+	now time.Time,
+	shard int32,
+	expiration time.Time,
+) error {
+	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", timeForShard(shard), expiration)
+
+	// Choose the TTL to make the metric expire at the given expiration.
+	ttl := int64(expiration.Sub(now).Seconds())
+
+	shardLabels := labelsForShardExpiration(shard)
+	expirationEntry := lookupEntry{
+		sortedLabels:       shardLabels,
+		sortedLabelsString: shardLabels.String(),
+		ttl:                ttl,
+	}
+
+	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		return errNewMetricLockNotAcquired
+	}
+
+	_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
+
+	c.newMetricLock.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("create shard expiration metric: %w", err)
+	}
+
+	return nil
 }
 
 func (c *CassandraIndex) refreshExpiration(
@@ -2246,36 +2413,36 @@ type lookupEntry struct {
 }
 
 // createMetrics creates a new metric IDs associated with provided request
-// The lock is assumed to be held.
-// Some care should be taken to avoid assigned the same ID from two SquirrelDB instance, so:
+// The lock newMetricLock is assumed to be held.
+// Some care should be taken to avoid assigning the same ID from two SquirrelDB instance, so:
 //
-// * To avoid race-condition, redo a check that metrics is not yet registered now that lock is acquired
+// * To avoid race-condition, redo a check that metrics are not yet registered now that the lock is acquired
 // * Read the all-metric postings. From there we find a free ID
 // * Update Cassandra tables to store this new metrics. The insertion is done in the following order:
 //   - First an entry is added to the expiration table. This ensure that in case of crash in this process,
 //     the ID will eventually be freed.
-//   - Then it update:
-//   - the all-metric postings. This effectively reseve the ID.
-//   - the id2labels tables (it give informations needed to cleanup other postings)
-//   - finally insert in labels2id, which is done as last because it's this table that determine that
-//     a metrics didn't exists
+//   - Then it updates:
+//   - the all-metric postings. This effectively reserve the ID.
+//   - the id2labels tables (it gives informations needed to cleanup other postings)
+//   - finally insert in labels2id, which is done last because it's this table that determines if
+//     a metrics exists.
 //
-// If the above process crash and partially write some value, it still in a good state because:
-//   - For the insertion, it's the last entry (in labels2id) that matter.
-//     The creation will be retried when point is retried
+// If the above process crashes and partially writes some values, it's still in a good state because:
+//   - For the insertion, it's the last entry (in labels2id) that matters.
+//     The creation will be retried when the point is retried.
 //   - For reading, even if the metric ID may match search (as soon as it's in some posting, it may happen),
-//     since no data points could be wrote and empty result are stipped, they won't be in results
-//   - For writing using __metric_id__ labels, it may indeed success if the partial write reacher id2labels...
+//     since no data points could be written and empty result are stripped, they won't be in results.
+//   - For writing using __metric_id__ labels, it may indeed succeed if the partial write reached id2labels...
 //     BUT to have the metric ID, client must first do a succesfull read to get the ID. So this shouldn't happen.
 //
-// The expiration tables is used to known which metrics are likely to expire on a give date.
-// They are grouped by day (that is, the tables contains on row per day, each row being the day
+// The expiration tables are used to know which metrics are likely to expire on a given date.
+// They are grouped by day (that is, the tables contain one row per day, each row being the day
 // and the list of metric IDs that may expire on this day).
-// A background process will process each past day from this tables and for each metrics:
+// A background process will process each past day from these tables and for each metrics:
 //   - Check if the metrics is actually expired. It may not be the case, if the metrics continued to get points.
 //     It does this check using a field of the table id2labels which is refreshed.
 //   - If expired, delete entry for this metric from the index (the opposite of creation)
-//   - Of not expired, add the metric IDs to the new expiration day in the table.
+//   - If not expired, add the metric IDs to the new expiration day in the table.
 //   - Once finished, delete the processed day.
 func (c *CassandraIndex) createMetrics(
 	ctx context.Context,
@@ -2559,7 +2726,7 @@ func (c *CassandraIndex) updatePostingShards(
 				return ctx.Err()
 			}
 
-			return errors.New("newMetricLock is not acquired")
+			return errNewMetricLockNotAcquired
 		}
 
 		err := c.applyUpdatePostingShards(ctx, maybePresent, updates, precense)
@@ -2878,9 +3045,9 @@ func (c *CassandraIndex) expire(now time.Time) {
 
 		for _, idData := range idsData {
 			if idData.cacheExpirationTime.Before(now) {
-				// This may delete too many entry, but:
-				// 1) normally only 1 entry match the hash
-				// 2) it's a cache, we don't loss data
+				// This may delete too many entries, but:
+				// 1) normally only 1 entry matches the hash
+				// 2) it's a cache, we don't lose data
 				delete(c.labelsToID, key)
 
 				size -= len(idsData)
@@ -2893,7 +3060,7 @@ func (c *CassandraIndex) expire(now time.Time) {
 	c.metrics.CacheSize.WithLabelValues("lookup-id").Set(float64(size))
 }
 
-func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
+func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now time.Time) {
 	c.lookupIDMutex.Lock()
 
 	start := time.Now()
@@ -2921,7 +3088,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
 	}
 
-	err := c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	err := c.applyExpirationUpdateRequestsLock(ctx, now, expireUpdates)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
 
@@ -2939,12 +3106,27 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context) {
 }
 
 func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
-	ctx context.Context, expireUpdates []expirationUpdateRequest,
+	ctx context.Context,
+	now time.Time,
+	expireUpdates []expirationUpdateRequest,
 ) error {
+	// Update current shard expiration with the highest expiration.
+	maxExpiration := time.Time{}
+	for _, update := range expireUpdates {
+		if update.Day.After(maxExpiration) {
+			maxExpiration = update.Day
+		}
+	}
+
+	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
+	if err != nil {
+		return fmt.Errorf("update shard expiration: %w", err)
+	}
+
 	c.newMetricLock.Lock()
 	defer c.newMetricLock.Unlock()
 
-	err := c.concurrentTasks(
+	err = c.concurrentTasks(
 		ctx,
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
@@ -3055,7 +3237,11 @@ func (c *CassandraIndex) InternalCreateMetric(
 	}
 
 	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
-		return nil, errors.New("newMetricLock is not acquired")
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		return nil, errNewMetricLockNotAcquired
 	}
 
 	done, err := c.createMetrics(ctx, time.Now(), requests, true)
@@ -3267,13 +3453,13 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 	return true, nil
 }
 
-// cassandraCheckExpire actually check for metric expired or not, and perform changes.
-// It assume that Cassandra lock expireMetricLockName is taken
+// cassandraCheckExpire actually checks for metric expired or not, and perform changes.
+// It assumes that Cassandra lock expireMetricLockName is taken.
 //
-// This method perform changes at the end, because changes will require the Cassandra lock newMetricLockName,
+// This method performs changes at the end, because changes will require the Cassandra lock newMetricLockName,
 // and we want to hold this lock only a very short time.
 //
-// This purge will also remove entry from the in-memory cache.
+// This purge will also remove entries from the in-memory cache.
 func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64, now time.Time) error {
 	var expireUpdates []expirationUpdateRequest
 
@@ -3337,6 +3523,23 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			continue
 		}
 
+		// If the metric represents a shard expiration, delete the shard.
+		shardStr := idToLabels[id].Get(expirationShardLabel)
+		if shardStr != "" {
+			shardInt, err := strconv.Atoi(shardStr)
+			if err != nil {
+				return fmt.Errorf("convert shard expiration label to int: %w", err)
+			}
+
+			// There is no overflow when converting to int32 because the shard was int32 when inserted.
+			shard := int32(shardInt) //nolint:gosec
+
+			err = c.deleteShard(ctx, shard)
+			if err != nil {
+				return fmt.Errorf("delete shard %s: %w", timeForShard(shard), err)
+			}
+		}
+
 		bulkDelete.PrepareDelete(id, idToLabels[id], false)
 	}
 
@@ -3379,6 +3582,104 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 	c.metrics.ExpireMetric.Add(float64(len(ids)))
 
 	return nil
+}
+
+// deleteShard deletes all postings associated to a shard.
+func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
+	c.logger.Info().Msgf("Deleting shard %s", timeForShard(shard))
+
+	// We can't run a query like "DELETE from index_postings WHERE shard = 283752"
+	// because our partition key is (shard, name), so we have to know the label names to delete.
+
+	// Delete all labels except postinglabelName which will be deleted only after the
+	// other labels are successfully deleted to be able to recover if the delete failed.
+	labelsToDelete := []string{allPostingLabel, maybePostingLabel}
+
+	// Find all label names to delete.
+	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	for iter.HasNext() {
+		labelName, _ := iter.Next()
+		labelsToDelete = append(labelsToDelete, labelName)
+	}
+
+	if iter.Err() != nil {
+		return fmt.Errorf("select postings by name: %w", iter.Err())
+	}
+
+	err := c.deletePostingsByNames(ctx, shard, labelsToDelete)
+
+	// If the postings were not found it means they were already deleted.
+	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+		return fmt.Errorf("delete labels from postings: %w", err)
+	}
+
+	// Delete postinglabelName separately.
+	err = c.deletePostingsByNames(ctx, shard, []string{postinglabelName})
+	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
+		return fmt.Errorf("delete special labels from postings: %w", err)
+	}
+
+	// Remove the shard from existing shards.
+	updateRequest := postingUpdateRequest{
+		Shard: globalShardNumber,
+		Label: labels.Label{
+			Name:  existingShardsLabel,
+			Value: existingShardsLabel,
+		},
+		RemoveIDs: []uint64{uint64(shard)},
+	}
+
+	_, err = c.postingUpdate(ctx, updateRequest)
+	if errors.Is(err, errBitmapEmpty) {
+		err = nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("remove existing shards: %w", err)
+	}
+
+	return nil
+}
+
+// deletePostingsByNames is a thin wrapper around store DeletePostingsByNames.
+// It handle submitting parallel queries when len(names) is too big.
+func (c *CassandraIndex) deletePostingsByNames(
+	ctx context.Context,
+	shard int32,
+	names []string,
+) error {
+	if len(names) < maxCQLInValue {
+		return c.store.DeletePostingsByNames(ctx, shard, names)
+	}
+
+	err := c.concurrentTasks(
+		ctx,
+		concurrentDelete,
+		func(ctx context.Context, work chan<- func() error) error {
+			for start := 0; start < len(names); start += maxCQLInValue {
+				end := start + maxCQLInValue
+				if end > len(names) {
+					end = len(names)
+				}
+
+				subNames := names[start:end]
+
+				task := func() error {
+					return c.store.DeletePostingsByNames(ctx, shard, subNames)
+				}
+
+				select {
+				case work <- task:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+
+	return err
 }
 
 // Run tasks concurrently with at most concurrency task in parallel.
@@ -3469,7 +3770,10 @@ func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateReq
 	}
 
 	if !bitmap.Any() {
-		if err := c.store.DeletePostings(ctx, job.Shard, job.Label.Name, job.Label.Value); err != nil {
+		err := c.store.DeletePostings(ctx, job.Shard, job.Label.Name, job.Label.Value)
+
+		// If the postings were not found it means they were already deleted.
+		if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 			return nil, fmt.Errorf("drop posting: %w", err)
 		}
 
@@ -3925,9 +4229,9 @@ func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day tim
 	return tmp, err
 }
 
-// ShardForTime return the shard number for give timestamp (second from epoc)
+// shardForTime return the shard number for give timestamp (second from epoc)
 // The shard number should only be useful for debugging or InternalUpdatePostingShards.
-func ShardForTime(ts int64) int32 {
+func shardForTime(ts int64) int32 {
 	shardSize := int32(postingShardSize.Hours())
 
 	return (int32(ts/3600) / shardSize) * shardSize
@@ -3944,8 +4248,8 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	}
 
 	shardSize := int32(postingShardSize.Hours())
-	startShard := ShardForTime(start.Unix())
-	endShard := ShardForTime(end.Unix())
+	startShard := shardForTime(start.Unix())
+	endShard := shardForTime(end.Unix())
 
 	var (
 		existingShards *roaring.Bitmap
@@ -4004,16 +4308,13 @@ func (c *CassandraIndex) selectLabelsList2ID(
 		ctx,
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
-			start := 0
-			for start < len(sortedLabelsListString) {
+			for start := 0; start < len(sortedLabelsListString); start += maxCQLInValue {
 				end := start + maxCQLInValue
 				if end > len(sortedLabelsListString) {
 					end = len(sortedLabelsListString)
 				}
 
 				subSortedLabelsListString := sortedLabelsListString[start:end]
-
-				start += maxCQLInValue
 
 				task := func() error {
 					tmp, err := c.store.SelectLabelsList2ID(ctx, subSortedLabelsListString)
@@ -4068,16 +4369,13 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 		ctx,
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
-			start := 0
-			for start < len(ids) {
+			for start := 0; start < len(ids); start += maxCQLInValue {
 				end := start + maxCQLInValue
 				if end > len(ids) {
 					end = len(ids)
 				}
 
 				subIds := ids[start:end]
-
-				start += maxCQLInValue
 
 				task := func() error {
 					tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
@@ -4159,6 +4457,57 @@ func timeToLiveFromLabels(labels *labels.Labels) int64 {
 	}
 
 	return timeToLive
+}
+
+// InternalUpdateAllShards updates the expiration of all shards.
+// Shards older than the TTL will be deleted, other shard will have their expiration created or updated.
+func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
+	// Get all known shards.
+	shardBitmap, err := c.getExistingShards(ctx, true)
+	if err != nil {
+		return fmt.Errorf("get existing shards: %w", err)
+	}
+
+	it := shardBitmap.Iterator()
+
+	for ctx.Err() == nil {
+		shard, eof := it.Next()
+		if eof {
+			break
+		}
+
+		err := c.internalUpdateShard(ctx, int32(shard), ttl)
+		if err != nil {
+			return fmt.Errorf("update shard: %w", err)
+		}
+	}
+
+	c.applyExpirationUpdateRequests(ctx, time.Now())
+
+	return nil
+}
+
+// internalUpdateShard updates a single shard expiration.
+// The shard is deleted if the expiration is in the past.
+func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, ttl time.Duration) error {
+	now := time.Now()
+	shardTime := timeForShard(shard)
+
+	// The expiration is calculated from the shard time.
+	expiration := shardTime.Add(ttl).Add(postingShardSize)
+
+	log.Info().Msgf("Updating shard %s with new expiration %s", shardTime, expiration)
+
+	if expiration.Before(now) {
+		err := c.deleteShard(ctx, shard)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	return c.updateShardExpiration(ctx, now, shard, expiration)
 }
 
 func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
@@ -4377,6 +4726,19 @@ func (s cassandraStore) DeletePostings(ctx context.Context, shard int32, name st
 	return s.session.Query(
 		"DELETE FROM index_postings WHERE shard = ? AND name = ? AND value = ?",
 		shard, name, value,
+	).WithContext(ctx).Exec()
+}
+
+func (s cassandraStore) DeletePostingsByNames(ctx context.Context, shard int32, names []string) error {
+	start := time.Now()
+
+	defer func() {
+		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
+	}()
+
+	return s.session.Query(
+		"DELETE FROM index_postings WHERE shard = ? AND name IN ?",
+		shard, names,
 	).WithContext(ctx).Exec()
 }
 

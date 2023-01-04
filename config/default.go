@@ -1,47 +1,82 @@
 package config
 
-//nolint:gochecknoglobals
-var defaults = map[string]interface{}{
-	"cassandra.addresses":                    []string{"127.0.0.1:9042"},
-	"cassandra.keyspace":                     "squirreldb",
-	"cassandra.replication_factor":           1,
-	"cassandra.default_time_to_live":         "8760h", // 1 year
-	"cassandra.aggregate.intended_duration":  "1m",
-	"cassandra.username":                     "",
-	"cassandra.password":                     "",
-	"cassandra.cert_path":                    "",
-	"cassandra.key_path":                     "",
-	"cassandra.ca_path":                      "",
-	"cassandra.enable_host_verification":     true,
-	"redis.addresses":                        []string{},
-	"redis.username":                         "",
-	"redis.password":                         "",
-	"redis.ssl":                              false,
-	"redis.ssl_insecure":                     false,
-	"redis.cert_path":                        "",
-	"redis.key_path":                         "",
-	"redis.ca_path":                          "",
-	"listen_address":                         "localhost:9201",
-	"remote_storage.max_concurrent_requests": 0,
-	"promql.max_evaluated_points":            0,
-	"promql.max_evaluated_series":            0,
-	"promql.tenant_label_name":               "__account_id",
-	"batch.size":                             "15m",
-	"log.level":                              1,
-	"log.disable_color":                      false,
-	"sentry.dsn":                             "",
-	"internal.index":                         "cassandra",
-	"internal.index_dummy_check_conflict":    true,
-	"internal.index_dummy_fixed_id":          0,
-	"internal.installation.format":           "Manual",
-	"internal.tsdb":                          "cassandra",
-	"internal.temporary_store":               "redis",
-	"internal.locks":                         "cassandra",
-	"internal.states":                        "cassandra",
-	"internal.store":                         "batcher",
-	"internal.redis_keyspace":                "",
-	"internal.mutable_labels_provider":       "cassandra",
-	"telemetry.address":                      "https://telemetry.bleemeo.com/v1/telemetry/",
-	"telemetry.enabled":                      true,
-	"telemetry.id.path":                      "./telemetry.json",
+import "time"
+
+// defaultPaths returns the default paths used to search for config files.
+func defaultPaths() []string {
+	return []string{
+		"squirreldb.conf",
+	}
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Cassandra: Cassandra{
+			Addresses:         []string{"127.0.0.1:9042"},
+			Keyspace:          "squirreldb",
+			ReplicationFactor: 1,
+			DefaultTimeToLive: 365 * 24 * time.Hour, // 1 year
+			Aggregate: Aggregate{
+				IntendedDuration: time.Minute,
+			},
+			Username:               "",
+			Password:               "",
+			CertPath:               "",
+			KeyPath:                "",
+			CAPath:                 "",
+			EnableHostVerification: true,
+		},
+		Redis: Redis{
+			Addresses:   []string{},
+			Username:    "",
+			Password:    "",
+			SSL:         false,
+			SSLInsecure: false,
+			CertPath:    "",
+			KeyPath:     "",
+			CAPath:      "",
+			Keyspace:    "",
+		},
+		ListenAddress: "localhost:9201",
+		RemoteStorage: RemoteStorage{
+			MaxConcurrentRequests: 0,
+		},
+		PromQL: PromQL{
+			MaxEvaluatedPoints: 0,
+			MaxEvaluatedSeries: 0,
+			TenantLabelName:    "__account_id",
+		},
+		Batch: Batch{
+			Size: 15 * time.Minute,
+		},
+		Log: Log{
+			Level:        1,
+			DisableColor: false,
+		},
+		Sentry: Sentry{
+			DSN: "",
+		},
+		Telemetry: Telemetry{
+			Enabled: true,
+			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
+			ID: ID{
+				Path: "./telemetry.json",
+			},
+		},
+		Internal: Internal{
+			Index:                   "cassandra",
+			IndexDummyCheckConflict: true,
+			IndexDummyFixedID:       0,
+			Installation: Installation{
+				Format: "Manual",
+			},
+			TSDB:                  "cassandra",
+			TemporaryStore:        "redis",
+			Locks:                 "cassandra",
+			States:                "cassandra",
+			Store:                 "batcher",
+			MutableLabelsProvider: "cassandra",
+			DisableBackgroundTask: false,
+		},
+	}
 }

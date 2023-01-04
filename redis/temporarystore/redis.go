@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"squirreldb/compare"
+	"squirreldb/config"
 	"squirreldb/redis/client"
 	"squirreldb/types"
 	"strconv"
@@ -27,7 +28,7 @@ const (
 )
 
 type Options struct {
-	RedisOptions client.Options
+	RedisOptions config.Redis
 	Keyspace     string
 }
 

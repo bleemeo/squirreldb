@@ -265,6 +265,15 @@ func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
 	return false
 }
 
+// InternalUpdateAllShards implements the IndexInternalShardExpirer interface.
+func (i *indexWrapper) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
+	if expirerer, ok := i.index.(types.IndexInternalShardExpirer); ok {
+		return expirerer.InternalUpdateAllShards(ctx, ttl)
+	}
+
+	return errNotImplemented
+}
+
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.
 type mutableMetricsSet struct {
 	metricsSet     types.MetricsSet
