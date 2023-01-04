@@ -267,7 +267,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name: "promql-query-forced-matcher",
+			name: "promql-query-forced-matcher-2",
 			makeRequest: newReqFactory(
 				"GET",
 				"/api/v1/label/__name__/values",

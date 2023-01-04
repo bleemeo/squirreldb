@@ -11,6 +11,7 @@ import (
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
@@ -215,5 +216,11 @@ func (w *writeMetrics) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar
 }
 
 func (w *writeMetrics) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
+	return 0, ErrNotImplemented
+}
+
+func (w *writeMetrics) AppendHistogram(
+	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram,
+) (storage.SeriesRef, error) {
 	return 0, ErrNotImplemented
 }
