@@ -157,6 +157,7 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
+	router.Get("/debug/update_shard_expiration", a.indexUpdateShardExpirationHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
@@ -326,6 +327,7 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "/debug/index_dump_by_shard?shard_time=2006-01-02: metrics in given shard")
 	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used&value=/: metrics in given posting")
 	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used: metrics in given postings ")
+	fmt.Fprintln(w, "/debug/update_shard_expiration?ttlDays=365: update all shard expirations with a ttl of one year")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "With the dump_by_posting you can omit the shard_time, which will query the special global shard.")
 	fmt.Fprintln(w, "This allows to query the globalShardNumber which contains few special values (like all ")
@@ -556,6 +558,36 @@ func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request)
 
 		if err := idx.DumpByPosting(ctx, w, date, name, value); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	} else {
+		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexUpdateShardExpirationHandler(w http.ResponseWriter, req *http.Request) {
+	ttlRaw := req.URL.Query().Get("ttlDays")
+	if ttlRaw == "" {
+		http.Error(w, `param "ttlDays" required"`, http.StatusBadRequest)
+
+		return
+	}
+
+	ttlDays, err := strconv.Atoi(ttlRaw)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`can't convert "ttlDays" to int: %s"`, err), http.StatusBadRequest)
+
+		return
+	}
+
+	ttl := time.Duration(ttlDays) * 24 * time.Hour
+
+	if index, ok := a.Index.(types.IndexInternalShardExpirer); ok {
+		if err := index.InternalUpdateAllShards(req.Context(), ttl); err != nil {
+			http.Error(w, fmt.Sprintf("Update shard failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}
