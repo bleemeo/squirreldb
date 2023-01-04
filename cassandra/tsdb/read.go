@@ -486,7 +486,7 @@ func (c *CassandraTSDB) xorChunkDecode(values []byte, result []types.MetricPoint
 	defer c.xorChunkPool.Put(chunk) //nolint:errcheck
 
 	it := chunk.Iterator(nil)
-	for it.Next() {
+	for it.Next() != chunkenc.ValNone {
 		t, v := it.At()
 
 		result = append(result, types.MetricPoint{
