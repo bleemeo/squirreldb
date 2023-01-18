@@ -176,9 +176,9 @@ func (i *indexWrapper) InfoGlobal(ctx context.Context, w io.Writer) error {
 }
 
 // InfoByID implements the IndexDumper interface used by the API.
-func (i *indexWrapper) InfoByID(ctx context.Context, w io.Writer, id types.MetricID, verbose bool) error {
+func (i *indexWrapper) InfoByID(ctx context.Context, w io.Writer, id types.MetricID) error {
 	if dumper, ok := i.index.(types.IndexDumper); ok {
-		return dumper.InfoByID(ctx, w, id, verbose)
+		return dumper.InfoByID(ctx, w, id)
 	}
 
 	return errNotImplemented

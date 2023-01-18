@@ -71,7 +71,7 @@ func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v
 	return 0, nil
 }
 
-// Commit submits the collected samples and purges the batch, unused.
+// Commit submits the collected samples and purges the batch.
 func (w *writeMetrics) Commit() error {
 	defer func() {
 		w.pendingTimeSeries = make(map[uint64]timeSeries)

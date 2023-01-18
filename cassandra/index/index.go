@@ -675,7 +675,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 	return nil
 }
 
-func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.MetricID, verbose bool) error {
+func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.MetricID) error {
 	labelsMap, expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{id})
 	if err != nil {
 		return err
@@ -750,7 +750,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			inMaybe,
 		)
 
-		if verbose && len(labelsMap) > 0 && (inPosting || inMaybe) {
+		if len(labelsMap) > 0 && (inPosting || inMaybe) {
 			missingPostings := make([]string, 0)
 
 			for _, l := range lbls {
@@ -798,7 +798,7 @@ func (c *CassandraIndex) InfoByLabels(ctx context.Context, w io.Writer, lbls lab
 	metricID := resp[sortedLabelsString]
 	fmt.Fprintf(w, "Labels %s has ID %d\n", sortedLabelsString, metricID)
 
-	return c.InfoByID(ctx, w, metricID, false)
+	return c.InfoByID(ctx, w, metricID)
 }
 
 // Verify perform some verification of the indexes health.

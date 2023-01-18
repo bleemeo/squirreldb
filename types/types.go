@@ -59,7 +59,7 @@ type Index interface {
 
 type IndexDumper interface {
 	InfoGlobal(ctx context.Context, w io.Writer) error
-	InfoByID(ctx context.Context, w io.Writer, id MetricID, verbose bool) error
+	InfoByID(ctx context.Context, w io.Writer, id MetricID) error
 	InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error
 	Dump(ctx context.Context, w io.Writer) error
 	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
