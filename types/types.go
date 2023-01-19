@@ -44,9 +44,10 @@ type Cluster interface {
 }
 
 type LookupRequest struct {
-	Start  time.Time
-	End    time.Time
-	Labels labels.Labels
+	Start      time.Time
+	End        time.Time
+	Labels     labels.Labels
+	TTLSeconds int64
 }
 
 type Index interface {
@@ -130,7 +131,7 @@ func WrapContext(ctx context.Context, r *http.Request) context.Context {
 	return context.WithValue(ctx, RequestContextKey{}, r)
 }
 
-// HTTP headers available to dynamically change settings on PromQL and remote read:
+// HTTP headers available to dynamically change settings on PromQL and remote read.
 const (
 	// Add one matcher to limit the evaluated series.
 	HeaderForcedMatcher    = "X-SquirrelDB-Forced-Matcher"

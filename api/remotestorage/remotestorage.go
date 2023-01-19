@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"squirreldb/types"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/exemplar"
@@ -60,11 +61,25 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	tenant := request.Header.Get(types.HeaderTenant)
 	tenantLabel := labels.Label{Name: r.tenantLabelName, Value: tenant}
 
+	// The TTL is set from the header.
+	timeToLive := int64(0)
+
+	ttlRaw := request.Header.Get(types.HeaderTimeToLive)
+	if ttlRaw != "" {
+		var err error
+
+		timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
+		if err != nil {
+			return errAppender{fmt.Errorf("can't parse time to live '%s', using default: %w", ttlRaw, err)}
+		}
+	}
+
 	writeMetrics := &writeMetrics{
 		index:             r.index,
 		writer:            r.writer,
 		metrics:           r.metrics,
 		tenantLabel:       tenantLabel,
+		timeToLiveSeconds: timeToLive,
 		pendingTimeSeries: make(map[uint64]timeSeries),
 		done:              r.remoteWriteGate.Done,
 	}

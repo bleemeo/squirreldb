@@ -29,6 +29,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const ttlLabel = "__test_ttl__"
+
 const (
 	MetricIDTest1 = 1 + iota
 	MetricIDTest2
@@ -793,10 +795,29 @@ func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest
 	results := make([]types.LookupRequest, len(list))
 
 	for i, l := range list {
+		// Set the request TTL from the labels.
+		timeToLive := int64(0)
+
+		if l.Has(ttlLabel) {
+			var err error
+
+			ttlRaw := l.Get(ttlLabel)
+
+			timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
+			if err != nil {
+				panic(fmt.Errorf("can't parse time to live '%s', using default: %w", ttlRaw, err))
+			}
+
+			builder := labels.NewBuilder(l)
+			builder.Del(ttlLabel)
+			l = builder.Labels(nil)
+		}
+
 		results[i] = types.LookupRequest{
-			Labels: l.Copy(),
-			Start:  now,
-			End:    now,
+			Labels:     l.Copy(),
+			TTLSeconds: timeToLive,
+			Start:      now,
+			End:        now,
 		}
 	}
 
@@ -808,7 +829,7 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 
 	for _, metric := range input {
 		builder := labels.NewBuilder(metric)
-		builder.Del(timeToLiveLabelName)
+		builder.Del(ttlLabel)
 
 		result = append(result, builder.Labels(nil))
 	}
@@ -820,7 +841,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	results := make(labels.Labels, 0, len(m))
 
 	for k, v := range m {
-		if dropSpecialLabel && (k == timeToLiveLabelName) {
+		if dropSpecialLabel && (k == ttlLabel) {
 			continue
 		}
 
@@ -1104,7 +1125,7 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 			name: "with ttl",
 			labels: labels.Labels{
 				{Name: "__name__", Value: "up"},
-				{Name: "__ttl__", Value: "3600"},
+				{Name: ttlLabel, Value: "3600"},
 				{Name: "job", Value: "scrape"},
 			},
 		},
@@ -1136,7 +1157,7 @@ func Benchmark_timeToLiveFromLabels(b *testing.B) {
 				{Name: "labels4", Value: "value4"},
 				{Name: "labels5", Value: "value5"},
 				{Name: "labels6", Value: "value6"},
-				{Name: "__ttl__", Value: "3600"},
+				{Name: ttlLabel, Value: "3600"},
 				{Name: "labels7", Value: "value7"},
 				{Name: "labels8", Value: "value8"},
 				{Name: "labels9", Value: "value9"},
@@ -4586,7 +4607,7 @@ func Test_cache(t *testing.T) {
 		}
 
 		if n >= 2000 {
-			lbls[timeToLiveLabelName] = "3600"
+			lbls[ttlLabel] = "3600"
 		}
 
 		labelsList[n] = labels.FromMap(lbls)
@@ -4928,15 +4949,15 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	labelsList = []labels.Labels{
 		labels.FromMap(map[string]string{
-			"__name__":          "expiration_conflict",
-			timeToLiveLabelName: "60",
+			"__name__": "expiration_conflict",
+			ttlLabel:   "60",
 		}),
 	}
 
 	labelsList2 := []labels.Labels{
 		labels.FromMap(map[string]string{
-			"__name__":          "expiration_conflict2",
-			timeToLiveLabelName: "60",
+			"__name__": "expiration_conflict2",
+			ttlLabel:   "60",
 		}),
 	}
 
@@ -5065,7 +5086,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	for n := 1; n < len(metrics); n++ {
 		secondTTL := int64(metricsTTL[n].Seconds())
-		metrics[n]["__ttl__"] = strconv.FormatInt(secondTTL, 10)
+		metrics[n][ttlLabel] = strconv.FormatInt(secondTTL, 10)
 	}
 
 	store := &mockStore{}
@@ -5223,7 +5244,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	metrics[0]["__ttl__"] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
+	metrics[0][ttlLabel] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
 
 	ids, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList[0:1], t2), t2)
@@ -5288,7 +5309,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		labels := map[string]string{
 			"__name__": "filler",
 			"id":       strconv.FormatInt(int64(n), 10),
-			"__ttl__":  strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel:   strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		}
 		labelsList[n] = labelsMapToList(labels, false)
 	}
@@ -5394,7 +5415,7 @@ func Test_expiration_offset(t *testing.T) {
 		"value":       "2",
 		"updated":     "yes",
 		"description": "The metrics with TTL set to 2 months",
-		"__ttl__":     strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		ttlLabel:      strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 	}
 
 	store := &mockStore{}
@@ -5523,12 +5544,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_used",
 			"item", "/",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName1",
 			"uniqueLabel1", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 	}
 
@@ -5536,22 +5557,22 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_used",
 			"item", "/dev/urandom",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueNameRnd",
 			"uniqueLabelRnd", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "more_random",
 			"device", "one",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "more_random",
 			"device", "two",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 	}
 
@@ -5559,12 +5580,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_used",
 			"item", "/home",
-			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName2",
 			"uniqueLabel2", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 	}
 
@@ -5572,12 +5593,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_used",
 			"item", "/home2",
-			"__ttl__", strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName0",
 			"uniqueLabel0", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
 		),
 	}
 
@@ -5586,12 +5607,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_free",
 			"item", "/",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName3",
 			"uniqueLabel3", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 	}
 
@@ -5599,12 +5620,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_free",
 			"item", "/home",
-			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName4",
 			"uniqueLabel4", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 	}
 
@@ -5612,12 +5633,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		labels.FromStrings(
 			"__name__", "disk_total",
 			"item", "/srv",
-			"__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
 			"__name__", "uniqueName5",
 			"uniqueLabel5", "samevalue",
-			"__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 	}
 
@@ -5659,7 +5680,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				builder := labels.NewBuilder(metricsRandomTTL[i])
 				// randomize between shortestTTL & longTTL
 				rndSecond := shortestTTL.Seconds() + rnd.Float64()*(longTTL.Seconds()-shortestTTL.Seconds())
-				builder.Set("__ttl__", strconv.FormatInt(int64(rndSecond), 10))
+				builder.Set(ttlLabel, strconv.FormatInt(int64(rndSecond), 10))
 				metricsRandomTTL[i] = builder.Labels(nil)
 
 				rndExpirationByShard[i][nextShard] = currentTime.Add(time.Duration(rndSecond) * time.Second)
@@ -5773,13 +5794,13 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			// Update TTL of metrics
 			for i := range metricsLongToShortTTL {
 				builder := labels.NewBuilder(metricsLongToShortTTL[i])
-				builder.Set("__ttl__", strconv.FormatInt(int64(shortTTL.Seconds()), 10))
+				builder.Set(ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10))
 				metricsLongToShortTTL[i] = builder.Labels(nil)
 			}
 
 			for i := range metricsShortToLongTTL {
 				builder := labels.NewBuilder(metricsShortToLongTTL[i])
-				builder.Set("__ttl__", strconv.FormatInt(int64(longTTL.Seconds()), 10))
+				builder.Set(ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10))
 				metricsShortToLongTTL[i] = builder.Labels(nil)
 			}
 		case currentPhase == 2 && nextPhase == 3:
@@ -5889,7 +5910,7 @@ func expirationLonglivedEndOfPhaseCheck(
 			continue
 		}
 
-		ttl, err := strconv.ParseInt(metric.Get("__ttl__"), 10, 0)
+		ttl, err := strconv.ParseInt(metric.Get(ttlLabel), 10, 0)
 		if err != nil {
 			return err
 		}

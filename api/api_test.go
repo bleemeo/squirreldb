@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -382,6 +383,8 @@ func Test_InterceptorStatusCode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			req = req.WithContext(types.WrapContext(context.Background(), req))
 
 			recorder := httptest.NewRecorder()
 			irw := &interceptor{OrigWriter: recorder}

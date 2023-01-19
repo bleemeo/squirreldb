@@ -97,7 +97,12 @@ func (w *writeMetrics) Commit() error {
 		pendingTimeSeries = append(pendingTimeSeries, ts)
 	}
 
-	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), pendingTimeSeries, w.index)
+	metrics, totalPoints, err := metricsFromTimeseries(
+		context.Background(),
+		pendingTimeSeries,
+		w.index,
+		w.timeToLiveSeconds,
+	)
 	if err != nil {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
@@ -124,6 +129,7 @@ func metricsFromTimeseries(
 	ctx context.Context,
 	pendingTimeSeries []timeSeries,
 	index types.Index,
+	timeToLiveSeconds int64,
 ) ([]types.MetricData, int, error) {
 	if len(pendingTimeSeries) == 0 {
 		return nil, 0, nil
@@ -155,9 +161,10 @@ func metricsFromTimeseries(
 		}
 
 		requests = append(requests, types.LookupRequest{
-			Labels: promSeries.Labels,
-			End:    time.Unix(max/1000, max%1000),
-			Start:  time.Unix(min/1000, min%1000),
+			Labels:     promSeries.Labels,
+			TTLSeconds: timeToLiveSeconds,
+			End:        time.Unix(max/1000, max%1000),
+			Start:      time.Unix(min/1000, min%1000),
 		})
 	}
 
