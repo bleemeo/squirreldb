@@ -106,7 +106,7 @@ func run(ctx context.Context) error {
 	}
 
 	if !*skipRead {
-		if err := read(ctx, now, readURL); err != nil {
+		if err := read(ctx, now, readURL, *tenant); err != nil {
 			return err
 		}
 	}

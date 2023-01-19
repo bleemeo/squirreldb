@@ -19,13 +19,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const tenantLabelName = "__account_id"
+
 type readRequest struct {
 	name     string
 	request  prompb.ReadRequest
 	response prompb.ReadResponse
 }
 
-func read(ctx context.Context, now time.Time, readURL string) error { //nolint:maintidx
+func read(ctx context.Context, now time.Time, readURL, tenant string) error { //nolint:maintidx
 	log.Print("Starting read phase")
 
 	workChannel := make(chan readRequest, *threads)
@@ -64,11 +66,14 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 				{
 					Timeseries: []*prompb.TimeSeries{
 						{
-							Labels: []prompb.Label{
-								{Name: "__name__", Value: "large_write"},
-								{Name: "nowStr", Value: *nowStr},
-								{Name: "size", Value: "week"},
-							},
+							Labels: addTenantIfNotEmpty(
+								[]prompb.Label{
+									{Name: "__name__", Value: "large_write"},
+									{Name: "nowStr", Value: *nowStr},
+									{Name: "size", Value: "week"},
+								},
+								tenant,
+							),
 							Samples: makeSample(
 								now.Add(-time.Hour*24*7),
 								10*time.Second,
@@ -102,11 +107,14 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 				{
 					Timeseries: []*prompb.TimeSeries{
 						{
-							Labels: []prompb.Label{
-								{Name: "__name__", Value: "large_write"},
-								{Name: "nowStr", Value: *nowStr},
-								{Name: "size", Value: "hour"},
-							},
+							Labels: addTenantIfNotEmpty(
+								[]prompb.Label{
+									{Name: "__name__", Value: "large_write"},
+									{Name: "nowStr", Value: *nowStr},
+									{Name: "size", Value: "hour"},
+								},
+								tenant,
+							),
 							Samples: makeSample(
 								now.Add(-time.Minute),
 								10*time.Second,
@@ -116,11 +124,14 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 							),
 						},
 						{
-							Labels: []prompb.Label{
-								{Name: "__name__", Value: "large_write"},
-								{Name: "nowStr", Value: *nowStr},
-								{Name: "size", Value: "week"},
-							},
+							Labels: addTenantIfNotEmpty(
+								[]prompb.Label{
+									{Name: "__name__", Value: "large_write"},
+									{Name: "nowStr", Value: *nowStr},
+									{Name: "size", Value: "week"},
+								},
+								tenant,
+							),
 							Samples: makeSample(
 								now.Add(-time.Minute),
 								10*time.Second,
@@ -161,10 +172,13 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 				{
 					Timeseries: []*prompb.TimeSeries{
 						{
-							Labels: []prompb.Label{
-								{Name: "__name__", Value: "sub_second"},
-								{Name: "nowStr", Value: *nowStr},
-							},
+							Labels: addTenantIfNotEmpty(
+								[]prompb.Label{
+									{Name: "__name__", Value: "sub_second"},
+									{Name: "nowStr", Value: *nowStr},
+								},
+								tenant,
+							),
 							Samples: makeSample(
 								now.Add(-time.Minute),
 								time.Millisecond,
@@ -178,10 +192,13 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 				{
 					Timeseries: []*prompb.TimeSeries{
 						{
-							Labels: []prompb.Label{
-								{Name: "__name__", Value: "high_precision"},
-								{Name: "nowStr", Value: *nowStr},
-							},
+							Labels: addTenantIfNotEmpty(
+								[]prompb.Label{
+									{Name: "__name__", Value: "high_precision"},
+									{Name: "nowStr", Value: *nowStr},
+								},
+								tenant,
+							),
 							Samples: makeSample(
 								now.Add(-time.Minute),
 								time.Second,
@@ -225,12 +242,15 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 					{
 						Timeseries: []*prompb.TimeSeries{
 							{
-								Labels: []prompb.Label{
-									{Name: "__name__", Value: "filler"},
-									{Name: "batch", Value: "yes"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
-								},
+								Labels: addTenantIfNotEmpty(
+									[]prompb.Label{
+										{Name: "__name__", Value: "filler"},
+										{Name: "batch", Value: "yes"},
+										{Name: "nowStr", Value: *nowStr},
+										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+									},
+									tenant,
+								),
 								Samples: samples,
 							},
 						},
@@ -260,21 +280,27 @@ func read(ctx context.Context, now time.Time, readURL string) error { //nolint:m
 					{
 						Timeseries: []*prompb.TimeSeries{
 							{
-								Labels: []prompb.Label{
-									{Name: "__name__", Value: "filler"},
-									{Name: "batch", Value: "no"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
-								},
+								Labels: addTenantIfNotEmpty(
+									[]prompb.Label{
+										{Name: "__name__", Value: "filler"},
+										{Name: "batch", Value: "no"},
+										{Name: "nowStr", Value: *nowStr},
+										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+									},
+									tenant,
+								),
 								Samples: samples[i : i+1],
 							},
 							{
-								Labels: []prompb.Label{
-									{Name: "__name__", Value: "filler"},
-									{Name: "batch", Value: "yes"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
-								},
+								Labels: addTenantIfNotEmpty(
+									[]prompb.Label{
+										{Name: "__name__", Value: "filler"},
+										{Name: "batch", Value: "yes"},
+										{Name: "nowStr", Value: *nowStr},
+										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+									},
+									tenant,
+								),
 								Samples: samples[i : i+1],
 							},
 						},
@@ -363,6 +389,18 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 	}
 
 	return err
+}
+
+func addTenantIfNotEmpty(l []prompb.Label, tenant string) []prompb.Label {
+	if tenant != "" {
+		newLabels := make([]prompb.Label, 0, len(l)+1)
+		newLabels = append(newLabels, prompb.Label{Name: tenantLabelName, Value: tenant})
+		newLabels = append(newLabels, l...)
+
+		return newLabels
+	}
+
+	return l
 }
 
 func labelsEqual(got, want []prompb.Label) bool {

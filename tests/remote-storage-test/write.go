@@ -179,7 +179,10 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 		request.Header.Set("Content-Encoding", "snappy")
 		request.Header.Set("Content-Type", "application/x-protobuf")
 		request.Header.Set("X-Prometheus-Remote-Write-Version", "2.0.0")
-		request.Header.Set("X-SquirrelDB-Tenant", tenant)
+
+		if tenant != "" {
+			request.Header.Set("X-SquirrelDB-Tenant", tenant)
+		}
 
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
