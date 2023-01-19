@@ -28,6 +28,12 @@ type writeMetrics struct {
 	writer  types.MetricWriter
 	metrics *metrics
 
+	// Tenant label added to all metrics written.
+	tenantLabel labels.Label
+
+	// Metrics Time To Live in seconds.
+	timeToLiveSeconds int64
+
 	// Map of pending timeseries indexed by their labels hash.
 	pendingTimeSeries map[uint64]timeSeries
 
@@ -43,6 +49,12 @@ type timeSeries struct {
 
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+	if w.tenantLabel.Value != "" {
+		builder := labels.NewBuilder(l)
+		builder.Set(w.tenantLabel.Name, w.tenantLabel.Value)
+		l = builder.Labels(nil)
+	}
+
 	if err := validateLabels(l); err != nil {
 		return 0, err
 	}

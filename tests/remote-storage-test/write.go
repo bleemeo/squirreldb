@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func write(ctx context.Context, now time.Time, writeURL string) error {
+func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 	log.Println("Starting write phase")
 
 	workChannel := make(chan prompb.WriteRequest, *threads)
@@ -23,7 +23,7 @@ func write(ctx context.Context, now time.Time, writeURL string) error {
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := writeWorker(ctx, workChannel, writeURL)
+			err := writeWorker(ctx, workChannel, writeURL, tenant)
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -154,7 +154,7 @@ func write(ctx context.Context, now time.Time, writeURL string) error {
 	return err
 }
 
-func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writeURL string) error {
+func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writeURL, tenant string) error {
 	for req := range workChannel {
 		if ctx.Err() != nil {
 			break
@@ -179,6 +179,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 		request.Header.Set("Content-Encoding", "snappy")
 		request.Header.Set("Content-Type", "application/x-protobuf")
 		request.Header.Set("X-Prometheus-Remote-Write-Version", "2.0.0")
+		request.Header.Set("X-SquirrelDB-Tenant", tenant)
 
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {

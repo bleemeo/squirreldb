@@ -55,6 +55,7 @@ type API struct {
 	PromQLMaxEvaluatedPoints    uint64
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
+	TenantLabelName             string
 	Logger                      zerolog.Logger
 
 	ready      int32
@@ -168,6 +169,7 @@ func (a *API) init() {
 	queryable := promql.NewStore(
 		a.Index,
 		a.Reader,
+		a.TenantLabelName,
 		a.PromQLMaxEvaluatedSeries,
 		a.PromQLMaxEvaluatedPoints,
 		a.MetricRegistry,
@@ -178,7 +180,13 @@ func (a *API) init() {
 		maxConcurrent = runtime.GOMAXPROCS(0) * 2
 	}
 
-	appendable := remotestorage.New(a.Writer, a.Index, maxConcurrent, a.MetricRegistry)
+	appendable := remotestorage.New(
+		a.Writer,
+		a.Index,
+		maxConcurrent,
+		a.TenantLabelName,
+		a.MetricRegistry,
+	)
 
 	api := NewPrometheus(
 		queryable,

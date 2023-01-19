@@ -18,7 +18,7 @@ type headerClient struct {
 }
 
 func (hc headerClient) Do(ctx context.Context, req *http.Request) (*http.Response, []byte, error) {
-	req.Header.Set("X-PromQL-Forced-Matcher", hc.PromQLForcedMatcherHeader)
+	req.Header.Set("X-SquirrelDB-Forced-Matcher", hc.PromQLForcedMatcherHeader)
 
 	return hc.Client.Do(ctx, req)
 }

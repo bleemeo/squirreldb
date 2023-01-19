@@ -4,16 +4,17 @@ import "time"
 
 // Config is the main structured configuration.
 type Config struct {
-	Cassandra     Cassandra     `yaml:"cassandra"`
-	Redis         Redis         `yaml:"redis"`
-	ListenAddress string        `yaml:"listen_address"`
-	RemoteStorage RemoteStorage `yaml:"remote_storage"`
-	PromQL        PromQL        `yaml:"promql"`
-	Batch         Batch         `yaml:"batch"`
-	Log           Log           `yaml:"log"`
-	Sentry        Sentry        `yaml:"sentry"`
-	Internal      Internal      `yaml:"internal"`
-	Telemetry     Telemetry     `yaml:"telemetry"`
+	Cassandra       Cassandra     `yaml:"cassandra"`
+	Redis           Redis         `yaml:"redis"`
+	ListenAddress   string        `yaml:"listen_address"`
+	TenantLabelName string        `yaml:"tenant_label_name"`
+	RemoteStorage   RemoteStorage `yaml:"remote_storage"`
+	PromQL          PromQL        `yaml:"promql"`
+	Batch           Batch         `yaml:"batch"`
+	Log             Log           `yaml:"log"`
+	Sentry          Sentry        `yaml:"sentry"`
+	Internal        Internal      `yaml:"internal"`
+	Telemetry       Telemetry     `yaml:"telemetry"`
 }
 
 type Internal struct {
@@ -58,9 +59,8 @@ type Batch struct {
 }
 
 type PromQL struct {
-	MaxEvaluatedPoints int    `yaml:"max_evaluated_points"`
-	MaxEvaluatedSeries int    `yaml:"max_evaluated_series"`
-	TenantLabelName    string `yaml:"tenant_label_name"`
+	MaxEvaluatedPoints int `yaml:"max_evaluated_points"`
+	MaxEvaluatedSeries int `yaml:"max_evaluated_series"`
 }
 
 type RemoteStorage struct {
