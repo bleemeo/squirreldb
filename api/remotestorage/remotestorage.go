@@ -70,7 +70,7 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 
 		timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
 		if err != nil {
-			return errAppender{fmt.Errorf("can't parse time to live '%s', using default: %w", ttlRaw, err)}
+			return errAppender{fmt.Errorf("can't parse time to live header '%s': %w", ttlRaw, err)}
 		}
 	}
 
