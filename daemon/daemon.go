@@ -517,6 +517,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.PromQL.MaxEvaluatedPoints)
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.PromQL.MaxEvaluatedSeries)
 	s.api.MaxConcurrentRemoteRequests = s.Config.RemoteStorage.MaxConcurrentRequests
+	s.api.TenantLabelName = s.Config.TenantLabelName
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 
@@ -826,7 +827,7 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 			return nil, err
 		}
 
-		tenantLabelName := s.Config.PromQL.TenantLabelName
+		tenantLabelName := s.Config.TenantLabelName
 		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
 
 		s.mutableLabelProcessor = labelProcessor

@@ -2,8 +2,11 @@ package remotestorage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"squirreldb/types"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/exemplar"
@@ -14,10 +17,13 @@ import (
 	"github.com/prometheus/prometheus/util/gate"
 )
 
+var errMissingRequest = errors.New("HTTP request not found in context")
+
 type RemoteStorage struct {
 	writer          types.MetricWriter
 	index           types.Index
 	remoteWriteGate *gate.Gate
+	tenantLabelName string
 	metrics         *metrics
 }
 
@@ -26,11 +32,13 @@ func New(
 	writer types.MetricWriter,
 	index types.Index,
 	maxConcurrentRemoteWrite int,
+	tenantLabelName string,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
 		writer:          writer,
 		index:           index,
+		tenantLabelName: tenantLabelName,
 		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
 		metrics:         newMetrics(reg),
 	}
@@ -44,10 +52,34 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
 	}
 
+	// If the tenant header is present, the tenant label is added to all metrics written.
+	request, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return errAppender{errMissingRequest}
+	}
+
+	tenant := request.Header.Get(types.HeaderTenant)
+	tenantLabel := labels.Label{Name: r.tenantLabelName, Value: tenant}
+
+	// The TTL is set from the header.
+	timeToLive := int64(0)
+
+	ttlRaw := request.Header.Get(types.HeaderTimeToLive)
+	if ttlRaw != "" {
+		var err error
+
+		timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
+		if err != nil {
+			return errAppender{fmt.Errorf("can't parse time to live '%s', using default: %w", ttlRaw, err)}
+		}
+	}
+
 	writeMetrics := &writeMetrics{
 		index:             r.index,
 		writer:            r.writer,
 		metrics:           r.metrics,
+		tenantLabel:       tenantLabel,
+		timeToLiveSeconds: timeToLive,
 		pendingTimeSeries: make(map[uint64]timeSeries),
 		done:              r.remoteWriteGate.Done,
 	}

@@ -40,14 +40,14 @@ func TestStructuredConfig(t *testing.T) {
 			CAPath:      "/ca.pem",
 			Keyspace:    "squirreldb",
 		},
-		ListenAddress: "127.0.0.1:9090",
+		ListenAddress:   "127.0.0.1:9090",
+		TenantLabelName: "account",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 1,
 		},
 		PromQL: PromQL{
 			MaxEvaluatedPoints: 2,
 			MaxEvaluatedSeries: 3,
-			TenantLabelName:    "account",
 		},
 		Batch: Batch{
 			Size: 30 * time.Minute,

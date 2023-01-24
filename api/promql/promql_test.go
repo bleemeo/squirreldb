@@ -114,7 +114,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Forced-Matcher": "__account_id=1234",
+				types.HeaderForcedMatcher: "__account_id=1234",
 			},
 			searches: []search{
 				{
@@ -142,7 +142,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Series": "2",
+				types.HeaderMaxEvaluatedSeries: "2",
 			},
 			searches: []search{
 				{
@@ -169,8 +169,8 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Series": "2",
-				"X-PromQL-Forced-Matcher":       "__account_id=1234",
+				types.HeaderMaxEvaluatedSeries: "2",
+				types.HeaderForcedMatcher:      "__account_id=1234",
 			},
 			searches: []search{
 				{
@@ -204,7 +204,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Points": "200",
+				types.HeaderMaxEvaluatedPoints: "200",
 			},
 			searches: []search{
 				{
@@ -231,8 +231,8 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Points": "200",
-				"X-PromQL-Forced-Matcher":       "__account_id=1234",
+				types.HeaderMaxEvaluatedPoints: "200",
+				types.HeaderForcedMatcher:      "__account_id=1234",
 			},
 			searches: []search{
 				{
@@ -264,9 +264,9 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				},
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Series": "2",
-				"X-PromQL-Max-Evaluated-Points": "200",
-				"X-PromQL-Forced-Matcher":       "__account_id=1234",
+				types.HeaderMaxEvaluatedSeries: "2",
+				types.HeaderMaxEvaluatedPoints: "200",
+				types.HeaderForcedMatcher:      "__account_id=1234",
 			},
 			searches: []search{
 				{
@@ -300,9 +300,9 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-Max-Evaluated-Series": "3",
-				"X-PromQL-Max-Evaluated-Points": "500",
-				"X-PromQL-Forced-Matcher":       "__account_id=1234",
+				types.HeaderMaxEvaluatedSeries: "3",
+				types.HeaderMaxEvaluatedPoints: "500",
+				types.HeaderForcedMatcher:      "__account_id=1234",
 			},
 			searches: []search{
 				{
@@ -342,7 +342,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-ForcePreAggregated": "false",
+				types.HeaderForcePreAggregated: "false",
 			},
 			wantForcePreaggregate: false,
 			searches: []search{
@@ -372,7 +372,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-ForcePreAggregated": "true",
+				types.HeaderForcePreAggregated: "true",
 			},
 			wantForcePreaggregate: true,
 			searches: []search{
@@ -402,7 +402,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-ForceRaw": "false",
+				types.HeaderForceRaw: "false",
 			},
 			wantForceRaw: false,
 			searches: []search{
@@ -432,7 +432,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-ForceRaw": "true",
+				types.HeaderForceRaw: "true",
 			},
 			wantForceRaw: true,
 			searches: []search{
@@ -462,8 +462,8 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				MaxEvaluatedSeries: 2,
 			},
 			reqHeader: map[string]string{
-				"X-PromQL-ForceRaw":           "true",
-				"X-PromQL-ForcePreAggregated": "true",
+				types.HeaderForceRaw:           "true",
+				types.HeaderForcePreAggregated: "true",
 			},
 			wantForceRaw:          true,
 			wantForcePreaggregate: false,
@@ -557,7 +557,7 @@ func TestPromQL_InvalidForcedMatcher(t *testing.T) {
 	}
 
 	r := httptest.NewRequest("", "/", nil)
-	r.Header.Add("X-PromQL-Forced-Matcher", "invalid")
+	r.Header.Add(types.HeaderForcedMatcher, "invalid")
 
 	ctx := types.WrapContext(context.Background(), r)
 

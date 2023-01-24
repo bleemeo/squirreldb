@@ -37,14 +37,14 @@ func DefaultConfig() Config {
 			CAPath:      "",
 			Keyspace:    "",
 		},
-		ListenAddress: "localhost:9201",
+		ListenAddress:   "localhost:9201",
+		TenantLabelName: "__account_id",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 0,
 		},
 		PromQL: PromQL{
 			MaxEvaluatedPoints: 0,
 			MaxEvaluatedSeries: 0,
-			TenantLabelName:    "__account_id",
 		},
 		Batch: Batch{
 			Size: 15 * time.Minute,

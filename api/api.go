@@ -55,6 +55,7 @@ type API struct {
 	PromQLMaxEvaluatedPoints    uint64
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
+	TenantLabelName             string
 	Logger                      zerolog.Logger
 
 	ready      int32
@@ -168,6 +169,7 @@ func (a *API) init() {
 	queryable := promql.NewStore(
 		a.Index,
 		a.Reader,
+		a.TenantLabelName,
 		a.PromQLMaxEvaluatedSeries,
 		a.PromQLMaxEvaluatedPoints,
 		a.MetricRegistry,
@@ -178,7 +180,13 @@ func (a *API) init() {
 		maxConcurrent = runtime.GOMAXPROCS(0) * 2
 	}
 
-	appendable := remotestorage.New(a.Writer, a.Index, maxConcurrent, a.MetricRegistry)
+	appendable := remotestorage.New(
+		a.Writer,
+		a.Index,
+		maxConcurrent,
+		a.TenantLabelName,
+		a.MetricRegistry,
+	)
 
 	api := NewPrometheus(
 		queryable,
@@ -344,13 +352,12 @@ func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	if idx, ok := a.Index.(types.IndexDumper); ok {
 		metricIDText := req.URL.Query()["metricID"]
 		metricLabelsText := req.URL.Query()["metricLabels"]
-		_, verbose := req.URL.Query()["verbose"]
 
 		switch {
 		case len(metricLabelsText) > 0:
 			a.indexInfoLabels(ctx, w, idx, metricLabelsText)
 		case len(metricIDText) > 0:
-			a.indexInfoIDs(ctx, w, idx, metricIDText, verbose)
+			a.indexInfoIDs(ctx, w, idx, metricIDText)
 		default:
 			if err := idx.InfoGlobal(ctx, w); err != nil {
 				http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
@@ -392,7 +399,6 @@ func (a API) indexInfoIDs(
 	w http.ResponseWriter,
 	idx types.IndexDumper,
 	metricIDText []string,
-	verbose bool,
 ) {
 	for _, text := range metricIDText {
 		id, err := strconv.ParseInt(text, 10, 64)
@@ -402,7 +408,7 @@ func (a API) indexInfoIDs(
 			return
 		}
 
-		if err := idx.InfoByID(ctx, w, types.MetricID(id), verbose); err != nil {
+		if err := idx.InfoByID(ctx, w, types.MetricID(id)); err != nil {
 			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
 
 			return

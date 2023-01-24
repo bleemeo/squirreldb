@@ -19,6 +19,7 @@ import (
 var (
 	remoteWrite = flag.String("write-url", "", "URL of remote write (if both url are unset, start a built-in SquirrelDB and use it)")
 	remoteRead  = flag.String("read-url", "", "URL of read write (if both url are unset, start a built-in SquirrelDB and use it)")
+	tenant      = flag.String("tenant", "", "Tenant header")
 	threads     = flag.Int("threads", 2, "Number of writing/reading threads")
 	scale       = flag.Int("scale", 5, "Scaling factor")
 	skipWrite   = flag.Bool("skip-write", false, "Skip write phase")
@@ -99,13 +100,13 @@ func run(ctx context.Context) error {
 	log.Printf("now = %v", now)
 
 	if !*skipWrite {
-		if err := write(ctx, now, writeURL); err != nil {
+		if err := write(ctx, now, writeURL, *tenant); err != nil {
 			return err
 		}
 	}
 
 	if !*skipRead {
-		if err := read(ctx, now, readURL); err != nil {
+		if err := read(ctx, now, readURL, *tenant); err != nil {
 			return err
 		}
 	}

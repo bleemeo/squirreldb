@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -235,7 +236,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 				"GET",
 				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
 				nil,
-				map[string]string{"X-PromQL-Forced-Matcher": "__account_id=1234"},
+				map[string]string{types.HeaderForcedMatcher: "__account_id=1234"},
 			),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
@@ -272,7 +273,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 				"GET",
 				"/api/v1/label/__name__/values",
 				nil,
-				map[string]string{"X-PromQL-Forced-Matcher": "__account_id=1236"},
+				map[string]string{types.HeaderForcedMatcher: "__account_id=1236"},
 			),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
@@ -333,7 +334,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 // could be changed in the future.
 // See ServeHTTP function in https://github.com/prometheus/prometheus/blob/main/storage/remote/write_handler.go.
 func Test_InterceptorStatusCode(t *testing.T) {
-	appendable := remotestorage.New(dummy.DiscardTSDB{}, &dummy.Index{}, 1, prometheus.NewRegistry())
+	appendable := remotestorage.New(dummy.DiscardTSDB{}, &dummy.Index{}, 1, "", prometheus.NewRegistry())
 	writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
 
 	tests := []struct {
@@ -382,6 +383,8 @@ func Test_InterceptorStatusCode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			req = req.WithContext(types.WrapContext(context.Background(), req))
 
 			recorder := httptest.NewRecorder()
 			irw := &interceptor{OrigWriter: recorder}

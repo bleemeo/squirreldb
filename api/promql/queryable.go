@@ -27,6 +27,7 @@ type Store struct {
 	Index                     types.Index
 	Reader                    types.MetricReader
 	MetricRegistry            prometheus.Registerer
+	TenantLabelName           string
 	DefaultMaxEvaluatedPoints uint64
 	DefaultMaxEvaluatedSeries uint32
 
@@ -57,6 +58,7 @@ type IndexWithStats interface {
 func NewStore(
 	index types.Index,
 	reader types.MetricReader,
+	tenantLabelName string,
 	promQLMaxEvaluatedSeries uint32,
 	promQLMaxEvaluatedPoints uint64,
 	metricRegistry prometheus.Registerer,
@@ -64,6 +66,7 @@ func NewStore(
 	store := Store{
 		Index:                     index,
 		Reader:                    reader,
+		TenantLabelName:           tenantLabelName,
 		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
 		metrics:                   newMetrics(metricRegistry),
@@ -73,20 +76,9 @@ func NewStore(
 }
 
 // newIndexAndReaderFromHeaders builds a new index and metric reader with limits from
-// the HTTP headers. Available headers are:
-//   - X-PromQL-Forced-Matcher: Add one matcher to limit evaluated series. Useful for
-//     filtering per-tenant.
-//   - X-PromQL-Max-Evaluated-Series: Limit the number of series that can be evaluated
-//     by this request
-//   - X-PromQL-Max-Evaluated-Points: Limit the number of points that can be evaluated
-//     by this request.
-//   - X-PromQL-ForcePreAggregated: Force using pre-aggregated data instead of raw points.
-//     Default for query is raw data. Default for query_range depends on step value.
-//   - X-PromQL-ForceRaw: Force using raw data instead of pre-aggregated points.
-//     If both ForcePreAggregated and ForceRaw are true, ForceRaw take precedence
-//     Default for query is raw data. Default for query_range depends on step value.
-//
-// A limit of 0 means unlimited.
+// the HTTP headers. Available headers are: HeaderForcedMatcher, HeaderMaxEvaluatedSeries,
+// HeaderMaxEvaluatedPoints, HeaderForcePreAggregated and HeaderForceRaw. See their declaration
+// for documentation.
 func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (querier, error) {
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
@@ -99,7 +91,11 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 		index: s.Index,
 	}
 
-	value := r.Header.Get("X-PromQL-Forced-Matcher")
+	value := r.Header.Get(types.HeaderForcedMatcher)
+	if value == "" {
+		value = r.Header.Get(types.HeaderForcedMatcherOld)
+	}
+
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
@@ -116,9 +112,27 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 		}
 	}
 
+	// The tenant header makes queries match only metrics from this tenant.
+	tenant := r.Header.Get(types.HeaderTenant)
+	if tenant != "" {
+		index = filteringIndex{
+			index: index,
+			matcher: labels.MustNewMatcher(
+				labels.MatchEqual,
+				s.TenantLabelName,
+				tenant,
+			),
+		}
+	}
+
 	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
 
-	if maxEvaluatedSeriesText := r.Header.Get("X-PromQL-Max-Evaluated-Series"); maxEvaluatedSeriesText != "" {
+	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
+	if maxEvaluatedSeriesText == "" {
+		maxEvaluatedSeriesText = r.Header.Get(types.HeaderMaxEvaluatedSeriesOld)
+	}
+
+	if maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
 		if err != nil {
 			return querier{}, err
@@ -134,7 +148,12 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 
 	maxEvaluatedPoints := s.DefaultMaxEvaluatedPoints
 
-	if maxEvaluatedPointsText := r.Header.Get("X-PromQL-Max-Evaluated-Points"); maxEvaluatedPointsText != "" {
+	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
+	if maxEvaluatedPointsText == "" {
+		maxEvaluatedPointsText = r.Header.Get(types.HeaderMaxEvaluatedPointsOld)
+	}
+
+	if maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
 		if err != nil {
 			return querier{}, err
@@ -157,7 +176,11 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 		metrics: s.metrics,
 	}
 
-	value = r.Header.Get("X-PromQL-ForcePreAggregated")
+	value = r.Header.Get(types.HeaderForcePreAggregated)
+	if value == "" {
+		value = r.Header.Get(types.HeaderForcePreAggregatedOld)
+	}
+
 	if value != "" {
 		tmp, err := strconv.ParseBool(value)
 		if err != nil {
@@ -167,7 +190,11 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 		q.forcePreAggregated = tmp
 	}
 
-	value = r.Header.Get("X-PromQL-ForceRaw")
+	value = r.Header.Get(types.HeaderForceRaw)
+	if value == "" {
+		value = r.Header.Get(types.HeaderForceRawOld)
+	}
+
 	if value != "" {
 		tmp, err := strconv.ParseBool(value)
 		if err != nil {

@@ -28,6 +28,12 @@ type writeMetrics struct {
 	writer  types.MetricWriter
 	metrics *metrics
 
+	// Tenant label added to all metrics written.
+	tenantLabel labels.Label
+
+	// Metrics Time To Live in seconds.
+	timeToLiveSeconds int64
+
 	// Map of pending timeseries indexed by their labels hash.
 	pendingTimeSeries map[uint64]timeSeries
 
@@ -43,6 +49,12 @@ type timeSeries struct {
 
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+	if w.tenantLabel.Value != "" {
+		builder := labels.NewBuilder(l)
+		builder.Set(w.tenantLabel.Name, w.tenantLabel.Value)
+		l = builder.Labels(nil)
+	}
+
 	if err := validateLabels(l); err != nil {
 		return 0, err
 	}
@@ -71,7 +83,7 @@ func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v
 	return 0, nil
 }
 
-// Commit submits the collected samples and purges the batch, unused.
+// Commit submits the collected samples and purges the batch.
 func (w *writeMetrics) Commit() error {
 	defer func() {
 		w.pendingTimeSeries = make(map[uint64]timeSeries)
@@ -85,7 +97,12 @@ func (w *writeMetrics) Commit() error {
 		pendingTimeSeries = append(pendingTimeSeries, ts)
 	}
 
-	metrics, totalPoints, err := metricsFromTimeseries(context.Background(), pendingTimeSeries, w.index)
+	metrics, totalPoints, err := metricsFromTimeseries(
+		context.Background(),
+		pendingTimeSeries,
+		w.index,
+		w.timeToLiveSeconds,
+	)
 	if err != nil {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
@@ -112,6 +129,7 @@ func metricsFromTimeseries(
 	ctx context.Context,
 	pendingTimeSeries []timeSeries,
 	index types.Index,
+	timeToLiveSeconds int64,
 ) ([]types.MetricData, int, error) {
 	if len(pendingTimeSeries) == 0 {
 		return nil, 0, nil
@@ -143,9 +161,10 @@ func metricsFromTimeseries(
 		}
 
 		requests = append(requests, types.LookupRequest{
-			Labels: promSeries.Labels,
-			End:    time.Unix(max/1000, max%1000),
-			Start:  time.Unix(min/1000, min%1000),
+			Labels:     promSeries.Labels,
+			TTLSeconds: timeToLiveSeconds,
+			End:        time.Unix(max/1000, max%1000),
+			Start:      time.Unix(min/1000, min%1000),
 		})
 	}
 

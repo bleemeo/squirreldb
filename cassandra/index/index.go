@@ -675,7 +675,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 	return nil
 }
 
-func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.MetricID, verbose bool) error {
+func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.MetricID) error {
 	labelsMap, expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, []types.MetricID{id})
 	if err != nil {
 		return err
@@ -750,7 +750,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			inMaybe,
 		)
 
-		if verbose && len(labelsMap) > 0 && (inPosting || inMaybe) {
+		if len(labelsMap) > 0 && (inPosting || inMaybe) {
 			missingPostings := make([]string, 0)
 
 			for _, l := range lbls {
@@ -798,7 +798,7 @@ func (c *CassandraIndex) InfoByLabels(ctx context.Context, w io.Writer, lbls lab
 	metricID := resp[sortedLabelsString]
 	fmt.Fprintf(w, "Labels %s has ID %d\n", sortedLabelsString, metricID)
 
-	return c.InfoByID(ctx, w, metricID, false)
+	return c.InfoByID(ctx, w, metricID)
 }
 
 // Verify perform some verification of the indexes health.
@@ -2104,9 +2104,14 @@ func (c *CassandraIndex) lookupIDsFromCache(
 	c.lookupIDMutex.Lock()
 
 	for i, req := range requests {
-		ttl := timeToLiveFromLabels(&req.Labels)
-		if ttl == 0 {
-			ttl = int64(c.options.DefaultTimeToLive.Seconds())
+		ttlSeconds := req.TTLSeconds
+		if ttlSeconds == 0 {
+			// TODO: Compatibility with TTL label, will be removed later.
+			ttlSeconds = timeToLiveFromLabels(&req.Labels)
+		}
+
+		if ttlSeconds == 0 {
+			ttlSeconds = int64(c.options.DefaultTimeToLive.Seconds())
 		}
 
 		labelsKey := req.Labels.Hash()
@@ -2123,7 +2128,7 @@ func (c *CassandraIndex) lookupIDsFromCache(
 			// This entry will expire soon. To reduce risk of using invalid cache (due to race
 			// condition with another SquirrelDB delete metrics), first refresh the expiration,
 			// and then refresh entry from Cassandra (ignore the cache).
-			wantedEntryExpiration := now.Add(time.Duration(ttl) * time.Second)
+			wantedEntryExpiration := now.Add(time.Duration(ttlSeconds) * time.Second)
 			cassandraExpiration := wantedEntryExpiration.Add(cassandraTTLUpdateDelay)
 			cassandraExpiration = cassandraExpiration.Add(
 				time.Duration(rand.Float64()*cassandraTTLUpdateJitter.Seconds()) * time.Second, //nolint:gosec
@@ -2148,7 +2153,7 @@ func (c *CassandraIndex) lookupIDsFromCache(
 		entries[i] = lookupEntry{
 			idData:       data,
 			labelsKey:    labelsKey,
-			ttl:          ttl,
+			ttl:          ttlSeconds,
 			wantedShards: shards,
 		}
 

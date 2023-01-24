@@ -168,7 +168,7 @@ func Test_metricsFromTimeseries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := metricsFromTimeseries(context.Background(), tt.args.promTimeseries, tt.args.index)
+			got, _, err := metricsFromTimeseries(context.Background(), tt.args.promTimeseries, tt.args.index, 0)
 			if err != nil {
 				t.Errorf("metricsFromTimeseries() failed: %v", err)
 			}
