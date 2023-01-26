@@ -3,10 +3,8 @@ package dummy
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"squirreldb/types"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +12,10 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-const postinglabelName = "__label|names__"
+const (
+	postinglabelName  = "__label|names__"
+	defaultTimeToLive = 24 * time.Hour
+)
 
 type MetricsLabel struct {
 	List []types.MetricLabel
@@ -134,9 +135,9 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 	}
 
 	for i, req := range requests {
-		ttls[i] = timeToLiveFromLabels(&req.Labels)
+		ttls[i] = req.TTLSeconds
 		if ttls[i] == 0 {
-			ttls[i] = int64(86400)
+			ttls[i] = int64(defaultTimeToLive.Seconds())
 		}
 
 		ids[i] = types.MetricID(req.Labels.Hash())
@@ -264,37 +265,4 @@ outer:
 	sort.Strings(list)
 
 	return list
-}
-
-// copied from cassandra/index.
-func timeToLiveFromLabels(labels *labels.Labels) int64 {
-	value, exists := popLabelsValue(labels, "__ttl__")
-
-	var timeToLive int64
-
-	if exists {
-		var err error
-		timeToLive, err = strconv.ParseInt(value, 10, 64)
-
-		if err != nil {
-			log.Printf("Warning: Can't get time to live from labels (%v), using default", err)
-
-			return 0
-		}
-	}
-
-	return timeToLive
-}
-
-// copied from cassandra/index.
-func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
-	for i, label := range *labels {
-		if label.Name == key {
-			*labels = append((*labels)[:i], (*labels)[i+1:]...)
-
-			return label.Value, true
-		}
-	}
-
-	return "", false
 }

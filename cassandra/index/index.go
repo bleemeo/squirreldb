@@ -70,8 +70,6 @@ const (
 	expireBatchSize                 = 1000
 )
 
-const timeToLiveLabelName = "__ttl__"
-
 const (
 	// The expiration of entries in Cassandra starts everyday at 00:00 UTC + expirationStartOffset.
 	expirationStartOffset = 6 * time.Hour
@@ -2105,11 +2103,6 @@ func (c *CassandraIndex) lookupIDsFromCache(
 
 	for i, req := range requests {
 		ttlSeconds := req.TTLSeconds
-		if ttlSeconds == 0 {
-			// TODO: Compatibility with TTL label, will be removed later.
-			ttlSeconds = timeToLiveFromLabels(&req.Labels)
-		}
-
 		if ttlSeconds == 0 {
 			ttlSeconds = int64(c.options.DefaultTimeToLive.Seconds())
 		}
@@ -4423,45 +4416,12 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 	)
 }
 
-// popLabelsValue get and delete value via its name from a labels.Label list.
-func popLabelsValue(labels *labels.Labels, key string) (string, bool) {
-	for i, label := range *labels {
-		if label.Name == key {
-			*labels = append((*labels)[:i], (*labels)[i+1:]...)
-
-			return label.Value, true
-		}
-	}
-
-	return "", false
-}
-
 // sortLabels returns the labels.Label list sorted by name.
 func sortLabels(labelList labels.Labels) labels.Labels {
 	sortedLabels := labelList.Copy()
 	sort.Sort(sortedLabels)
 
 	return sortedLabels
-}
-
-// Returns and delete time to live from a labels.Label list.
-func timeToLiveFromLabels(labels *labels.Labels) int64 {
-	value, exists := popLabelsValue(labels, timeToLiveLabelName)
-
-	var timeToLive int64
-
-	if exists {
-		var err error
-		timeToLive, err = strconv.ParseInt(value, 10, 64)
-
-		if err != nil {
-			log.Warn().Err(err).Msg("Can't get time to live from labels, using default")
-
-			return 0
-		}
-	}
-
-	return timeToLive
 }
 
 // InternalUpdateAllShards updates the expiration of all shards.

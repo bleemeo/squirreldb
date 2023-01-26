@@ -92,10 +92,6 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	value := r.Header.Get(types.HeaderForcedMatcher)
-	if value == "" {
-		value = r.Header.Get(types.HeaderForcedMatcherOld)
-	}
-
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
@@ -128,10 +124,6 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
 
 	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
-	if maxEvaluatedSeriesText == "" {
-		maxEvaluatedSeriesText = r.Header.Get(types.HeaderMaxEvaluatedSeriesOld)
-	}
-
 	if maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
 		if err != nil {
@@ -149,10 +141,6 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	maxEvaluatedPoints := s.DefaultMaxEvaluatedPoints
 
 	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
-	if maxEvaluatedPointsText == "" {
-		maxEvaluatedPointsText = r.Header.Get(types.HeaderMaxEvaluatedPointsOld)
-	}
-
 	if maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
 		if err != nil {
@@ -177,10 +165,6 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	value = r.Header.Get(types.HeaderForcePreAggregated)
-	if value == "" {
-		value = r.Header.Get(types.HeaderForcePreAggregatedOld)
-	}
-
 	if value != "" {
 		tmp, err := strconv.ParseBool(value)
 		if err != nil {
@@ -191,10 +175,6 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	value = r.Header.Get(types.HeaderForceRaw)
-	if value == "" {
-		value = r.Header.Get(types.HeaderForceRawOld)
-	}
-
 	if value != "" {
 		tmp, err := strconv.ParseBool(value)
 		if err != nil {

@@ -35,7 +35,7 @@ import (
 const (
 	httpServerShutdownTimeout = 10 * time.Second
 
-	// A read sample limit is already implemented dynamically with the header X-PromQL-Max-Evaluated-Points.
+	// A read sample limit is already implemented dynamically with the header X-SquirrelDB-Max-Evaluated-Points.
 	remoteReadSampleLimit     = 0       // No limit
 	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )

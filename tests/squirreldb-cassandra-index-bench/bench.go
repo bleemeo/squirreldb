@@ -494,7 +494,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 
 	// We remove 1 days (and max ttl update delay) so the expiration of the
 	// metrics is yesterday
-	negativeTTL := strconv.FormatInt(-86400-int64(index.InternalMaxTTLUpdateDelay().Seconds()), 10)
+	negativeTTL := -int64((24*time.Hour + index.InternalMaxTTLUpdateDelay()).Seconds())
 
 	for n := 0; n < *shardSize; n++ {
 		userID := strconv.FormatInt(rnd.Int63n(100000), 10)
@@ -518,21 +518,23 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 			labelsMap[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rnd.Int63n(20), 10)
 		}
 
-		if *expiredFaction > 0 && n%*expiredFaction == 0 {
-			labelsMap["__ttl__"] = negativeTTL
-		}
-
 		promLabel := labels.FromMap(labelsMap)
 
 		if *sortInsert {
 			sort.Sort(promLabel)
 		}
 
-		metrics[n] = types.LookupRequest{
+		request := types.LookupRequest{
 			Start:  now,
 			End:    now,
 			Labels: promLabel,
 		}
+
+		if *expiredFaction > 0 && n%*expiredFaction == 0 {
+			request.TTLSeconds = negativeTTL
+		}
+
+		metrics[n] = request
 	}
 
 	return metrics
