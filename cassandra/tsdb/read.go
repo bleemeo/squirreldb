@@ -425,13 +425,13 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 
 	//nolint:goconst
 	switch function {
-	case "min":
+	case "min", "min_over_time":
 		streamNumber = 0
-	case "max":
+	case "max", "max_over_time":
 		streamNumber = 1
-	case "avg":
+	case "avg", "avg_over_time":
 		streamNumber = 2
-	case "count":
+	case "count", "count_over_time":
 		streamNumber = 3
 	default:
 		streamNumber = 2

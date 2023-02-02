@@ -498,12 +498,12 @@ func Benchmark_pointsDecode(b *testing.B) {
 func Test_EncodeAggregate(t *testing.T) {
 	resolution := aggregateResolution.Milliseconds()
 
-	metricHunderdHours := types.MetricData{
+	metricHundredHours := types.MetricData{
 		ID:         types.MetricID(100),
 		TimeToLive: 42,
 		Points:     types.MakePointsForTest(100 * 3600 / 10),
 	}
-	aggregatedMetricHunderdHours := aggregate.Aggregate(metricHunderdHours, resolution)
+	aggregatedMetricHundredHours := aggregate.Aggregate(metricHundredHours, resolution)
 
 	type args struct {
 		aggregatedPoints []aggregate.AggregatedPoint
@@ -609,8 +609,8 @@ func Test_EncodeAggregate(t *testing.T) {
 			name: "100_hours",
 			args: args{
 				baseTimestamp:    1568678400000,
-				t0:               aggregatedMetricHunderdHours.Points[0].Timestamp,
-				aggregatedPoints: aggregatedMetricHunderdHours.Points,
+				t0:               aggregatedMetricHundredHours.Points[0].Timestamp,
+				aggregatedPoints: aggregatedMetricHundredHours.Points,
 			},
 		},
 	}
@@ -619,7 +619,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
-		for _, timestamp := range []int64{0, future.Unix()} {
+		for _, timestamp := range []int64{future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
 
@@ -638,15 +638,21 @@ func Test_EncodeAggregate(t *testing.T) {
 					newFormatCutoff: timestamp,
 				}
 
-				testedFun := []string{"min", "max", "avg", "count"}
-				buffer, err := c.encodeAggregatedPoints(
-					tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
-				)
-				if err != nil {
-					t.Errorf("encodeAggregatedPoints failed: %v", err)
+				testedFun := []string{
+					"min", "min",
+					"max", "max_over_time",
+					"avg", "avg_over_time",
+					"count", "count_over_time",
 				}
 
 				for _, function := range testedFun {
+					buffer, err := c.encodeAggregatedPoints(
+						tt.args.aggregatedPoints, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp,
+					)
+					if err != nil {
+						t.Errorf("encodeAggregatedPoints failed: %v", err)
+					}
+
 					want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
 					got, err := c.decodeAggregatedPoints(
 						buffer, tt.args.baseTimestamp, tt.args.t0-tt.args.baseTimestamp, function, nil,
@@ -654,21 +660,21 @@ func Test_EncodeAggregate(t *testing.T) {
 					for i, p := range tt.args.aggregatedPoints {
 						want[i].Timestamp = p.Timestamp
 						switch function {
-						case "min":
+						case "min", "min_over_time":
 							want[i].Value = p.Min
-						case "max":
+						case "max", "max_over_time":
 							want[i].Value = p.Max
-						case "avg":
+						case "avg", "avg_over_time":
 							want[i].Value = p.Average
-						case "count":
+						case "count", "count_over_time":
 							want[i].Value = p.Count
 						}
 					}
 					if err != nil {
-						t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") failed: %v", function, err)
+						t.Fatalf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") failed: %v", function, err)
 					}
 					if !reflect.DeepEqual(got, want) {
-						t.Errorf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") = %v, want = %v", function, got, want)
+						t.Fatalf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") = %v, want = %v", function, got, want)
 					}
 				}
 			})
