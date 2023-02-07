@@ -619,7 +619,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		tt := tt
 		future := time.Date(2025, 2, 19, 0, 0, 17, 383, time.UTC)
 
-		for _, timestamp := range []int64{future.Unix()} {
+		for _, timestamp := range []int64{0, future.Unix()} {
 			timestamp := timestamp
 			name := tt.name + "-new"
 
@@ -639,7 +639,7 @@ func Test_EncodeAggregate(t *testing.T) {
 				}
 
 				testedFun := []string{
-					"min", "min",
+					"min", "min_over_time",
 					"max", "max_over_time",
 					"avg", "avg_over_time",
 					"count", "count_over_time",

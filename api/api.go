@@ -639,6 +639,17 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 
 	start := time.Now()
 
+	// Flush the points from the temporary store so they can be pre-aggregated.
+	// Recent points are still kept in memory for faster reads.
+	if a.FlushCallback != nil {
+		err := a.FlushCallback()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+	}
+
 	if a.PreAggregateCallback != nil {
 		err := a.PreAggregateCallback(ctx, thread, from, to)
 		if err != nil {

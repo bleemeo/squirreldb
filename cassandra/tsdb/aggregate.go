@@ -153,7 +153,7 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 
 // ForcePreAggregation will pre-aggregate all metrics between two given time
 // The forced pre-aggregation will run even if data are already pre-aggregated and
-// will no change the stored position where pre-aggregation think it stopped.
+// will not change the stored position where pre-aggregation think it stopped.
 // The from & to will be extended to be aligned with the aggregation size.
 //
 // Forcing pre-aggregation should only serve when:
