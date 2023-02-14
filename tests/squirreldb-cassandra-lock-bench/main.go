@@ -95,7 +95,7 @@ func run(ctx context.Context) error {
 			Logger: log.With().Str("component", "daemon").Logger(),
 		}
 
-		lockFactory, err := squirreldb.LockFactory()
+		lockFactory, err := squirreldb.LockFactory(ctx)
 		if err != nil {
 			return err
 		}

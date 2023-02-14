@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -14,7 +15,7 @@ import (
 )
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
-func New(options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool, error) {
+func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
@@ -42,7 +43,7 @@ func New(options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool,
 
 	keyspaceCreated := false
 
-	if !keyspaceExists(session, options.Keyspace) {
+	if !keyspaceExists(ctx, session, options.Keyspace) {
 		// Not sure if we are allowed to create keyspace concurrently. Add a random jitter to
 		// reduce change of concurrent keyspace creation
 		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond) //nolint:gosec
@@ -50,7 +51,7 @@ func New(options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool,
 		replicationFactor := strconv.FormatInt(int64(options.ReplicationFactor), 10)
 		query := keyspaceCreateQuery(session, options.Keyspace, replicationFactor)
 
-		err = query.Exec()
+		err = query.WithContext(ctx).Exec()
 
 		//nolint:gocritic
 		if errors.Is(err, &gocql.RequestErrAlreadyExists{}) {
@@ -78,10 +79,13 @@ func New(options config.Cassandra, logger zerolog.Logger) (*gocql.Session, bool,
 	return finalSession, keyspaceCreated, nil
 }
 
-func keyspaceExists(session *gocql.Session, keyspace string) bool {
+func keyspaceExists(ctx context.Context, session *gocql.Session, keyspace string) bool {
 	var name string
 
-	err := session.Query("SELECT keyspace_name FROM system_schema.keyspaces where keyspace_name = ?", keyspace).Scan(&name)
+	err := session.Query(
+		"SELECT keyspace_name FROM system_schema.keyspaces where keyspace_name = ?",
+		keyspace,
+	).WithContext(ctx).Scan(&name)
 
 	return err == nil
 }

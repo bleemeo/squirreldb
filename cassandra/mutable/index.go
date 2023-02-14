@@ -79,7 +79,7 @@ func (i *indexWrapper) Search(
 	matchers []*labels.Matcher,
 ) (types.MetricsSet, error) {
 	// Replace mutable labels by non mutable labels.
-	matchers, err := i.labelProcessor.ReplaceMutableLabels(matchers)
+	matchers, err := i.labelProcessor.ReplaceMutableLabels(ctx, matchers)
 	if err != nil {
 		// Return an empty metric set if the mutable matchers have no match.
 		if errors.Is(err, errNoResult) {
@@ -95,6 +95,7 @@ func (i *indexWrapper) Search(
 	}
 
 	metricsSetWrapper := &mutableMetricsSet{
+		ctx:            ctx,
 		metricsSet:     metricsSet,
 		labelProcessor: i.labelProcessor,
 		logger:         i.logger,
@@ -114,13 +115,13 @@ func (i *indexWrapper) LabelValues(
 ) ([]string, error) {
 	tenant := i.labelProcessor.tenantFromMatchers(matchers)
 	if tenant != "" {
-		isMutableLabel, err := i.labelProcessor.IsMutableLabel(tenant, name)
+		isMutableLabel, err := i.labelProcessor.IsMutableLabel(ctx, tenant, name)
 		if err != nil {
 			return nil, err
 		}
 
 		if isMutableLabel {
-			values, err := i.labelProcessor.labelProvider.AllValues(tenant, name)
+			values, err := i.labelProcessor.labelProvider.AllValues(ctx, tenant, name)
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +154,7 @@ func (i *indexWrapper) LabelNames(
 
 	tenant := i.labelProcessor.tenantFromMatchers(matchers)
 	if tenant != "" {
-		mutableLabelNames, err := i.labelProcessor.MutableLabelNames(tenant)
+		mutableLabelNames, err := i.labelProcessor.MutableLabelNames(ctx, tenant)
 		if err != nil {
 			return nil, err
 		}
@@ -248,9 +249,9 @@ func (i *indexWrapper) DumpByPosting(
 }
 
 // InternalForceExpirationTimestamp implements the IndexInternalExpirerer interface used in tests.
-func (i *indexWrapper) InternalForceExpirationTimestamp(value time.Time) error {
+func (i *indexWrapper) InternalForceExpirationTimestamp(ctx context.Context, value time.Time) error {
 	if expirerer, ok := i.index.(types.IndexInternalExpirerer); ok {
-		return expirerer.InternalForceExpirationTimestamp(value)
+		return expirerer.InternalForceExpirationTimestamp(ctx, value)
 	}
 
 	return errNotImplemented
@@ -278,6 +279,7 @@ func (i *indexWrapper) InternalUpdateAllShards(ctx context.Context, ttl time.Dur
 type mutableMetricsSet struct {
 	metricsSet     types.MetricsSet
 	currentMetric  types.MetricLabel
+	ctx            context.Context //nolint:containedctx
 	err            error
 	labelProcessor *LabelProcessor
 	logger         zerolog.Logger
@@ -294,7 +296,7 @@ func (m *mutableMetricsSet) Next() bool {
 
 	metric := m.metricsSet.At()
 
-	lbls, err := m.labelProcessor.AddMutableLabels(metric.Labels)
+	lbls, err := m.labelProcessor.AddMutableLabels(m.ctx, metric.Labels)
 	if err != nil {
 		m.logger.Err(err).Msg("Failed to add mutable labels")
 

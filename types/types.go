@@ -73,7 +73,7 @@ type IndexVerifier interface {
 }
 
 type IndexInternalExpirerer interface {
-	InternalForceExpirationTimestamp(value time.Time) error
+	InternalForceExpirationTimestamp(ctx context.Context, value time.Time) error
 }
 
 type IndexRunner interface {
@@ -119,8 +119,8 @@ type TryLocker interface {
 }
 
 type State interface {
-	Read(name string, value interface{}) (bool, error)
-	Write(name string, value interface{}) error
+	Read(ctx context.Context, name string, value interface{}) (bool, error)
+	Write(ctx context.Context, name string, value interface{}) error
 }
 
 // RequestContextKey is used as a key in a context to a HTTP request.

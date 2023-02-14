@@ -295,7 +295,7 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 		return err
 	}
 
-	err = session.Query("DROP KEYSPACE IF EXISTS " + s.Config.Cassandra.Keyspace).Exec()
+	err = session.Query("DROP KEYSPACE IF EXISTS " + s.Config.Cassandra.Keyspace).WithContext(ctx).Exec()
 	if err != nil {
 		return fmt.Errorf("failed to drop keyspace: %w", err)
 	}
@@ -397,8 +397,8 @@ func SetTestEnvironment() {
 }
 
 // SchemaLock return a lock to modify the Cassandra schema.
-func (s *SquirrelDB) SchemaLock() (types.TryLocker, error) {
-	lockFactory, err := s.LockFactory()
+func (s *SquirrelDB) SchemaLock(ctx context.Context) (types.TryLocker, error) {
+	lockFactory, err := s.LockFactory(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -419,10 +419,11 @@ func (s *SquirrelDB) CassandraSessionNoKeyspace() (*gocql.Session, error) {
 	return session, nil
 }
 
-// CassandraSession return the Cassandra session used for SquirrelDB.
-func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
+// CassandraSession return the Cassandra connection used for SquirrelDB.
+func (s *SquirrelDB) CassandraSession(ctx context.Context) (*gocql.Session, error) {
 	if s.cassandraSession == nil {
 		session, keyspaceCreated, err := session.New(
+			ctx,
 			s.Config.Cassandra,
 			s.Logger.With().Str("component", "session").Logger(),
 		)
@@ -438,16 +439,17 @@ func (s *SquirrelDB) CassandraSession() (*gocql.Session, error) {
 }
 
 // LockFactory return the Lock factory of SquirrelDB.
-func (s *SquirrelDB) LockFactory() (LockFactory, error) {
+func (s *SquirrelDB) LockFactory(ctx context.Context) (LockFactory, error) {
 	if s.lockFactory == nil {
 		switch s.Config.Internal.Locks {
 		case backendCassandra:
-			session, err := s.CassandraSession()
+			session, err := s.CassandraSession(ctx)
 			if err != nil {
 				return nil, err
 			}
 
 			factory, err := locks.New(
+				ctx,
 				s.MetricRegistry,
 				session,
 				s.cassandraKeyspaceCreated,
@@ -470,21 +472,21 @@ func (s *SquirrelDB) LockFactory() (LockFactory, error) {
 	return s.lockFactory, nil
 }
 
-func (s *SquirrelDB) States() (types.State, error) {
+func (s *SquirrelDB) States(ctx context.Context) (types.State, error) {
 	if s.states == nil {
 		switch s.Config.Internal.States {
 		case backendCassandra:
-			session, err := s.CassandraSession()
+			session, err := s.CassandraSession(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			lock, err := s.SchemaLock()
+			lock, err := s.SchemaLock(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			states, err := states.New(session, lock)
+			states, err := states.New(ctx, session, lock)
 			if err != nil {
 				return nil, err
 			}
@@ -630,17 +632,17 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 
 		switch s.Config.Internal.Index {
 		case backendCassandra:
-			session, err := s.CassandraSession()
+			session, err := s.CassandraSession(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			states, err := s.States()
+			states, err := s.States(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			schemaLock, err := s.SchemaLock()
+			schemaLock, err := s.SchemaLock(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -708,12 +710,12 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 	if s.persistentStore == nil { //nolint:nestif
 		switch s.Config.Internal.TSDB {
 		case backendCassandra:
-			session, err := s.CassandraSession()
+			session, err := s.CassandraSession(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			schemaLock, err := s.SchemaLock()
+			schemaLock, err := s.SchemaLock(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -723,12 +725,12 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 				return nil, err
 			}
 
-			lockFactory, err := s.LockFactory()
+			lockFactory, err := s.LockFactory(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			states, err := s.States()
+			states, err := s.States(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -740,6 +742,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 			}
 
 			tsdb, err := tsdb.New(
+				ctx,
 				s.MetricRegistry,
 				session,
 				options,
@@ -789,13 +792,13 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		return errors.New("newMetricLock is not acquired")
 	}
 
-	state, _ := s.States()
-	stateBool, err := state.Read("cluster_id", &clusterID)
+	state, _ := s.States(ctx)
+	stateBool, err := state.Read(ctx, "cluster_id", &clusterID)
 
 	if err != nil || !stateBool {
 		clusterID = uuid.New().String()
 
-		err := s.states.Write("cluster_id", clusterID)
+		err := s.states.Write(ctx, "cluster_id", clusterID)
 		if err != nil {
 			s.Logger.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
 		}
@@ -842,12 +845,12 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 
 		switch s.Config.Internal.MutableLabelsProvider {
 		case backendCassandra:
-			session, err := s.CassandraSession()
+			session, err := s.CassandraSession(ctx)
 			if err != nil {
 				return nil, err
 			}
 
-			store, err = mutable.NewCassandraStore(session)
+			store, err = mutable.NewCassandraStore(ctx, session)
 			if err != nil {
 				return nil, err
 			}

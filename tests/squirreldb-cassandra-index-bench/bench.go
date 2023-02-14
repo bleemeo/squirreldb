@@ -311,7 +311,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 		beforePurge := len(ids)
 		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
 
-		err = indexExpirerer.InternalForceExpirationTimestamp(beforeYesterday)
+		err = indexExpirerer.InternalForceExpirationTimestamp(ctx, beforeYesterday)
 		if err != nil {
 			return fmt.Errorf("state.Write() failed: %w", err)
 		}

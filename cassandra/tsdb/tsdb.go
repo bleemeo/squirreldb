@@ -70,6 +70,7 @@ type CassandraTSDB struct {
 
 // New created a new CassandraTSDB object.
 func New(
+	ctx context.Context,
 	reg prometheus.Registerer,
 	session *gocql.Session,
 	options Options,
@@ -86,17 +87,11 @@ func New(
 		return nil, fmt.Errorf("invalid newFormatFrom: %w", err)
 	}
 
-	dataTableCreateQuery := dataTableCreateQuery(session, options.DefaultTimeToLive)
-	dataTableCreateQuery.Consistency(gocql.All)
-
-	if err := dataTableCreateQuery.Exec(); err != nil {
+	if err := dataTableCreate(ctx, session, options.DefaultTimeToLive); err != nil {
 		return nil, fmt.Errorf("create table data: %w", err)
 	}
 
-	aggregateDataTableCreateQuery := aggregateDataTableCreateQuery(session, options.DefaultTimeToLive)
-	aggregateDataTableCreateQuery.Consistency(gocql.All)
-
-	if err := aggregateDataTableCreateQuery.Exec(); err != nil {
+	if err := aggregateDataTableCreate(ctx, session, options.DefaultTimeToLive); err != nil {
 		return nil, fmt.Errorf("create table data_aggregated: %w", err)
 	}
 
@@ -178,8 +173,7 @@ func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
 	c.pointsBufferPool.Put(&v)
 }
 
-// Returns data table create Query.
-func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duration) *gocql.Query {
+func dataTableCreate(ctx context.Context, session *gocql.Session, defaultTimeToLive time.Duration) error {
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data (
@@ -199,14 +193,13 @@ func dataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duratio
 			'unchecked_tombstone_compaction': true,
 			'tombstone_compaction_interval': 604800
 		}
-		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
-	`))
+		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE`),
+	).Consistency(gocql.All).WithContext(ctx)
 
-	return query
+	return query.Exec()
 }
 
-// Returns aggregate data table create Query.
-func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive time.Duration) *gocql.Query {
+func aggregateDataTableCreate(ctx context.Context, session *gocql.Session, defaultTimeToLive time.Duration) error {
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data_aggregated (
@@ -225,8 +218,8 @@ func aggregateDataTableCreateQuery(session *gocql.Session, defaultTimeToLive tim
 			'unchecked_tombstone_compaction': true,
 			'tombstone_compaction_interval': 8467200
 		}
-		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE
-	`))
+		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE`),
+	).Consistency(gocql.All).WithContext(ctx)
 
-	return query
+	return query.Exec()
 }

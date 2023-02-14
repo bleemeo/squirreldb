@@ -59,7 +59,7 @@ func run(ctx context.Context) error {
 
 		firstLoop = false
 
-		session, err := squirreldb.CassandraSession()
+		session, err := squirreldb.CassandraSession(ctx)
 		if err != nil {
 			log.Printf("connection to cassandra failed: %s", err)
 
@@ -67,7 +67,7 @@ func run(ctx context.Context) error {
 		}
 
 		count := 0
-		it := session.Query("SELECT peer from system.peers").Iter()
+		it := session.Query("SELECT peer from system.peers").WithContext(ctx).Iter()
 
 		for it.Scan(nil) {
 			count++

@@ -54,7 +54,12 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		lbls, err := provider.GetMutable(searchedTenant, searchedNonMutableName, searchedNonMutableValue)
+		lbls, err := provider.GetMutable(
+			context.Background(),
+			searchedTenant,
+			searchedNonMutableName,
+			searchedNonMutableValue,
+		)
 		if err != nil {
 			b.Fatal(err)
 		}

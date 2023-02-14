@@ -102,7 +102,7 @@ func TestReplaceMutableLabels(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotMatchers, err := lp.ReplaceMutableLabels(test.matchers)
+			gotMatchers, err := lp.ReplaceMutableLabels(context.Background(), test.matchers)
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}
@@ -150,7 +150,7 @@ func TestAddMutableLabels(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotLabels, err := lp.AddMutableLabels(test.labels)
+			gotLabels, err := lp.AddMutableLabels(context.Background(), test.labels)
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}

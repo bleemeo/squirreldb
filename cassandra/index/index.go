@@ -3267,15 +3267,15 @@ func (c *CassandraIndex) InternalCreateMetric(
 
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
 // This should only be used in test & benchmark.
-func (c *CassandraIndex) InternalForceExpirationTimestamp(value time.Time) error {
+func (c *CassandraIndex) InternalForceExpirationTimestamp(ctx context.Context, value time.Time) error {
 	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(context.Background(), 0); !acquired {
+	if acquired := lock.TryLock(ctx, 0); !acquired {
 		return errors.New("lock held, please retry")
 	}
 
 	defer lock.Unlock()
 
-	return c.options.States.Write(expireMetricStateName, value.Format(time.RFC3339))
+	return c.options.States.Write(ctx, expireMetricStateName, value.Format(time.RFC3339))
 }
 
 func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.Time) {
@@ -3321,10 +3321,10 @@ func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool
 	return c.existingShards, nil
 }
 
-func (c *CassandraIndex) expirationLastProcessedDay() (time.Time, error) {
+func (c *CassandraIndex) expirationLastProcessedDay(ctx context.Context) (time.Time, error) {
 	var fromTimeStr string
 
-	_, err := c.options.States.Read(expireMetricStateName, &fromTimeStr)
+	_, err := c.options.States.Read(ctx, expireMetricStateName, &fromTimeStr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("unable to get last processed day for metrics expiration: %w", err)
 	}
@@ -3352,7 +3352,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		c.metrics.ExpireTotalSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	lastProcessedDay, err := c.expirationLastProcessedDay()
+	lastProcessedDay, err := c.expirationLastProcessedDay(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -3362,7 +3362,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 	if lastProcessedDay.IsZero() {
 		lastProcessedDay = maxTime
 
-		err := c.options.States.Write(expireMetricStateName, lastProcessedDay.Format(time.RFC3339))
+		err := c.options.States.Write(ctx, expireMetricStateName, lastProcessedDay.Format(time.RFC3339))
 		if err != nil {
 			return false, fmt.Errorf("unable to set last processed day for metrics expiration: %w", err)
 		}
@@ -3443,7 +3443,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		return false, fmt.Errorf("unable to remove processed list of metrics to check for expiration: %w", err)
 	}
 
-	err = c.options.States.Write(expireMetricStateName, candidateDay.Format(time.RFC3339))
+	err = c.options.States.Write(ctx, expireMetricStateName, candidateDay.Format(time.RFC3339))
 	if err != nil {
 		return false, fmt.Errorf("unable to set last processed day for metrics expiration: %w", err)
 	}
@@ -4566,7 +4566,7 @@ func (s cassandraStore) Init(ctx context.Context) error {
 	}
 
 	for _, query := range queries {
-		if err := s.session.Query(query).WithContext(ctx).Consistency(gocql.All).Exec(); err != nil {
+		if err := s.session.Query(query).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
 			return err
 		}
 	}
@@ -4584,7 +4584,7 @@ func InternalDropTables(ctx context.Context, session *gocql.Session) error {
 		"DROP TABLE IF EXISTS index_expiration",
 	}
 	for _, query := range queries {
-		if err := session.Query(query).WithContext(ctx).Exec(); err != nil {
+		if err := session.Query(query).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
 			return err
 		}
 	}
