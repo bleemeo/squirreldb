@@ -93,7 +93,7 @@ func TestReplaceMutableLabels(t *testing.T) {
 	}
 
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger())
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
@@ -141,7 +141,7 @@ func TestAddMutableLabels(t *testing.T) {
 	}
 
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger())
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {

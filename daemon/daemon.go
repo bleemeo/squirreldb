@@ -393,7 +393,12 @@ func SetTestEnvironment() {
 		os.Setenv("SQUIRRELDB_TELEMETRY_ENABLED", "false")
 	}
 
-	log.Logger = logger.NewTestLogger()
+	// Initialize the logger temporarily before loading the config.
+	log.Logger = logger.NewLogger(logger.NewConsoleWriter(false), zerolog.TraceLevel)
+
+	cfg, _, _ := Config()
+
+	log.Logger = logger.NewTestLogger(cfg.Log.DisableColor)
 }
 
 // SchemaLock return a lock to modify the Cassandra schema.

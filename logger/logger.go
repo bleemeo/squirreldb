@@ -25,6 +25,6 @@ func NewLogger(w io.Writer, level zerolog.Level) zerolog.Logger {
 }
 
 // NewTestLogger returns a zerolog logger ready to use in tests.
-func NewTestLogger() zerolog.Logger {
-	return NewLogger(NewConsoleWriter(false), zerolog.TraceLevel)
+func NewTestLogger(disableColor bool) zerolog.Logger {
+	return NewLogger(NewConsoleWriter(disableColor), zerolog.TraceLevel)
 }
