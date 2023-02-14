@@ -3,12 +3,13 @@ package mutable
 import (
 	"context"
 	"fmt"
+	"squirreldb/cassandra/connection"
 
 	"github.com/gocql/gocql"
 )
 
 type cassandra struct {
-	session *gocql.Session
+	connection *connection.Connection
 }
 
 type Store interface {
@@ -21,9 +22,9 @@ type Store interface {
 }
 
 // NewCassandraStore returns a new Cassandra mutable label store.
-func NewCassandraStore(ctx context.Context, session *gocql.Session) (Store, error) {
+func NewCassandraStore(ctx context.Context, connection *connection.Connection) (Store, error) {
 	cp := &cassandra{
-		session: session,
+		connection: connection,
 	}
 
 	if err := cp.createTables(ctx); err != nil {
@@ -35,7 +36,14 @@ func NewCassandraStore(ctx context.Context, session *gocql.Session) (Store, erro
 
 // createTables creates the mutable labels table if it doesn't exist.
 func (cp *cassandra) createTables(ctx context.Context) error {
-	queryMutableLabelValues := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	queryMutableLabelValues := session.Query(`
 		CREATE TABLE IF NOT EXISTS mutable_label_values (
 			tenant text,
 			name text,
@@ -45,7 +53,7 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 		)`,
 	).WithContext(ctx)
 
-	queryMutableLabelNames := cp.session.Query(`
+	queryMutableLabelNames := session.Query(`
 		CREATE TABLE IF NOT EXISTS mutable_label_names (
 			tenant text,
 			name text,
@@ -67,7 +75,14 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 
 // AssociatedNames return the associated names map[mutable label name] -> non mutable label name.
 func (cp *cassandra) AssociatedNames(ctx context.Context, tenant string) (map[string]string, error) {
-	iter := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	iter := session.Query(`
 		SELECT name, associated_name FROM mutable_label_names
 		WHERE tenant = ?`,
 		tenant,
@@ -92,7 +107,14 @@ func (cp *cassandra) AssociatedNames(ctx context.Context, tenant string) (map[st
 
 // AssociatedValues returns the associated values for a mutable label name and tenant.
 func (cp *cassandra) AssociatedValues(ctx context.Context, tenant, name string) (map[string][]string, error) {
-	iter := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	iter := session.Query(`
 		SELECT value, associated_values FROM mutable_label_values
 		WHERE tenant = ? AND name = ?`,
 		tenant, name,
@@ -117,7 +139,14 @@ func (cp *cassandra) AssociatedValues(ctx context.Context, tenant, name string) 
 
 // SetAssociatedValues sets the non mutable label values associated to a mutable label.
 func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithValues) error {
-	query := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		INSERT INTO mutable_label_values (tenant, name, value, associated_values)
 		VALUES (?, ?, ?, ?)`,
 		label.Tenant, label.Name, label.Value, label.AssociatedValues,
@@ -132,7 +161,14 @@ func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithVal
 
 // DeleteAssociatedValues deletes the non mutable label values associated to a mutable label.
 func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) error {
-	query := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		DELETE FROM mutable_label_values
 		WHERE tenant = ? AND name = ? AND value = ?`,
 		label.Tenant, label.Name, label.Value,
@@ -147,7 +183,14 @@ func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) er
 
 // SetAssociatedName sets the non mutable label name associated to a mutable label name.
 func (cp *cassandra) SetAssociatedName(ctx context.Context, label LabelWithName) error {
-	query := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		INSERT INTO mutable_label_names (tenant, name, associated_name)
 		VALUES (?, ?, ?)`,
 		label.Tenant, label.Name, label.AssociatedName,
@@ -162,7 +205,14 @@ func (cp *cassandra) SetAssociatedName(ctx context.Context, label LabelWithName)
 
 // DeleteAssociatedName deletes a mutable label name.
 func (cp *cassandra) DeleteAssociatedName(ctx context.Context, tenant, name string) error {
-	queryDeleteLabelNames := cp.session.Query(`
+	session, err := cp.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	queryDeleteLabelNames := session.Query(`
 		DELETE FROM mutable_label_names
 		WHERE tenant = ? AND name = ?`,
 		tenant, name,
@@ -172,7 +222,7 @@ func (cp *cassandra) DeleteAssociatedName(ctx context.Context, tenant, name stri
 		return fmt.Errorf("delete label name from mutable_label_names: %w", err)
 	}
 
-	queryDeleteLabelValues := cp.session.Query(`
+	queryDeleteLabelValues := session.Query(`
 		DELETE FROM squirreldb.mutable_label_values
 		WHERE tenant = ? AND name = ?`,
 		tenant, name,

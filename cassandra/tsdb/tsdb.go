@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
@@ -48,10 +49,10 @@ type lockFactory interface {
 }
 
 type CassandraTSDB struct {
-	session *gocql.Session
-	options Options
-	metrics *metrics
-	logger  zerolog.Logger
+	connection *connection.Connection
+	options    Options
+	metrics    *metrics
+	logger     zerolog.Logger
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -72,7 +73,7 @@ type CassandraTSDB struct {
 func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
-	session *gocql.Session,
+	connection *connection.Connection,
 	options Options,
 	index types.Index,
 	lockFactory lockFactory,
@@ -87,16 +88,16 @@ func New(
 		return nil, fmt.Errorf("invalid newFormatFrom: %w", err)
 	}
 
-	if err := dataTableCreate(ctx, session, options.DefaultTimeToLive); err != nil {
+	if err := dataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
 		return nil, fmt.Errorf("create table data: %w", err)
 	}
 
-	if err := aggregateDataTableCreate(ctx, session, options.DefaultTimeToLive); err != nil {
+	if err := aggregateDataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
 		return nil, fmt.Errorf("create table data_aggregated: %w", err)
 	}
 
 	tsdb := &CassandraTSDB{
-		session:     session,
+		connection:  connection,
 		options:     options,
 		metrics:     newMetrics(reg),
 		logger:      logger,
@@ -173,7 +174,14 @@ func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
 	c.pointsBufferPool.Put(&v)
 }
 
-func dataTableCreate(ctx context.Context, session *gocql.Session, defaultTimeToLive time.Duration) error {
+func dataTableCreate(ctx context.Context, connection *connection.Connection, defaultTimeToLive time.Duration) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data (
@@ -199,7 +207,17 @@ func dataTableCreate(ctx context.Context, session *gocql.Session, defaultTimeToL
 	return query.Exec()
 }
 
-func aggregateDataTableCreate(ctx context.Context, session *gocql.Session, defaultTimeToLive time.Duration) error {
+func aggregateDataTableCreate(ctx context.Context,
+	connection *connection.Connection,
+	defaultTimeToLive time.Duration,
+) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	replacer := strings.NewReplacer("$DEFAULT_TIME_TO_LIVE", strconv.FormatInt(int64(defaultTimeToLive.Seconds()), 10))
 	query := session.Query(replacer.Replace(`
 		CREATE TABLE IF NOT EXISTS data_aggregated (

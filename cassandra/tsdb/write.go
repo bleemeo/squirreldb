@@ -284,16 +284,23 @@ func (c *CassandraTSDB) tableInsertRawData(
 	values []byte,
 	writingTimestamp int64,
 ) error {
+	session, err := c.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	var query *gocql.Query
 
 	if writingTimestamp == 0 {
-		query = c.session.Query(`
+		query = session.Query(`
 			INSERT INTO data (metric_id, base_ts, offset_ms, insert_time, values)
 			VALUES (?, ?, ?, now(), ?)
 			USING TTL ?
 		`, id, baseTimestamp, offsetMs, values, timeToLive)
 	} else {
-		query = c.session.Query(`
+		query = session.Query(`
 			INSERT INTO data (metric_id, base_ts, offset_ms, insert_time, values)
 			VALUES (?, ?, ?, now(), ?)
 			USING TTL ? AND TIMESTAMP ?
@@ -315,16 +322,23 @@ func (c *CassandraTSDB) tableInsertAggregatedData(
 	values []byte,
 	writingTimestamp int64,
 ) error {
+	session, err := c.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	var query *gocql.Query
 
 	if writingTimestamp == 0 {
-		query = c.session.Query(`
+		query = session.Query(`
 			INSERT INTO data_aggregated (metric_id, base_ts, offset_second, values)
 			VALUES (?, ?, ?, ?)
 			USING TTL ?
 		`, id, baseTimestamp, offsetSecond, values, timeToLive)
 	} else {
-		query = c.session.Query(`
+		query = session.Query(`
 			INSERT INTO data_aggregated (metric_id, base_ts, offset_second, values)
 			VALUES (?, ?, ?, ?)
 			USING TTL ? AND TIMESTAMP ?

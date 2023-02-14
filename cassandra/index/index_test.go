@@ -496,6 +496,9 @@ func (i mockPostingIter) Err() error {
 	return i.err
 }
 
+func (i mockPostingIter) Close() {
+}
+
 func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

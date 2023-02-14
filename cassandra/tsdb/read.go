@@ -194,8 +194,15 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 
 	start := time.Now()
 
+	session, err := c.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
 	tableSelectDataIter := c.aggregatedTableSelectDataIter(ctx,
-		c.session,
+		session.Session,
 		int64(aggregateData.ID),
 		baseTimestamp,
 		fromOffset,
@@ -290,8 +297,15 @@ func (c *CassandraTSDB) readRawPartitionData(
 
 	start := time.Now()
 
+	session, err := c.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
 	tableSelectDataIter := c.rawTableSelectDataIter(
-		ctx, c.session, int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp,
+		ctx, session.Session, int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp,
 	)
 
 	queryDuration := time.Since(start)
@@ -335,7 +349,8 @@ func (c *CassandraTSDB) readRawPartitionData(
 }
 
 // Returns table select data Query.
-func (c *CassandraTSDB) rawTableSelectDataIter(ctx context.Context,
+func (c *CassandraTSDB) rawTableSelectDataIter(
+	ctx context.Context,
 	session *gocql.Session,
 	id int64,
 	baseTimestamp,

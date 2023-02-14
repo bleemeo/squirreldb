@@ -59,7 +59,16 @@ func run(ctx context.Context) error {
 
 		firstLoop = false
 
-		session, err := squirreldb.CassandraSession(ctx)
+		connection, err := squirreldb.CassandraConnection(ctx)
+		if err != nil {
+			log.Printf("connection to cassandra failed: %s", err)
+
+			continue
+		}
+
+		defer connection.Close()
+
+		session, err := connection.Session()
 		if err != nil {
 			log.Printf("connection to cassandra failed: %s", err)
 

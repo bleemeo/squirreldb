@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"squirreldb/cassandra/connection"
 	"strconv"
 	"sync"
 
@@ -11,20 +12,20 @@ import (
 )
 
 type CassandraStates struct {
-	session *gocql.Session
+	connection *connection.Connection
 }
 
 // New creates a new CassandraStates object.
-func New(ctx context.Context, session *gocql.Session, lock sync.Locker) (*CassandraStates, error) {
+func New(ctx context.Context, connection *connection.Connection, lock sync.Locker) (*CassandraStates, error) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := statesTableCreate(ctx, session); err != nil {
+	if err := statesTableCreate(ctx, connection); err != nil {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
 	states := &CassandraStates{
-		session: session,
+		connection: connection,
 	}
 
 	return states, nil
@@ -74,7 +75,14 @@ func (c *CassandraStates) Write(ctx context.Context, name string, value interfac
 
 // Returns states table insert state Query.
 func (c *CassandraStates) statesTableInsertState(ctx context.Context, name string, value string) error {
-	query := c.session.Query(`
+	session, err := c.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		INSERT INTO states (name, value)
 		VALUES (?, ?)`,
 		name, value,
@@ -87,18 +95,32 @@ func (c *CassandraStates) statesTableInsertState(ctx context.Context, name strin
 func (c *CassandraStates) statesTableSelectState(ctx context.Context, name string) (string, error) {
 	var valueString string
 
-	query := c.session.Query(`
+	session, err := c.connection.Session()
+	if err != nil {
+		return "", err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		SELECT value FROM states
 		WHERE name = ?`,
 		name,
 	).WithContext(ctx)
 
-	err := query.Scan(&valueString)
+	err = query.Scan(&valueString)
 
 	return valueString, err
 }
 
-func statesTableCreate(ctx context.Context, session *gocql.Session) error {
+func statesTableCreate(ctx context.Context, connection *connection.Connection) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	query := session.Query(`
 		CREATE TABLE IF NOT EXISTS states (
 			name text,

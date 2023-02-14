@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp/syntax"
 	"sort"
+	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
 	"squirreldb/types"
 	"strconv"
@@ -213,7 +214,7 @@ const (
 func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
-	session *gocql.Session,
+	connection *connection.Connection,
 	options Options,
 	logger zerolog.Logger,
 ) (*CassandraIndex, error) {
@@ -222,7 +223,7 @@ func New(
 	return initialize(
 		ctx,
 		cassandraStore{
-			session:    session,
+			connection: connection,
 			schemaLock: options.SchemaLock,
 			metrics:    metrics,
 		},
@@ -513,6 +514,8 @@ func (c *CassandraIndex) dumpByPostingByName(
 	name string,
 ) error {
 	iter := c.store.SelectPostingByName(ctx, shardID, name)
+	defer iter.Close()
+
 	for iter.HasNext() {
 		tmp := roaring.NewBTreeBitmap()
 		labelValue, buffer := iter.Next()
@@ -649,6 +652,8 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		for iter.HasNext() {
 			labelNamesCount++
 		}
+
+		iter.Close()
 
 		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard))
 
@@ -1398,6 +1403,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 	labelNames[postinglabelName] = true
 
 	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	defer iter.Close()
+
 	for iter.HasNext() {
 		labelValue, buffer := iter.Next()
 
@@ -1444,6 +1451,8 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		}
 
 		iter := c.store.SelectPostingByName(ctx, shard, name)
+		defer iter.Close()
+
 		for iter.HasNext() {
 			tmp := roaring.NewBTreeBitmap()
 			labelValue, buffer := iter.Next()
@@ -1844,6 +1853,7 @@ func (c *CassandraIndex) labelValues(
 		}
 
 		iter := c.store.SelectPostingByName(ctx, shard, name)
+		defer iter.Close()
 
 		for iter.HasNext() {
 			if ctx.Err() != nil {
@@ -3595,6 +3605,8 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 
 	// Find all label names to delete.
 	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	defer iter.Close()
+
 	for iter.HasNext() {
 		labelName, _ := iter.Next()
 		labelsToDelete = append(labelsToDelete, labelName)
@@ -4486,27 +4498,33 @@ func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 	return results
 }
 
-// HasNext() must always be called once before each Next() (and next called once).
+// HasNext() must always be called once before each Next() (and next called once). Close() must be called at the end.
 type postingIter interface {
 	HasNext() bool
 	Next() (string, []byte)
 	Err() error
+	Close()
 }
 
 type cassandraStore struct {
-	session    *gocql.Session
+	connection *connection.Connection
 	schemaLock sync.Locker
 	metrics    *metrics
 }
 
 type cassandraByteIter struct {
-	Iter   *gocql.Iter
-	buffer []byte
-	value  string
-	err    error
+	Iter    *gocql.Iter
+	session *connection.SessionWrapper
+	buffer  []byte
+	value   string
+	err     error
 }
 
 func (i *cassandraByteIter) HasNext() bool {
+	if i.err != nil {
+		return false
+	}
+
 	if i.Iter.Scan(&i.value, &i.buffer) {
 		return true
 	}
@@ -4526,6 +4544,12 @@ func (i cassandraByteIter) Err() error {
 	}
 
 	return i.err
+}
+
+func (i *cassandraByteIter) Close() {
+	if i.session != nil {
+		i.session.Close()
+	}
 }
 
 // createTables create all Cassandra tables.
@@ -4565,8 +4589,15 @@ func (s cassandraStore) Init(ctx context.Context) error {
 		)`,
 	}
 
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	for _, query := range queries {
-		if err := s.session.Query(query).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
+		if err := session.Query(query).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
 			return err
 		}
 	}
@@ -4576,15 +4607,23 @@ func (s cassandraStore) Init(ctx context.Context) error {
 
 // InternalDropTables drop tables used by the index.
 // This should only be used in test & benchmark.
-func InternalDropTables(ctx context.Context, session *gocql.Session) error {
+func InternalDropTables(ctx context.Context, connection *connection.Connection) error {
 	queries := []string{
 		"DROP TABLE IF EXISTS index_labels2id",
 		"DROP TABLE IF EXISTS index_postings",
 		"DROP TABLE IF EXISTS index_id2labels",
 		"DROP TABLE IF EXISTS index_expiration",
 	}
+
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	for _, query := range queries {
-		if err := session.Query(query).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
+		if err := session.Query(query).WithContext(ctx).Exec(); err != nil {
 			return err
 		}
 	}
@@ -4605,7 +4644,14 @@ func (s cassandraStore) InsertPostings(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"INSERT INTO index_postings (shard, name, value, bitset) VALUES (?, ?, ?, ?)",
 		shard, name, value, bitset,
 	).WithContext(ctx).Exec()
@@ -4623,7 +4669,14 @@ func (s cassandraStore) InsertID2Labels(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"INSERT INTO index_id2labels (id, labels, expiration_date) VALUES (?, ?, ?)",
 		id, sortedLabels, expiration,
 	).WithContext(ctx).Exec()
@@ -4636,7 +4689,14 @@ func (s cassandraStore) InsertLabels2ID(ctx context.Context, sortedLabelsString 
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"INSERT INTO index_labels2id (labels, id) VALUES (?, ?)",
 		sortedLabelsString, id,
 	).WithContext(ctx).Exec()
@@ -4649,7 +4709,14 @@ func (s cassandraStore) DeleteLabels2ID(ctx context.Context, sortedLabelsString 
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"DELETE FROM index_labels2id WHERE labels = ?",
 		sortedLabelsString,
 	).WithContext(ctx).Exec()
@@ -4662,7 +4729,14 @@ func (s cassandraStore) DeleteID2Labels(ctx context.Context, id types.MetricID) 
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"DELETE FROM index_id2labels WHERE id = ?",
 		id,
 	).WithContext(ctx).Exec()
@@ -4675,7 +4749,14 @@ func (s cassandraStore) DeleteExpiration(ctx context.Context, day time.Time) err
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"DELETE FROM index_expiration WHERE day = ?",
 		day,
 	).WithContext(ctx).Exec()
@@ -4688,7 +4769,14 @@ func (s cassandraStore) DeletePostings(ctx context.Context, shard int32, name st
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"DELETE FROM index_postings WHERE shard = ? AND name = ? AND value = ?",
 		shard, name, value,
 	).WithContext(ctx).Exec()
@@ -4701,7 +4789,14 @@ func (s cassandraStore) DeletePostingsByNames(ctx context.Context, shard int32, 
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"DELETE FROM index_postings WHERE shard = ? AND name IN ?",
 		shard, names,
 	).WithContext(ctx).Exec()
@@ -4714,7 +4809,14 @@ func (s cassandraStore) InsertExpiration(ctx context.Context, day time.Time, bit
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	return s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	return session.Query(
 		"INSERT INTO index_expiration (day, bitset) VALUES (?, ?)",
 		day, bitset,
 	).WithContext(ctx).Exec()
@@ -4730,7 +4832,14 @@ func (s cassandraStore) SelectLabelsList2ID(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	iter := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	iter := session.Query(
 		"SELECT labels, id FROM index_labels2id WHERE labels IN ?",
 		sortedLabelsListString,
 	).WithContext(ctx).Iter()
@@ -4746,7 +4855,7 @@ func (s cassandraStore) SelectLabelsList2ID(
 		result[labels] = types.MetricID(cqlID)
 	}
 
-	err := iter.Close()
+	err = iter.Close()
 
 	return result, err
 }
@@ -4761,7 +4870,14 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	iter := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	defer session.Close()
+
+	iter := session.Query(
 		"SELECT id, labels, expiration_date FROM index_id2labels WHERE id IN ?",
 		ids,
 	).WithContext(ctx).Iter()
@@ -4780,7 +4896,7 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(
 		results2[types.MetricID(id)] = expiration
 	}
 
-	err := iter.Close()
+	err = iter.Close()
 
 	return results, results2, err
 }
@@ -4792,13 +4908,20 @@ func (s cassandraStore) SelectExpiration(ctx context.Context, day time.Time) ([]
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(
 		"SELECT bitset FROM index_expiration WHERE day = ?",
 		day,
 	).WithContext(ctx)
 
 	var buffer []byte
-	err := query.Scan(&buffer)
+	err = query.Scan(&buffer)
 
 	return buffer, err
 }
@@ -4810,7 +4933,14 @@ func (s cassandraStore) UpdateID2LabelsExpiration(ctx context.Context, id types.
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("write").Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(
 		"UPDATE index_id2labels SET expiration_date = ? WHERE id = ?",
 		expiration,
 		int64(id),
@@ -4826,13 +4956,19 @@ func (s cassandraStore) SelectPostingByName(ctx context.Context, shard int32, na
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	iter := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return &cassandraByteIter{err: err}
+	}
+
+	iter := session.Query(
 		"SELECT value, bitset FROM index_postings WHERE shard = ? AND name = ?",
 		shard, name,
 	).WithContext(ctx).Iter()
 
 	return &cassandraByteIter{
-		Iter: iter,
+		Iter:    iter,
+		session: session,
 	}
 }
 
@@ -4848,7 +4984,14 @@ func (s cassandraStore) SelectPostingByNameValue(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	query := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(
 		"SELECT bitset FROM index_postings WHERE shard = ? AND name = ? AND value = ?",
 		shard, name, value,
 	).WithContext(ctx)
@@ -4865,7 +5008,14 @@ func (s cassandraStore) SelectValueForName(ctx context.Context, shard int32, nam
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	iter := s.session.Query(
+	session, err := s.connection.Session()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	defer session.Close()
+
+	iter := session.Query(
 		"SELECT value, bitset FROM index_postings WHERE shard = ? AND name = ?",
 		shard, name,
 	).WithContext(ctx).Iter()
@@ -4884,7 +5034,7 @@ func (s cassandraStore) SelectValueForName(ctx context.Context, shard int32, nam
 		buffer = nil
 	}
 
-	err := iter.Close()
+	err = iter.Close()
 
 	return values, buffers, err
 }

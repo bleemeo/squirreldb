@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -23,9 +24,9 @@ const (
 )
 
 type CassandraLocks struct {
-	session *gocql.Session
-	metrics *metrics
-	logger  zerolog.Logger
+	connection *connection.Connection
+	metrics    *metrics
+	logger     zerolog.Logger
 }
 
 type Lock struct {
@@ -49,7 +50,7 @@ type Lock struct {
 func New(
 	ctx context.Context,
 	reg prometheus.Registerer,
-	session *gocql.Session,
+	connection *connection.Connection,
 	createdKeySpace bool,
 	logger zerolog.Logger,
 ) (*CassandraLocks, error) {
@@ -63,12 +64,12 @@ func New(
 	if createdKeySpace {
 		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) //nolint:gosec
 
-		err = locksTableCreate(ctx, session)
-	} else if !tableExists(ctx, session) {
+		err = initTable(ctx, connection)
+	} else if !tableExists(ctx, connection) {
 		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint:gosec
 		logger.Debug().Msg("Created lock tables")
 
-		err = locksTableCreate(ctx, session)
+		err = initTable(ctx, connection)
 	}
 
 	if err != nil {
@@ -76,16 +77,27 @@ func New(
 	}
 
 	locks := &CassandraLocks{
-		session: session,
-		metrics: newMetrics(reg),
-		logger:  logger,
+		connection: connection,
+		metrics:    newMetrics(reg),
+		logger:     logger,
 	}
 
 	return locks, nil
 }
 
-func tableExists(ctx context.Context, session *gocql.Session) bool {
-	err := session.Query("SELECT name FROM locks WHERE name='test'").WithContext(ctx).Exec()
+func initTable(ctx context.Context, connection *connection.Connection) error {
+	return locksTableCreate(ctx, connection)
+}
+
+func tableExists(ctx context.Context, connection *connection.Connection) bool {
+	session, err := connection.Session()
+	if err != nil {
+		return false
+	}
+
+	defer session.Close()
+
+	err = session.Query("SELECT name FROM locks WHERE name='test'").WithContext(ctx).Exec()
 
 	return err == nil
 }
@@ -341,7 +353,14 @@ func (l *Lock) updateLock(ctx context.Context) {
 }
 
 func (l *Lock) locksTableDeleteLock(ctx context.Context) (bool, error) {
-	query := l.c.session.Query(`
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return false, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		DELETE FROM "locks"
 		WHERE name = ?
 		IF lock_id = ?`,
@@ -354,7 +373,14 @@ func (l *Lock) locksTableDeleteLock(ctx context.Context) (bool, error) {
 func (l *Lock) locksTableInsertLock(ctx context.Context) (string, bool, error) {
 	var holder string
 
-	query := l.c.session.Query(`
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return "", false, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		UPDATE locks
 		USING TTL ?
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
@@ -370,7 +396,14 @@ func (l *Lock) locksTableInsertLock(ctx context.Context) (string, bool, error) {
 
 // Returns locks table update lock Query.
 func (l *Lock) locksTableUpdateLock(ctx context.Context) error {
-	query := l.c.session.Query(`
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		UPDATE locks USING TTL ?
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
@@ -382,7 +415,14 @@ func (l *Lock) locksTableUpdateLock(ctx context.Context) error {
 }
 
 // Returns locks table create Query.
-func locksTableCreate(ctx context.Context, session *gocql.Session) error {
+func locksTableCreate(ctx context.Context, connection *connection.Connection) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	query := session.Query(`
 		CREATE TABLE IF NOT EXISTS locks (
 			name text,
