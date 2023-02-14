@@ -62,6 +62,7 @@ func run(ctx context.Context) error {
 			Config: cfg,
 			Logger: log.With().Str("component", "daemon").Logger(),
 		}
+		defer squirreldb.Stop()
 
 		err = squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
