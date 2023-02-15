@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
@@ -443,7 +443,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 			return nil, fmt.Errorf("read length for stream %d: %w", i, err)
 		}
 
-		_, err = reader.Seek(int64(length), os.SEEK_CUR)
+		_, err = reader.Seek(int64(length), io.SeekCurrent)
 		if err != nil {
 			return nil, fmt.Errorf("seek in stream: %w", err)
 		}
@@ -454,7 +454,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 		return nil, fmt.Errorf("read stream length: %w", err)
 	}
 
-	startIndex, _ := reader.Seek(0, os.SEEK_CUR)
+	startIndex, _ := reader.Seek(0, io.SeekCurrent)
 	endIndex := int(startIndex) + int(length)
 
 	if endIndex > len(values) {

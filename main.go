@@ -54,7 +54,7 @@ func setupSentryLogger(cfg config.Config) io.Closer {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Deprecated since Go 1.20, a random seed is used by default.
 
 	daemon.Version = version
 	daemon.Commit = commit

@@ -90,7 +90,7 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	rand.Seed(*seed)
+	rand.Seed(*seed) //nolint:staticcheck // Deprecated.
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
