@@ -75,7 +75,11 @@ func (s series) Labels() labels.Labels {
 	return s.labels
 }
 
-func (s series) Iterator() chunkenc.Iterator {
+// Iterator returns an iterator of the data of the series.
+// The iterator passed as argument is for re-use, if not nil.
+// Depending on implementation, the iterator can
+// be re-used or a new iterator can be allocated.
+func (s series) Iterator(chunkenc.Iterator) chunkenc.Iterator {
 	return &seriesSample{
 		data:   s.data,
 		offset: -1,

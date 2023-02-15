@@ -2,8 +2,6 @@
 
 set -e
 
-USER_UID=$(id -u)
-
 # Should be the same as build.sh
 GORELEASER_VERSION="v1.11.4"
 

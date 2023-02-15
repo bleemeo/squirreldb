@@ -100,7 +100,7 @@ func (a errAppender) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar.E
 }
 
 func (a errAppender) AppendHistogram(
-	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram,
+	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram, *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
 	return 0, a.err
 }
