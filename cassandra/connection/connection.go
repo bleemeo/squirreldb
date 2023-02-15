@@ -31,8 +31,9 @@ type Connection struct {
 	closed                    bool
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
-	observedError             chan connectError
+	wakeRunLoop               chan interface{}
 	lastConnectionEstablished time.Time
+	lastObservedError         connectError
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
@@ -99,7 +100,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 		sessionUserCount: make(map[int]int),
 		sessions:         make(map[int]*gocql.Session),
 		cancel:           cancel,
-		observedError:    make(chan connectError),
+		wakeRunLoop:      make(chan interface{}),
 	}
 
 	manager.wg.Add(1)
@@ -143,6 +144,10 @@ func (c *Connection) openSession(lockAlreadyHeld bool) error {
 		defer c.l.Unlock()
 	}
 
+	if !c.lastConnectionEstablished.IsZero() && c.sessionUserCount[c.currentSessionID] == 0 {
+		c.closeSession(c.currentSessionID)
+	}
+
 	c.currentSessionID++
 	c.sessions[c.currentSessionID] = session
 	c.lastConnectionEstablished = time.Now()
@@ -177,13 +182,11 @@ func (c *Connection) run(ctx context.Context) {
 	defer ticker.Stop()
 
 	for ctx.Err() == nil {
-		var observedError connectError
-
 		select {
 		case <-ctx.Done():
 			continue
 		case <-ticker.C:
-		case observedError = <-c.observedError:
+		case <-c.wakeRunLoop:
 		}
 
 		if time.Since(lastRunOnce) < 10*time.Second {
@@ -194,7 +197,7 @@ func (c *Connection) run(ctx context.Context) {
 
 		lastRunOnce = time.Now()
 
-		reopenConnection := c.runOnce(ctx, observedError)
+		reopenConnection := c.runOnce(ctx)
 		for reopenConnection && ctx.Err() == nil {
 			err := c.openSession(false)
 			if err != nil {
@@ -211,7 +214,7 @@ func (c *Connection) run(ctx context.Context) {
 	c.shutdown()
 }
 
-func (c *Connection) runOnce(ctx context.Context, observedError connectError) bool {
+func (c *Connection) runOnce(ctx context.Context) bool {
 	c.l.Lock()
 	defer c.l.Unlock()
 
@@ -239,14 +242,16 @@ func (c *Connection) runOnce(ctx context.Context, observedError connectError) bo
 		c.logger.Info().Err(err).Msg("Cassandra connection is no longer valid, reopening one")
 
 		reopenConnection = true
-	} else if observedError.err != nil && time.Since(c.lastConnectionEstablished) > 15*time.Minute {
+	} else if c.lastObservedError.err != nil && time.Since(c.lastConnectionEstablished) > 15*time.Minute {
 		c.logger.Info().
-			Err(observedError.err).
-			Str("HostnameAndPort", observedError.hostAndPort).
+			Err(c.lastObservedError.err).
+			Str("HostnameAndPort", c.lastObservedError.hostAndPort).
 			Msg("Observed connection and last reconnection is more than 15 minutes old")
 
 		reopenConnection = true
 	}
+
+	c.lastObservedError = connectError{}
 
 	return reopenConnection
 }

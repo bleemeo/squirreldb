@@ -13,11 +13,15 @@ type connectError struct {
 
 func (obs connectObserver) ObserveConnect(msg gocql.ObservedConnect) {
 	if msg.Err != nil {
-		select {
-		case obs.connection.observedError <- connectError{
+		obs.connection.l.Lock()
+		obs.connection.lastObservedError = connectError{
 			err:         msg.Err,
 			hostAndPort: msg.Host.HostnameAndPort(),
-		}:
+		}
+		obs.connection.l.Unlock()
+
+		select {
+		case obs.connection.wakeRunLoop <- nil:
 		default:
 		}
 
