@@ -101,6 +101,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 		),
 		Logger: log.With().Str("component", "daemon").Logger(),
 	}
+	defer squirreldb.Stop()
 
 	idx, err := squirreldb.Index(ctx, false)
 	if err != nil {
@@ -145,8 +146,10 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 					prometheus.DefaultRegisterer,
 				),
 				ExistingCluster: cluster,
-				Logger:          log.With().Str("component", "daemon").Logger(),
+				Logger:          log.With().Str("component", "daemon").Int("process", p).Logger(),
 			}
+
+			defer squirreldb.Stop()
 
 			localIndex, err := squirreldb.Index(ctx, false)
 			if err != nil {
@@ -311,7 +314,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 		beforePurge := len(ids)
 		beforeYesterday := time.Now().Truncate(24 * time.Hour).Add(-2 * 24 * time.Hour)
 
-		err = indexExpirerer.InternalForceExpirationTimestamp(beforeYesterday)
+		err = indexExpirerer.InternalForceExpirationTimestamp(ctx, beforeYesterday)
 		if err != nil {
 			return fmt.Errorf("state.Write() failed: %w", err)
 		}

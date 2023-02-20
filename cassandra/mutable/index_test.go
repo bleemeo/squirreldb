@@ -38,9 +38,9 @@ func TestMutableIndex(t *testing.T) {
 
 	dummyIndex := dummy.NewIndex(metrics)
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger())
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	labelProcessor := mutable.NewLabelProcessor(provider, "__account_id")
-	idx := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger())
+	idx := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger(true))
 
 	tests := []struct {
 		want     types.MetricsSet

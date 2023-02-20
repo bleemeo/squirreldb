@@ -23,7 +23,12 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	registry := prometheus.NewRegistry()
 	initialData := generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel)
 	store := dummy.NewMutableLabelStore(initialData)
-	provider := mutable.NewProvider(context.Background(), registry, &dummy.LocalCluster{}, store, logger.NewTestLogger())
+	provider := mutable.NewProvider(context.Background(),
+		registry,
+		&dummy.LocalCluster{},
+		store,
+		logger.NewTestLogger(true),
+	)
 
 	var searchedTenant, searchedNonMutableName, searchedMutableName string
 	for tenant, names := range initialData.AssociatedNames {
@@ -54,7 +59,12 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		lbls, err := provider.GetMutable(searchedTenant, searchedNonMutableName, searchedNonMutableValue)
+		lbls, err := provider.GetMutable(
+			context.Background(),
+			searchedTenant,
+			searchedNonMutableName,
+			searchedNonMutableValue,
+		)
 		if err != nil {
 			b.Fatal(err)
 		}

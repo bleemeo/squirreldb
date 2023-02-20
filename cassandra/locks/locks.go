@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
 	"squirreldb/retry"
 	"squirreldb/types"
@@ -17,12 +18,15 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const retryMaxDelay = 30 * time.Second
+const (
+	retryMaxDelay = 30 * time.Second
+	unlockTimeout = 15 * time.Second
+)
 
 type CassandraLocks struct {
-	session *gocql.Session
-	metrics *metrics
-	logger  zerolog.Logger
+	connection *connection.Connection
+	metrics    *metrics
+	logger     zerolog.Logger
 }
 
 type Lock struct {
@@ -44,8 +48,9 @@ type Lock struct {
 
 // New creates a new CassandraLocks object.
 func New(
+	ctx context.Context,
 	reg prometheus.Registerer,
-	session *gocql.Session,
+	connection *connection.Connection,
 	createdKeySpace bool,
 	logger zerolog.Logger,
 ) (*CassandraLocks, error) {
@@ -59,12 +64,12 @@ func New(
 	if createdKeySpace {
 		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) //nolint:gosec
 
-		err = initTable(session)
-	} else if !tableExists(session) {
+		err = initTable(ctx, connection)
+	} else if !tableExists(ctx, connection) {
 		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint:gosec
 		logger.Debug().Msg("Created lock tables")
 
-		err = initTable(session)
+		err = initTable(ctx, connection)
 	}
 
 	if err != nil {
@@ -72,23 +77,27 @@ func New(
 	}
 
 	locks := &CassandraLocks{
-		session: session,
-		metrics: newMetrics(reg),
-		logger:  logger,
+		connection: connection,
+		metrics:    newMetrics(reg),
+		logger:     logger,
 	}
 
 	return locks, nil
 }
 
-func initTable(session *gocql.Session) error {
-	locksTableCreateQuery := locksTableCreateQuery(session)
-	locksTableCreateQuery.Consistency(gocql.All)
-
-	return locksTableCreateQuery.Exec()
+func initTable(ctx context.Context, connection *connection.Connection) error {
+	return locksTableCreate(ctx, connection)
 }
 
-func tableExists(session *gocql.Session) bool {
-	err := session.Query("SELECT name FROM locks WHERE name='test'").Exec()
+func tableExists(ctx context.Context, connection *connection.Connection) bool {
+	session, err := connection.Session()
+	if err != nil {
+		return false
+	}
+
+	defer session.Close()
+
+	err = session.Query("SELECT name FROM locks WHERE name='test'").WithContext(ctx).Exec()
 
 	return err == nil
 }
@@ -127,14 +136,9 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 		panic("impossible case: tryLock should never be called when Cassandra lock is acquired")
 	}
 
-	var holder string
-
 	start := time.Now()
 
-	locksTableInsertLockQuery := l.locksTableInsertLockQuery().WithContext(ctx)
-	locksTableInsertLockQuery.SerialConsistency(gocql.LocalSerial)
-
-	acquired, err := locksTableInsertLockQuery.ScanCAS(&holder)
+	holder, acquired, err := l.locksTableInsertLock(ctx)
 
 	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
 
@@ -149,13 +153,14 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 		// The context *may* be canceled after C* took the look. So try to unlock it.
 		// Also if C* reply with timeout, we actually don't known if write succeeded or not.
 		if ctx.Err() != nil || errors.As(err, &unused) {
-			locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
-
-			locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
-
 			cassStart := time.Now()
 
-			_, err = locksTableDeleteLockQuery.ScanCAS(nil)
+			subCtx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
+			defer cancel()
+
+			// It will try to delete the lock even if main context is cancelled, so use
+			// a new background context for this.
+			_, err = l.locksTableDeleteLock(subCtx) //nolint: contextcheck
 			if err != nil {
 				l.logger.Debug().Err(err).Msg("Opportunistic unlock failed")
 			}
@@ -293,13 +298,13 @@ func (l *Lock) Unlock() {
 
 	start := time.Now()
 
-	locksTableDeleteLockQuery := l.locksTableDeleteLockQuery()
-
-	locksTableDeleteLockQuery.SerialConsistency(gocql.LocalSerial)
 	retry.Print(func() error {
 		cassStart := time.Now()
 
-		applied, err := locksTableDeleteLockQuery.ScanCAS(nil)
+		ctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
+		defer cancel()
+
+		applied, err := l.locksTableDeleteLock(ctx)
 		if err == nil && !applied {
 			l.logger.Warn().Msgf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
 		}
@@ -332,11 +337,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 			retry.Print(func() error {
 				start := time.Now()
 
-				locksTableUpdateLockQuery := l.locksTableUpdateLockQuery()
-
-				locksTableUpdateLockQuery.SerialConsistency(gocql.LocalSerial)
-
-				err := locksTableUpdateLockQuery.Exec()
+				err := l.locksTableUpdateLock(ctx)
 
 				l.c.metrics.CassandraQueriesSeconds.WithLabelValues("refresh").Observe(time.Since(start).Seconds())
 
@@ -351,44 +352,77 @@ func (l *Lock) updateLock(ctx context.Context) {
 	}
 }
 
-// Returns locks table delete lock Query.
-func (l *Lock) locksTableDeleteLockQuery() *gocql.Query {
-	query := l.c.session.Query(`
+func (l *Lock) locksTableDeleteLock(ctx context.Context) (bool, error) {
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return false, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		DELETE FROM "locks"
 		WHERE name = ?
-		IF lock_id = ?
-	`, l.name, l.lockID)
+		IF lock_id = ?`,
+		l.name, l.lockID,
+	).SerialConsistency(gocql.LocalSerial).WithContext(ctx)
 
-	return query
+	return query.ScanCAS(nil)
 }
 
-// Returns locks table insert lock Query.
-func (l *Lock) locksTableInsertLockQuery() *gocql.Query {
-	query := l.c.session.Query(`
+func (l *Lock) locksTableInsertLock(ctx context.Context) (string, bool, error) {
+	var holder string
+
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return "", false, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		UPDATE locks
 		USING TTL ?
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
-		IF lock_id in (?, NULL)
-	`, int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
+		IF lock_id in (?, NULL)`,
+		int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID,
+	).SerialConsistency(gocql.LocalSerial).WithContext(ctx)
 
-	return query
+	acquired, err := query.ScanCAS(&holder)
+
+	return holder, acquired, err
 }
 
 // Returns locks table update lock Query.
-func (l *Lock) locksTableUpdateLockQuery() *gocql.Query {
-	query := l.c.session.Query(`
+func (l *Lock) locksTableUpdateLock(ctx context.Context) error {
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
 		UPDATE locks USING TTL ?
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
-		IF lock_id = ?
-	`, int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID)
+		IF lock_id = ?`,
+		int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID,
+	).SerialConsistency(gocql.LocalSerial).WithContext(ctx)
 
-	return query
+	return query.Exec()
 }
 
 // Returns locks table create Query.
-func locksTableCreateQuery(session *gocql.Session) *gocql.Query {
+func locksTableCreate(ctx context.Context, connection *connection.Connection) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	query := session.Query(`
 		CREATE TABLE IF NOT EXISTS locks (
 			name text,
@@ -396,8 +430,8 @@ func locksTableCreateQuery(session *gocql.Session) *gocql.Query {
 			timestamp timestamp,
 			PRIMARY KEY (name)
 		)
-		WITH memtable_flush_period_in_ms = 60000
-	`)
+		WITH memtable_flush_period_in_ms = 60000`,
+	).Consistency(gocql.All).WithContext(ctx)
 
-	return query
+	return query.Exec()
 }

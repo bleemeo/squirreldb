@@ -1,6 +1,7 @@
 package dummy
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -13,7 +14,7 @@ type States struct {
 	mutex  sync.Mutex
 }
 
-func (s *States) Read(name string, value interface{}) (bool, error) {
+func (s *States) Read(_ context.Context, name string, value interface{}) (bool, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -42,7 +43,7 @@ func (s *States) Read(name string, value interface{}) (bool, error) {
 	return true, nil
 }
 
-func (s *States) Write(name string, value interface{}) error {
+func (s *States) Write(_ context.Context, name string, value interface{}) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

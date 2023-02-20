@@ -80,8 +80,9 @@ func run(ctx context.Context) error {
 					map[string]string{"process": strconv.FormatInt(int64(n), 10)},
 					prometheus.DefaultRegisterer,
 				),
-				Logger: log.With().Str("component", "daemon").Logger(),
+				Logger: log.With().Str("component", "daemon").Int("process", n).Logger(),
 			}
+			defer squirreldb.Stop()
 
 			if n == 0 {
 				err = squirreldb.DropCassandraData(ctx, false)

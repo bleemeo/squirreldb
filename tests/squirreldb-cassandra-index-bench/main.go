@@ -78,15 +78,16 @@ func run(ctx context.Context) error {
 			map[string]string{"process": "test1"},
 			prometheus.DefaultRegisterer,
 		),
-		Logger: log.With().Str("component", "daemon").Logger(),
+		Logger: log.With().Str("component", "daemon").Int("process", 1).Logger(),
 	}
+	defer squirreldb.Stop()
 
 	if !*noDropTables {
 		log.Printf("Dropping tables")
 
 		err := squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to drop keyspace")
+			return fmt.Errorf("failed to drop keyspace: %w", err)
 		}
 	}
 
@@ -95,12 +96,12 @@ func run(ctx context.Context) error {
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create file")
+			return fmt.Errorf("failed to create profile file: %w", err)
 		}
 
 		err = pprof.StartCPUProfile(f)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to start CPU profile")
+			return fmt.Errorf("failed to start CPU profile: %w", err)
 		}
 
 		defer pprof.StopCPUProfile()
@@ -125,8 +126,9 @@ func run(ctx context.Context) error {
 				map[string]string{"process": "test2"},
 				prometheus.DefaultRegisterer,
 			),
-			Logger: log.With().Str("component", "daemon2").Logger(),
+			Logger: log.With().Str("component", "daemon").Int("process", 2).Logger(),
 		}
+		defer squirreldb2.Stop()
 
 		cassandraIndex2, err := squirreldb2.Index(ctx, false)
 		if err != nil {
@@ -147,8 +149,9 @@ func run(ctx context.Context) error {
 		squirreldb3 := &daemon.SquirrelDB{
 			Config:         cfg,
 			MetricRegistry: prometheus.NewRegistry(),
-			Logger:         log.With().Str("component", "daemon3").Logger(),
+			Logger:         log.With().Str("component", "daemon").Int("process", 3).Logger(),
 		}
+		defer squirreldb3.Stop()
 
 		idx, err := squirreldb3.Index(ctx, false)
 		if err != nil {

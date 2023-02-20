@@ -54,7 +54,7 @@ type mockState struct {
 	values map[string]string
 }
 
-func (m *mockState) Read(name string, output interface{}) (bool, error) {
+func (m *mockState) Read(_ context.Context, name string, output interface{}) (bool, error) {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -73,7 +73,7 @@ func (m *mockState) Read(name string, output interface{}) (bool, error) {
 	return true, nil
 }
 
-func (m *mockState) Write(name string, value interface{}) error {
+func (m *mockState) Write(_ context.Context, name string, value interface{}) error {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -494,6 +494,9 @@ func (i *mockPostingIter) Next() (string, []byte) {
 
 func (i mockPostingIter) Err() error {
 	return i.err
+}
+
+func (i mockPostingIter) Close() {
 }
 
 func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
@@ -6771,15 +6774,15 @@ func Test_timeForShard(t *testing.T) {
 }
 
 func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTime time.Time) error {
-	previousLastProcessedDay, err := index.expirationLastProcessedDay()
+	ctx := context.Background()
+
+	previousLastProcessedDay, err := index.expirationLastProcessedDay(ctx)
 	if err != nil {
 		return err
 	}
 
 	currentNow := now
 	allWorkDone := false
-
-	ctx := context.Background()
 
 	// RunOnce does few actions that could fail is store is failing:
 	// * periodicRefreshIDInShard: error for this one will be ignored
@@ -6806,7 +6809,7 @@ func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTi
 			// For error case, cassandraExpire will be delayed by up to 15 minutes, so add 15 minutes to current time.
 			currentNow = currentNow.Add(15 * time.Minute)
 
-			lastProcessedDay, err := index.expirationLastProcessedDay()
+			lastProcessedDay, err := index.expirationLastProcessedDay(ctx)
 			if err != nil {
 				return err
 			}

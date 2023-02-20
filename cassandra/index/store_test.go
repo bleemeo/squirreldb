@@ -197,6 +197,9 @@ func (it errPostingIter) Err() error {
 	return it.err
 }
 
+func (it errPostingIter) Close() {
+}
+
 // SelectPostingByName return  label value with the associated postings in sorted order.
 func (s *failingStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
 	if err := s.callShouldFailBefore(ctx, "SelectPostingByName"); err != nil {
@@ -204,6 +207,7 @@ func (s *failingStore) SelectPostingByName(ctx context.Context, shard int32, nam
 	}
 
 	r1 := s.realStore.SelectPostingByName(ctx, shard, name)
+	defer r1.Close()
 
 	err := s.callShouldFailAfter(ctx, "SelectPostingByName", r1.Err())
 	if err != nil {

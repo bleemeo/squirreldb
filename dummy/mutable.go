@@ -1,6 +1,7 @@
 package dummy
 
 import (
+	"context"
 	"errors"
 	"squirreldb/cassandra/mutable"
 )
@@ -68,13 +69,13 @@ func NewMutableLabelStore(lbls MutableLabels) mutable.Store {
 	return mutableLabelStore{labels: lbls}
 }
 
-func (s mutableLabelStore) AssociatedNames(tenant string) (map[string]string, error) {
+func (s mutableLabelStore) AssociatedNames(_ context.Context, tenant string) (map[string]string, error) {
 	associatedNames := s.labels.AssociatedNames[tenant]
 
 	return associatedNames, nil
 }
 
-func (s mutableLabelStore) AssociatedValues(tenant, name string) (map[string][]string, error) {
+func (s mutableLabelStore) AssociatedValues(_ context.Context, tenant, name string) (map[string][]string, error) {
 	key := mutable.LabelKey{
 		Tenant: tenant,
 		Name:   name,
@@ -85,18 +86,18 @@ func (s mutableLabelStore) AssociatedValues(tenant, name string) (map[string][]s
 	return associatedValues, nil
 }
 
-func (s mutableLabelStore) DeleteAssociatedName(tenant, name string) error {
+func (s mutableLabelStore) DeleteAssociatedName(_ context.Context, tenant, name string) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) DeleteAssociatedValues(label mutable.Label) error {
+func (s mutableLabelStore) DeleteAssociatedValues(_ context.Context, label mutable.Label) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) SetAssociatedName(label mutable.LabelWithName) error {
+func (s mutableLabelStore) SetAssociatedName(_ context.Context, label mutable.LabelWithName) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) SetAssociatedValues(label mutable.LabelWithValues) error {
+func (s mutableLabelStore) SetAssociatedValues(_ context.Context, label mutable.LabelWithValues) error {
 	return errNotImplemented
 }

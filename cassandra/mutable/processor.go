@@ -2,6 +2,7 @@
 package mutable
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -34,7 +35,10 @@ func NewLabelProcessor(provider LabelProvider, tenantLabelName string) *LabelPro
 // ReplaceMutableLabels searches for mutable labels and replace them by non mutable labels.
 // For example if we have a mutable label group "mygroup" which contains 'server1' and 'server2',
 // the label matcher group="mygroup" becomes instance="server1|server2".
-func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*labels.Matcher, error) {
+func (lp *LabelProcessor) ReplaceMutableLabels(
+	ctx context.Context,
+	matchers []*labels.Matcher,
+) ([]*labels.Matcher, error) {
 	processedMatchers := make([]*labels.Matcher, 0, len(matchers))
 	tenant := lp.tenantFromMatchers(matchers)
 
@@ -45,7 +49,7 @@ func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*l
 
 	// Search for mutable labels and replace them by non mutable labels.
 	for _, matcher := range matchers {
-		isMutableLabel, err := lp.IsMutableLabel(tenant, matcher.Name)
+		isMutableLabel, err := lp.IsMutableLabel(ctx, tenant, matcher.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -59,9 +63,9 @@ func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*l
 		var newMatcher *labels.Matcher
 
 		if matcher.Type == labels.MatchRegexp || matcher.Type == labels.MatchNotRegexp {
-			newMatcher, err = lp.processMutableLabelRegex(tenant, matcher)
+			newMatcher, err = lp.processMutableLabelRegex(ctx, tenant, matcher)
 		} else {
-			newMatcher, err = lp.processMutableLabel(tenant, matcher)
+			newMatcher, err = lp.processMutableLabel(ctx, tenant, matcher)
 		}
 
 		if err != nil {
@@ -77,8 +81,8 @@ func (lp *LabelProcessor) ReplaceMutableLabels(matchers []*labels.Matcher) ([]*l
 }
 
 // IsMutableLabel returns whether the label name is mutable.
-func (lp *LabelProcessor) IsMutableLabel(tenant, name string) (bool, error) {
-	mutableLabelNames, err := lp.labelProvider.MutableLabelNames(tenant)
+func (lp *LabelProcessor) IsMutableLabel(ctx context.Context, tenant, name string) (bool, error) {
+	mutableLabelNames, err := lp.labelProvider.MutableLabelNames(ctx, tenant)
 	if err != nil {
 		return false, err
 	}
@@ -103,8 +107,11 @@ func (lp *LabelProcessor) tenantFromMatchers(matchers []*labels.Matcher) string 
 }
 
 // processMutableLabel replaces a mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Matcher) (*labels.Matcher, error) {
-	lbls, err := lp.labelProvider.GetNonMutable(tenant, matcher.Name, matcher.Value)
+func (lp *LabelProcessor) processMutableLabel(ctx context.Context,
+	tenant string,
+	matcher *labels.Matcher,
+) (*labels.Matcher, error) {
+	lbls, err := lp.labelProvider.GetNonMutable(ctx, tenant, matcher.Name, matcher.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -118,18 +125,22 @@ func (lp *LabelProcessor) processMutableLabel(tenant string, matcher *labels.Mat
 }
 
 // processMutableLabelRegex replaces a regex mutable matcher by non mutable matchers.
-func (lp *LabelProcessor) processMutableLabelRegex(tenant string, matcher *labels.Matcher) (*labels.Matcher, error) {
+func (lp *LabelProcessor) processMutableLabelRegex(
+	ctx context.Context,
+	tenant string,
+	matcher *labels.Matcher,
+) (*labels.Matcher, error) {
 	// Search for all matching values.
 	var matchingLabels NonMutableLabels
 
-	values, err := lp.labelProvider.AllValues(tenant, matcher.Name)
+	values, err := lp.labelProvider.AllValues(ctx, tenant, matcher.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, value := range values {
 		if matcher.Matches(value) {
-			lbls, err := lp.labelProvider.GetNonMutable(tenant, matcher.Name, value)
+			lbls, err := lp.labelProvider.GetNonMutable(ctx, tenant, matcher.Name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -217,7 +228,7 @@ func regexMatchType(matchType labels.MatchType) labels.MatchType {
 // AddMutableLabels searches for non mutable labels and add their corresponding mutable labels
 // if they exist. For example if we have a mutable label group "mygroup" which contains 'server1',
 // and the label instance="server1" as input, the label group="mygroup" will be added.
-func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, error) {
+func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labels) (labels.Labels, error) {
 	// Find the tenant.
 	var tenant string
 
@@ -236,7 +247,7 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 
 	// Search for mutable labels associated to these labels.
 	for _, label := range lbls {
-		newMutableLabels, err := lp.labelProvider.GetMutable(tenant, label.Name, label.Value)
+		newMutableLabels, err := lp.labelProvider.GetMutable(ctx, tenant, label.Name, label.Value)
 		if err != nil {
 			if errors.Is(err, errNoResult) {
 				continue
@@ -257,6 +268,6 @@ func (lp *LabelProcessor) AddMutableLabels(lbls labels.Labels) (labels.Labels, e
 }
 
 // MutableLabelNames returns all the mutable label names possible for a tenant.
-func (lp *LabelProcessor) MutableLabelNames(tenant string) ([]string, error) {
-	return lp.labelProvider.MutableLabelNames(tenant)
+func (lp *LabelProcessor) MutableLabelNames(ctx context.Context, tenant string) ([]string, error) {
+	return lp.labelProvider.MutableLabelNames(ctx, tenant)
 }

@@ -1,8 +1,10 @@
 package states
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"squirreldb/cassandra/connection"
 	"strconv"
 	"sync"
 
@@ -10,35 +12,28 @@ import (
 )
 
 type CassandraStates struct {
-	session *gocql.Session
+	connection *connection.Connection
 }
 
 // New creates a new CassandraStates object.
-func New(session *gocql.Session, lock sync.Locker) (*CassandraStates, error) {
+func New(ctx context.Context, connection *connection.Connection, lock sync.Locker) (*CassandraStates, error) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	statesTableCreateQuery := statesTableCreateQuery(session)
-	statesTableCreateQuery.Consistency(gocql.All)
-
-	if err := statesTableCreateQuery.Exec(); err != nil {
+	if err := statesTableCreate(ctx, connection); err != nil {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
 	states := &CassandraStates{
-		session: session,
+		connection: connection,
 	}
 
 	return states, nil
 }
 
 // Read reads value of the state from the states table.
-func (c *CassandraStates) Read(name string, value interface{}) (found bool, err error) {
-	statesTableSelectStateQuery := c.statesTableSelectStateQuery(name)
-
-	var valueString string
-
-	err = statesTableSelectStateQuery.Scan(&valueString)
+func (c *CassandraStates) Read(ctx context.Context, name string, value interface{}) (found bool, err error) {
+	valueString, err := c.statesTableSelectState(ctx, name)
 
 	if errors.Is(err, gocql.ErrNotFound) {
 		return false, nil
@@ -68,11 +63,10 @@ func (c *CassandraStates) Read(name string, value interface{}) (found bool, err 
 }
 
 // Write updates the state in the states table.
-func (c *CassandraStates) Write(name string, value interface{}) error {
+func (c *CassandraStates) Write(ctx context.Context, name string, value interface{}) error {
 	valueString := fmt.Sprint(value)
-	statesTableUpdateStateQuery := c.statesTableInsertStateQuery(name, valueString)
 
-	if err := statesTableUpdateStateQuery.Exec(); err != nil {
+	if err := c.statesTableInsertState(ctx, name, valueString); err != nil {
 		return fmt.Errorf("update Cassandra: %w", err)
 	}
 
@@ -80,35 +74,61 @@ func (c *CassandraStates) Write(name string, value interface{}) error {
 }
 
 // Returns states table insert state Query.
-func (c *CassandraStates) statesTableInsertStateQuery(name string, value string) *gocql.Query {
-	query := c.session.Query(`
-		INSERT INTO states (name, value)
-		VALUES (?, ?)
-	`, name, value)
+func (c *CassandraStates) statesTableInsertState(ctx context.Context, name string, value string) error {
+	session, err := c.connection.Session()
+	if err != nil {
+		return err
+	}
 
-	return query
+	defer session.Close()
+
+	query := session.Query(`
+		INSERT INTO states (name, value)
+		VALUES (?, ?)`,
+		name, value,
+	).WithContext(ctx)
+
+	return query.Exec()
 }
 
 // Returns states table select state Query.
-func (c *CassandraStates) statesTableSelectStateQuery(name string) *gocql.Query {
-	query := c.session.Query(`
-		SELECT value FROM states
-		WHERE name = ?
-	`, name)
+func (c *CassandraStates) statesTableSelectState(ctx context.Context, name string) (string, error) {
+	var valueString string
 
-	return query
+	session, err := c.connection.Session()
+	if err != nil {
+		return "", err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
+		SELECT value FROM states
+		WHERE name = ?`,
+		name,
+	).WithContext(ctx)
+
+	err = query.Scan(&valueString)
+
+	return valueString, err
 }
 
-// Returns states table create Query.
-func statesTableCreateQuery(session *gocql.Session) *gocql.Query {
+func statesTableCreate(ctx context.Context, connection *connection.Connection) error {
+	session, err := connection.Session()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
 	query := session.Query(`
 		CREATE TABLE IF NOT EXISTS states (
 			name text,
 			value text,
 			PRIMARY KEY (name)
 		)
-		WITH memtable_flush_period_in_ms = 300000
-	`)
+		WITH memtable_flush_period_in_ms = 300000`,
+	).Consistency(gocql.All).WithContext(ctx)
 
-	return query
+	return query.Exec()
 }

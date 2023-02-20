@@ -92,10 +92,12 @@ func run(ctx context.Context) error {
 				map[string]string{"process": strconv.FormatInt(int64(p), 10)},
 				prometheus.DefaultRegisterer,
 			),
-			Logger: log.With().Str("component", "daemon").Logger(),
+			Logger: log.With().Str("component", "daemon").Int("process", p).Logger(),
 		}
 
-		lockFactory, err := squirreldb.LockFactory()
+		defer squirreldb.Stop()
+
+		lockFactory, err := squirreldb.LockFactory(ctx)
 		if err != nil {
 			return err
 		}

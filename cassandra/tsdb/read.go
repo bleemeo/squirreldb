@@ -17,6 +17,7 @@ import (
 )
 
 type readIter struct {
+	ctx                   context.Context //nolint: containedctx
 	err                   error
 	c                     *CassandraTSDB
 	tmp                   []types.MetricPoint
@@ -44,6 +45,7 @@ func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricReques
 	tmp := c.getPointsBuffer()
 
 	return &readIter{
+		ctx:                   ctx,
 		c:                     c,
 		request:               request,
 		tmp:                   tmp,
@@ -95,7 +97,7 @@ func (i *readIter) Next() bool {
 
 	if readAggregate {
 		newData, newTmp, err := i.c.readAggregateData(
-			id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function,
+			i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function,
 		)
 
 		i.tmp = newTmp
@@ -120,7 +122,7 @@ func (i *readIter) Next() bool {
 	}
 
 	if fromTimestamp <= i.request.ToTimestamp {
-		newData, newTmp, err := i.c.readRawData(id, data, fromTimestamp, i.request.ToTimestamp, i.tmp)
+		newData, newTmp, err := i.c.readRawData(i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp)
 
 		i.tmp = newTmp
 		data = newData
@@ -143,6 +145,7 @@ func (i *readIter) Next() bool {
 
 // Returns aggregated data between the specified timestamps of the requested metric. Return points in descending order.
 func (c *CassandraTSDB) readAggregateData(
+	ctx context.Context,
 	id types.MetricID,
 	buffer types.MetricData,
 	fromTimestamp, toTimestamp int64,
@@ -156,7 +159,7 @@ func (c *CassandraTSDB) readAggregateData(
 	buffer.ID = id
 
 	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= aggregatePartitionSize.Milliseconds() {
-		tmp, err = c.readAggregatePartitionData(&buffer, fromTimestamp, toTimestamp, baseTS, tmp, function)
+		tmp, err = c.readAggregatePartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp, function)
 
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "aggregated").Observe(time.Since(start).Seconds())
@@ -174,6 +177,7 @@ func (c *CassandraTSDB) readAggregateData(
 
 // Returns aggregated partition data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readAggregatePartitionData(
+	ctx context.Context,
 	aggregateData *types.MetricData,
 	fromTimestamp, toTimestamp, baseTimestamp int64,
 	tmp []types.MetricPoint,
@@ -190,7 +194,20 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 
 	start := time.Now()
 
-	tableSelectDataIter := c.aggregatedTableSelectDataIter(int64(aggregateData.ID), baseTimestamp, fromOffset, toOffset)
+	session, err := c.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
+	tableSelectDataIter := c.aggregatedTableSelectDataIter(ctx,
+		session.Session,
+		int64(aggregateData.ID),
+		baseTimestamp,
+		fromOffset,
+		toOffset,
+	)
 
 	queryDuration := time.Since(start)
 
@@ -233,6 +250,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 
 // Returns raw data between the specified timestamps of the requested metric. Return points in descending order.
 func (c *CassandraTSDB) readRawData(
+	ctx context.Context,
 	id types.MetricID,
 	buffer types.MetricData,
 	fromTimestamp, toTimestamp int64,
@@ -245,7 +263,7 @@ func (c *CassandraTSDB) readRawData(
 	buffer.ID = id
 
 	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= rawPartitionSize.Milliseconds() {
-		tmp, err = c.readRawPartitionData(&buffer, fromTimestamp, toTimestamp, baseTS, tmp)
+		tmp, err = c.readRawPartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp)
 
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
@@ -263,6 +281,7 @@ func (c *CassandraTSDB) readRawData(
 
 // readRawPartitionData add to rawData data between the specified timestamps of the requested metric.
 func (c *CassandraTSDB) readRawPartitionData(
+	ctx context.Context,
 	rawData *types.MetricData,
 	fromTimestamp, toTimestamp, baseTimestamp int64,
 	tmp []types.MetricPoint,
@@ -278,8 +297,15 @@ func (c *CassandraTSDB) readRawPartitionData(
 
 	start := time.Now()
 
+	session, err := c.connection.Session()
+	if err != nil {
+		return nil, err
+	}
+
+	defer session.Close()
+
 	tableSelectDataIter := c.rawTableSelectDataIter(
-		int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp,
+		ctx, session.Session, int64(rawData.ID), baseTimestamp, fromOffsetTimestamp, toOffsetTimestamp,
 	)
 
 	queryDuration := time.Since(start)
@@ -323,21 +349,36 @@ func (c *CassandraTSDB) readRawPartitionData(
 }
 
 // Returns table select data Query.
-func (c *CassandraTSDB) rawTableSelectDataIter(id int64, baseTimestamp, fromOffset, toOffset int64) *gocql.Iter {
-	query := c.session.Query(`
+func (c *CassandraTSDB) rawTableSelectDataIter(
+	ctx context.Context,
+	session *gocql.Session,
+	id int64,
+	baseTimestamp,
+	fromOffset,
+	toOffset int64,
+) *gocql.Iter {
+	query := session.Query(`
 		SELECT offset_ms, TTL(values), values FROM data
-		WHERE metric_id = ? AND base_ts = ? AND offset_ms >= ? AND offset_ms <= ?
-	`, id, baseTimestamp, fromOffset, toOffset)
+		WHERE metric_id = ? AND base_ts = ? AND offset_ms >= ? AND offset_ms <= ?`,
+		id, baseTimestamp, fromOffset, toOffset,
+	).WithContext(ctx)
 	iter := query.Iter()
 
 	return iter
 }
 
-func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, fromOffset, toOffset int64) *gocql.Iter {
-	query := c.session.Query(`
+func (c *CassandraTSDB) aggregatedTableSelectDataIter(ctx context.Context,
+	session *gocql.Session,
+	id int64,
+	baseTimestamp,
+	fromOffset,
+	toOffset int64,
+) *gocql.Iter {
+	query := session.Query(`
 		SELECT offset_second, TTL(values), values FROM data_aggregated
-		WHERE metric_id = ? AND base_ts = ? AND offset_second >= ? AND offset_second <= ?
-	`, id, baseTimestamp, fromOffset/1000, toOffset/1000)
+		WHERE metric_id = ? AND base_ts = ? AND offset_second >= ? AND offset_second <= ?`,
+		id, baseTimestamp, fromOffset/1000, toOffset/1000,
+	).WithContext(ctx)
 	iter := query.Iter()
 
 	return iter

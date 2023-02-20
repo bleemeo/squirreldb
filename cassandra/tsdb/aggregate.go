@@ -133,7 +133,7 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 
 			for _, data := range metrics[startIndex:endIndex] {
 				retry.Print(func() error {
-					return c.writeAggregateData(data, writingTimestamp) //nolint:scopelint
+					return c.writeAggregateData(ctx, data, writingTimestamp) //nolint:scopelint
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 					c.logger,
 					"write aggregated points to Cassandra",
@@ -211,6 +211,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 					var err error
 
 					rangePointsCount, err = c.doAggregation(
+						ctx,
 						ids,
 						currentFrom.UnixNano()/1000000,
 						currentTo.UnixNano()/1000000,
@@ -292,7 +293,7 @@ func (c *CassandraTSDB) aggregateShard(
 	{
 		var fromTimeStr string
 		retry.Print(func() error {
-			_, err := c.state.Read(name, &fromTimeStr)
+			_, err := c.state.Read(ctx, name, &fromTimeStr)
 
 			return err //nolint:wrapcheck
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
@@ -316,7 +317,7 @@ func (c *CassandraTSDB) aggregateShard(
 		fromTime = maxTime
 
 		retry.Print(func() error {
-			return c.state.Write(name, fromTime.Format(time.RFC3339))
+			return c.state.Write(ctx, name, fromTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			c.logger,
 			"update state for shard "+name,
@@ -368,13 +369,13 @@ func (c *CassandraTSDB) aggregateShard(
 	start := time.Now()
 
 	if count, err := c.doAggregation(
-		shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds(),
+		ctx, shardIDs, fromTime.UnixNano()/1000000, toTime.UnixNano()/1000000, aggregateResolution.Milliseconds(),
 	); err == nil {
 		c.logger.Debug().Msgf("Aggregated shard %d from [%v] to [%v] and read %d points in %v",
 			shard, fromTime, toTime, count, time.Since(start))
 
 		retry.Print(func() error {
-			return c.state.Write(name, toTime.Format(time.RFC3339))
+			return c.state.Write(ctx, name, toTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			c.logger,
 			"update state for shard "+name,
@@ -387,7 +388,12 @@ func (c *CassandraTSDB) aggregateShard(
 }
 
 // doAggregation perform the aggregation for given parameter.
-func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTimestamp, resolution int64) (int, error) {
+func (c *CassandraTSDB) doAggregation(ctx context.Context,
+	ids []types.MetricID,
+	fromTimestamp,
+	toTimestamp,
+	resolution int64,
+) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -410,7 +416,7 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 		metric.TimeToLive = 0
 		metric.Points = metric.Points[:0]
 
-		metric, tmp, err = c.readRawData(id, metric, fromTimestamp, toTimestamp, tmp)
+		metric, tmp, err = c.readRawData(ctx, id, metric, fromTimestamp, toTimestamp, tmp)
 		if err != nil {
 			return pointsRead, err
 		}
@@ -425,7 +431,7 @@ func (c *CassandraTSDB) doAggregation(ids []types.MetricID, fromTimestamp, toTim
 			continue
 		}
 
-		err := c.writeAggregateData(aggregatedMetric, 0)
+		err := c.writeAggregateData(ctx, aggregatedMetric, 0)
 		if err != nil {
 			return pointsRead, err
 		}
