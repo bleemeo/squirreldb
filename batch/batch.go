@@ -625,7 +625,7 @@ func (b *Batch) flush(
 		// The TTL should be long enough to allow another SquirrelDB to detect
 		// that this metrics has no ownership.
 		// maximum deadline is now + b.batchSize
-		// Give two takeoverInterval as safely margin
+		// Give two takeoverInterval as safety margin.
 		ttl := 2*takeoverInterval + overdueThreshold + b.batchSize
 
 		return b.memoryStore.MarkToExpire(ctx, idToExpire, ttl)

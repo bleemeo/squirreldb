@@ -343,6 +343,8 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(id int64, baseTimestamp, f
 	return iter
 }
 
+// Decode encoded points.
+// The values are mutated and should not be reused.
 func (c *CassandraTSDB) decodePoints(
 	values []byte,
 	baseTimestamp int64,
@@ -366,6 +368,8 @@ func (c *CassandraTSDB) decodePoints(
 	}
 }
 
+// Decode gorilla encoded values.
+// The values are mutated and should not be reused.
 func gorillaDecode(
 	values []byte,
 	baseTimestamp int64,
@@ -425,13 +429,13 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 
 	//nolint:goconst
 	switch function {
-	case "min":
+	case "min", "min_over_time":
 		streamNumber = 0
-	case "max":
+	case "max", "max_over_time":
 		streamNumber = 1
-	case "avg":
+	case "avg", "avg_over_time":
 		streamNumber = 2
-	case "count":
+	case "count", "count_over_time":
 		streamNumber = 3
 	default:
 		streamNumber = 2
@@ -503,6 +507,8 @@ func (c *CassandraTSDB) xorChunkDecode(values []byte, result []types.MetricPoint
 	return result, nil
 }
 
+// Decode gorilla encoded aggregated points.
+// The values are mutated and should not be reused.
 func gorillaDecodeAggregate(
 	values []byte,
 	baseTimestamp int64,

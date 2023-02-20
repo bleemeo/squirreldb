@@ -153,6 +153,16 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     sh -exc "go run $race_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
 
 echo
+echo "== Running squirreldb-promql-aggregate"
+docker run $docker_network --rm -e HOME=/go/pkg \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-promql-aggregate/"
+
+echo
 echo "== Running remote-storage-test"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
