@@ -85,6 +85,7 @@ func NewPrometheus(
 		LookbackDelta:      5 * time.Minute,
 	})
 
+	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
 	rulesRetrieverFunc := func(context.Context) v1.RulesRetriever { return mockRulesRetriever{} }
@@ -115,6 +116,7 @@ func NewPrometheus(
 		queryable,
 		appendable,
 		mockExemplarQueryable{},
+		scrapePoolRetrieverFunc,
 		targetRetrieverFunc,
 		alertmanagerRetrieverFunc,
 		configFunc,

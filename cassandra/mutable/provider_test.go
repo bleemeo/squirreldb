@@ -127,7 +127,7 @@ func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableL
 func randomString(length int) string {
 	b := make([]byte, length)
 
-	rand.Read(b)
+	rand.Read(b) //nolint:staticcheck // Deprecated.
 
 	return fmt.Sprintf("%x", b)[:length]
 }

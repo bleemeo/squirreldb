@@ -29,6 +29,13 @@ func (mockExemplarQuerier) Select(start, end int64, matchers ...[]*labels.Matche
 	return nil, errNotImplemented
 }
 
+// mockScrapePoolRetriever implements v1.ScrapePoolRetriever.
+type mockScrapePoolRetriever struct{}
+
+func (mockScrapePoolRetriever) ScrapePools() []string {
+	return nil
+}
+
 // mockTargetRetriever implements v1.TargetRetriever.
 type mockTargetRetriever struct{}
 

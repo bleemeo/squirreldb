@@ -239,7 +239,7 @@ func (w *writeMetrics) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata
 }
 
 func (w *writeMetrics) AppendHistogram(
-	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram,
+	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram, *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
 	return 0, ErrNotImplemented
 }

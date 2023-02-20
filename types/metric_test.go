@@ -451,7 +451,7 @@ func TestSortPoints(t *testing.T) {
 }
 
 func BenchmarkDeduplicatePoints(b *testing.B) {
-	rand.Seed(42)
+	rand.Seed(42) //nolint:staticcheck // Deprecated.
 
 	tests := []struct {
 		name   string
