@@ -25,13 +25,7 @@ const (
 	aggregateSize          = 24 * time.Hour
 )
 
-const (
-	retryMaxDelay = 30 * time.Second
-	// Format write in Cassandra changed from this date.
-	// Only the first timestamp count (base_ts + offset_ts).
-	// All SquirrelDB must be updated before this date.
-	newFormatFrom = "2021-06-15T09:00:00Z"
-)
+const retryMaxDelay = 30 * time.Second
 
 var (
 	errPointsEmptyValues = errors.New("empty points values")
@@ -63,7 +57,6 @@ type CassandraTSDB struct {
 	index            types.Index
 	lockFactory      lockFactory
 	state            types.State
-	newFormatCutoff  int64
 	pointsBufferPool sync.Pool
 	bytesPool        sync.Pool
 	xorChunkPool     chunkenc.Pool
@@ -82,11 +75,6 @@ func New(
 ) (*CassandraTSDB, error) {
 	options.SchemaLock.Lock()
 	defer options.SchemaLock.Unlock()
-
-	newFormatCutoff, err := time.Parse(time.RFC3339, newFormatFrom)
-	if err != nil {
-		return nil, fmt.Errorf("invalid newFormatFrom: %w", err)
-	}
 
 	if err := dataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
 		return nil, fmt.Errorf("create table data: %w", err)
@@ -114,8 +102,7 @@ func New(
 				return make([]byte, 15)
 			},
 		},
-		xorChunkPool:    chunkenc.NewPool(),
-		newFormatCutoff: newFormatCutoff.Unix(),
+		xorChunkPool: chunkenc.NewPool(),
 	}
 
 	return tsdb, nil

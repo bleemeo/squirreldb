@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
@@ -136,10 +135,7 @@ func (c *CassandraTSDB) writeAggregateRow(
 		return nil
 	}
 
-	firstPoint := aggregatedData.Points[0]
-	offsetMs := firstPoint.Timestamp - baseTimestamp
-
-	aggregateValues, err := c.encodeAggregatedPoints(aggregatedData.Points, baseTimestamp, offsetMs)
+	aggregateValues, err := c.encodeAggregatedPoints(aggregatedData.Points)
 	if err != nil {
 		return err
 	}
@@ -158,6 +154,7 @@ func (c *CassandraTSDB) writeAggregateRow(
 	}
 
 	start := time.Now()
+	offsetMs := aggregatedData.Points[0].Timestamp - baseTimestamp
 
 	err = c.tableInsertAggregatedData(ctx,
 		int64(id),
@@ -234,9 +231,7 @@ func (c *CassandraTSDB) writeRawPartitionData(
 		return nil
 	}
 
-	offsetMs := data.Points[0].Timestamp - baseTimestamp
-
-	rawValues, err := c.encodePoints(data.Points, baseTimestamp, offsetMs)
+	rawValues, err := c.encodePoints(data.Points)
 	if err != nil {
 		return err
 	}
@@ -255,6 +250,7 @@ func (c *CassandraTSDB) writeRawPartitionData(
 	}
 
 	start := time.Now()
+	offsetMs := data.Points[0].Timestamp - baseTimestamp
 
 	err = c.tableInsertRawData(
 		ctx,
@@ -350,12 +346,7 @@ func (c *CassandraTSDB) tableInsertAggregatedData(
 	return query.Exec()
 }
 
-func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp int64, offset int64) ([]byte, error) {
-	if baseTimestamp+offset < c.newFormatCutoff*1000 {
-		// minus one on baseTimestamp is to ensure offset is > 0
-		return gorillaEncode(points, uint32(offset), baseTimestamp-1), nil
-	}
-
+func (c *CassandraTSDB) encodePoints(points []types.MetricPoint) ([]byte, error) {
 	pbuffer, ok := c.bytesPool.Get().(*[]byte)
 
 	var buffer []byte
@@ -387,15 +378,7 @@ func (c *CassandraTSDB) encodePoints(points []types.MetricPoint, baseTimestamp i
 	return buffer, nil
 }
 
-func (c *CassandraTSDB) encodeAggregatedPoints(
-	points []aggregate.AggregatedPoint,
-	baseTimestamp int64,
-	offset int64,
-) ([]byte, error) {
-	if baseTimestamp+offset < c.newFormatCutoff*1000 {
-		return gorillaEncodeAggregate(points, uint32(offset/aggregateResolution.Milliseconds()), baseTimestamp), nil
-	}
-
+func (c *CassandraTSDB) encodeAggregatedPoints(points []aggregate.AggregatedPoint) ([]byte, error) {
 	pbuffer, ok := c.bytesPool.Get().(*[]byte)
 
 	var buffer []byte
@@ -498,90 +481,4 @@ func (c *CassandraTSDB) xorChunkEncodeAggregate(points []aggregate.AggregatedPoi
 	}
 
 	return buffer, nil
-}
-
-// gorillaEncode encode points using Gorilla tsz
-//
-// It's the encoding described in https://www.vldb.org/pvldb/vol8/p1816-teller.pdf with two change:
-//   - This function use millisecond precision timestamp (while Gorilla use second). This function
-//     will pass the millisecond timestamp as second timestamp.
-//   - All timestamp of offseted by baseTimestamp (that is, the actual value stored is the timestamp
-//     with baseTimestamp subtracted).
-//     This second points allow timestamp to remain smaller than 32-bits integer, which is required
-//     because Gorilla can't store larger timestamp (strictly speaking, can't store delta larger than
-//     a 32-bits integer)
-//
-// There are the following constraint:
-// * points must be sorted
-// * baseTimestamp must be *strickly* less than all point timestamps
-// * t0 is baseTimestamp + offset. offset *must* be > 0
-// * t0 must be less or equal to all points timestamps
-// * Delta with biggest timestamp and baseTimestamp must be less than 49 days (fit in 32 bits integer)
-// * delta with first point timestamp and t0 must fit in 14-bits integer (that is ~16 seconds).
-func gorillaEncode(points []types.MetricPoint, offset uint32, baseTimestamp int64) []byte {
-	s := tsz.New(offset)
-
-	for _, point := range points {
-		s.Push(uint32(point.Timestamp-baseTimestamp), point.Value)
-	}
-
-	s.Finish()
-
-	buffer := s.Bytes()
-
-	return buffer
-}
-
-// gorillaEncodeAggregate encode aggregated points
-// It's mostly gorillaEncode() done for each aggregate (min, max, average, ...) concatened, but with all timestamp
-// encoded as multiple of scale.
-// It also means that same constraint as gorillaEncode apply (but any maximum time delta are scaled), for it may not
-// store only ~49 days but 49 * scale days (with default of 300000 - 5 minute in milliseconds - that is ~40 000 year).
-func gorillaEncodeAggregate(points []aggregate.AggregatedPoint, offsetScale uint32, baseTimestamp int64) []byte {
-	var (
-		buffer        []byte
-		uvarIntBuffer [binary.MaxVarintLen32]byte
-	)
-
-	scale := aggregateResolution.Milliseconds()
-	workPoint := make([]types.MetricPoint, len(points))
-
-	for i, p := range points {
-		workPoint[i].Timestamp = p.Timestamp / scale
-		workPoint[i].Value = p.Min
-	}
-
-	tmp := gorillaEncode(workPoint, offsetScale, baseTimestamp/scale)
-	n := binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
-	buffer = append(buffer, uvarIntBuffer[:n]...)
-	buffer = append(buffer, tmp...)
-
-	for i, p := range points {
-		workPoint[i].Value = p.Max
-	}
-
-	tmp = gorillaEncode(workPoint, offsetScale, baseTimestamp/scale)
-	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
-	buffer = append(buffer, uvarIntBuffer[:n]...)
-	buffer = append(buffer, tmp...)
-
-	for i, p := range points {
-		workPoint[i].Value = p.Average
-	}
-
-	tmp = gorillaEncode(workPoint, offsetScale, baseTimestamp/scale)
-	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
-	buffer = append(buffer, uvarIntBuffer[:n]...)
-	buffer = append(buffer, tmp...)
-
-	for i, p := range points {
-		workPoint[i].Value = p.Count
-	}
-
-	tmp = gorillaEncode(workPoint, offsetScale, baseTimestamp/scale)
-	n = binary.PutUvarint(uvarIntBuffer[:], uint64(len(tmp)))
-	buffer = append(buffer, uvarIntBuffer[:n]...)
-	buffer = append(buffer, tmp...)
-
-	return buffer
 }
