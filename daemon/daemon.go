@@ -795,7 +795,6 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			URL:                s.Config.Telemetry.Address,
 			Version:            Version,
 			InstallationFormat: s.Config.Internal.Installation.Format,
-			LockTimeout:        5 * time.Second,
 			LockFactory:        s.lockFactory,
 			State:              state,
 			Logger:             s.Logger.With().Str("component", "telemetry").Logger(),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"squirreldb/dummy"
 	"testing"
-	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -75,7 +74,6 @@ func createTelemetryAndGetID(t *testing.T, lockFactory *dummy.Locks, state *dumm
 	t.Helper()
 
 	telemetry := New(Options{
-		LockTimeout: 100 * time.Millisecond,
 		LockFactory: lockFactory,
 		State:       state,
 		Logger:      log.With().Str("component", "telemetry-1").Logger(),

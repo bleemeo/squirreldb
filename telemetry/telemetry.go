@@ -62,9 +62,7 @@ type Options struct {
 	// The way SquirrelDB was installed (Manual, Package, Docker, etc).
 	InstallationFormat string
 	// SquirrelDB version.
-	Version string
-	// Timeout used when taking a lock.
-	LockTimeout time.Duration
+	Version     string
 	LockFactory lockFactory
 	State       types.State
 	Logger      zerolog.Logger
@@ -203,13 +201,8 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 			return "", ctx.Err()
 		}
 
-		// We only know if a lock is already taken after the timeout (10s). This is slow
-		// if many locks are taken but it doesn't matter since it only runs once a day.
-		ctxTimeout, cancel := context.WithTimeout(ctx, t.opts.LockTimeout)
-		defer cancel()
-
 		lock := t.opts.LockFactory.CreateLock("telemetry-id-"+id, idLockTTL)
-		if ok := lock.TryLock(ctxTimeout, 0); !ok {
+		if ok := lock.TryLock(ctx, 0); !ok {
 			// The lock is taken, another SquirrelDB already uses this ID.
 			continue
 		}
