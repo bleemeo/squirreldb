@@ -2,6 +2,7 @@ package states
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"squirreldb/cassandra/connection"
@@ -56,7 +57,12 @@ func (c *CassandraStates) Read(ctx context.Context, name string, value interface
 	case *string:
 		*v = valueString
 	default:
-		return false, fmt.Errorf("unknown type")
+		err := json.Unmarshal([]byte(valueString), value)
+		if err != nil {
+			return false, fmt.Errorf("failed to unmarshal value: %w", err)
+		}
+
+		return true, nil
 	}
 
 	return true, nil
@@ -64,7 +70,19 @@ func (c *CassandraStates) Read(ctx context.Context, name string, value interface
 
 // Write updates the state in the states table.
 func (c *CassandraStates) Write(ctx context.Context, name string, value interface{}) error {
-	valueString := fmt.Sprint(value)
+	var valueString string
+
+	switch value.(type) {
+	case float64, int, int64, string:
+		valueString = fmt.Sprint(value)
+	default:
+		marshalled, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("failed to marshal value: %w", err)
+		}
+
+		valueString = string(marshalled)
+	}
 
 	if err := c.statesTableInsertState(ctx, name, valueString); err != nil {
 		return fmt.Errorf("update Cassandra: %w", err)

@@ -77,9 +77,6 @@ func TestStructuredConfig(t *testing.T) {
 		Telemetry: Telemetry{
 			Address: "http://example.com",
 			Enabled: true,
-			ID: ID{
-				Path: "my_id",
-			},
 		},
 	}
 

@@ -105,7 +105,7 @@ func write(ctx context.Context, minTS, maxTS time.Time, squirrelDBURL string) er
 
 	// Consecutive values of a metric. With one point per 10s, this is 5 minutes of points,
 	// which also corresponds to the aggregation size.
-    // These values have an average of 1, a max of 2 and a min of 0 on 5 minutes.
+	// These values have an average of 1, a max of 2 and a min of 0 on 5 minutes.
 	values := []int{
 		2, 1, 1, 1, 1, 1,
 		1, 1, 1, 1, 1, 1,

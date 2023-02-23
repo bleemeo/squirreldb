@@ -2,6 +2,7 @@ package dummy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -37,7 +38,12 @@ func (s *States) Read(_ context.Context, name string, value interface{}) (bool, 
 	case *string:
 		*v = valueString
 	default:
-		return false, fmt.Errorf("unknown type")
+		err := json.Unmarshal([]byte(valueString), value)
+		if err != nil {
+			return false, fmt.Errorf("failed to unmarshal value: %w", err)
+		}
+
+		return true, nil
 	}
 
 	return true, nil
@@ -51,7 +57,20 @@ func (s *States) Write(_ context.Context, name string, value interface{}) error 
 		s.values = make(map[string]string)
 	}
 
-	valueString := fmt.Sprint(value)
+	var valueString string
+
+	switch value.(type) {
+	case float64, int, int64, string:
+		valueString = fmt.Sprint(value)
+	default:
+		marshalled, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("failed to marshal value: %w", err)
+		}
+
+		valueString = string(marshalled)
+	}
+
 	s.values[name] = valueString
 
 	return nil

@@ -20,77 +20,122 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
-	"os"
 	"squirreldb/facts"
 	"squirreldb/logger"
+	"squirreldb/types"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
+const lockRetryDelay = 5 * time.Second
+
+var errFailedLock = errors.New("failed to acquire lock")
+
 type Telemetry struct {
-	ID        string
-	newFacts  map[string]string
-	runOption map[string]string
-	logger    zerolog.Logger
+	opts Options
+
+	id     string
+	idLock types.TryLocker
 }
 
-type telemetryJSONID struct {
-	ID string `json:"id"`
+type lockFactory interface {
+	CreateLock(name string, timeToLive time.Duration) types.TryLocker
 }
 
-func (t *Telemetry) getIDFromFile() {
-	filepath := t.runOption["filepath"]
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-		t.setIDToFile(filepath)
+type Options struct {
+	// The telemetry URL.
+	URL string
+	// The way SquirrelDB was installed (Manual, Package, Docker, etc).
+	InstallationFormat string
+	// Common ID between all SquirrelDB in the cluster.
+	ClusterID string
+	// SquirrelDB version.
+	Version string
+	// Timeout used when taking a lock.
+	LockTimeout time.Duration
+	LockFactory lockFactory
+	State       types.State
+	Logger      zerolog.Logger
+}
+
+func New(opts Options) *Telemetry {
+	tlm := Telemetry{
+		opts: opts,
 	}
 
-	file, _ := os.ReadFile(filepath)
+	return &tlm
+}
 
-	var tlm telemetryJSONID
+func (t *Telemetry) Start(ctx context.Context) {
+	go func() {
+		defer logger.ProcessPanic()
 
-	_ = json.Unmarshal(file, &tlm)
-	t.ID = tlm.ID
+		t.run(ctx)
+	}()
+}
 
-	if t.ID == "" {
-		t.setIDToFile(filepath)
+func (t *Telemetry) run(ctx context.Context) {
+	select {
+	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): //nolint:gosec
+	case <-ctx.Done():
+		return
+	}
+
+	for {
+		t.postInformation(ctx)
+
+		select {
+		case <-time.After(24 * time.Hour):
+		case <-ctx.Done():
+			t.stop()
+
+			return
+		}
 	}
 }
 
-func (t *Telemetry) setIDToFile(filepath string) {
-	var tlm telemetryJSONID
-
-	t.ID = uuid.New().String()
-	tlm.ID = t.ID
-
-	file, _ := json.MarshalIndent(tlm, "", " ") //nolint:errchkjson // False positive.
-
-	_ = os.WriteFile(filepath, file, 0o600)
+func (t *Telemetry) stop() {
+	// Free our telemetry ID before stopping.
+	if t.idLock != nil {
+		t.idLock.Unlock()
+	}
 }
 
-func (t Telemetry) postInformation(ctx context.Context) {
+func (t *Telemetry) postInformation(ctx context.Context) {
+	id, err := t.getTelemetryID(ctx)
+	if err != nil {
+		t.opts.Logger.Err(err).Msg("Failed to get telemetry id")
+
+		return
+	}
+
+	t.opts.Logger.Debug().Msgf("Got telemetry ID %s", id)
+
 	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{ //nolint:errchkjson // False positive.
-		"id":                  t.ID,
-		"cluster_id":          t.newFacts["cluster_id"],
+		"id":                  id,
+		"cluster_id":          t.opts.ClusterID,
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
-		"installation_format": t.newFacts["installation_format"],
+		"installation_format": t.opts.InstallationFormat,
 		"kernel_version":      facts["kernel_version"],
 		"memory":              facts["memory"],
 		"product":             "SquirrelDB",
 		"os_type":             facts["os_name"],
 		"os_version":          facts["os_version"],
 		"system_architecture": facts["architecture"],
-		"version":             t.newFacts["version"],
+		"version":             t.opts.Version,
 	})
 
-	req, _ := http.NewRequest(http.MethodPost, t.runOption["url"], bytes.NewBuffer(body))
+	req, _ := http.NewRequest(http.MethodPost, t.opts.URL, bytes.NewBuffer(body))
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -99,58 +144,93 @@ func (t Telemetry) postInformation(ctx context.Context) {
 
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
 	if err != nil {
-		t.logger.Err(err).Msg("Failed to post telemetry")
+		t.opts.Logger.Err(err).Msg("Failed to post telemetry")
 
 		return
 	}
 
-	t.logger.Info().Msgf("Telemetry response status: %s", resp.Status)
+	t.opts.Logger.Info().Msgf("Telemetry response status: %s", resp.Status)
 
-	defer func() {
-		// Ensure we read the whole response to avoid "Connection reset by peer" on server
-		// and ensure HTTP connection can be resused
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
+	// Ensure we read the whole response to avoid "Connection reset by peer" on server
+	// and ensure the HTTP connection can be reused
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 }
 
-func (t Telemetry) run(ctx context.Context) {
-	select {
-	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): //nolint:gosec
-	case <-ctx.Done():
-		return
+// The telemetry ID is stored both as a lock and in the state.
+// The state contains the list of all known IDs.
+// To get an ID, SquirrelDB checks if the IDs in the list are already taken.
+// An ID is taken if the lock associated to this ID is taken.
+// If it finds a free ID, it takes it, else it adds a new ID to the state and lock the new ID.
+// Note that this means the IDs can be swapped between SquirrelDB nodes after a restart.
+func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
+	if t.id != "" {
+		return t.id, nil
 	}
 
-	t.getIDFromFile()
-
-	for {
-		t.postInformation(ctx)
-
-		select {
-		case <-time.After(24 * time.Hour):
-		case <-ctx.Done():
-			return
+	// Use a lock to read and write to the list of telemetry IDs from the state.
+	lock := t.opts.LockFactory.CreateLock("create telemetry id", 5*time.Second)
+	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
 		}
+
+		return "", fmt.Errorf("%w: create telemetry id", errFailedLock)
 	}
-}
 
-func New(newFacts map[string]string, runOption map[string]string, logger zerolog.Logger) Telemetry {
-	var tlm Telemetry
+	defer lock.Unlock()
 
-	tlm.newFacts = newFacts
-	tlm.runOption = runOption
-	tlm.logger = logger
+	var telemetryIDs []string
 
-	return tlm
-}
+	_, err := t.opts.State.Read(ctx, "telemetry-ids", &telemetryIDs)
+	if err != nil {
+		return "", fmt.Errorf("failed to read telemetry ID from state: %w", err)
+	}
 
-func (t Telemetry) Start(ctx context.Context) {
-	go func() {
-		defer logger.ProcessPanic()
+	// Find a free ID in the list.
+	for _, id := range telemetryIDs {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 
-		t.run(ctx)
-	}()
-}
+		// We only know if a lock is already taken after the timeout (10s). This is slow
+		// if many locks are taken but it doesn't matter since it only runs once a day.
+		ctxTimeout, cancel := context.WithTimeout(ctx, t.opts.LockTimeout)
+		defer cancel()
 
-func (t Telemetry) Stop() {
+		lock := t.opts.LockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
+		if ok := lock.TryLock(ctxTimeout, lockRetryDelay); !ok {
+			// The lock is taken, another SquirrelDB already uses this ID.
+			continue
+		}
+
+		// Lock successfully taken, we found a free ID.
+		t.id = id
+		t.idLock = lock
+
+		break
+	}
+
+	if t.id != "" {
+		return t.id, nil
+	}
+
+	// No free ID found, create a new one, add it to the state and lock it.
+	id := uuid.New().String()
+	telemetryIDs = append(telemetryIDs, id)
+
+	err = t.opts.State.Write(ctx, "telemetry-ids", telemetryIDs)
+	if err != nil {
+		return "", fmt.Errorf("failed to write telemetry ID in state: %w", err)
+	}
+
+	lock = t.opts.LockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
+	if ok := lock.TryLock(ctx, lockRetryDelay); !ok {
+		return "", fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
+	}
+
+	t.idLock = lock
+	t.id = id
+
+	return id, nil
 }

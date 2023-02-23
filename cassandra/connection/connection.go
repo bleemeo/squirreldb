@@ -151,7 +151,7 @@ func (c *Connection) openSession(lockAlreadyHeld bool) error {
 	c.currentSessionID++
 	c.sessions[c.currentSessionID] = session
 	c.lastConnectionEstablished = time.Now()
-	c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("openned session")
+	c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("opened session")
 
 	return nil
 }

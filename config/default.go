@@ -59,9 +59,6 @@ func DefaultConfig() Config {
 		Telemetry: Telemetry{
 			Enabled: true,
 			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
-			ID: ID{
-				Path: "./telemetry.json",
-			},
 		},
 		Internal: Internal{
 			Index:                   "cassandra",

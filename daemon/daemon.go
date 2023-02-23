@@ -798,8 +798,10 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		return errors.New("newMetricLock is not acquired")
+		return errors.New("failed to acquire telemetry cluster ID lock")
 	}
+
+	defer lock.Unlock()
 
 	state, _ := s.States(ctx)
 	stateBool, err := state.Read(ctx, "cluster_id", &clusterID)
@@ -813,20 +815,18 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		}
 	}
 
-	defer lock.Unlock()
-
-	addFacts := map[string]string{
-		"installation_format": s.Config.Internal.Installation.Format,
-		"cluster_id":          clusterID,
-		"version":             Version,
-	}
-
-	runOption := map[string]string{
-		"filepath": s.Config.Telemetry.ID.Path,
-		"url":      s.Config.Telemetry.Address,
-	}
-
-	tlm := telemetry.New(addFacts, runOption, s.Logger.With().Str("component", "telemetry").Logger())
+	tlm := telemetry.New(
+		telemetry.Options{
+			URL:                s.Config.Telemetry.Address,
+			Version:            Version,
+			ClusterID:          clusterID,
+			InstallationFormat: s.Config.Internal.Installation.Format,
+			LockTimeout:        5 * time.Second,
+			LockFactory:        s.lockFactory,
+			State:              state,
+			Logger:             s.Logger.With().Str("component", "telemetry").Logger(),
+		},
+	)
 	tlm.Start(ctx)
 
 	return nil
