@@ -31,7 +31,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -790,36 +789,11 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		return nil
 	}
 
-	var clusterID string
-
-	lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
-	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		return errors.New("failed to acquire telemetry cluster ID lock")
-	}
-
-	defer lock.Unlock()
-
 	state, _ := s.States(ctx)
-	stateBool, err := state.Read(ctx, "cluster_id", &clusterID)
-
-	if err != nil || !stateBool {
-		clusterID = uuid.New().String()
-
-		err := s.states.Write(ctx, "cluster_id", clusterID)
-		if err != nil {
-			s.Logger.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
-		}
-	}
-
 	tlm := telemetry.New(
 		telemetry.Options{
 			URL:                s.Config.Telemetry.Address,
 			Version:            Version,
-			ClusterID:          clusterID,
 			InstallationFormat: s.Config.Internal.Installation.Format,
 			LockTimeout:        5 * time.Second,
 			LockFactory:        s.lockFactory,

@@ -41,7 +41,11 @@ var errFailedLock = errors.New("failed to acquire lock")
 type Telemetry struct {
 	opts Options
 
-	id     string
+	// Common ID between all SquirrelDB in the cluster.
+	clusterID string
+	// ID of this SquirrelDB instance.
+	id string
+	// Lock used to avoid other SquirrelDB taking the same ID.
 	idLock types.TryLocker
 }
 
@@ -54,8 +58,6 @@ type Options struct {
 	URL string
 	// The way SquirrelDB was installed (Manual, Package, Docker, etc).
 	InstallationFormat string
-	// Common ID between all SquirrelDB in the cluster.
-	ClusterID string
 	// SquirrelDB version.
 	Version string
 	// Timeout used when taking a lock.
@@ -116,12 +118,17 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 		return
 	}
 
-	t.opts.Logger.Debug().Msgf("Got telemetry ID %s", id)
+	clusterID, err := t.getClusterID(ctx)
+	if err != nil {
+		t.opts.Logger.Err(err).Msg("Failed to get cluster id")
+
+		return
+	}
 
 	facts := facts.Facts(ctx)
 	body, _ := json.Marshal(map[string]string{ //nolint:errchkjson // False positive.
 		"id":                  id,
-		"cluster_id":          t.opts.ClusterID,
+		"cluster_id":          clusterID,
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],
@@ -205,6 +212,8 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 		}
 
 		// Lock successfully taken, we found a free ID.
+		t.opts.Logger.Debug().Msgf("Found free telemetry ID %s", id)
+
 		t.id = id
 		t.idLock = lock
 
@@ -229,8 +238,52 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
 	}
 
+	t.opts.Logger.Debug().Msgf("Created telemetry ID %s", id)
+
 	t.idLock = lock
 	t.id = id
 
 	return id, nil
+}
+
+func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {
+	if t.clusterID != "" {
+		return t.clusterID, nil
+	}
+
+	var clusterID string
+
+	lock := t.opts.LockFactory.CreateLock("create cluster id", 5*time.Second)
+	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+
+		return "", fmt.Errorf("%w: create cluster id", errFailedLock)
+	}
+
+	defer lock.Unlock()
+
+	hasClusterID, err := t.opts.State.Read(ctx, "cluster_id", &clusterID)
+	if err != nil {
+		return "", fmt.Errorf("unable to read cluster id for telemetry: %w", err)
+	}
+
+	if !hasClusterID {
+		// The cluster ID doesn't exist, create it.
+		clusterID = uuid.New().String()
+
+		err = t.opts.State.Write(ctx, "cluster_id", clusterID)
+		if err != nil {
+			return "", fmt.Errorf("unable to set cluster id for telemetry: %w", err)
+		}
+
+		t.opts.Logger.Debug().Msgf("Created telemetry cluster ID %s", clusterID)
+	} else {
+		t.opts.Logger.Debug().Msgf("Read telemetry cluster ID %s", clusterID)
+	}
+
+	t.clusterID = clusterID
+
+	return clusterID, nil
 }
