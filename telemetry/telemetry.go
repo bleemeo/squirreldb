@@ -34,7 +34,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const lockRetryDelay = 5 * time.Second
+const (
+	idLockTTL        = time.Minute
+	idLockRetryDelay = 5 * time.Second
+)
 
 var errFailedLock = errors.New("failed to acquire lock")
 
@@ -205,8 +208,8 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 		ctxTimeout, cancel := context.WithTimeout(ctx, t.opts.LockTimeout)
 		defer cancel()
 
-		lock := t.opts.LockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
-		if ok := lock.TryLock(ctxTimeout, lockRetryDelay); !ok {
+		lock := t.opts.LockFactory.CreateLock("telemetry-id-"+id, idLockTTL)
+		if ok := lock.TryLock(ctxTimeout, 0); !ok {
 			// The lock is taken, another SquirrelDB already uses this ID.
 			continue
 		}
@@ -234,7 +237,7 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 	}
 
 	lock = t.opts.LockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
-	if ok := lock.TryLock(ctx, lockRetryDelay); !ok {
+	if ok := lock.TryLock(ctx, idLockRetryDelay); !ok {
 		return "", fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
 	}
 

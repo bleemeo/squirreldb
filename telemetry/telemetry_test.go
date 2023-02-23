@@ -45,7 +45,8 @@ func TestTelemetryID(t *testing.T) {
 	}
 
 	// Both SquirrelDB are stopped, SquirrelDB 2 is restarted before SquirrelDB 1.
-	// The two IDs should be swapped, SquirrelDB 2 should take the ID that SquirrelDB 1 had before.
+	// The two IDs could be swapped, SquirrelDB 2 could take the ID that SquirrelDB 1 had before.
+	// This is actually what will happen in the current implementation.
 	telemetry1.stop()
 	telemetry2.stop()
 
