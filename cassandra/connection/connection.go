@@ -92,7 +92,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 	cluster.Keyspace = options.Keyspace
 	cluster.Consistency = gocql.LocalQuorum
 
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(context.Background())
 
 	manager := &Connection{
 		logger:           logger,
@@ -105,7 +105,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 
 	manager.wg.Add(1)
 
-	go manager.run(runCtx)
+	go manager.run(runCtx) //nolint: contextcheck
 
 	cluster.ConnectObserver = connectObserver{connection: manager}
 
@@ -260,6 +260,8 @@ func (c *Connection) runOnce(ctx context.Context) bool {
 func (c *Connection) shutdown() {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	c.closed = true
 
 	if _, ok := c.sessions[c.currentSessionID]; ok {
 		c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("closing current session for shutdown")
