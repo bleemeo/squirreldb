@@ -32,8 +32,8 @@ type Connection struct {
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
 	wakeRunLoop               chan interface{}
+	observer                  *connectObserver
 	lastConnectionEstablished time.Time
-	lastObservedError         connectError
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
@@ -94,20 +94,23 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 
 	runCtx, cancel := context.WithCancel(context.Background())
 
+	wakeRunLoop := make(chan interface{})
+
 	manager := &Connection{
 		logger:           logger,
 		cluster:          cluster,
 		sessionUserCount: make(map[int]int),
 		sessions:         make(map[int]*gocql.Session),
 		cancel:           cancel,
-		wakeRunLoop:      make(chan interface{}),
+		wakeRunLoop:      wakeRunLoop,
+		observer:         &connectObserver{wakeRunLoop: wakeRunLoop},
 	}
 
 	manager.wg.Add(1)
 
 	go manager.run(runCtx) //nolint: contextcheck
 
-	cluster.ConnectObserver = connectObserver{connection: manager}
+	cluster.ConnectObserver = manager.observer
 
 	return manager, keyspaceCreated, nil
 }
@@ -238,21 +241,20 @@ func (c *Connection) runOnce(ctx context.Context) bool {
 	c.l.Lock()
 
 	reopenConnection := false
+	lastObservedError := c.observer.GetAndClearLastObservation()
 
 	if err != nil {
 		c.logger.Info().Err(err).Msg("Cassandra connection is no longer valid, reopening one")
 
 		reopenConnection = true
-	} else if c.lastObservedError.err != nil && time.Since(c.lastConnectionEstablished) > 15*time.Minute {
+	} else if lastObservedError.err != nil && time.Since(c.lastConnectionEstablished) > 15*time.Minute {
 		c.logger.Info().
-			Err(c.lastObservedError.err).
-			Str("HostnameAndPort", c.lastObservedError.hostAndPort).
+			Err(lastObservedError.err).
+			Str("HostnameAndPort", lastObservedError.hostAndPort).
 			Msg("Observed connection and last reconnection is more than 15 minutes old")
 
 		reopenConnection = true
 	}
-
-	c.lastObservedError = connectError{}
 
 	return reopenConnection
 }
