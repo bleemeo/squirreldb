@@ -11,7 +11,6 @@ import (
 	"squirreldb/types"
 	"time"
 
-	"github.com/dgryski/go-tsz"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
@@ -222,7 +221,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 	for tableSelectDataIter.Scan(&offsetSecond, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		tmp, err = c.decodeAggregatedPoints(values, baseTimestamp, offsetSecond*1000, function, tmp[:0])
+		tmp, err = c.decodeAggregatedPoints(values, function, tmp[:0])
 		if err != nil {
 			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "aggregated").Observe(queryDuration.Seconds())
 
@@ -321,7 +320,7 @@ func (c *CassandraTSDB) readRawPartitionData(
 	for tableSelectDataIter.Scan(&offsetMs, &timeToLive, &values) {
 		queryDuration += time.Since(start)
 
-		tmp, err = c.decodePoints(values, baseTimestamp, offsetMs, tmp)
+		tmp, err = c.decodePoints(values, tmp)
 
 		if err != nil {
 			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "raw").Observe(queryDuration.Seconds())
@@ -386,17 +385,8 @@ func (c *CassandraTSDB) aggregatedTableSelectDataIter(ctx context.Context,
 
 // Decode encoded points.
 // The values are mutated and should not be reused.
-func (c *CassandraTSDB) decodePoints(
-	values []byte,
-	baseTimestamp int64,
-	offset int64,
-	result []types.MetricPoint,
-) ([]types.MetricPoint, error) {
-	if baseTimestamp+offset < c.newFormatCutoff*1000 {
-		return gorillaDecode(values, baseTimestamp-1, result[:0], 1)
-	}
-
-	// The new format use the first byte as version.
+func (c *CassandraTSDB) decodePoints(values []byte, result []types.MetricPoint) ([]types.MetricPoint, error) {
+	// The format uses the first byte as the version.
 	if len(values) == 0 {
 		return nil, errPointsEmptyValues
 	}
@@ -409,47 +399,12 @@ func (c *CassandraTSDB) decodePoints(
 	}
 }
 
-// Decode gorilla encoded values.
-// The values are mutated and should not be reused.
-func gorillaDecode(
-	values []byte,
-	baseTimestamp int64,
-	result []types.MetricPoint,
-	scale int64,
-) ([]types.MetricPoint, error) {
-	i, err := tsz.NewIterator(values)
-	if err != nil {
-		return nil, fmt.Errorf("read TSZ value: %w", err)
-	}
-
-	for i.Next() {
-		t, v := i.Values()
-
-		result = append(result, types.MetricPoint{
-			Timestamp: int64(t)*scale + baseTimestamp,
-			Value:     v,
-		})
-	}
-
-	err = i.Err()
-	if err != nil {
-		return result, fmt.Errorf("tsz Iterator(): %w", err)
-	}
-
-	return result, nil
-}
-
 func (c *CassandraTSDB) decodeAggregatedPoints(
 	values []byte,
-	baseTimestamp int64,
-	offset int64,
-	function string, result []types.MetricPoint,
+	function string,
+	result []types.MetricPoint,
 ) ([]types.MetricPoint, error) {
-	if baseTimestamp+offset < c.newFormatCutoff*1000 {
-		return gorillaDecodeAggregate(values, baseTimestamp, function, result[:0])
-	}
-
-	// The new format use the first byte as version.
+	// The format uses the first byte as the version.
 	if len(values) == 0 {
 		return nil, errPointsEmptyValues
 	}
@@ -546,22 +501,6 @@ func (c *CassandraTSDB) xorChunkDecode(values []byte, result []types.MetricPoint
 	}
 
 	return result, nil
-}
-
-// Decode gorilla encoded aggregated points.
-// The values are mutated and should not be reused.
-func gorillaDecodeAggregate(
-	values []byte,
-	baseTimestamp int64,
-	function string,
-	result []types.MetricPoint,
-) ([]types.MetricPoint, error) {
-	subValues, err := demuxAggregate(values, function)
-	if err != nil {
-		return nil, err
-	}
-
-	return gorillaDecode(subValues, baseTimestamp, result, aggregateResolution.Milliseconds())
 }
 
 func filterPoints(points []types.MetricPoint, fromTimestamp int64, toTimestamp int64) []types.MetricPoint {

@@ -5,7 +5,6 @@ go 1.18
 require (
 	github.com/archdx/zerolog-sentry v1.0.2
 	github.com/cenkalti/backoff/v4 v4.2.0
-	github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe
 	github.com/fatih/structs v1.1.0
 	github.com/go-kit/log v0.2.1
 	github.com/go-redis/redis/v8 v8.11.5
