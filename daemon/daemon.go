@@ -31,7 +31,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -790,43 +789,17 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		return nil
 	}
 
-	var clusterID string
-
-	lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
-	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		return errors.New("newMetricLock is not acquired")
-	}
-
 	state, _ := s.States(ctx)
-	stateBool, err := state.Read(ctx, "cluster_id", &clusterID)
-
-	if err != nil || !stateBool {
-		clusterID = uuid.New().String()
-
-		err := s.states.Write(ctx, "cluster_id", clusterID)
-		if err != nil {
-			s.Logger.Warn().Err(err).Msgf("Unable to set cluster id for telemetry")
-		}
-	}
-
-	defer lock.Unlock()
-
-	addFacts := map[string]string{
-		"installation_format": s.Config.Internal.Installation.Format,
-		"cluster_id":          clusterID,
-		"version":             Version,
-	}
-
-	runOption := map[string]string{
-		"filepath": s.Config.Telemetry.ID.Path,
-		"url":      s.Config.Telemetry.Address,
-	}
-
-	tlm := telemetry.New(addFacts, runOption, s.Logger.With().Str("component", "telemetry").Logger())
+	tlm := telemetry.New(
+		telemetry.Options{
+			URL:                s.Config.Telemetry.Address,
+			Version:            Version,
+			InstallationFormat: s.Config.Internal.Installation.Format,
+			LockFactory:        s.lockFactory,
+			State:              state,
+			Logger:             s.Logger.With().Str("component", "telemetry").Logger(),
+		},
+	)
 	tlm.Start(ctx)
 
 	return nil

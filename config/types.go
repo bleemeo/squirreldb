@@ -34,11 +34,6 @@ type Internal struct {
 type Telemetry struct {
 	Address string `yaml:"address"`
 	Enabled bool   `yaml:"enabled"`
-	ID      ID     `yaml:"id"`
-}
-
-type ID struct {
-	Path string `yaml:"path"`
 }
 
 type Installation struct {
