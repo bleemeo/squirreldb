@@ -92,7 +92,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 	cluster.Keyspace = options.Keyspace
 	cluster.Consistency = gocql.LocalQuorum
 
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(context.Background())
 
 	manager := &Connection{
 		logger:           logger,
@@ -105,7 +105,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 
 	manager.wg.Add(1)
 
-	go manager.run(runCtx)
+	go manager.run(runCtx) //nolint: contextcheck
 
 	cluster.ConnectObserver = connectObserver{connection: manager}
 
@@ -145,6 +145,7 @@ func (c *Connection) openSession(lockAlreadyHeld bool) error {
 	}
 
 	if !c.lastConnectionEstablished.IsZero() && c.sessionUserCount[c.currentSessionID] == 0 {
+		c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("closing old current session")
 		c.closeSession(c.currentSessionID)
 	}
 
@@ -260,7 +261,10 @@ func (c *Connection) shutdown() {
 	c.l.Lock()
 	defer c.l.Unlock()
 
+	c.closed = true
+
 	if _, ok := c.sessions[c.currentSessionID]; ok {
+		c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("closing current session for shutdown")
 		c.closeSession(c.currentSessionID)
 	}
 
@@ -271,6 +275,8 @@ func (c *Connection) shutdown() {
 				Int("userCount", c.sessionUserCount[sessionID]).
 				Msg("session not closed by user")
 		}
+
+		c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("closing session for shutdown")
 
 		c.closeSession(sessionID)
 	}
@@ -293,6 +299,8 @@ func (c *Connection) wrapperCloseSession(sessionID int) {
 	c.sessionUserCount[sessionID]--
 
 	if sessionID != c.currentSessionID && c.sessionUserCount[sessionID] == 0 {
+		c.logger.Debug().Int("sessionID", c.currentSessionID).Msg("closing session that is not current session")
+
 		c.closeSession(sessionID)
 	}
 }
@@ -303,8 +311,6 @@ func (c *Connection) closeSession(sessionID int) {
 
 		return
 	}
-
-	c.logger.Debug().Int("sessionID", sessionID).Msg("closing session")
 
 	c.sessions[sessionID].Close()
 	delete(c.sessions, sessionID)
