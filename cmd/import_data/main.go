@@ -16,9 +16,9 @@
 
 // Command used to import data generated from the PromQL API.
 // The data can be generated with curl with a query or a query range:
-// curl 'http://localhost:9201/api/v1/query_range' -d 'query=cpu_used' \
-// -d 'start=2023-02-23T10:30:30.781Z' -d 'end=2023-02-23T10:31:00.781Z' -d 'step=10s'|jq .data.result > data.json
-// curl 'http://localhost:9201/api/v1/query' -d 'query=cpu_used[5m]' |jq .data.result > data.json
+// curl 'http://localhost:9201/api/v1/query_range' -d 'query=cpu_used' -d 'start=2023-02-23T10:30:30.781Z' \
+// -d 'end=2023-02-23T10:31:00.781Z' -d 'step=10s' | go run ./cmd/import_data
+// curl 'http://localhost:9201/api/v1/query' -d 'query=cpu_used[5m]' | go run ./cmd/import_data
 
 package main
 
@@ -28,7 +28,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"squirreldb/logger"
@@ -42,12 +41,19 @@ import (
 
 //nolint:gochecknoglobals
 var (
-	file          = pflag.String("file", "./data.json", "File containing the JSON data")
 	writeURL      = pflag.String("write-url", "http://localhost:9201/api/v1/write/", "Prometheus write API URL")
 	excludeLabels = pflag.StringSlice("ignore-labels", []string{"server_group"}, "Labels to exclude when writing")
 )
 
 var errRequestFailed = errors.New("request failed")
+
+type response struct {
+	Data data `json:"data"`
+}
+
+type data struct {
+	Result []metric `json:"result"`
+}
 
 type metric struct {
 	Labels map[string]string `json:"metric"`
@@ -69,21 +75,16 @@ func main() {
 }
 
 func run() error {
-	jsonFile, err := os.Open(*file)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
+	byteValue, _ := io.ReadAll(os.Stdin)
 
-	byteValue, _ := ioutil.ReadAll(jsonFile)
+	var resp response
 
-	var metrics []metric
-
-	err = json.Unmarshal(byteValue, &metrics)
+	err := json.Unmarshal(byteValue, &resp)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal data: %w", err)
 	}
 
-	series, err := metricstoTimeseries(metrics)
+	series, err := metricstoTimeseries(resp.Data.Result)
 	if err != nil {
 		return fmt.Errorf("failed to parse metrics: %w", err)
 	}
