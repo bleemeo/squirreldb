@@ -32,6 +32,7 @@ import (
 	"os"
 	"squirreldb/logger"
 	"strconv"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
@@ -43,6 +44,7 @@ import (
 var (
 	writeURL      = pflag.String("write-url", "http://localhost:9201/api/v1/write/", "Prometheus write API URL")
 	excludeLabels = pflag.StringSlice("ignore-labels", []string{"server_group"}, "Labels to exclude when writing")
+	addTime       = pflag.Duration("add-time", 0, "Add a fixed duration to all timestamps")
 )
 
 var errRequestFailed = errors.New("request failed")
@@ -116,8 +118,10 @@ func metricstoTimeseries(metrics []metric) ([]prompb.TimeSeries, error) {
 		samples := make([]prompb.Sample, 0, len(metric.Values))
 
 		for _, point := range metric.Values {
-			tsFloat, _ := point[0].(float64)
+			tsFloatSeconds, _ := point[0].(float64)
 			valueString, _ := point[1].(string)
+
+			ts := time.Unix(int64(tsFloatSeconds), 0).Add(*addTime)
 
 			value, err := strconv.ParseFloat(valueString, 64)
 			if err != nil {
@@ -126,7 +130,7 @@ func metricstoTimeseries(metrics []metric) ([]prompb.TimeSeries, error) {
 
 			samples = append(samples,
 				prompb.Sample{
-					Timestamp: int64(tsFloat) * 1000,
+					Timestamp: ts.UnixMilli(),
 					Value:     value,
 				},
 			)
