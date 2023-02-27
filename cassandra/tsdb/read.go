@@ -121,7 +121,7 @@ func (i *readIter) Next() bool {
 		}
 
 		if len(data.Points) != 0 {
-			lastPoint := data.Points[len(data.Points)-1]
+			lastPoint := data.Points[0]
 			fromTimestamp = lastPoint.Timestamp + aggregateResolution.Milliseconds()
 		}
 
