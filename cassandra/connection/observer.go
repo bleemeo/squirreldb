@@ -1,9 +1,17 @@
 package connection
 
-import "github.com/gocql/gocql"
+import (
+	"sync"
+
+	"github.com/gocql/gocql"
+	"github.com/rs/zerolog"
+)
 
 type connectObserver struct {
-	connection *Connection
+	l                 sync.Mutex
+	lastObservedError connectError
+	logger            zerolog.Logger
+	wakeRunLoop       chan interface{}
 }
 
 type connectError struct {
@@ -11,21 +19,31 @@ type connectError struct {
 	hostAndPort string
 }
 
-func (obs connectObserver) ObserveConnect(msg gocql.ObservedConnect) {
+func (obs *connectObserver) GetAndClearLastObservation() connectError {
+	obs.l.Lock()
+	defer obs.l.Unlock()
+
+	value := obs.lastObservedError
+	obs.lastObservedError = connectError{}
+
+	return value
+}
+
+func (obs *connectObserver) ObserveConnect(msg gocql.ObservedConnect) {
 	if msg.Err != nil {
-		obs.connection.l.Lock()
-		obs.connection.lastObservedError = connectError{
+		obs.l.Lock()
+		obs.lastObservedError = connectError{
 			err:         msg.Err,
 			hostAndPort: msg.Host.HostnameAndPort(),
 		}
-		obs.connection.l.Unlock()
+		obs.l.Unlock()
 
 		select {
-		case obs.connection.wakeRunLoop <- nil:
+		case obs.wakeRunLoop <- nil:
 		default:
 		}
 
-		obs.connection.logger.Debug().
+		obs.logger.Debug().
 			Err(msg.Err).
 			Str("HostnameAndPort", msg.Host.HostnameAndPort()).
 			Msg("ObserveConnect see an error")
