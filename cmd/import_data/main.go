@@ -121,7 +121,7 @@ func metricstoTimeseries(metrics []metric) ([]prompb.TimeSeries, error) {
 			tsFloatSeconds, _ := point[0].(float64)
 			valueString, _ := point[1].(string)
 
-			ts := time.Unix(int64(tsFloatSeconds), 0).Add(*addTime)
+			ts := time.UnixMilli(int64(tsFloatSeconds * 1000)).Add(*addTime)
 
 			value, err := strconv.ParseFloat(valueString, 64)
 			if err != nil {
