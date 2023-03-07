@@ -4,17 +4,18 @@ import "time"
 
 // Config is the main structured configuration.
 type Config struct {
-	Cassandra       Cassandra     `yaml:"cassandra"`
-	Redis           Redis         `yaml:"redis"`
-	ListenAddress   string        `yaml:"listen_address"`
-	TenantLabelName string        `yaml:"tenant_label_name"`
-	RemoteStorage   RemoteStorage `yaml:"remote_storage"`
-	PromQL          PromQL        `yaml:"promql"`
-	Batch           Batch         `yaml:"batch"`
-	Log             Log           `yaml:"log"`
-	Sentry          Sentry        `yaml:"sentry"`
-	Internal        Internal      `yaml:"internal"`
-	Telemetry       Telemetry     `yaml:"telemetry"`
+	Cassandra           Cassandra     `yaml:"cassandra"`
+	Redis               Redis         `yaml:"redis"`
+	ListenAddress       string        `yaml:"listen_address"`
+	TenantLabelName     string        `yaml:"tenant_label_name"`
+	RequireTenantHeader bool          `yaml:"require_tenant_header"`
+	RemoteStorage       RemoteStorage `yaml:"remote_storage"`
+	PromQL              PromQL        `yaml:"promql"`
+	Batch               Batch         `yaml:"batch"`
+	Log                 Log           `yaml:"log"`
+	Sentry              Sentry        `yaml:"sentry"`
+	Internal            Internal      `yaml:"internal"`
+	Telemetry           Telemetry     `yaml:"telemetry"`
 }
 
 type Internal struct {
