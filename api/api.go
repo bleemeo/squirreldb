@@ -56,6 +56,7 @@ type API struct {
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
 	TenantLabelName             string
+	MutableLabelDetector        remotestorage.MutableLabelDetector
 	Logger                      zerolog.Logger
 
 	ready      int32
@@ -187,6 +188,7 @@ func (a *API) init() {
 		a.Index,
 		maxConcurrent,
 		a.TenantLabelName,
+		a.MutableLabelDetector,
 		a.MetricRegistry,
 	)
 

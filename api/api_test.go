@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"os"
 	"squirreldb/api/remotestorage"
+	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
+	"squirreldb/logger"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -329,34 +331,90 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	}
 }
 
-// Test that when we try to write an invalid label or metric name we get an HTTP 400 status code.
-// We rely on Prometheus returning a 500 error by default that we convert to a 400, but this behaviour
-// could be changed in the future.
-// See ServeHTTP function in https://github.com/prometheus/prometheus/blob/main/storage/remote/write_handler.go.
-func Test_InterceptorStatusCode(t *testing.T) {
-	appendable := remotestorage.New(dummy.DiscardTSDB{}, &dummy.Index{}, 1, "", prometheus.NewRegistry())
-	writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
+func TestWriteHandler(t *testing.T) {
+	t.Parallel()
+
+	const (
+		tenantLabelName = "__account_id"
+		tenantValue     = "1234"
+	)
 
 	tests := []struct {
-		name   string
-		labels []prompb.Label
+		name           string
+		labels         []prompb.Label
+		expectStatus   int
+		absentMatchers []*labels.Matcher
 	}{
+		// Test that when we try to write an invalid label or metric name we get an HTTP 400 status code.
+		// We rely on Prometheus returning a 500 error by default that we convert to a 400, but this behaviour
+		// could be changed in the future.
+		// See ServeHTTP function in https://github.com/prometheus/prometheus/blob/main/storage/remote/write_handler.go.
 		{
 			name: "invalid-metric-name",
 			labels: []prompb.Label{
+				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "__name__", Value: "na-me"},
 			},
+			expectStatus: http.StatusBadRequest,
 		},
 		{
 			name: "invalid-label-name",
 			labels: []prompb.Label{
+				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "la-bel", Value: "val"},
+			},
+			expectStatus: http.StatusBadRequest,
+		},
+		// Mutable labels should be removed when writing.
+		{
+			name: "invalid-mutable-label",
+			labels: []prompb.Label{
+				{Name: tenantLabelName, Value: tenantValue},
+				{Name: "group", Value: "my_group"},
+			},
+			expectStatus: http.StatusOK,
+			absentMatchers: []*labels.Matcher{
+				{Name: "group", Value: "my_group"},
 			},
 		},
 	}
 
 	for _, test := range tests {
+		test := test
+
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := dummy.NewMutableLabelStore(dummy.MutableLabels{
+				AssociatedNames: map[string]map[string]string{
+					tenantValue: {
+						"group": "instance",
+					},
+				},
+			})
+
+			provider := mutable.NewProvider(context.Background(),
+				prometheus.NewRegistry(),
+				&dummy.LocalCluster{},
+				store,
+				logger.NewTestLogger(true),
+			)
+			labelProcessor := mutable.NewLabelProcessor(provider, tenantLabelName)
+
+			dummyIndex := &dummy.Index{
+				StoreMetricIDInMemory: true,
+			}
+			appendable := remotestorage.New(
+				&dummy.MemoryTSDB{},
+				dummyIndex,
+				1,
+				tenantLabelName,
+				labelProcessor,
+				prometheus.NewRegistry(),
+			)
+			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
+
+			now := time.Now()
 			wr := &prompb.WriteRequest{
 				Timeseries: []prompb.TimeSeries{
 					{
@@ -364,7 +422,7 @@ func Test_InterceptorStatusCode(t *testing.T) {
 						Samples: []prompb.Sample{
 							{
 								Value:     10,
-								Timestamp: time.Now().Unix() / 1e6,
+								Timestamp: now.UnixMilli(),
 							},
 						},
 					},
@@ -386,6 +444,8 @@ func Test_InterceptorStatusCode(t *testing.T) {
 
 			req = req.WithContext(types.WrapContext(context.Background(), req))
 
+			req.Header.Add(types.HeaderTenant, tenantValue)
+
 			recorder := httptest.NewRecorder()
 			irw := &interceptor{OrigWriter: recorder}
 			writeHandler.ServeHTTP(irw, req)
@@ -393,8 +453,19 @@ func Test_InterceptorStatusCode(t *testing.T) {
 			resp := recorder.Result()
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("wanted status 400, got %v", resp.StatusCode)
+			if resp.StatusCode != test.expectStatus {
+				t.Fatalf("wanted status %d, got %v", test.expectStatus, resp.StatusCode)
+			}
+
+			if len(test.absentMatchers) > 0 {
+				metrics, err := dummyIndex.Search(context.Background(), now, now, test.absentMatchers)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if metrics.Count() > 0 {
+					t.Fatalf("%d metrics matched %s", metrics.Count(), test.absentMatchers)
+				}
 			}
 		})
 	}

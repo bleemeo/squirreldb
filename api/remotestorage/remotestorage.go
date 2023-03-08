@@ -20,11 +20,16 @@ import (
 var errMissingRequest = errors.New("HTTP request not found in context")
 
 type RemoteStorage struct {
-	writer          types.MetricWriter
-	index           types.Index
-	remoteWriteGate *gate.Gate
-	tenantLabelName string
-	metrics         *metrics
+	writer               types.MetricWriter
+	index                types.Index
+	remoteWriteGate      *gate.Gate
+	tenantLabelName      string
+	mutableLabelDetector MutableLabelDetector
+	metrics              *metrics
+}
+
+type MutableLabelDetector interface {
+	IsMutableLabel(ctx context.Context, tenant, name string) (bool, error)
 }
 
 // New returns a new initialized appendable storage.
@@ -33,14 +38,16 @@ func New(
 	index types.Index,
 	maxConcurrentRemoteWrite int,
 	tenantLabelName string,
+	mutableLabelDetector MutableLabelDetector,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
-		writer:          writer,
-		index:           index,
-		tenantLabelName: tenantLabelName,
-		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
-		metrics:         newMetrics(reg),
+		writer:               writer,
+		index:                index,
+		tenantLabelName:      tenantLabelName,
+		mutableLabelDetector: mutableLabelDetector,
+		remoteWriteGate:      gate.New(maxConcurrentRemoteWrite),
+		metrics:              newMetrics(reg),
 	}
 
 	return &remoteStorage
@@ -75,13 +82,14 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	}
 
 	writeMetrics := &writeMetrics{
-		index:             r.index,
-		writer:            r.writer,
-		metrics:           r.metrics,
-		tenantLabel:       tenantLabel,
-		timeToLiveSeconds: timeToLive,
-		pendingTimeSeries: make(map[uint64]timeSeries),
-		done:              r.remoteWriteGate.Done,
+		index:                r.index,
+		writer:               r.writer,
+		metrics:              r.metrics,
+		tenantLabel:          tenantLabel,
+		mutableLabelDetector: r.mutableLabelDetector,
+		timeToLiveSeconds:    timeToLive,
+		pendingTimeSeries:    make(map[uint64]timeSeries),
+		done:                 r.remoteWriteGate.Done,
 	}
 
 	return writeMetrics

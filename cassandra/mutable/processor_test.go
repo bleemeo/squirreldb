@@ -138,6 +138,13 @@ func TestAddMutableLabels(t *testing.T) {
 				"group", "group3", "environment", "prod",
 			),
 		},
+		{
+			name:   "remove-input-mutable-label",
+			labels: labels.FromStrings("__account_id", "1234", "instance", "server1", "group", "group-to-remove"),
+			wantLabels: labels.FromStrings(
+				"__account_id", "1234", "instance", "server1", "group", "group1",
+			),
+		},
 	}
 
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
