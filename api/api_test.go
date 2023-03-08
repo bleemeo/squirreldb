@@ -68,6 +68,10 @@ func getPromQLabels(t *testing.T, resp *http.Response) promQlLabels {
 }
 
 func TestAPIRoute(t *testing.T) { //nolint:maintidx
+	t.Parallel()
+
+	const tenantLabelName = "__account_id"
+
 	t0 := time.Now().Add(-time.Minute)
 
 	data := []struct {
@@ -78,8 +82,8 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 		{
 			ID: 1,
 			Labels: labels.FromMap(map[string]string{
-				"__account_id": "1234",
-				"__name__":     "cpu_used",
+				tenantLabelName: "1234",
+				"__name__":      "cpu_used",
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 11},
@@ -89,9 +93,9 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 		{
 			ID: 2,
 			Labels: labels.FromMap(map[string]string{
-				"__account_id": "1234",
-				"__name__":     "disk_used",
-				"mountpoint":   "/home",
+				tenantLabelName: "1234",
+				"__name__":      "disk_used",
+				"mountpoint":    "/home",
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 12},
@@ -101,9 +105,9 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 		{
 			ID: 3,
 			Labels: labels.FromMap(map[string]string{
-				"__account_id": "1235",
-				"__name__":     "disk_used",
-				"mountpoint":   "/home",
+				tenantLabelName: "1235",
+				"__name__":      "disk_used",
+				"mountpoint":    "/home",
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 13},
@@ -113,9 +117,9 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 		{
 			ID: 4,
 			Labels: labels.FromMap(map[string]string{
-				"__account_id": "1236",
-				"__name__":     "uptime",
-				"instance":     "server:8015",
+				tenantLabelName: "1236",
+				"__name__":      "uptime",
+				"instance":      "server:8015",
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 14},
@@ -143,13 +147,6 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	}
 
 	store := &dummy.MemoryTSDB{Data: storeData}
-
-	api := API{
-		Index:  dummy.NewIndex(idxData),
-		Reader: store,
-		Writer: store,
-	}
-	api.init()
 
 	// The new request factory is used to make produce new different *http.Request for tests.
 	// Since we run tests cases twice, this ensure that *http.Request mutation can live between
@@ -190,13 +187,15 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	}
 
 	cases := []struct {
-		name             string
-		makeRequest      func() *http.Request
-		validateResponse func(t *testing.T, resp *http.Response)
+		name                string
+		requireTenantHeader bool
+		makeRequest         func() *http.Request
+		validateResponse    func(t *testing.T, resp *http.Response)
 	}{
 		{
-			name:        "readiness",
-			makeRequest: newReqFactory("GET", "http://localhost:9201/ready", nil, nil),
+			name:                "readiness",
+			requireTenantHeader: false,
+			makeRequest:         newReqFactory("GET", "http://localhost:9201/ready", nil, nil),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
 
@@ -206,8 +205,9 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name:        "readiness2",
-			makeRequest: newReqFactory("GET", "/ready", nil, nil),
+			name:                "readiness2",
+			requireTenantHeader: false,
+			makeRequest:         newReqFactory("GET", "/ready", nil, nil),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
 
@@ -217,8 +217,11 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name:        "promql-query",
-			makeRequest: newReqFactory("GET", urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}), nil, nil),
+			name:                "promql-query",
+			requireTenantHeader: false,
+			makeRequest: newReqFactory(
+				"GET", urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}), nil, nil,
+			),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
 
@@ -233,7 +236,8 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name: "promql-query-forced-matcher",
+			name:                "promql-query-forced-matcher",
+			requireTenantHeader: false,
 			makeRequest: newReqFactory(
 				"GET",
 				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
@@ -254,8 +258,9 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name:        "labels_values",
-			makeRequest: newReqFactory("GET", "/api/v1/label/__name__/values", nil, nil),
+			name:                "labels_values",
+			requireTenantHeader: false,
+			makeRequest:         newReqFactory("GET", "/api/v1/label/__name__/values", nil, nil),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
 
@@ -270,7 +275,8 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
-			name: "promql-query-forced-matcher-2",
+			name:                "promql-query-forced-matcher-2",
+			requireTenantHeader: false,
 			makeRequest: newReqFactory(
 				"GET",
 				"/api/v1/label/__name__/values",
@@ -290,12 +296,62 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 				}
 			},
 		},
+		{
+			name:                "promql-query-missing-tenant-header",
+			requireTenantHeader: true,
+			makeRequest: newReqFactory(
+				"GET",
+				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
+				nil,
+				nil,
+			),
+			validateResponse: func(t *testing.T, resp *http.Response) {
+				t.Helper()
+
+				if resp.StatusCode != http.StatusUnprocessableEntity {
+					t.Errorf("StatusCode = %d, want 422", resp.StatusCode)
+				}
+			},
+		},
+		{
+			name:                "promql-query-with-tenant-header",
+			requireTenantHeader: true,
+			makeRequest: newReqFactory(
+				"GET",
+				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
+				nil,
+				map[string]string{types.HeaderTenant: "1235"}),
+			validateResponse: func(t *testing.T, resp *http.Response) {
+				t.Helper()
+
+				if resp.StatusCode != http.StatusOK {
+					t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
+				}
+
+				r := getPromQLResponse(t, resp)
+				if len(r.Data.Result) != 1 {
+					t.Errorf("len(Data.Result) = %d, want 1", len(r.Data.Result))
+				}
+			},
+		},
 	}
 
-	// First validate that all check fail when not ready
 	for _, tt := range cases {
 		tt := tt
-		t.Run(tt.name+"-not-ready", func(t *testing.T) {
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			api := API{
+				Index:               dummy.NewIndex(idxData),
+				Reader:              store,
+				Writer:              store,
+				RequireTenantHeader: tt.requireTenantHeader,
+				TenantLabelName:     tenantLabelName,
+			}
+			api.init()
+
+			// First validate that all check fail when not ready.
 			req := tt.makeRequest()
 			w := httptest.NewRecorder()
 			api.ServeHTTP(w, req)
@@ -308,21 +364,14 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			if resp.StatusCode != want {
 				t.Errorf("StatusCode = %d, want %d", resp.StatusCode, want)
 			}
-		})
-	}
 
-	api.Ready()
+			// Check that all check pass when the api is ready.
+			api.Ready()
 
-	// First validate that all check fail when not ready
-	for _, tt := range cases {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := tt.makeRequest()
-			w := httptest.NewRecorder()
+			req = tt.makeRequest()
+			w = httptest.NewRecorder()
 			api.ServeHTTP(w, req)
-			resp := w.Result()
+			resp = w.Result()
 
 			defer resp.Body.Close()
 
@@ -340,10 +389,11 @@ func TestWriteHandler(t *testing.T) {
 	)
 
 	tests := []struct {
-		name           string
-		labels         []prompb.Label
-		expectStatus   int
-		absentMatchers []*labels.Matcher
+		name             string
+		labels           []prompb.Label
+		skipTenantHeader bool
+		expectStatus     int
+		absentMatchers   []*labels.Matcher
 	}{
 		// Test that when we try to write an invalid label or metric name we get an HTTP 400 status code.
 		// We rely on Prometheus returning a 500 error by default that we convert to a 400, but this behaviour
@@ -364,6 +414,14 @@ func TestWriteHandler(t *testing.T) {
 				{Name: "la-bel", Value: "val"},
 			},
 			expectStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing-tenant-header",
+			labels: []prompb.Label{
+				{Name: "label", Value: "value"},
+			},
+			expectStatus:     http.StatusBadRequest,
+			skipTenantHeader: true,
 		},
 		// Mutable labels should be removed when writing.
 		{
@@ -410,6 +468,7 @@ func TestWriteHandler(t *testing.T) {
 				1,
 				tenantLabelName,
 				labelProcessor,
+				true,
 				prometheus.NewRegistry(),
 			)
 			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
@@ -444,7 +503,9 @@ func TestWriteHandler(t *testing.T) {
 
 			req = req.WithContext(types.WrapContext(context.Background(), req))
 
-			req.Header.Add(types.HeaderTenant, tenantValue)
+			if !test.skipTenantHeader {
+				req.Header.Add(types.HeaderTenant, tenantValue)
+			}
 
 			recorder := httptest.NewRecorder()
 			irw := &interceptor{OrigWriter: recorder}

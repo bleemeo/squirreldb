@@ -529,6 +529,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MaxConcurrentRemoteRequests = s.Config.RemoteStorage.MaxConcurrentRequests
 	s.api.TenantLabelName = s.Config.TenantLabelName
 	s.api.MutableLabelDetector = s.mutableLabelProcessor
+	s.api.RequireTenantHeader = s.Config.RequireTenantHeader
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 

@@ -40,7 +40,10 @@ const (
 	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
-var regexErrInvalidMatcher = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrInvalidMatcher))
+var (
+	regexErrInvalidMatcher      = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrInvalidMatcher))
+	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrMissingTenantHeader))
+)
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
@@ -57,7 +60,10 @@ type API struct {
 	PromQLMaxEvaluatedSeries    uint32
 	TenantLabelName             string
 	MutableLabelDetector        remotestorage.MutableLabelDetector
-	Logger                      zerolog.Logger
+	// When enabled, return an response to queries and write
+	// requests that don't provide the tenant header.
+	RequireTenantHeader bool
+	Logger              zerolog.Logger
 
 	ready      int32
 	router     http.Handler
@@ -173,6 +179,7 @@ func (a *API) init() {
 		a.Index,
 		a.Reader,
 		a.TenantLabelName,
+		a.RequireTenantHeader,
 		a.PromQLMaxEvaluatedSeries,
 		a.PromQLMaxEvaluatedPoints,
 		a.MetricRegistry,
@@ -189,6 +196,7 @@ func (a *API) init() {
 		maxConcurrent,
 		a.TenantLabelName,
 		a.MutableLabelDetector,
+		a.RequireTenantHeader,
 		a.MetricRegistry,
 	)
 
@@ -811,7 +819,8 @@ func (i *interceptor) WriteHeader(rc int) {
 }
 
 func (i *interceptor) Write(b []byte) (int, error) {
-	if i.status == http.StatusInternalServerError && regexErrInvalidMatcher.Match(b) {
+	if i.status == http.StatusInternalServerError &&
+		(regexErrInvalidMatcher.Match(b) || regexErrMissingTenantHeader.Match(b)) {
 		i.status = http.StatusBadRequest
 	}
 

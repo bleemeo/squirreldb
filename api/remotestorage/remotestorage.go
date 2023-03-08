@@ -17,7 +17,10 @@ import (
 	"github.com/prometheus/prometheus/util/gate"
 )
 
-var errMissingRequest = errors.New("HTTP request not found in context")
+var (
+	ErrMissingTenantHeader = errors.New("the tenant header is missing")
+	errMissingRequest      = errors.New("HTTP request not found in context")
+)
 
 type RemoteStorage struct {
 	writer               types.MetricWriter
@@ -25,7 +28,9 @@ type RemoteStorage struct {
 	remoteWriteGate      *gate.Gate
 	tenantLabelName      string
 	mutableLabelDetector MutableLabelDetector
-	metrics              *metrics
+	// When enabled, return an error to write requests that don't provide the tenant header.
+	requireTenantHeader bool
+	metrics             *metrics
 }
 
 type MutableLabelDetector interface {
@@ -39,6 +44,7 @@ func New(
 	maxConcurrentRemoteWrite int,
 	tenantLabelName string,
 	mutableLabelDetector MutableLabelDetector,
+	requireTenantHeader bool,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
@@ -46,6 +52,7 @@ func New(
 		index:                index,
 		tenantLabelName:      tenantLabelName,
 		mutableLabelDetector: mutableLabelDetector,
+		requireTenantHeader:  requireTenantHeader,
 		remoteWriteGate:      gate.New(maxConcurrentRemoteWrite),
 		metrics:              newMetrics(reg),
 	}
@@ -66,7 +73,9 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	}
 
 	tenant := request.Header.Get(types.HeaderTenant)
-	tenantLabel := labels.Label{Name: r.tenantLabelName, Value: tenant}
+	if tenant == "" && r.requireTenantHeader {
+		return errAppender{ErrMissingTenantHeader}
+	}
 
 	// The TTL is set from the header.
 	timeToLive := int64(0)
@@ -85,7 +94,7 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 		index:                r.index,
 		writer:               r.writer,
 		metrics:              r.metrics,
-		tenantLabel:          tenantLabel,
+		tenantLabel:          labels.Label{Name: r.tenantLabelName, Value: tenant},
 		mutableLabelDetector: r.mutableLabelDetector,
 		timeToLiveSeconds:    timeToLive,
 		pendingTimeSeries:    make(map[uint64]timeSeries),
