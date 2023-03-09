@@ -77,12 +77,15 @@ func NewPrometheus(
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
 	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
-		Logger:             logger.NewKitLogger(&queryLogger),
-		Reg:                metricRegistry,
-		MaxSamples:         50000000,
-		Timeout:            2 * time.Minute,
-		ActiveQueryTracker: nil,
-		LookbackDelta:      5 * time.Minute,
+		Logger:               logger.NewKitLogger(&queryLogger),
+		Reg:                  metricRegistry,
+		MaxSamples:           50000000,
+		Timeout:              2 * time.Minute,
+		ActiveQueryTracker:   nil,
+		LookbackDelta:        5 * time.Minute,
+		EnableAtModifier:     true,
+		EnableNegativeOffset: true,
+		EnablePerStepStats:   false,
 	})
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
