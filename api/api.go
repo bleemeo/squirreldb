@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
+	"github.com/thanos-community/promql-engine/engine"
 )
 
 const (
@@ -76,13 +77,18 @@ func NewPrometheus(
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
-	queryEngine := ppromql.NewEngine(ppromql.EngineOpts{
-		Logger:             logger.NewKitLogger(&queryLogger),
-		Reg:                metricRegistry,
-		MaxSamples:         50000000,
-		Timeout:            2 * time.Minute,
-		ActiveQueryTracker: nil,
-		LookbackDelta:      5 * time.Minute,
+	queryEngine := engine.New(engine.Opts{
+		EngineOpts: ppromql.EngineOpts{
+			Logger:             logger.NewKitLogger(&queryLogger),
+			Reg:                metricRegistry,
+			MaxSamples:         50000000,
+			Timeout:            2 * time.Minute,
+			ActiveQueryTracker: nil,
+			LookbackDelta:      5 * time.Minute,
+		},
+		LogicalOptimizers: nil,
+		DebugWriter:       nil,
+		DisableFallback:   false,
 	})
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
