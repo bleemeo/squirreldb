@@ -14,17 +14,17 @@ import (
 
 type headerClient struct {
 	api.Client
-	PromQLForcedMatcherHeader string
+	SquirrelDBTenantHeader string
 }
 
 func (hc headerClient) Do(ctx context.Context, req *http.Request) (*http.Response, []byte, error) {
-	req.Header.Set("X-SquirrelDB-Forced-Matcher", hc.PromQLForcedMatcherHeader)
+	req.Header.Set("X-SquirrelDB-Tenant", hc.SquirrelDBTenantHeader)
 
 	return hc.Client.Do(ctx, req)
 }
 
 // Returns the API.
-func initAPI(url string, promQLForcedMatcherHeader string) v1.API {
+func initAPI(url string, squirrelDBTenantHeader string) v1.API {
 	client, err := api.NewClient(api.Config{
 		Address: url,
 	})
@@ -32,8 +32,8 @@ func initAPI(url string, promQLForcedMatcherHeader string) v1.API {
 		log.Fatalf("Error creating client: %v\n", err)
 	}
 
-	if promQLForcedMatcherHeader != "" {
-		client = headerClient{Client: client, PromQLForcedMatcherHeader: promQLForcedMatcherHeader}
+	if squirrelDBTenantHeader != "" {
+		client = headerClient{Client: client, SquirrelDBTenantHeader: squirrelDBTenantHeader}
 	}
 
 	return v1.NewAPI(client)
@@ -149,9 +149,9 @@ func main() {
 		false,
 		"Allow empty reply. By default it's a fatal error to have an empty response",
 	)
-	forcedMatcher := flag.String("forced-matcher", "", "SquirrelDB forced matcher header (e.g. __account_id__=1234)")
+	tenant := flag.String("tenant", "", "SquirrelDB tenant header")
 	flag.Parse()
 
-	API := initAPI(*urlAPI, *forcedMatcher)
+	API := initAPI(*urlAPI, *tenant)
 	testQueryParallel(API, *query, *parallelQueries, *runDuration, *queryRange, *queryStep, *allowEmpty)
 }
