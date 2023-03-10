@@ -37,8 +37,9 @@ func DefaultConfig() Config {
 			CAPath:      "",
 			Keyspace:    "",
 		},
-		ListenAddress:   "localhost:9201",
-		TenantLabelName: "__account_id",
+		ListenAddress:       "localhost:9201",
+		TenantLabelName:     "__account_id",
+		RequireTenantHeader: false,
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 0,
 		},

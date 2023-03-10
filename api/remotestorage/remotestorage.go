@@ -17,14 +17,19 @@ import (
 	"github.com/prometheus/prometheus/util/gate"
 )
 
-var errMissingRequest = errors.New("HTTP request not found in context")
+var (
+	ErrMissingTenantHeader = errors.New("the tenant header is missing")
+	errMissingRequest      = errors.New("HTTP request not found in context")
+)
 
 type RemoteStorage struct {
 	writer          types.MetricWriter
 	index           types.Index
 	remoteWriteGate *gate.Gate
 	tenantLabelName string
-	metrics         *metrics
+	// When enabled, return an error to write requests that don't provide the tenant header.
+	requireTenantHeader bool
+	metrics             *metrics
 }
 
 // New returns a new initialized appendable storage.
@@ -33,14 +38,16 @@ func New(
 	index types.Index,
 	maxConcurrentRemoteWrite int,
 	tenantLabelName string,
+	requireTenantHeader bool,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
-		writer:          writer,
-		index:           index,
-		tenantLabelName: tenantLabelName,
-		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
-		metrics:         newMetrics(reg),
+		writer:              writer,
+		index:               index,
+		tenantLabelName:     tenantLabelName,
+		requireTenantHeader: requireTenantHeader,
+		remoteWriteGate:     gate.New(maxConcurrentRemoteWrite),
+		metrics:             newMetrics(reg),
 	}
 
 	return &remoteStorage
@@ -59,7 +66,9 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	}
 
 	tenant := request.Header.Get(types.HeaderTenant)
-	tenantLabel := labels.Label{Name: r.tenantLabelName, Value: tenant}
+	if tenant == "" && r.requireTenantHeader {
+		return errAppender{ErrMissingTenantHeader}
+	}
 
 	// The TTL is set from the header.
 	timeToLive := int64(0)
@@ -78,7 +87,7 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 		index:             r.index,
 		writer:            r.writer,
 		metrics:           r.metrics,
-		tenantLabel:       tenantLabel,
+		tenantLabel:       labels.Label{Name: r.tenantLabelName, Value: tenant},
 		timeToLiveSeconds: timeToLive,
 		pendingTimeSeries: make(map[uint64]timeSeries),
 		done:              r.remoteWriteGate.Done,

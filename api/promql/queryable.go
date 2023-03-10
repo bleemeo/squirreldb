@@ -18,16 +18,18 @@ import (
 )
 
 var (
-	errMissingRequest = errors.New("HTTP request not found in context")
-	errInvalidMatcher = errors.New("invalid matcher")
+	errMissingRequest      = errors.New("HTTP request not found in context")
+	errMissingTenantHeader = errors.New("the tenant header is missing")
+	errInvalidMatcher      = errors.New("invalid matcher")
 )
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
 type Store struct {
-	Index                     types.Index
-	Reader                    types.MetricReader
-	MetricRegistry            prometheus.Registerer
-	TenantLabelName           string
+	Index           types.Index
+	Reader          types.MetricReader
+	TenantLabelName string
+	// When enabled, return an error to queries that don't provide the tenant header.
+	RequireTenantHeader       bool
 	DefaultMaxEvaluatedPoints uint64
 	DefaultMaxEvaluatedSeries uint32
 
@@ -59,6 +61,7 @@ func NewStore(
 	index types.Index,
 	reader types.MetricReader,
 	tenantLabelName string,
+	requireTenantHeader bool,
 	promQLMaxEvaluatedSeries uint32,
 	promQLMaxEvaluatedPoints uint64,
 	metricRegistry prometheus.Registerer,
@@ -67,6 +70,7 @@ func NewStore(
 		Index:                     index,
 		Reader:                    reader,
 		TenantLabelName:           tenantLabelName,
+		RequireTenantHeader:       requireTenantHeader,
 		DefaultMaxEvaluatedSeries: promQLMaxEvaluatedSeries,
 		DefaultMaxEvaluatedPoints: promQLMaxEvaluatedPoints,
 		metrics:                   newMetrics(metricRegistry),
@@ -119,6 +123,8 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 				tenant,
 			),
 		}
+	} else if s.RequireTenantHeader {
+		return querier{}, errMissingTenantHeader
 	}
 
 	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
