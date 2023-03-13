@@ -102,7 +102,7 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 // InternalWriteAggregated writes all specified metrics as aggregated data
 // This method should only by used for benchmark/tests or bulk import.
 // This will replace data for given aggregated row (based on timestamp of first time).
-// Points in each AggregatedData MUST be sorted.
+// Points in each AggregatedData MUST be sorted in ascending order.
 // Also if writingTimestamp is not 0, it's the timestamp used to write in Cassandra (in microseconds since epoc).
 func (c *CassandraTSDB) InternalWriteAggregated(
 	ctx context.Context,
@@ -421,6 +421,7 @@ func (c *CassandraTSDB) doAggregation(ctx context.Context,
 			return pointsRead, err
 		}
 
+		// Sort points in ascending order.
 		reversePoints(metric.Points)
 
 		aggregatedMetric := aggregate.Aggregate(metric, resolution)

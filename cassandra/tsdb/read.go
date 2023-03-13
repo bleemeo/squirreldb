@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"squirreldb/aggregate"
 	"squirreldb/compare"
 	"squirreldb/types"
 	"time"
@@ -25,6 +26,15 @@ type readIter struct {
 	aggregatedToTimestamp int64
 	offset                int
 }
+
+type promqlFunctionType int
+
+const (
+	promqlFunctionMin = iota
+	promqlFunctionMax
+	promqlFunctionAverage
+	promqlFunctionCount
+)
 
 // ReadIter returns metrics according to the request made.
 func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
@@ -111,7 +121,7 @@ func (i *readIter) Next() bool {
 		}
 
 		if len(data.Points) != 0 {
-			lastPoint := data.Points[len(data.Points)-1]
+			lastPoint := data.Points[0]
 			fromTimestamp = lastPoint.Timestamp + aggregateResolution.Milliseconds()
 		}
 
@@ -132,6 +142,46 @@ func (i *readIter) Next() bool {
 			i.close()
 
 			return false
+		}
+
+		// When aggregated is used, aggregate the raw data before returning it.
+		// This fixes a bug when both aggregated data and raw data were returned:
+		// at the point between the aggregated data and the raw data (today at 0:00 UTC),
+		// we had a drop in rate().
+		// The aggregated point at 11:55 PM represents the average over the next five minutes,
+		// so this decreased the rate() with the next raw point at 12:00 AM.
+		if readAggregate {
+			aggregatedData := aggregate.Aggregate(data, aggregateResolution.Milliseconds())
+			points := make([]types.MetricPoint, 0, len(aggregatedData.Points))
+			functionType := promqlFunctionToType(i.request.Function)
+
+			for _, aggregatedPoint := range aggregatedData.Points {
+				var value float64
+
+				switch functionType {
+				case promqlFunctionMin:
+					value = aggregatedPoint.Min
+				case promqlFunctionMax:
+					value = aggregatedPoint.Max
+				case promqlFunctionAverage:
+					value = aggregatedPoint.Average
+				case promqlFunctionCount:
+					value = aggregatedPoint.Count
+				default:
+					value = aggregatedPoint.Average
+				}
+
+				points = append(points, types.MetricPoint{
+					Timestamp: aggregatedPoint.Timestamp,
+					Value:     value,
+				})
+			}
+
+			data = types.MetricData{
+				Points:     points,
+				ID:         aggregatedData.ID,
+				TimeToLive: aggregatedData.TimeToLive,
+			}
 		}
 	}
 
@@ -423,15 +473,14 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 
 	reader := bytes.NewReader(values)
 
-	//nolint:goconst
-	switch function {
-	case "min", "min_over_time":
+	switch promqlFunctionToType(function) {
+	case promqlFunctionMin:
 		streamNumber = 0
-	case "max", "max_over_time":
+	case promqlFunctionMax:
 		streamNumber = 1
-	case "avg", "avg_over_time":
+	case promqlFunctionAverage:
 		streamNumber = 2
-	case "count", "count_over_time":
+	case promqlFunctionCount:
 		streamNumber = 3
 	default:
 		streamNumber = 2
@@ -458,10 +507,33 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 	endIndex := int(startIndex) + int(length)
 
 	if endIndex > len(values) {
-		return nil, errors.New("corrupted values, stored length larged than actual length")
+		return nil, errors.New("corrupted values, stored length larger than actual length")
 	}
 
 	return values[int(startIndex):endIndex], nil
+}
+
+// Return the function type for a PromQL function.
+func promqlFunctionToType(function string) promqlFunctionType {
+	//nolint:goconst
+	switch function {
+	case "min", "min_over_time":
+		return promqlFunctionMin
+	case "max", "max_over_time":
+		return promqlFunctionMax
+	case "avg", "avg_over_time":
+		return promqlFunctionAverage
+	case "count", "count_over_time":
+		return promqlFunctionCount
+	// On a counter, we must use min or max and not the average.
+	// When a counter resets, the preaggregated average values could
+	// have multiple counter resets instead of just one.
+	// Here we list the functions that work on a counter.
+	case "rate", "irate", "increase", "resets":
+		return promqlFunctionMax
+	default:
+		return promqlFunctionAverage
+	}
 }
 
 func (c *CassandraTSDB) xorChunkDecodeAggregate(

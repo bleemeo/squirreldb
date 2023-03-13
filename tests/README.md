@@ -12,7 +12,7 @@ Tests:
 * squirreldb-promql-bench: Benchmark PromQL queries.
 * remote-storage-test: simple write then read using the Prometheus remote storage.
   It ensure data wrote can be re-read.
-
+* promql-compliance-test: Run Prometheus PromQL compliance tests against SquirrelDB.
 
 
 To run test, you will need a Cassandra (and in some test Redis):

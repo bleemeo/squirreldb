@@ -22,6 +22,7 @@ type AggregatedData struct {
 }
 
 // Aggregate aggregates data.
+// The returned data keeps the same order as the input points.
 func Aggregate(data types.MetricData, resolution int64) AggregatedData {
 	if len(data.Points) == 0 {
 		return AggregatedData{}

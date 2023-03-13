@@ -18,14 +18,14 @@ import (
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
 // Write writes all specified metrics.
-// Metric points should be sorted and deduplicated.
+// Metric points should be sorted in ascending order and deduplicated.
 func (c *CassandraTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
 	return c.InternalWrite(ctx, metrics, 0)
 }
 
 // InternalWrite writes all specified metrics as aggregated data
 // This method should only by used for benchmark/tests or bulk import.
-// Metrics points should be sorted and deduplicated.
+// Metric points should be sorted in ascending order and deduplicated.
 // If writingTimestamp is not 0, it's the timestamp used to write in Cassandra (in microseconds since epoc).
 func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.MetricData, writingTimestamp int64) error {
 	if len(metrics) == 0 {
@@ -71,6 +71,7 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 }
 
 // Write writes all specified metrics of the slice.
+// The metric points must be sorted in ascending order.
 func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.MetricData, writingTimestamp int64) {
 	for _, data := range metrics {
 		retry.Print(func() error {
@@ -83,7 +84,8 @@ func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.Metric
 }
 
 // writeAggregateData writes aggregated data for one metric.
-// It ensure that points with the same baseTimestamp are written together.
+// The aggregated points must be sorted in ascending order.
+// It ensures that points with the same baseTimestamp are written together.
 func (c *CassandraTSDB) writeAggregateData(ctx context.Context,
 	aggregatedData aggregate.AggregatedData,
 	writingTimestamp int64,
@@ -124,6 +126,7 @@ func (c *CassandraTSDB) writeAggregateData(ctx context.Context,
 }
 
 // writeAggregateRow writes one aggregated row.
+// The aggregated points must be sorted in ascending order.
 func (c *CassandraTSDB) writeAggregateRow(
 	ctx context.Context,
 	id types.MetricID,
@@ -174,6 +177,7 @@ func (c *CassandraTSDB) writeAggregateRow(
 }
 
 // Write raw data per partition.
+// The metric points must be sorted in ascending order.
 func (c *CassandraTSDB) writeRawData(ctx context.Context, data types.MetricData, writingTimestamp int64) error {
 	if len(data.Points) == 0 {
 		return nil
@@ -221,6 +225,7 @@ func (c *CassandraTSDB) writeRawData(ctx context.Context, data types.MetricData,
 }
 
 // Write raw partition data.
+// The metric points must be sorted in ascending order.
 func (c *CassandraTSDB) writeRawPartitionData(
 	ctx context.Context,
 	data types.MetricData,

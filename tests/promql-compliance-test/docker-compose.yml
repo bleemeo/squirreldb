@@ -1,0 +1,8 @@
+version: '3.3'
+
+services:
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus-test-data.yml:/etc/prometheus/prometheus.yml
+    network_mode: host

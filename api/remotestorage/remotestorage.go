@@ -17,14 +17,25 @@ import (
 	"github.com/prometheus/prometheus/util/gate"
 )
 
-var errMissingRequest = errors.New("HTTP request not found in context")
+var (
+	ErrMissingTenantHeader = errors.New("the tenant header is missing")
+	ErrParseTTLHeader      = errors.New("can't parse time to live header ")
+	errMissingRequest      = errors.New("HTTP request not found in context")
+)
 
 type RemoteStorage struct {
-	writer          types.MetricWriter
-	index           types.Index
-	remoteWriteGate *gate.Gate
-	tenantLabelName string
-	metrics         *metrics
+	writer               types.MetricWriter
+	index                types.Index
+	remoteWriteGate      *gate.Gate
+	tenantLabelName      string
+	mutableLabelDetector MutableLabelDetector
+	// When enabled, return an error to write requests that don't provide the tenant header.
+	requireTenantHeader bool
+	metrics             *metrics
+}
+
+type MutableLabelDetector interface {
+	IsMutableLabel(ctx context.Context, tenant, name string) (bool, error)
 }
 
 // New returns a new initialized appendable storage.
@@ -33,25 +44,24 @@ func New(
 	index types.Index,
 	maxConcurrentRemoteWrite int,
 	tenantLabelName string,
+	mutableLabelDetector MutableLabelDetector,
+	requireTenantHeader bool,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
-		writer:          writer,
-		index:           index,
-		tenantLabelName: tenantLabelName,
-		remoteWriteGate: gate.New(maxConcurrentRemoteWrite),
-		metrics:         newMetrics(reg),
+		writer:               writer,
+		index:                index,
+		tenantLabelName:      tenantLabelName,
+		mutableLabelDetector: mutableLabelDetector,
+		requireTenantHeader:  requireTenantHeader,
+		remoteWriteGate:      gate.New(maxConcurrentRemoteWrite),
+		metrics:              newMetrics(reg),
 	}
 
 	return &remoteStorage
 }
 
 func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
-	// Limit concurrent writes, block here if too many concurrent writes are running.
-	if err := r.remoteWriteGate.Start(ctx); err != nil {
-		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
-	}
-
 	// If the tenant header is present, the tenant label is added to all metrics written.
 	request, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
@@ -59,7 +69,9 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	}
 
 	tenant := request.Header.Get(types.HeaderTenant)
-	tenantLabel := labels.Label{Name: r.tenantLabelName, Value: tenant}
+	if tenant == "" && r.requireTenantHeader {
+		return errAppender{ErrMissingTenantHeader}
+	}
 
 	// The TTL is set from the header.
 	timeToLive := int64(0)
@@ -70,18 +82,25 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 
 		timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
 		if err != nil {
-			return errAppender{fmt.Errorf("can't parse time to live header '%s': %w", ttlRaw, err)}
+			return errAppender{fmt.Errorf("%w '%s': %w", ErrParseTTLHeader, ttlRaw, err)}
 		}
 	}
 
+	// Limit concurrent writes, block here if too many concurrent writes are running.
+	// The appender must call remoteWriteGate.Done to release a slot.
+	if err := r.remoteWriteGate.Start(ctx); err != nil {
+		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
+	}
+
 	writeMetrics := &writeMetrics{
-		index:             r.index,
-		writer:            r.writer,
-		metrics:           r.metrics,
-		tenantLabel:       tenantLabel,
-		timeToLiveSeconds: timeToLive,
-		pendingTimeSeries: make(map[uint64]timeSeries),
-		done:              r.remoteWriteGate.Done,
+		index:                r.index,
+		writer:               r.writer,
+		metrics:              r.metrics,
+		tenantLabel:          labels.Label{Name: r.tenantLabelName, Value: tenant},
+		mutableLabelDetector: r.mutableLabelDetector,
+		timeToLiveSeconds:    timeToLive,
+		pendingTimeSeries:    make(map[uint64]timeSeries),
+		done:                 r.remoteWriteGate.Done,
 	}
 
 	return writeMetrics
