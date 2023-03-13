@@ -28,6 +28,10 @@ type writeMetrics struct {
 	writer  types.MetricWriter
 	metrics *metrics
 
+	// Mutable label detector is used to detect if a label is mutable.
+	// It allows to remove mutable labels in the written metrics.
+	mutableLabelDetector MutableLabelDetector
+
 	// Tenant label added to all metrics written.
 	tenantLabel labels.Label
 
@@ -50,8 +54,24 @@ type timeSeries struct {
 // Append adds a sample pair for the given series.
 func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if w.tenantLabel.Value != "" {
+		// Add or replace the tenant label with the tenant header.
 		builder := labels.NewBuilder(l)
 		builder.Set(w.tenantLabel.Name, w.tenantLabel.Value)
+
+		// Remove the mutable labels.
+		// Mutable labels should not be written because they can't be searched
+		// as the index replaces them by real labels when querying a metric.
+		for _, label := range l {
+			isMutable, err := w.mutableLabelDetector.IsMutableLabel(context.Background(), w.tenantLabel.Value, label.Name)
+			if err != nil {
+				return 0, err
+			}
+
+			if isMutable {
+				builder.Del(label.Name)
+			}
+		}
+
 		l = builder.Labels(nil)
 	}
 

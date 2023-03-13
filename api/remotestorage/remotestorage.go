@@ -24,13 +24,18 @@ var (
 )
 
 type RemoteStorage struct {
-	writer          types.MetricWriter
-	index           types.Index
-	remoteWriteGate *gate.Gate
-	tenantLabelName string
+	writer               types.MetricWriter
+	index                types.Index
+	remoteWriteGate      *gate.Gate
+	tenantLabelName      string
+	mutableLabelDetector MutableLabelDetector
 	// When enabled, return an error to write requests that don't provide the tenant header.
 	requireTenantHeader bool
 	metrics             *metrics
+}
+
+type MutableLabelDetector interface {
+	IsMutableLabel(ctx context.Context, tenant, name string) (bool, error)
 }
 
 // New returns a new initialized appendable storage.
@@ -39,16 +44,18 @@ func New(
 	index types.Index,
 	maxConcurrentRemoteWrite int,
 	tenantLabelName string,
+	mutableLabelDetector MutableLabelDetector,
 	requireTenantHeader bool,
 	reg prometheus.Registerer,
 ) storage.Appendable {
 	remoteStorage := RemoteStorage{
-		writer:              writer,
-		index:               index,
-		tenantLabelName:     tenantLabelName,
-		requireTenantHeader: requireTenantHeader,
-		remoteWriteGate:     gate.New(maxConcurrentRemoteWrite),
-		metrics:             newMetrics(reg),
+		writer:               writer,
+		index:                index,
+		tenantLabelName:      tenantLabelName,
+		mutableLabelDetector: mutableLabelDetector,
+		requireTenantHeader:  requireTenantHeader,
+		remoteWriteGate:      gate.New(maxConcurrentRemoteWrite),
+		metrics:              newMetrics(reg),
 	}
 
 	return &remoteStorage
@@ -86,13 +93,14 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 	}
 
 	writeMetrics := &writeMetrics{
-		index:             r.index,
-		writer:            r.writer,
-		metrics:           r.metrics,
-		tenantLabel:       labels.Label{Name: r.tenantLabelName, Value: tenant},
-		timeToLiveSeconds: timeToLive,
-		pendingTimeSeries: make(map[uint64]timeSeries),
-		done:              r.remoteWriteGate.Done,
+		index:                r.index,
+		writer:               r.writer,
+		metrics:              r.metrics,
+		tenantLabel:          labels.Label{Name: r.tenantLabelName, Value: tenant},
+		mutableLabelDetector: r.mutableLabelDetector,
+		timeToLiveSeconds:    timeToLive,
+		pendingTimeSeries:    make(map[uint64]timeSeries),
+		done:                 r.remoteWriteGate.Done,
 	}
 
 	return writeMetrics

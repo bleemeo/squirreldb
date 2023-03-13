@@ -228,6 +228,7 @@ func regexMatchType(matchType labels.MatchType) labels.MatchType {
 // AddMutableLabels searches for non mutable labels and add their corresponding mutable labels
 // if they exist. For example if we have a mutable label group "mygroup" which contains 'server1',
 // and the label instance="server1" as input, the label group="mygroup" will be added.
+// It also removes any mutable labels present in the input.
 func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labels) (labels.Labels, error) {
 	// Find the tenant.
 	var tenant string
@@ -245,8 +246,21 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 		return lbls, nil
 	}
 
+	builder := labels.NewBuilder(lbls)
+
 	// Search for mutable labels associated to these labels.
 	for _, label := range lbls {
+		isMutable, err := lp.IsMutableLabel(ctx, tenant, label.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		// Remove mutable labels present in the input.
+		// It means the metric was written with labels that later became mutable.
+		if isMutable {
+			builder.Del(label.Name)
+		}
+
 		newMutableLabels, err := lp.labelProvider.GetMutable(ctx, tenant, label.Name, label.Value)
 		if err != nil {
 			if errors.Is(err, errNoResult) {
@@ -256,15 +270,12 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 			return nil, err
 		}
 
-		if len(newMutableLabels) > 0 {
-			lbls = append(lbls, newMutableLabels...)
+		for _, label := range newMutableLabels {
+			builder.Set(label.Name, label.Value)
 		}
 	}
 
-	// Sort the labels to make sure we always return the same labels for a given input.
-	sort.Sort(lbls)
-
-	return lbls, nil
+	return builder.Labels(nil), nil
 }
 
 // MutableLabelNames returns all the mutable label names possible for a tenant.

@@ -59,6 +59,7 @@ type API struct {
 	MetricRegistry              prometheus.Registerer
 	PromQLMaxEvaluatedSeries    uint32
 	TenantLabelName             string
+	MutableLabelDetector        remotestorage.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
 	RequireTenantHeader bool
@@ -194,6 +195,7 @@ func (a *API) init() {
 		a.Index,
 		maxConcurrent,
 		a.TenantLabelName,
+		a.MutableLabelDetector,
 		a.RequireTenantHeader,
 		a.MetricRegistry,
 	)
