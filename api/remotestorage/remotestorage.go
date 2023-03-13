@@ -19,6 +19,7 @@ import (
 
 var (
 	ErrMissingTenantHeader = errors.New("the tenant header is missing")
+	ErrParseTTLHeader      = errors.New("can't parse time to live header ")
 	errMissingRequest      = errors.New("HTTP request not found in context")
 )
 
@@ -54,11 +55,6 @@ func New(
 }
 
 func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
-	// Limit concurrent writes, block here if too many concurrent writes are running.
-	if err := r.remoteWriteGate.Start(ctx); err != nil {
-		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
-	}
-
 	// If the tenant header is present, the tenant label is added to all metrics written.
 	request, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
@@ -79,8 +75,14 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 
 		timeToLive, err = strconv.ParseInt(ttlRaw, 10, 64)
 		if err != nil {
-			return errAppender{fmt.Errorf("can't parse time to live header '%s': %w", ttlRaw, err)}
+			return errAppender{fmt.Errorf("%w '%s': %w", ErrParseTTLHeader, ttlRaw, err)}
 		}
+	}
+
+	// Limit concurrent writes, block here if too many concurrent writes are running.
+	// The appender must call remoteWriteGate.Done to release a slot.
+	if err := r.remoteWriteGate.Start(ctx); err != nil {
+		return errAppender{fmt.Errorf("too many concurrent remote write: %w", err)}
 	}
 
 	writeMetrics := &writeMetrics{
