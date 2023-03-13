@@ -2,6 +2,7 @@
 !squirreldb.conf
 /dist*
 /work
+/tests/promql-compliance-test/compliance
 
 /.idea
 .vscode
