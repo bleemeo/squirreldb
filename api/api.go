@@ -63,8 +63,9 @@ type API struct {
 	MutableLabelDetector        remotestorage.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
-	RequireTenantHeader bool
-	Logger              zerolog.Logger
+	RequireTenantHeader   bool
+	UseThanosPromQLEngine bool
+	Logger                zerolog.Logger
 
 	ready      int32
 	router     http.Handler
@@ -80,26 +81,37 @@ func NewPrometheus(
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
+	useThanosPromQLEngine bool,
 	apiLogger zerolog.Logger,
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
-	queryEngine := engine.New(engine.Opts{
-		EngineOpts: ppromql.EngineOpts{
-			Logger:               logger.NewKitLogger(&queryLogger),
-			Reg:                  metricRegistry,
-			MaxSamples:           50000000,
-			Timeout:              2 * time.Minute,
-			ActiveQueryTracker:   nil,
-			LookbackDelta:        5 * time.Minute,
-			EnableAtModifier:     true,
-			EnableNegativeOffset: true,
-			EnablePerStepStats:   false,
-		},
-		LogicalOptimizers: nil,
-		DebugWriter:       nil,
-		DisableFallback:   false,
-	})
+	engineOpts := ppromql.EngineOpts{
+		Logger:               logger.NewKitLogger(&queryLogger),
+		Reg:                  metricRegistry,
+		MaxSamples:           50000000,
+		Timeout:              2 * time.Minute,
+		ActiveQueryTracker:   nil,
+		LookbackDelta:        5 * time.Minute,
+		EnableAtModifier:     true,
+		EnableNegativeOffset: true,
+		EnablePerStepStats:   false,
+	}
+
+	var queryEngine v1.QueryEngine
+
+	if useThanosPromQLEngine {
+		apiLogger.Info().Msg("Using Thanos PromQL engine")
+
+		queryEngine = engine.New(engine.Opts{
+			EngineOpts:        engineOpts,
+			LogicalOptimizers: nil,
+			DebugWriter:       nil,
+			DisableFallback:   false,
+		})
+	} else {
+		queryEngine = ppromql.NewEngine(engineOpts)
+	}
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -214,6 +226,7 @@ func (a *API) init() {
 		appendable,
 		maxConcurrent,
 		a.MetricRegistry,
+		a.UseThanosPromQLEngine,
 		a.Logger,
 	)
 
