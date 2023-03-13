@@ -525,6 +525,12 @@ func promqlFunctionToType(function string) promqlFunctionType {
 		return promqlFunctionAverage
 	case "count", "count_over_time":
 		return promqlFunctionCount
+	// On a counter, we must use min or max and not the average.
+	// When a counter resets, the preaggregated average values could
+	// have multiple counter resets instead of just one.
+	// Here we list the functions that work on a counter.
+	case "rate", "irate", "increase", "resets":
+		return promqlFunctionMax
 	default:
 		return promqlFunctionAverage
 	}
