@@ -20,11 +20,11 @@ func TestAppenderInvalidRequest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	app := remotestorage.New(nil, nil, maxConcurrentWrite, "", true, prometheus.NewRegistry())
+	app := remotestorage.New(nil, nil, maxConcurrentWrite, "", mockMutableLAbel{}, true, prometheus.NewRegistry())
 
 	// Send some requests with a missing tenant header.
 	for i := 0; i < 2*maxConcurrentWrite; i++ {
-		request, _ := http.NewRequest(http.MethodPost, "http://localhost:9201/api/v1/write", nil)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", nil)
 		subCtx := types.WrapContext(ctx, request)
 
 		appender := app.Appender(subCtx)
@@ -37,7 +37,7 @@ func TestAppenderInvalidRequest(t *testing.T) {
 
 	// Send some requests with an invalid TTL header.
 	for i := 0; i < 2*maxConcurrentWrite; i++ {
-		request, _ := http.NewRequest(http.MethodPost, "http://localhost:9201/api/v1/write", nil)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", nil)
 		request.Header.Set(types.HeaderTenant, "my_tenant")
 		request.Header.Set(types.HeaderTimeToLive, "invalid_ttl")
 
@@ -50,4 +50,10 @@ func TestAppenderInvalidRequest(t *testing.T) {
 			t.Fatalf("Expected ErrMissingTenantHeader, got %s", err)
 		}
 	}
+}
+
+type mockMutableLAbel struct{}
+
+func (mockMutableLAbel) IsMutableLabel(ctx context.Context, tenant, name string) (bool, error) {
+	return false, nil
 }
