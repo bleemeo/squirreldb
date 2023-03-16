@@ -73,7 +73,7 @@ func run(ctx context.Context) error {
 		return warnings
 	}
 
-	rand.Seed(*seed) //nolint:staticcheck // Deprecated.
+	rand.Seed(*seed)
 
 	ctx, cancel := context.WithTimeout(ctx, *runDuration)
 	resultChan := make(chan result, (*workerProcesses)*(*workerThreads)*(*count))

@@ -8,7 +8,7 @@ import (
 
 func Test_decode(t *testing.T) {
 	blob := make([]byte, 66000)
-	rand.Read(blob) //nolint:staticcheck // Deprecated.
+	rand.Read(blob)
 
 	tests := []struct {
 		name    string

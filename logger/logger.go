@@ -21,9 +21,6 @@ func NewConsoleWriter(disableColor bool) io.Writer {
 
 // NewLogger returns a zerolog logger with timestamp and level.
 func NewLogger(w io.Writer, level zerolog.Level) zerolog.Logger {
-	// Change the default time format of zerolog to allow millisecond precision.
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
-
 	return log.Output(w).With().Timestamp().Logger().Level(level)
 }
 
