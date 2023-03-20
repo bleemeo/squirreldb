@@ -185,10 +185,15 @@ func (i *indexWrapper) InfoByID(ctx context.Context, w io.Writer, id types.Metri
 	return errNotImplemented
 }
 
-// InfoByLabels implements the IndexDumper interface used by the API.
-func (i *indexWrapper) InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error {
+// DumpByLabels implements the IndexDumper interface used by the API.
+func (i *indexWrapper) DumpByLabels(
+	ctx context.Context,
+	w io.Writer,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) error {
 	if dumper, ok := i.index.(types.IndexDumper); ok {
-		return dumper.InfoByLabels(ctx, w, lbls)
+		return dumper.DumpByLabels(ctx, w, start, end, matchers)
 	}
 
 	return errNotImplemented

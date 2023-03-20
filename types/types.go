@@ -61,8 +61,8 @@ type Index interface {
 type IndexDumper interface {
 	InfoGlobal(ctx context.Context, w io.Writer) error
 	InfoByID(ctx context.Context, w io.Writer, id MetricID) error
-	InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error
 	Dump(ctx context.Context, w io.Writer) error
+	DumpByLabels(ctx context.Context, w io.Writer, start, end time.Time, matchers []*labels.Matcher) error
 	DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error
 	DumpByShard(ctx context.Context, w io.Writer, shard time.Time) error
 	DumpByPosting(ctx context.Context, w io.Writer, shard time.Time, name string, value string) error
