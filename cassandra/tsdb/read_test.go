@@ -512,7 +512,9 @@ func BenchmarkMergePoints(b *testing.B) {
 	}
 }
 
-func benchmarkMergePoints(b *testing.B, nSrc, nDst, srcTsOffset, dstTsOffset int) {
+func benchmarkMergePoints(b *testing.B, nSrc, nDst, srcTsOffset, dstTsOffset int) { //nolint:stylecheck
+	b.Helper()
+
 	src := make([]types.MetricPoint, 0, nSrc)
 	dst := make([]types.MetricPoint, 0, nDst)
 
