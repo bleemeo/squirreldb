@@ -610,6 +610,20 @@ func reversePoints(points []types.MetricPoint) {
 // dst must be sorted (and de-duplicated) in descending order.
 // The result is sorted in descending order and de-duplicated.
 func mergePoints(dst, src []types.MetricPoint) []types.MetricPoint {
+	// Fast path for merging pre-aggregated data and raw data:
+	// in this case all points in src are after the points in dst.
+	if len(dst) > 0 && len(src) > 0 && src[0].Timestamp > dst[0].Timestamp {
+		// Shift dst points to the right to make room for src points.
+		dst = append(dst, src...)
+		copy(dst[len(src):], dst[0:len(dst)-len(src)])
+
+		for i := len(src) - 1; i >= 0; i-- {
+			dst[len(src)-i-1] = src[i]
+		}
+
+		return dst
+	}
+
 	dstIndex := len(dst)
 	srcIndex := len(src) - 1
 
