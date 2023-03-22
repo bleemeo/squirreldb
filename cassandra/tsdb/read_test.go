@@ -2,7 +2,9 @@ package tsdb
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
+	"sort"
 	"squirreldb/types"
 	"testing"
 	"time"
@@ -414,6 +416,65 @@ func Test_mergePoints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mergePoints(tt.args.dst, tt.args.src)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("mergePoints() diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func Test_mergePointsRandom(t *testing.T) {
+	const (
+		srcLen = 15
+		dstLen = 45
+	)
+
+	for testNumber := 0; testNumber < 15; testNumber++ {
+		testNumber := testNumber
+		t.Run(fmt.Sprintf("test-%d", testNumber), func(t *testing.T) {
+			rnd := rand.New(rand.NewSource(int64(testNumber)))
+
+			t.Parallel()
+
+			src := make([]types.MetricPoint, 0, 15)
+			dst := make([]types.MetricPoint, 0, 45)
+
+			for i := 0; i < srcLen; i++ {
+				src = append(src, types.MetricPoint{
+					Timestamp: rnd.Int63n(3600),
+					Value:     12.34,
+				})
+			}
+
+			for i := 0; i < dstLen; i++ {
+				dst = append(dst, types.MetricPoint{
+					Timestamp: rnd.Int63n(3600),
+					Value:     12.34,
+				})
+			}
+
+			want := make([]types.MetricPoint, 0, len(src)+len(dst))
+			want = append(want, src...)
+			want = append(want, dst...)
+
+			sort.Slice(src, func(i, j int) bool {
+				return src[i].Timestamp < src[j].Timestamp
+			})
+
+			// dst and want are deduplicated
+			dst = types.DeduplicatePoints(dst)
+			want = types.DeduplicatePoints(want)
+
+			// dst and want are sorted descending
+			sort.Slice(dst, func(i, j int) bool {
+				return dst[i].Timestamp > dst[j].Timestamp
+			})
+
+			sort.Slice(want, func(i, j int) bool {
+				return want[i].Timestamp > want[j].Timestamp
+			})
+
+			got := mergePoints(dst, src)
+			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("mergePoints() diff (-want +got):\n%s", diff)
 			}
 		})
