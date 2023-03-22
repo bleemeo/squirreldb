@@ -606,7 +606,7 @@ func reversePoints(points []types.MetricPoint) {
 }
 
 // MergeSortedPoints merge two sorted list of points in-place.
-// src must be sorted ascending
+// src must be sorted ascending order.
 // dst must be sorted (and de-duplicated) in descending order.
 // The result is sorted in descending order and de-duplicated.
 func mergePoints(dst, src []types.MetricPoint) []types.MetricPoint {
@@ -614,37 +614,47 @@ func mergePoints(dst, src []types.MetricPoint) []types.MetricPoint {
 	srcIndex := len(src) - 1
 
 	for srcIndex >= 0 {
-		pts := src[srcIndex]
+		point := src[srcIndex]
 
 		switch {
-		case dstIndex == 0 || dst[dstIndex-1].Timestamp > pts.Timestamp:
-			dst = append(dst, pts)
+		case dstIndex == 0 || dst[dstIndex-1].Timestamp > point.Timestamp:
+			dst = append(dst, point)
 
 			dstIndex++
 			srcIndex--
-		case dst[dstIndex-1].Timestamp == pts.Timestamp:
-			// duplicated point, overwrite the existing one. The new one may be more recent
+		case dst[dstIndex-1].Timestamp == point.Timestamp:
+			// Duplicated point, overwrite the existing one. The new one may be more recent.
 			srcIndex--
 		default:
-			// pts might need to be inserted in the "past". Search the insertion point
-			for n := dstIndex - 1; n >= -1; n-- {
-				if n == -1 || dst[n].Timestamp > pts.Timestamp {
-					// pts must be inserted at buffer[n+1]
-					dst = append(dst, types.MetricPoint{})
+			// pts might need to be inserted in the "past".
+			// Search the insertion point using binary search.
+			// The search has a complexity of O(n*log(n)).
+			a := -1
+			b := dstIndex - 1
 
-					copy(dst[n+2:dstIndex+1], dst[n+1:dstIndex])
+			for b-a > 1 {
+				n := (a + b) / 2
 
-					dst[n+1] = pts
-					dstIndex++
-					srcIndex--
-
-					break
-				} else if dst[n].Timestamp == pts.Timestamp {
-					// duplicated point, overwrite the existing one. The new one may be more recent
-					srcIndex--
-
-					break
+				if dst[n].Timestamp >= point.Timestamp {
+					a = n
+				} else {
+					b = n
 				}
+			}
+
+			// We found a, the highest integer such as dst[a].Timestamp >= pts.Timestamp or a == -1.
+			if a == -1 || dst[a].Timestamp > point.Timestamp {
+				// pts must be inserted at buffer[n+1]
+				dst = append(dst, types.MetricPoint{})
+
+				copy(dst[a+2:dstIndex+1], dst[a+1:dstIndex])
+
+				dst[a+1] = point
+				dstIndex++
+				srcIndex--
+			} else if dst[a].Timestamp == point.Timestamp {
+				// Duplicated point, overwrite the existing one. The new one may be more recent.
+				srcIndex--
 			}
 		}
 	}
