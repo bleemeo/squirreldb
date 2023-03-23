@@ -75,6 +75,7 @@ func DefaultConfig() Config {
 			Store:                 "batcher",
 			MutableLabelsProvider: "cassandra",
 			DisableBackgroundTask: false,
+			UseThanosPromQLEngine: false,
 		},
 	}
 }
