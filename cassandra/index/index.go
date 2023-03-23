@@ -444,6 +444,30 @@ func (c *CassandraIndex) Dump(ctx context.Context, w io.Writer) error {
 	return ctx.Err()
 }
 
+func (c *CassandraIndex) DumpByLabels(
+	ctx context.Context,
+	w io.Writer,
+	start, end time.Time,
+	matchers []*labels.Matcher,
+) error {
+	metrics, err := c.Search(ctx, start, end, matchers)
+	if err != nil {
+		fmt.Fprintf(w, "fail to search labels: %v", err)
+
+		return nil
+	}
+
+	ids := make([]types.MetricID, 0, metrics.Count())
+	for metrics.Next() {
+		ids = append(ids, metrics.At().ID)
+	}
+
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	return c.dumpBulk(ctx, csvWriter, ids)
+}
+
 func (c *CassandraIndex) DumpByExpirationDate(ctx context.Context, w io.Writer, expirationDate time.Time) error {
 	expirationBitmap, err := c.cassandraGetExpirationList(ctx, expirationDate.Truncate(24*time.Hour))
 	if err != nil {
@@ -781,27 +805,6 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	}
 
 	return nil
-}
-
-func (c *CassandraIndex) InfoByLabels(ctx context.Context, w io.Writer, lbls labels.Labels) error {
-	sortedLabels := sortLabels(lbls)
-	sortedLabelsString := sortedLabels.String()
-
-	resp, err := c.store.SelectLabelsList2ID(ctx, []string{sortedLabelsString})
-	if err != nil {
-		return err
-	}
-
-	if len(resp) == 0 {
-		fmt.Fprintf(w, "Labels %s not found in index\n", sortedLabelsString)
-
-		return nil
-	}
-
-	metricID := resp[sortedLabelsString]
-	fmt.Fprintf(w, "Labels %s has ID %d\n", sortedLabelsString, metricID)
-
-	return c.InfoByID(ctx, w, metricID)
 }
 
 // Verify perform some verification of the indexes health.

@@ -24,7 +24,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/model/labels"
 	ppromql "github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
@@ -183,6 +182,7 @@ func (a *API) init() {
 	router.Get("/debug/index_info", a.indexInfoHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
+	router.Get("/debug/index_dump_by_labels", a.indexDumpByLabelsHandler)
 	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
@@ -363,8 +363,8 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "/debug/index_info: provide global information")
 	fmt.Fprintln(w, "/debug/index_info?metricID=XXX: provide information on given metric ID")
 	fmt.Fprintln(w, "/debug/index_info?verbose&metricID=XXX: provide more information on given metric ID")
-	fmt.Fprintln(w, "/debug/index_info?metricLabels=XXX: provide information on given metric labels")
 	fmt.Fprintln(w, "/debug/index_dump: all known metrics")
+	fmt.Fprintln(w, "/debug/index_dump_by_labels?query=cpu_used{instance=\"my_server\"}&start=2006-01-02&end=2006-01-02")
 	fmt.Fprintln(w, "/debug/index_dump_by_expiration?date=2006-01-02: metrics to check for expiration at given date")
 	fmt.Fprintln(w, "/debug/index_dump_by_shard?shard_time=2006-01-02: metrics in given shard")
 	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used&value=/: metrics in given posting")
@@ -375,9 +375,6 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "This allows to query the globalShardNumber which contains few special values (like all ")
 	fmt.Fprintln(w, "assigned ID, existing shard,...)")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "To use /debug/index_info?metricLabels=XXX, you need to encode the labels. The easiest is using curl")
-	fmt.Fprintln(w, "curl http://localhost:9201/debug/index_info -G -d metricLabels='item=\"/\",__name__=\"disk_used\"")
-	fmt.Fprintln(w, "If curl complains about bad URL format, remove whitespace after each \",\"")
 }
 
 func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
@@ -385,11 +382,8 @@ func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
 		metricIDText := req.URL.Query()["metricID"]
-		metricLabelsText := req.URL.Query()["metricLabels"]
 
 		switch {
-		case len(metricLabelsText) > 0:
-			a.indexInfoLabels(ctx, w, idx, metricLabelsText)
 		case len(metricIDText) > 0:
 			a.indexInfoIDs(ctx, w, idx, metricIDText)
 		default:
@@ -403,28 +397,6 @@ func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Index does not implement Info*()", http.StatusNotImplemented)
 
 		return
-	}
-}
-
-func (a API) indexInfoLabels(
-	ctx context.Context,
-	w http.ResponseWriter,
-	idx types.IndexDumper,
-	metricLabelsText []string,
-) {
-	for _, text := range metricLabelsText {
-		metricLabels, err := textToLabels(text)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
-
-			return
-		}
-
-		if err := idx.InfoByLabels(ctx, w, metricLabels); err != nil {
-			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
-
-			return
-		}
 	}
 }
 
@@ -484,6 +456,58 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 		}
 	} else {
 		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	idx, ok := a.Index.(types.IndexDumper)
+	if !ok {
+		http.Error(w, "Index does not implement DumpByLabels()", http.StatusNotImplemented)
+
+		return
+	}
+
+	var err error
+
+	// Set start to the oldest date possible if it's not set.
+	start := time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	startStr := req.URL.Query().Get("start")
+	if startStr != "" {
+		start, err = time.Parse("2006-01-02", startStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("parse start time: %v", err), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	// Set end to now if it's not set.
+	end := time.Now()
+
+	endStr := req.URL.Query().Get("end")
+	if endStr != "" {
+		end, err = time.Parse("2006-01-02", endStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("parse end time: %v", err), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	matchers, err := parser.ParseMetricSelector(req.URL.Query().Get("query"))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("fail to parse query: %v", err), http.StatusBadRequest)
+
+		return
+	}
+
+	if err := idx.DumpByLabels(ctx, w, start, end, matchers); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 		return
 	}
@@ -857,18 +881,4 @@ func (i *interceptor) Write(b []byte) (int, error) {
 
 func (i *interceptor) Header() http.Header {
 	return i.OrigWriter.Header()
-}
-
-func textToLabels(text string) (labels.Labels, error) {
-	matchers, err := parser.ParseMetricSelector("{" + text + "}")
-	if err != nil {
-		return nil, fmt.Errorf("fail to parse labels: %w", err)
-	}
-
-	builder := labels.NewBuilder(nil)
-	for _, v := range matchers {
-		builder.Set(v.Name, v.Value)
-	}
-
-	return builder.Labels(nil), nil
 }
