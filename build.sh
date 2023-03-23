@@ -5,7 +5,7 @@ set -e
 USER_UID=$(id -u)
 
 # Should be the same as run-tests.sh
-GORELEASER_VERSION="v1.15.2"
+GORELEASER_VERSION="v1.16.1"
 
 case "$1" in
    "")
@@ -72,7 +72,7 @@ else
       git config --global --add safe.directory /src
       goreleaser check
       go test ./...
-      goreleaser --rm-dist --snapshot --parallelism 2
+      goreleaser --clean --snapshot --parallelism 2
       chown -R $USER_UID dist
       "
 

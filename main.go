@@ -54,11 +54,14 @@ func setupSentryLogger(cfg config.Config) io.Closer {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Deprecated since Go 1.20, a random seed is used by default.
+	rand.Seed(time.Now().UnixNano())
 
 	daemon.Version = version
 	daemon.Commit = commit
 	daemon.Date = date
+
+	// Change the default time format of zerolog to allow millisecond precision.
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 
 	// Initialize the logger temporarily before loading the config.
 	log.Logger = logger.NewLogger(logger.NewConsoleWriter(false), zerolog.TraceLevel)

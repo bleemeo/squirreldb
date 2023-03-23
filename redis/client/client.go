@@ -262,7 +262,7 @@ func (c *Client) fixClient(ctx context.Context) error {
 	case singleErr == nil && infoErr != nil:
 		c.clusterClient = nil
 	default:
-		return fmt.Errorf("ping redis: single node client: %w, cluster client: %s", singleErr, clusterErr)
+		return fmt.Errorf("ping redis: single node client: %w, cluster client: %w", singleErr, clusterErr)
 	}
 
 	return nil
