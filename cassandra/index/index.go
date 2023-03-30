@@ -88,7 +88,7 @@ var (
 	errTimeOutOfRange           = errors.New("time out of range")
 	errBitmapEmpty              = errors.New("the result bitmap is empty")
 	errNotASimpleRegex          = errors.New("not a simple regex")
-	errNewMetricLockNotAcquired = errors.New("newMetricLock is not acquired")
+	errNewMetricLockNotAcquired = errors.New("newMetricGlobalLock is not acquired")
 	errMetricDoesNotExist       = errors.New("metric doesn't exist")
 )
 
@@ -118,8 +118,16 @@ type CassandraIndex struct {
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 
+	// The three locks used in index are:
+	// * lookupIDMutex is a local lock and only protect local (in-memory) value.
+	// * newMetricGlobalLock is a global lock and protect values in Cassandra. It protect any
+	//   value that could be written during metric creation. Since metric creation is done
+	//   synchroniously when writing points, this lock should not be held for too long.
+	// * expirationGlobalLock is a global lock and protect values in Cassandra. Unlike newMetricGlobalLock
+	//   it protect value that can't we written on metric creation.
 	lookupIDMutex            sync.Mutex
-	newMetricLock            types.TryLocker
+	newMetricGlobalLock      types.TryLocker
+	expirationGlobalLock     types.TryLocker
 	expirationUpdateRequests map[time.Time]expirationUpdateRequest
 	expirationBackoff        backoff.BackOff
 	nextExpirationAt         time.Time
@@ -258,7 +266,8 @@ func initialize(
 		shardExpirationCache:     &shardExpirationCache{},
 		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
 		expirationBackoff:        expBackoff,
-		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+		newMetricGlobalLock:      options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+		expirationGlobalLock:     options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive),
 		metrics:                  metrics,
 		logger:                   logger,
 	}
@@ -817,7 +826,7 @@ func (c *CassandraIndex) Verify(
 }
 
 // verify perform some checks on index consistency.
-// It could apply fixes and could acquire the newMetricLock to ensure a consitent read of the index.
+// It could apply fixes and could acquire the newMetricGlobalLock to ensure a consitent read of the index.
 // The lock is required as a metric creation / expiration during the verification process could
 // return a false-positive, but holding the lock will block metric creation during the whole verification process.
 // When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
@@ -837,8 +846,8 @@ func (c *CassandraIndex) verify(
 	}
 
 	if acquireLock {
-		c.newMetricLock.Lock()
-		defer c.newMetricLock.Unlock()
+		c.newMetricGlobalLock.Lock()
+		defer c.newMetricGlobalLock.Unlock()
 	}
 
 	issueCount, shards, err := c.verifyMissingShard(ctx, w, doFix)
@@ -2026,7 +2035,7 @@ func (c *CassandraIndex) lookupIDs(
 			pending[i] = entries[idx]
 		}
 
-		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}
@@ -2036,7 +2045,7 @@ func (c *CassandraIndex) lookupIDs(
 
 		done, err := c.createMetrics(ctx, now, pending, false)
 
-		c.newMetricLock.Unlock()
+		c.newMetricGlobalLock.Unlock()
 
 		if err != nil {
 			return nil, nil, err
@@ -2310,7 +2319,7 @@ func (c *CassandraIndex) createShardExpirationMetric(
 		ttl:                ttl,
 	}
 
-	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+	if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -2320,7 +2329,7 @@ func (c *CassandraIndex) createShardExpirationMetric(
 
 	_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
 
-	c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("create shard expiration metric: %w", err)
@@ -2423,7 +2432,7 @@ type lookupEntry struct {
 }
 
 // createMetrics creates a new metric IDs associated with provided request
-// The lock newMetricLock is assumed to be held.
+// The lock newMetricGlobalLock is assumed to be held.
 // Some care should be taken to avoid assigning the same ID from two SquirrelDB instance, so:
 //
 // * To avoid race-condition, redo a check that metrics are not yet registered now that the lock is acquired
@@ -2731,7 +2740,7 @@ func (c *CassandraIndex) updatePostingShards(
 	c.invalidatePostings(ctx, keysToInvalidate)
 
 	if len(maybePresent) > 0 {
-		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -2741,7 +2750,7 @@ func (c *CassandraIndex) updatePostingShards(
 
 		err := c.applyUpdatePostingShards(ctx, maybePresent, updates, precense)
 
-		c.newMetricLock.Unlock()
+		c.newMetricGlobalLock.Unlock()
 
 		if err != nil {
 			return err
@@ -3133,8 +3142,8 @@ func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
 		return fmt.Errorf("update shard expiration: %w", err)
 	}
 
-	c.newMetricLock.Lock()
-	defer c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Lock()
+	defer c.newMetricGlobalLock.Unlock()
 
 	err = c.concurrentTasks(
 		ctx,
@@ -3246,7 +3255,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 		}
 	}
 
-	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+	if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -3256,7 +3265,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 
 	done, err := c.createMetrics(ctx, time.Now(), requests, true)
 
-	c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Unlock()
 
 	if err != nil {
 		return nil, err
@@ -3280,12 +3289,11 @@ func (c *CassandraIndex) InternalCreateMetric(
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
 // This should only be used in test & benchmark.
 func (c *CassandraIndex) InternalForceExpirationTimestamp(ctx context.Context, value time.Time) error {
-	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(ctx, 0); !acquired {
+	if acquired := c.expirationGlobalLock.TryLock(ctx, 0); !acquired {
 		return errors.New("lock held, please retry")
 	}
 
-	defer lock.Unlock()
+	defer c.expirationGlobalLock.Unlock()
 
 	return c.options.States.Write(ctx, expireMetricStateName, value.Format(time.RFC3339))
 }
@@ -3352,11 +3360,10 @@ func (c *CassandraIndex) expirationLastProcessedDay(ctx context.Context) (time.T
 
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bool, error) {
-	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(ctx, 0); !acquired {
+	if acquired := c.expirationGlobalLock.TryLock(ctx, 0); !acquired {
 		return false, nil
 	}
-	defer lock.Unlock()
+	defer c.expirationGlobalLock.Unlock()
 
 	start := time.Now()
 
@@ -3395,7 +3402,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		return false, nil
 	}
 
-	// We don't need the newMetricLockName lock here, because newly created metrics
+	// We don't need the newMetricGlobalLock lock here, because newly created metrics
 	// won't be added in candidateDay (which is in the past).
 	bitmap, err := c.cassandraGetExpirationList(ctx, candidateDay)
 	if err != nil {
@@ -3464,9 +3471,9 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 }
 
 // cassandraCheckExpire actually checks for metric expired or not, and perform changes.
-// It assumes that Cassandra lock expireMetricLockName is taken.
+// It assumes that Cassandra lock expirationGlobalLock is taken.
 //
-// This method performs changes at the end, because changes will require the Cassandra lock newMetricLockName,
+// This method performs changes at the end, because changes will require the Cassandra lock newMetricGlobalLock,
 // and we want to hold this lock only a very short time.
 //
 // This purge will also remove entries from the in-memory cache.
@@ -3553,8 +3560,8 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		bulkDelete.PrepareDelete(id, idToLabels[id], false)
 	}
 
-	c.newMetricLock.Lock()
-	defer c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Lock()
+	defer c.newMetricGlobalLock.Unlock()
 
 	start := time.Now()
 
@@ -3816,6 +3823,7 @@ type expirationUpdateRequest struct {
 // expirationUpdate apply an expirationUpdateRequest, which is a request to move metricID between day at which
 // they are expected to expire.
 // Be aware that job.AddIDs and job.RemoveIDs are mutated (do a copy if the slice is shared / reused after this call).
+// The lock newMetricGlobalLock must be held while calling this function.
 func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpdateRequest) error {
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
 	if err != nil {

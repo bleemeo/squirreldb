@@ -70,7 +70,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 	}
 }
 
-// Delete perform the deletion and REQUIRE the newMetricLockName.
+// Delete perform the deletion and REQUIRE the newMetricGlobalLock.
 //
 // The method should be called only once, a new deleter should be created to reuse it.
 //
