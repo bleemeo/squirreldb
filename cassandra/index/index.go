@@ -1794,13 +1794,11 @@ func (c *CassandraIndex) lookupLabels(
 				var ok bool
 
 				labelList[i], ok = idToLabels[id]
-				if !ok {
-					return nil, fmt.Errorf("labels for metric ID %d not found", id)
+				if ok {
+					size := c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
+
+					c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 				}
-
-				size := c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
-
-				c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 			}
 		}
 	}
@@ -3029,20 +3027,24 @@ type metricsLabels struct {
 }
 
 func (l *metricsLabels) Next() bool {
-	if l.next >= len(l.ids) {
-		return false
-	}
-
-	if l.labelsList == nil {
+	if l.labelsList == nil && len(l.ids) > 0 {
 		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
 		if l.err != nil {
 			return false
 		}
 	}
 
-	l.next++
+	for l.next < len(l.ids) {
+		l.next++
 
-	return true
+		if l.labelsList[l.next-1] == nil {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }
 
 func (l *metricsLabels) At() types.MetricLabel {
@@ -3914,7 +3916,7 @@ func (c *CassandraIndex) idsForMatchers(
 		for i, id := range ids {
 			lbls := result.labelsList[i]
 
-			if matcherMatches(matchers, lbls) {
+			if lbls != nil && matcherMatches(matchers, lbls) {
 				newIds = append(newIds, id)
 				newLabels = append(newLabels, lbls)
 			}
