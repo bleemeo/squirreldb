@@ -3001,14 +3001,14 @@ func (c *CassandraIndex) Search(
 		return nil, nil
 	}
 
-	ids, labelsList, err := c.idsForMatchers(ctx, shards, matchers, 3)
+	result, err := c.idsForMatchers(ctx, shards, matchers, 3)
 	if err != nil {
 		return nil, err
 	}
 
-	c.metrics.SearchMetrics.Add(float64(len(ids)))
+	c.metrics.SearchMetrics.Add(float64(result.Count()))
 
-	return &metricsLabels{c: c, ctx: ctx, ids: ids, labelsList: labelsList}, nil
+	return result, nil
 }
 
 type metricsLabels struct {
@@ -3876,29 +3876,31 @@ func (c *CassandraIndex) idsForMatchers(
 	shards []int32,
 	matchers []*labels.Matcher,
 	directCheckThreshold int,
-) (ids []types.MetricID, labelsList []labels.Labels, err error) {
+) (*metricsLabels, error) {
 	results, checkMatches, err := c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	if results == nil {
-		return nil, nil, nil
-	}
+	ids := bitsetToIDs(results)
 
-	ids = bitsetToIDs(results)
+	result := &metricsLabels{
+		c:   c,
+		ctx: ctx,
+		ids: ids,
+	}
 
 	if checkMatches {
-		labelsList, err = c.lookupLabels(ctx, ids, time.Now())
+		result.labelsList, err = c.lookupLabels(ctx, ids, time.Now())
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		newIds := make([]types.MetricID, 0, len(ids))
 		newLabels := make([]labels.Labels, 0, len(ids))
 
 		for i, id := range ids {
-			lbls := labelsList[i]
+			lbls := result.labelsList[i]
 
 			if matcherMatches(matchers, lbls) {
 				newIds = append(newIds, id)
@@ -3906,11 +3908,11 @@ func (c *CassandraIndex) idsForMatchers(
 			}
 		}
 
-		ids = newIds
-		labelsList = newLabels
+		result.ids = newIds
+		result.labelsList = newLabels
 	}
 
-	return ids, labelsList, nil
+	return result, nil
 }
 
 // postingsForMatchers return metric IDs matching given matcher.
@@ -4447,6 +4449,10 @@ func sortLabels(labelList labels.Labels) labels.Labels {
 }
 
 func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
+	if it == nil {
+		return nil
+	}
+
 	resultInts := it.Slice()
 	results := make([]types.MetricID, len(resultInts))
 

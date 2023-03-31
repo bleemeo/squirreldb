@@ -1971,6 +1971,63 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
+			name:     "no-matcher",
+			index:    index1,
+			matchers: []*labels.Matcher{},
+			want:     []types.MetricID{},
+		},
+		{
+			name:  "empty-result-simple",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"this_name_does_not_exists",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:  "empty-result-complex1",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"this_label_is_always_empty_so_nothing_will_match",
+					"",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:  "empty-result-complex2",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"devel",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_.*total$",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
@@ -2150,9 +2207,9 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
+				t.Errorf("idsForMatchers() error = %v", err)
 
 				return
 			}
@@ -2160,22 +2217,25 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
+				t.Errorf("idsForMatchers() error = %v", err)
 
 				return
 			}
@@ -2183,15 +2243,18 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
@@ -2201,7 +2264,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -2211,15 +2274,18 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 	}
@@ -3686,7 +3752,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		}
 
 		t.Run(tt.name+" shardsAll", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3696,20 +3762,23 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3719,20 +3788,24 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
 
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3742,15 +3815,18 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
@@ -3760,7 +3836,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3770,15 +3846,19 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
 
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 	}
