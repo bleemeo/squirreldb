@@ -3018,12 +3018,14 @@ func (c *CassandraIndex) Search(
 }
 
 type metricsLabels struct {
-	ctx        context.Context //nolint:containedctx
-	err        error
-	c          *CassandraIndex
-	ids        []types.MetricID
-	labelsList []labels.Labels
-	next       int
+	ctx            context.Context //nolint:containedctx
+	err            error
+	c              *CassandraIndex
+	ids            []types.MetricID
+	labelsList     []labels.Labels
+	matchers       []*labels.Matcher
+	needLabelCheck bool
+	next           int
 }
 
 func (l *metricsLabels) Next() bool {
@@ -3038,6 +3040,10 @@ func (l *metricsLabels) Next() bool {
 		l.next++
 
 		if l.labelsList[l.next-1] == nil {
+			continue
+		}
+
+		if l.needLabelCheck && !matcherMatches(l.matchers, l.labelsList[l.next-1]) {
 			continue
 		}
 
@@ -3899,9 +3905,11 @@ func (c *CassandraIndex) idsForMatchers(
 	ids := bitsetToIDs(results)
 
 	result := &metricsLabels{
-		c:   c,
-		ctx: ctx,
-		ids: ids,
+		c:              c,
+		ctx:            ctx,
+		ids:            ids,
+		matchers:       matchers,
+		needLabelCheck: !checkMatches,
 	}
 
 	if checkMatches {
