@@ -14,53 +14,105 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-// verify perform some checks on index consistency.
-// It could apply fixes and could acquire the newMetricGlobalLock to ensure a consitent read of the index.
+type indexVerifier struct {
+	index       *CassandraIndex
+	doFix       bool
+	acquireLock bool
+	output      io.Writer
+	now         time.Time
+}
+
+type verifierExecution struct {
+	indexVerifier
+	bulkDeleter *deleter
+	// allPosting is the content of the special posting globalAllPostingLabel
+	allPosting *roaring.Bitmap
+	// allGoodIds will contains all MetricIDs which have correct id <-> labels entry in
+	// tables labels2id and id2labels.
+	allGoodIds *roaring.Bitmap
+}
+
+func (c *CassandraIndex) newVerifier(now time.Time, output io.Writer) indexVerifier {
+	return indexVerifier{
+		index:  c,
+		now:    now,
+		output: output,
+	}
+}
+
+// WithDoFix enable or disable fix for correctable error found. It imply taking the newMetricGlobalLock lock.
+func (v indexVerifier) WithDoFix(enable bool) indexVerifier {
+	if enable {
+		v.acquireLock = true
+	}
+
+	v.doFix = enable
+
+	return v
+}
+
+// WithLock enable or disable taking lock during index verification.
 // The lock is required as a metric creation / expiration during the verification process could
 // return a false-positive, but holding the lock will block metric creation during the whole verification process.
+// If disabled, it also disable DoFix.
+func (v indexVerifier) WithLock(enable bool) indexVerifier {
+	v.acquireLock = enable
+
+	if !enable {
+		v.doFix = false
+	}
+
+	return v
+}
+
+// verify perform some checks on index consistency.
+// It could apply fixes and could acquire the newMetricGlobalLock to ensure a consitent read of the index.
 // When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
 // that some issue might get fixed automatically (e.g. expired metrics that are not yet processed, partial write should
 // be fixed when expiration is applied for them, ...).
-func (c *CassandraIndex) verify(
-	ctx context.Context,
-	now time.Time,
-	w io.Writer,
-	doFix bool,
-	acquireLock bool,
-) (hadIssue bool, err error) {
-	bulkDeleter := newBulkDeleter(c)
-
-	if doFix && !acquireLock {
-		return hadIssue, errors.New("doFix require acquire lock")
+func (v indexVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
+	execution := &verifierExecution{
+		indexVerifier: v,
+		bulkDeleter:   newBulkDeleter(v.index),
 	}
 
-	if acquireLock {
-		c.newMetricGlobalLock.Lock()
-		defer c.newMetricGlobalLock.Unlock()
+	return execution.verify(ctx)
+}
+
+func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err error) {
+	if ve.acquireLock {
+		ve.index.newMetricGlobalLock.Lock()
+		defer ve.index.newMetricGlobalLock.Unlock()
 	}
 
-	issueCount, shards, err := c.verifyMissingShard(ctx, w, doFix)
+	issueCount, shards, err := ve.verifyMissingShard(ctx)
 	if err != nil {
 		return hadIssue, err
 	}
 
 	hadIssue = hadIssue || issueCount > 0
 
-	allGoodIds := roaring.NewBTreeBitmap()
+	ve.allGoodIds = roaring.NewBTreeBitmap()
 
-	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
+	ve.allPosting, err = ve.index.postings(
+		ctx,
+		[]int32{globalShardNumber},
+		globalAllPostingLabel,
+		globalAllPostingLabel,
+		false,
+	)
 	if err != nil {
 		return hadIssue, err
 	}
 
-	fmt.Fprintf(w, "Index had %d shards and should have %d metrics\n", shards.Count(), allPosting.Count())
+	fmt.Fprintf(ve.output, "Index had %d shards and should have %d metrics\n", shards.Count(), ve.allPosting.Count())
 
-	if respf, ok := w.(http.Flusher); ok {
+	if respf, ok := ve.output.(http.Flusher); ok {
 		respf.Flush()
 	}
 
 	count := 0
-	it := allPosting.Iterator()
+	it := ve.allPosting.Iterator()
 
 	pendingIds := make([]types.MetricID, 0, 10000)
 
@@ -89,7 +141,7 @@ func (c *CassandraIndex) verify(
 		}
 
 		if len(pendingIds) > 0 {
-			bulkHadIssue, err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, allPosting, allGoodIds)
+			bulkHadIssue, err := ve.verifyBulk(ctx, pendingIds)
 			if err != nil {
 				return hadIssue, err
 			}
@@ -98,32 +150,32 @@ func (c *CassandraIndex) verify(
 		}
 	}
 
-	fmt.Fprintf(w, "Index contains %d metrics and %d ok\n", count, allGoodIds.Count())
+	fmt.Fprintf(ve.output, "Index contains %d metrics and %d ok\n", count, ve.allGoodIds.Count())
 
-	if respf, ok := w.(http.Flusher); ok {
+	if respf, ok := ve.output.(http.Flusher); ok {
 		respf.Flush()
 	}
 
-	if doFix {
-		fmt.Fprintf(w, "Applying fix...")
+	if ve.doFix {
+		fmt.Fprintf(ve.output, "Applying fix...")
 
-		if err := bulkDeleter.Delete(ctx); err != nil {
+		if err := ve.bulkDeleter.Delete(ctx); err != nil {
 			return hadIssue, err
 		}
 	}
 
 	for _, shard := range shards.Slice() {
 		shard := int32(shard)
-		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
+		fmt.Fprintf(ve.output, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
-		shardHadIssue, err := c.verifyShard(ctx, w, doFix, shard, allPosting)
+		shardHadIssue, err := ve.verifyShard(ctx, shard)
 		if err != nil {
 			return hadIssue, err
 		}
 
 		hadIssue = hadIssue || shardHadIssue
 
-		if respf, ok := w.(http.Flusher); ok {
+		if respf, ok := ve.output.(http.Flusher); ok {
 			respf.Flush()
 		}
 	}
@@ -133,12 +185,10 @@ func (c *CassandraIndex) verify(
 
 // verifyMissingShard search from now+3 weeks to 100 weeks before this points for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard(
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-) (errorCount int, shards *roaring.Bitmap, err error) {
-	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
+func (ve *verifierExecution) verifyMissingShard(
+	ctx context.Context) (errorCount int, shards *roaring.Bitmap, err error,
+) {
+	shards, err = ve.index.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 	if err != nil {
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
 	}
@@ -152,7 +202,7 @@ func (c *CassandraIndex) verifyMissingShard(
 
 		queryShard := []int32{shardForTime(current.Unix())}
 
-		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
+		it, err := ve.index.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
 			return 0, shards, err
 		}
@@ -161,13 +211,13 @@ func (c *CassandraIndex) verifyMissingShard(
 			errorCount++
 
 			fmt.Fprintf(
-				w,
+				ve.output,
 				"Shard %s for time %v isn't in all shards",
 				timeForShard(queryShard[0]).Format(shardDateFormat),
 				current.String(),
 			)
 
-			if doFix {
+			if ve.doFix {
 				_, err = shards.AddN(uint64(queryShard[0]))
 				if err != nil {
 					return 0, shards, fmt.Errorf("update bitmap: %w", err)
@@ -186,7 +236,7 @@ func (c *CassandraIndex) verifyMissingShard(
 
 		shard := int32(shard)
 
-		it, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
+		it, err := ve.index.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
 			return 0, shards, fmt.Errorf("get postings for maybe metric IDs: %w", err)
 		}
@@ -194,9 +244,13 @@ func (c *CassandraIndex) verifyMissingShard(
 		if it == nil || !it.Any() {
 			errorCount++
 
-			fmt.Fprintf(w, "Shard %s is listed in all shards but don't exists\n", timeForShard(shard).Format(shardDateFormat))
+			fmt.Fprintf(
+				ve.output,
+				"Shard %s is listed in all shards but don't exists\n",
+				timeForShard(shard).Format(shardDateFormat),
+			)
 
-			if doFix {
+			if ve.doFix {
 				_, err = shards.RemoveN(uint64(shard))
 				if err != nil {
 					return 0, shards, fmt.Errorf("update bitmap: %w", err)
@@ -205,7 +259,7 @@ func (c *CassandraIndex) verifyMissingShard(
 		}
 	}
 
-	if errorCount > 0 && doFix {
+	if errorCount > 0 && ve.doFix {
 		var buffer bytes.Buffer
 
 		_, err = shards.WriteTo(&buffer)
@@ -214,7 +268,7 @@ func (c *CassandraIndex) verifyMissingShard(
 			return errorCount, shards, fmt.Errorf("serialize bitmap: %w", err)
 		}
 
-		err = c.store.InsertPostings(ctx, globalShardNumber, existingShardsLabel, existingShardsLabel, buffer.Bytes())
+		err = ve.index.store.InsertPostings(ctx, globalShardNumber, existingShardsLabel, existingShardsLabel, buffer.Bytes())
 		if err != nil {
 			return errorCount, shards, fmt.Errorf("update existing shards: %w", err)
 		}
@@ -224,17 +278,11 @@ func (c *CassandraIndex) verifyMissingShard(
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk(
+func (ve *verifierExecution) verifyBulk(
 	ctx context.Context,
-	now time.Time,
-	w io.Writer,
-	doFix bool,
 	ids []types.MetricID,
-	bulkDeleter *deleter,
-	allPosting *roaring.Bitmap,
-	allGoodIds *roaring.Bitmap,
 ) (hadIssue bool, err error) {
-	id2Labels, id2expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
+	id2Labels, id2expiration, err := ve.index.selectIDS2LabelsAndExpiration(ctx, ids)
 	if err != nil {
 		return hadIssue, fmt.Errorf("get labels: %w", err)
 	}
@@ -244,12 +292,12 @@ func (c *CassandraIndex) verifyBulk(
 	for _, id := range ids {
 		lbls, ok := id2Labels[id]
 		if !ok {
-			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
+			fmt.Fprintf(ve.output, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
 
 			hadIssue = true
 
-			if doFix {
-				bulkDeleter.PrepareDelete(id, nil, false)
+			if ve.doFix {
+				ve.bulkDeleter.PrepareDelete(id, nil, false)
 			}
 
 			continue
@@ -260,7 +308,7 @@ func (c *CassandraIndex) verifyBulk(
 		_, ok = id2expiration[id]
 		if !ok {
 			fmt.Fprintf(
-				w,
+				ve.output,
 				"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify\n",
 				id,
 				lbls.String(),
@@ -276,7 +324,7 @@ func (c *CassandraIndex) verifyBulk(
 		return hadIssue, ctx.Err()
 	}
 
-	labels2ID, err := c.selectLabelsList2ID(ctx, allLabelsString)
+	labels2ID, err := ve.index.selectLabelsList2ID(ctx, allLabelsString)
 	if err != nil {
 		return hadIssue, fmt.Errorf("get labels2ID: %w", err)
 	}
@@ -298,19 +346,19 @@ func (c *CassandraIndex) verifyBulk(
 
 		id2, ok := labels2ID[lbls.String()]
 		if !ok {
-			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
+			fmt.Fprintf(ve.output, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
 
 			hadIssue = true
 
-			if doFix {
-				bulkDeleter.PrepareDelete(id, lbls, false)
+			if ve.doFix {
+				ve.bulkDeleter.PrepareDelete(id, lbls, false)
 			}
 
 			continue
 		}
 
 		if id != id2 { //nolint:nestif
-			tmp, tmp2, err := c.selectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
+			tmp, tmp2, err := ve.index.selectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
 			if err != nil {
 				return hadIssue, fmt.Errorf("get labels from store: %w", err)
 			}
@@ -320,7 +368,7 @@ func (c *CassandraIndex) verifyBulk(
 
 			if !ok && lbls2 != nil {
 				fmt.Fprintf(
-					w,
+					ve.output,
 					"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify",
 					id2,
 					lbls2.String(),
@@ -334,7 +382,7 @@ func (c *CassandraIndex) verifyBulk(
 			switch {
 			case lbls2 == nil:
 				fmt.Fprintf(
-					w,
+					ve.output,
 					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
 					id,
 					lbls.String(),
@@ -343,14 +391,14 @@ func (c *CassandraIndex) verifyBulk(
 
 				hadIssue = true
 
-				if doFix {
+				if ve.doFix {
 					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(id2, lbls, false)
-					bulkDeleter.PrepareDelete(id, lbls, false)
+					ve.bulkDeleter.PrepareDelete(id2, lbls, false)
+					ve.bulkDeleter.PrepareDelete(id, lbls, false)
 				}
-			case !allPosting.Contains(uint64(id2)):
+			case !ve.allPosting.Contains(uint64(id2)):
 				fmt.Fprintf(
-					w,
+					ve.output,
 					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
 					id,
 					lbls.String(),
@@ -359,14 +407,14 @@ func (c *CassandraIndex) verifyBulk(
 
 				hadIssue = true
 
-				if doFix {
+				if ve.doFix {
 					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(id2, lbls2, false)
-					bulkDeleter.PrepareDelete(id, lbls, false)
+					ve.bulkDeleter.PrepareDelete(id2, lbls2, false)
+					ve.bulkDeleter.PrepareDelete(id, lbls, false)
 				}
 			default:
 				fmt.Fprintf(
-					w,
+					ve.output,
 					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
 					id,
 					lbls.String(),
@@ -379,27 +427,27 @@ func (c *CassandraIndex) verifyBulk(
 				hadIssue = true
 
 				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
-				if doFix {
-					bulkDeleter.PrepareDelete(id, lbls, true)
+				if ve.doFix {
+					ve.bulkDeleter.PrepareDelete(id, lbls, true)
 				}
 			}
 
 			continue
 		}
 
-		if now.After(expiration.Add(24 * time.Hour)) {
-			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
+		if ve.now.After(expiration.Add(24 * time.Hour)) {
+			fmt.Fprintf(ve.output, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
 
 			hadIssue = true
 
-			if doFix {
-				bulkDeleter.PrepareDelete(id, lbls, false)
+			if ve.doFix {
+				ve.bulkDeleter.PrepareDelete(id, lbls, false)
 			}
 
 			continue
 		}
 
-		_, err = allGoodIds.AddN(uint64(id))
+		_, err = ve.allGoodIds.AddN(uint64(id))
 		if err != nil {
 			return hadIssue, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -409,22 +457,19 @@ func (c *CassandraIndex) verifyBulk(
 }
 
 // check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard( //nolint:maintidx
+func (ve *verifierExecution) verifyShard( //nolint:maintidx
 	ctx context.Context,
-	w io.Writer,
-	doFix bool,
 	shard int32,
-	allPosting *roaring.Bitmap,
 ) (hadIssue bool, err error) {
 	updates := make([]postingUpdateRequest, 0)
 	labelToIndex := make(map[labels.Label]int)
 
-	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+	localAll, err := ve.index.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return false, err
 	}
 
-	localMaybe, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+	localMaybe, err := ve.index.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 	if err != nil {
 		return false, err
 	}
@@ -433,7 +478,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		hadIssue = true
 
 		fmt.Fprintf(
-			w,
+			ve.output,
 			"shard %s is empty (automatic cleanup may fix this)!\n",
 			timeForShard(shard).Format(shardDateFormat),
 		)
@@ -443,7 +488,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		hadIssue = true
 
 		fmt.Fprintf(
-			w,
+			ve.output,
 			"shard %s is empty!\n",
 			timeForShard(shard).Format(shardDateFormat),
 		)
@@ -461,13 +506,13 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		hadIssue = true
 
 		fmt.Fprintf(
-			w,
+			ve.output,
 			"shard %s: ID %d is present in localAll but not in localMaybe!\n",
 			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
-		if doFix {
+		if ve.doFix {
 			lbl := labels.Label{
 				Name:  maybePostingLabel,
 				Value: maybePostingLabel,
@@ -499,13 +544,13 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		hadIssue = true
 
 		fmt.Fprintf(
-			w,
+			ve.output,
 			"shard %s: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
 			timeForShard(shard).Format(shardDateFormat),
 			id,
 		)
 
-		if doFix {
+		if ve.doFix {
 			lbl := labels.Label{
 				Name:  maybePostingLabel,
 				Value: maybePostingLabel,
@@ -550,7 +595,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 			break
 		}
 
-		tmp, _, err := c.selectIDS2LabelsAndExpiration(ctx, pendingIds)
+		tmp, _, err := ve.index.selectIDS2LabelsAndExpiration(ctx, pendingIds)
 		if err != nil {
 			return true, fmt.Errorf("get labels: %w", err)
 		}
@@ -595,14 +640,14 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		it   *roaring.Bitmap
 		name string
 	}{
-		{name: "global all IDs", it: allPosting},
+		{name: "global all IDs", it: ve.allPosting},
 		{name: "shard all IDs", it: localAll},
 		{name: "shard maybe present IDs", it: localMaybe},
 	}
 
 	labelNames[postinglabelName] = true
 
-	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
+	iter := ve.index.store.SelectPostingByName(ctx, shard, postinglabelName)
 	defer iter.Close()
 
 	for iter.HasNext() {
@@ -612,13 +657,13 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 			hadIssue = true
 
 			fmt.Fprintf(
-				w,
+				ve.output,
 				"shard %s: postinglabelName has extra name=%s\n",
 				timeForShard(shard).Format(shardDateFormat),
 				labelValue,
 			)
 
-			if doFix {
+			if ve.doFix {
 				lbl := labels.Label{
 					Name:  postinglabelName,
 					Value: labelValue,
@@ -650,7 +695,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 			break
 		}
 
-		iter := c.store.SelectPostingByName(ctx, shard, name)
+		iter := ve.index.store.SelectPostingByName(ctx, shard, name)
 		defer iter.Close()
 
 		for iter.HasNext() {
@@ -672,7 +717,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 				hadIssue = true
 
 				fmt.Fprintf(
-					w,
+					ve.output,
 					"shard %s: extra posting for %s=%s exists (with %d IDs)\n",
 					timeForShard(shard).Format(shardDateFormat),
 					name,
@@ -680,7 +725,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					tmp.Count(),
 				)
 
-				if doFix {
+				if ve.doFix {
 					idx, ok := labelToIndex[lbl]
 					if !ok {
 						idx = len(updates)
@@ -707,7 +752,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					hadIssue = true
 
 					fmt.Fprintf(
-						w,
+						ve.output,
 						"shard %s: missing ID %d in posting for %s=%s\n",
 						timeForShard(shard).Format(shardDateFormat),
 						id,
@@ -715,7 +760,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 						labelValue,
 					)
 
-					if doFix {
+					if ve.doFix {
 						idx, ok := labelToIndex[lbl]
 						if !ok {
 							idx = len(updates)
@@ -741,7 +786,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					hadIssue = true
 
 					fmt.Fprintf(
-						w,
+						ve.output,
 						"shard %s: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
 						timeForShard(shard).Format(shardDateFormat),
 						id,
@@ -749,10 +794,10 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 						labelValue,
 						localMaybe.Contains(id),
 						localAll.Contains(id),
-						allPosting.Contains(id),
+						ve.allPosting.Contains(id),
 					)
 
-					if doFix {
+					if ve.doFix {
 						idx, ok := labelToIndex[lbl]
 						if !ok {
 							idx = len(updates)
@@ -781,7 +826,7 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 					hadIssue = true
 
 					fmt.Fprintf(
-						w,
+						ve.output,
 						"shard %s: posting for %s=%s has ID %d which is not in %s!\n",
 						timeForShard(shard).Format(shardDateFormat),
 						name,
@@ -798,14 +843,14 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		hadIssue = true
 
 		fmt.Fprintf(
-			w,
+			ve.output,
 			"shard %s: posting %s=%s was expected to exists\n",
 			timeForShard(shard).Format(shardDateFormat),
 			lbl.Name,
 			lbl.Value,
 		)
 
-		if doFix {
+		if ve.doFix {
 			idx, ok := labelToIndex[lbl]
 			if !ok {
 				idx = len(updates)
@@ -820,15 +865,15 @@ func (c *CassandraIndex) verifyShard( //nolint:maintidx
 		}
 	}
 
-	if doFix && len(updates) > 0 {
-		err = c.concurrentTasks(
+	if ve.doFix && len(updates) > 0 {
+		err = ve.index.concurrentTasks(
 			ctx,
 			concurrentInsert,
 			func(ctx context.Context, work chan<- func() error) error {
 				for _, req := range updates {
 					req := req
 					task := func() error {
-						_, err := c.postingUpdate(ctx, req)
+						_, err := ve.index.postingUpdate(ctx, req)
 
 						if errors.Is(err, errBitmapEmpty) {
 							err = nil

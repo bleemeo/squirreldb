@@ -3886,7 +3886,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err := index1.newVerifier(now, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3895,7 +3895,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index2.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err = index2.newVerifier(now, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3904,7 +3904,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index3.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err = index3.newVerifier(now, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4812,7 +4812,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	{
 		buffer := bytes.NewBuffer(nil)
-		hadIssue, err := index1.verify(context.Background(), t0, buffer, false, false)
+		hadIssue, err := index1.newVerifier(t0, buffer).Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -4990,7 +4990,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.verify(context.Background(), t6, buffer, false, false)
+	hadIssue, err := index1.newVerifier(t6, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4999,7 +4999,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index2.verify(context.Background(), t6, buffer, false, false)
+	hadIssue, err = index2.newVerifier(t6, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5142,7 +5142,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.verify(context.Background(), t0, buffer, false, false)
+	hadIssue, err := index.newVerifier(t0, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5163,7 +5163,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.verify(context.Background(), t0, buffer, false, false)
+	hadIssue, err = index.newVerifier(t0, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5344,7 +5344,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.verify(context.Background(), t5, buffer, false, false)
+	hadIssue, err = index.newVerifier(t5, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5368,7 +5368,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.verify(context.Background(), t6, buffer, false, false)
+	hadIssue, err = index.newVerifier(t6, buffer).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5948,13 +5948,7 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.verify(
-		context.Background(),
-		currentTime,
-		buffer,
-		false,
-		false,
-	)
+	hadError, err := index.newVerifier(currentTime, buffer).Verify(context.Background())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -7314,13 +7308,8 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				shouldFail.SetRate(0, 0)
 
-				verifyHadErrors[batchIdx], err = index.verify(
-					context.Background(),
-					batch.now,
-					verifyResults[batchIdx],
-					false,
-					false,
-				)
+				verifyHadErrors[batchIdx], err = index.newVerifier(
+					batch.now, verifyResults[batchIdx]).Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7550,13 +7539,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.verify(
-				context.Background(),
-				currentTime,
-				buffer,
-				false,
-				false,
-			)
+			hadError, err := index1.newVerifier(currentTime, buffer).Verify(context.Background())
 			if err != nil {
 				t.Error(err)
 			}
