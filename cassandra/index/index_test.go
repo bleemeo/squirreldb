@@ -1036,8 +1036,19 @@ func Benchmark_labelsToID(b *testing.B) {
 		},
 	}
 	for _, tt := range tests {
-		c := CassandraIndex{
-			labelsToID: make(map[uint64][]idData),
+		c, err := initialize(
+			context.Background(),
+			&mockStore{},
+			Options{
+				DefaultTimeToLive: 365 * 24 * time.Hour,
+				LockFactory:       &mockLockFactory{},
+				Cluster:           &dummy.LocalCluster{},
+			},
+			newMetrics(prometheus.NewRegistry()),
+			log.With().Str("component", "index1").Logger(),
+		)
+		if err != nil {
+			b.Fatal(err)
 		}
 
 		b.Run(tt.name, func(b *testing.B) {
