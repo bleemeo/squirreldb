@@ -471,7 +471,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 		return false, err
 	}
 
-	localMaybe, err := ve.index.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
+	localMaybe, err := ve.index.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 	if err != nil {
 		return false, err
 	}
