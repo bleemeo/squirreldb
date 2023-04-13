@@ -183,7 +183,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 	return hadIssue, ctx.Err()
 }
 
-// verifyMissingShard search from now+3 weeks to 100 weeks before this points for shard not present in existingShards.
+// verifyMissingShard search from now+3 weeks to 100 weeks before now+3 weeks for shard not present in existingShards.
 // It also verify that all shards in existingShards actually exists.
 func (ve *verifierExecution) verifyMissingShard(
 	ctx context.Context) (errorCount int, shards *roaring.Bitmap, err error,
@@ -202,25 +202,27 @@ func (ve *verifierExecution) verifyMissingShard(
 
 		queryShard := []int32{shardForTime(current.Unix())}
 
-		it, err := ve.index.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
-		if err != nil {
-			return 0, shards, err
-		}
+		for _, name := range []string{maybePostingLabel, allPostingLabel} {
+			it, err := ve.index.postings(ctx, queryShard, name, name, false)
+			if err != nil {
+				return 0, shards, err
+			}
 
-		if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
-			errorCount++
+			if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
+				errorCount++
 
-			fmt.Fprintf(
-				ve.output,
-				"Shard %s for time %v isn't in all shards",
-				timeForShard(queryShard[0]).Format(shardDateFormat),
-				current.String(),
-			)
+				fmt.Fprintf(
+					ve.output,
+					"Shard %s for time %v isn't in all shards",
+					timeForShard(queryShard[0]).Format(shardDateFormat),
+					current.String(),
+				)
 
-			if ve.doFix {
-				_, err = shards.AddN(uint64(queryShard[0]))
-				if err != nil {
-					return 0, shards, fmt.Errorf("update bitmap: %w", err)
+				if ve.doFix {
+					_, err = shards.AddN(uint64(queryShard[0]))
+					if err != nil {
+						return 0, shards, fmt.Errorf("update bitmap: %w", err)
+					}
 				}
 			}
 		}
