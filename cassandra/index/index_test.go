@@ -2328,6 +2328,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &mockState{},
 		},
 		newMetrics(prometheus.NewRegistry()),
 		getTestLogger().With().Str("component", "index1").Logger(),
@@ -2504,6 +2505,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &dummy.States{},
 		},
 		newMetrics(prometheus.NewRegistry()),
 		getTestLogger().With().Str("component", "index2").Logger(),
@@ -2524,6 +2526,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &dummy.States{},
 		},
 		newMetrics(prometheus.NewRegistry()),
 		getTestLogger().With().Str("component", "index3").Logger(),
@@ -4990,22 +4993,33 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.newVerifier(t6, buffer).Verify(context.Background())
-	if err != nil {
-		t.Error(err)
+	indexes := []*CassandraIndex{index1, index2}
+
+	for i, idx := range indexes {
+		// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
+		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
 	}
 
-	if hadIssue {
-		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
-	hadIssue, err = index2.newVerifier(t6, buffer).Verify(context.Background())
-	if err != nil {
-		t.Error(err)
-	}
+	for i, idx := range indexes {
+		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
 
-	if hadIssue {
-		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
 	}
 }
 
@@ -5142,7 +5156,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.newVerifier(t0, buffer).Verify(context.Background())
+	hadIssue, err := index.newVerifier(t0, buffer).WithStrictExpiration(false).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5163,7 +5177,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t0, buffer).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t0, buffer).WithStrictExpiration(false).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5344,7 +5358,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t5, buffer).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t5, buffer).WithStrictExpiration(false).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5368,7 +5382,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.newVerifier(t6, buffer).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5948,7 +5962,7 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.newVerifier(currentTime, buffer).Verify(context.Background())
+	hadError, err := index.newVerifier(currentTime, buffer).WithStrictExpiration(false).Verify(context.Background())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -7309,7 +7323,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 				shouldFail.SetRate(0, 0)
 
 				verifyHadErrors[batchIdx], err = index.newVerifier(
-					batch.now, verifyResults[batchIdx]).Verify(context.Background())
+					batch.now, verifyResults[batchIdx]).WithStrictExpiration(false).Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7539,7 +7553,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.newVerifier(currentTime, buffer).Verify(context.Background())
+			hadError, err := index1.newVerifier(currentTime, buffer).WithStrictExpiration(false).Verify(context.Background())
 			if err != nil {
 				t.Error(err)
 			}

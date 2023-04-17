@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"squirreldb/types"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pilosa/pilosa/v2/roaring"
@@ -15,11 +17,12 @@ import (
 )
 
 type indexVerifier struct {
-	index       *CassandraIndex
-	doFix       bool
-	acquireLock bool
-	output      io.Writer
-	now         time.Time
+	index            *CassandraIndex
+	doFix            bool
+	acquireLock      bool
+	strictExpiration bool
+	output           io.Writer
+	now              time.Time
 }
 
 type verifierExecution struct {
@@ -30,7 +33,11 @@ type verifierExecution struct {
 	// allGoodIds will contains all MetricIDs which have correct id <-> labels entry in
 	// tables labels2id and id2labels.
 	allGoodIds *roaring.Bitmap
+	// expectedExpiration contains the expected value for index_expiration table (based on id2labels table)
+	expectedExpiration map[time.Time]*roaring.Bitmap
 }
+
+const maxIDBeforeTruncate = 50
 
 func (c *CassandraIndex) newVerifier(now time.Time, output io.Writer) indexVerifier {
 	return indexVerifier{
@@ -65,6 +72,18 @@ func (v indexVerifier) WithLock(enable bool) indexVerifier {
 	return v
 }
 
+// WithStrictExpiration enable or disable fail on warning condition for expiration.
+// By default, it's only checked that expiration don't have fatal error (which would cause metric
+// to don't expire at all for example). With this option, it also check that expiration information
+// are fully up-to-date without duplicate information. For this check to works, task like cassandraExpire()
+// and applyExpirationUpdateRequests() must have run.
+// It modify the verifier and return it to allow chaining call.
+func (v indexVerifier) WithStrictExpiration(enable bool) indexVerifier {
+	v.strictExpiration = enable
+
+	return v
+}
+
 // verify perform some checks on index consistency.
 // It could apply fixes and could acquire the newMetricGlobalLock to ensure a consitent read of the index.
 // When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
@@ -72,8 +91,9 @@ func (v indexVerifier) WithLock(enable bool) indexVerifier {
 // be fixed when expiration is applied for them, ...).
 func (v indexVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
 	execution := &verifierExecution{
-		indexVerifier: v,
-		bulkDeleter:   newBulkDeleter(v.index),
+		indexVerifier:      v,
+		bulkDeleter:        newBulkDeleter(v.index),
+		expectedExpiration: make(map[time.Time]*roaring.Bitmap),
 	}
 
 	return execution.verify(ctx)
@@ -179,6 +199,13 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 			respf.Flush()
 		}
 	}
+
+	expirationIssue, err := ve.verifyExpiration(ctx)
+	if err != nil {
+		return hadIssue, err
+	}
+
+	hadIssue = hadIssue || expirationIssue
 
 	return hadIssue, ctx.Err()
 }
@@ -345,6 +372,19 @@ func (ve *verifierExecution) verifyBulk(
 		if !ok {
 			continue
 		}
+
+		expirationDay := expiration.Truncate(24 * time.Hour)
+
+		it := ve.expectedExpiration[expirationDay]
+		if it == nil {
+			it = roaring.NewBTreeBitmap()
+		}
+
+		if _, err := it.AddN(uint64(id)); err != nil {
+			return false, err
+		}
+
+		ve.expectedExpiration[expirationDay] = it
 
 		id2, ok := labels2ID[lbls.String()]
 		if !ok {
@@ -899,4 +939,229 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 	}
 
 	return hadIssue, nil
+}
+
+// check that expiration entries are consitent.
+func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue bool, err error) {
+	// In a perfect situation, what is in Cassandra should exactly match v.expectedExpiration
+	// Thing that are allowed:
+	// * entry in expiration not present in v.allPosting (mean a creation was aborted)
+	// * few entries present in unexpected bucket (mean some operation fail)
+	// * entry no present in expected bucket, but present in older bucket not yet processed
+	//
+	// What is unexpected:
+	// * an ID from v.allPosting never present
+	startDay, err := ve.index.expirationLastProcessedDay(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if startDay.IsZero() {
+		startDay = ve.now.Truncate(24 * time.Hour).Add(-24 * time.Hour)
+	}
+
+	var endDay time.Time
+
+	idExpectedInFuture := roaring.NewBTreeBitmap()
+	idSeenInExpiration := roaring.NewBTreeBitmap()
+	idExpectedInPast := roaring.NewBTreeBitmap()
+
+	for day, tmp := range ve.expectedExpiration {
+		if day.Before(startDay) {
+			startDay = day
+		}
+
+		if endDay.IsZero() || day.After(endDay) {
+			endDay = day
+		}
+
+		idExpectedInFuture.UnionInPlace(tmp)
+	}
+
+	// Start and end few days before/after expected limit
+	startDay = startDay.Add(-24 * time.Hour * 7)
+	endDay = endDay.Add(24 * time.Hour * 7)
+
+	{
+		tmp := ve.allGoodIds.Difference(idExpectedInFuture)
+		if tmp.Any() {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"allGoodIds contains %d IDs for which we don't have an expiration expected. This seems a bug in verifier\n",
+				tmp.Count(),
+			)
+		}
+
+		tmp = idExpectedInFuture.Difference(ve.allPosting)
+		if tmp.Any() {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"There is %d IDs that are expected to have an expiration which"+
+					" don't existing in allPosting. This seems a bug in verifier\n",
+				tmp.Count(),
+			)
+		}
+	}
+
+	for currentDay := startDay; endDay.After(currentDay); currentDay = currentDay.Add(24 * time.Hour) {
+		gotExpiration, err := ve.index.cassandraGetExpirationList(ctx, currentDay)
+		if err != nil {
+			return false, err
+		}
+
+		wantExpiration := ve.expectedExpiration[currentDay]
+
+		if gotExpiration == nil {
+			gotExpiration = roaring.NewBTreeBitmap()
+		}
+
+		if wantExpiration == nil {
+			wantExpiration = roaring.NewBTreeBitmap()
+		}
+
+		gotUnexpectedIDs := gotExpiration.Difference(wantExpiration)
+		gotInvalidIDs := gotUnexpectedIDs.Difference(ve.allGoodIds)
+		gotValidUnexpectedIDs := gotUnexpectedIDs.Intersect(ve.allGoodIds)
+		gotExpectedInPast := gotValidUnexpectedIDs.Intersect(idExpectedInPast)
+		gotExpectedInFuture := gotValidUnexpectedIDs.Intersect(idExpectedInFuture)
+		gotUnexpctedVerifierBug := gotValidUnexpectedIDs.Difference(idExpectedInPast).Difference(idExpectedInFuture)
+
+		gotMissingIDs := wantExpiration.Difference(gotExpiration)
+		gotMissingSeenInPast := gotMissingIDs.Intersect(idSeenInExpiration)
+		gotMissingNeverSeen := gotMissingIDs.Difference(idSeenInExpiration)
+
+		if gotInvalidIDs.Any() && ve.strictExpiration {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s had %d IDs which are unknown to allGoodIds: %s\n",
+				currentDay.Format(shardDateFormat),
+				gotInvalidIDs.Count(),
+				truncatedIDList(gotInvalidIDs, maxIDBeforeTruncate),
+			)
+		}
+
+		if gotExpectedInFuture.Any() && ve.strictExpiration {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s had %d IDs which are expected in the future: %s\n",
+				currentDay.Format(shardDateFormat),
+				gotExpectedInFuture.Count(),
+				truncatedIDList(gotExpectedInFuture, maxIDBeforeTruncate),
+			)
+		}
+
+		if gotExpectedInPast.Any() && ve.strictExpiration {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s had %d IDs which are expected in the past: %s\n",
+				currentDay.Format(shardDateFormat),
+				gotExpectedInPast.Count(),
+				truncatedIDList(gotExpectedInPast, maxIDBeforeTruncate),
+			)
+		}
+
+		if gotUnexpctedVerifierBug.Any() {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s had %d IDs which are not expected in past, future or this day (verifier bug?): %s\n",
+				currentDay.Format(shardDateFormat),
+				gotUnexpctedVerifierBug.Count(),
+				truncatedIDList(gotUnexpctedVerifierBug, maxIDBeforeTruncate),
+			)
+		}
+
+		if gotMissingNeverSeen.Any() {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s do not contains expected ID (and there were not in previous day): %s\n",
+				currentDay.Format(shardDateFormat),
+				truncatedIDList(gotMissingNeverSeen, maxIDBeforeTruncate),
+			)
+		}
+
+		if gotMissingSeenInPast.Any() && ve.strictExpiration {
+			hadIssue = true
+
+			fmt.Fprintf(
+				ve.output,
+				"expiration day %s do not contains expected ID (but there were in previous day): %s\n",
+				currentDay.Format(shardDateFormat),
+				truncatedIDList(gotMissingSeenInPast, maxIDBeforeTruncate),
+			)
+		}
+
+		idSeenInExpiration.UnionInPlace(gotExpiration)
+		idExpectedInFuture.DifferenceInPlace(wantExpiration)
+		idExpectedInPast.UnionInPlace(wantExpiration)
+	}
+
+	return hadIssue, nil
+}
+
+func truncatedIDList(bitmap *roaring.Bitmap, maxItem int) string {
+	iter := bitmap.Iterator()
+	buffer := make([]string, 0, maxItem)
+	elipsis := false
+	numberMore := 0
+
+	for {
+		id, eof := iter.Next()
+		if eof {
+			break
+		}
+
+		if len(buffer) == maxItem {
+			elipsis = true
+			numberMore = int(bitmap.Count()) - maxItem
+
+			break
+		}
+
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
+	}
+
+	result := strings.Join(buffer, ", ")
+	if elipsis {
+		result += fmt.Sprintf("... (%d more)", numberMore)
+	}
+
+	return result
+}
+
+func truncatedSliceIDList(ids []uint64, maxItem int) string {
+	buffer := make([]string, 0, maxItem)
+	elipsis := false
+	numberMore := 0
+
+	for _, id := range ids {
+		if len(buffer) == maxItem {
+			elipsis = true
+			numberMore = len(ids) - maxItem
+
+			break
+		}
+
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
+	}
+
+	result := strings.Join(buffer, ", ")
+	if elipsis {
+		result += fmt.Sprintf("... (%d more)", numberMore)
+	}
+
+	return result
 }

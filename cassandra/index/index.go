@@ -3005,7 +3005,11 @@ type expirationUpdateRequest struct {
 // The lock newMetricGlobalLock must be held while calling this function.
 func (c *CassandraIndex) expirationUpdate(ctx context.Context, expireFrom string, job expirationUpdateRequest) error {
 	c.logger.Debug().Msgf(
-		"From task %s, updating expiration day %v, add %v, remove %v", expireFrom, job.Day, job.AddIDs, job.RemoveIDs,
+		"From task %s, updating expiration day %v, add %v, remove %v",
+		expireFrom,
+		job.Day,
+		truncatedSliceIDList(job.AddIDs, 25),
+		truncatedSliceIDList(job.RemoveIDs, 25),
 	)
 
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
