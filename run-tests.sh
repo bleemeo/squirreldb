@@ -31,7 +31,8 @@ while [ ! -z "$1" ]; do
         echo "    long: Run longer test"
         echo "    race: Run test with -race"
         echo "  nostop: Do not stop Cassandra & Redis at the end"
-        echo "   shell: Open a shell instead of running tests. It will start Redis & Cassandra"
+        echo "   shell: Open a shell instead of running tests. It will start Redis & Cassandra."
+        echo "          It also forward the port 9200 to a SquirrelDB running inside this shell"
         echo "scylladb: Use ScyllaDB instead of Cassandra"
 
         exit 1
@@ -99,15 +100,16 @@ export GORACE=halt_on_error=1
 
 if [ "${WITH_SHELL}" = "1" ]; then
 
-docker run $docker_network --rm -ti -e HOME=/go/pkg \
+docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
     -e GORACE \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} bash
+    goreleaser/goreleaser:${GORELEASER_VERSION} bash || true
 else
 
 echo "== waiting stores"
