@@ -2506,9 +2506,10 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 		}
 	}
 
+	_, err := c.getExistingShards(ctx, true)
+
 	c.lookupIDMutex.Unlock()
 
-	_, err := c.getExistingShards(ctx, true)
 	if err != nil {
 		c.logger.Debug().Err(err).Msg("Refresh existingsShards failed")
 	}
@@ -2519,10 +2520,10 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 	}
 }
 
+// getExistingShards return the bitmap of existing shard. It use a cache which is refreshed if forceUpdate is true
+// or the cache is empty.
+// The lock c.lookupIDMutex must be held while calling this method AND while using the result bitmap.
 func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool) (*roaring.Bitmap, error) {
-	c.lookupIDMutex.Lock()
-	defer c.lookupIDMutex.Unlock()
-
 	if c.existingShards == nil || forceUpdate {
 		tmp, err := c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 		if err != nil {
@@ -3485,6 +3486,9 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	)
 
 	if !returnAll {
+		c.lookupIDMutex.Lock()
+		defer c.lookupIDMutex.Unlock()
+
 		existingShards, err = c.getExistingShards(ctx, false)
 		if err != nil {
 			return nil, err

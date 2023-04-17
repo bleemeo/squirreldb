@@ -161,7 +161,7 @@ func (c *postingsCache) Invalidate(entries []postingsCacheKey) int {
 func (c *postingsCache) Set(shard int32, name string, value string, bitmap *roaring.Bitmap) int {
 	now := time.Now()
 
-	return c.set(now, shard, name, value, bitmap)
+	return c.set(now, shard, name, value, bitmap.Freeze())
 }
 
 func (c *postingsCache) set(now time.Time, shard int32, name string, value string, bitmap *roaring.Bitmap) int {
