@@ -59,8 +59,8 @@ if [ "${WITH_CLUSTER}" = "1" ]; then
 elif [ "${WITH_SCYLLADB}" = "1" ]; then
     echo
     echo "== Starting ScyllaDB & Redis"
-    docker run --name squirreldb-test-scylla -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M scylladb/scylla:4.6.0 || true
-    docker run --name squirreldb-test-redis -d redis:6.2.6 || true
+    docker run --name squirreldb-test-scylla -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M scylladb/scylla || true
+    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.IPAddress }}'):9042
@@ -69,8 +69,8 @@ elif [ "${WITH_SCYLLADB}" = "1" ]; then
 else
     echo
     echo "== Starting Cassandra & Redis"
-    docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra:4.0.3 || true
-    docker run --name squirreldb-test-redis -d redis:6.2.6 || true
+    docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra || true
+    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
