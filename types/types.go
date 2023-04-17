@@ -80,10 +80,6 @@ type IndexRunner interface {
 	RunOnce(ctx context.Context, now time.Time) bool
 }
 
-type IndexInternalShardExpirer interface {
-	InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error
-}
-
 type MetricsSet interface {
 	Next() bool
 	At() MetricLabel

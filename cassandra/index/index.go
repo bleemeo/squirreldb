@@ -27,7 +27,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -4437,57 +4436,6 @@ func sortLabels(labelList labels.Labels) labels.Labels {
 	sort.Sort(sortedLabels)
 
 	return sortedLabels
-}
-
-// InternalUpdateAllShards updates the expiration of all shards.
-// Shards older than the TTL will be deleted, other shard will have their expiration created or updated.
-func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
-	// Get all known shards.
-	shardBitmap, err := c.getExistingShards(ctx, true)
-	if err != nil {
-		return fmt.Errorf("get existing shards: %w", err)
-	}
-
-	it := shardBitmap.Iterator()
-
-	for ctx.Err() == nil {
-		shard, eof := it.Next()
-		if eof {
-			break
-		}
-
-		err := c.internalUpdateShard(ctx, int32(shard), ttl)
-		if err != nil {
-			return fmt.Errorf("update shard: %w", err)
-		}
-	}
-
-	c.applyExpirationUpdateRequests(ctx, time.Now())
-
-	return nil
-}
-
-// internalUpdateShard updates a single shard expiration.
-// The shard is deleted if the expiration is in the past.
-func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, ttl time.Duration) error {
-	now := time.Now()
-	shardTime := timeForShard(shard)
-
-	// The expiration is calculated from the shard time.
-	expiration := shardTime.Add(ttl).Add(postingShardSize)
-
-	log.Info().Msgf("Updating shard %s with new expiration %s", shardTime, expiration)
-
-	if expiration.Before(now) {
-		err := c.deleteShard(ctx, shard)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	return c.updateShardExpiration(ctx, now, shard, expiration)
 }
 
 func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
