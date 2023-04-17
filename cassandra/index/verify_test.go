@@ -17,7 +17,7 @@ func Test_truncatedIDList(t *testing.T) {
 			name:    "empty",
 			input:   []uint64{},
 			maxItem: 10,
-			want:    "",
+			want:    "nothing",
 		},
 		{
 			name:    "some",

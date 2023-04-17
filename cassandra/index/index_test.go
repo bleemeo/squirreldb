@@ -50,6 +50,38 @@ const (
 	MetricIDTest15
 )
 
+type mockTime struct {
+	l   sync.Mutex
+	now time.Time
+}
+
+func newMockTime(value time.Time) *mockTime {
+	return &mockTime{
+		now: value,
+	}
+}
+
+func (m *mockTime) Now() time.Time {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	return m.now
+}
+
+func (m *mockTime) Set(value time.Time) {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	m.now = value
+}
+
+func (m *mockTime) Add(delta time.Duration) {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	m.now = m.now.Add(delta)
+}
+
 type mockState struct {
 	l      sync.Mutex
 	values map[string]string
@@ -7730,6 +7762,273 @@ func clusterCheckSearch(
 		realLabels := realStore.id2labels[item.ID]
 		if !labels.Equal(realLabels, item.Labels) {
 			return fmt.Errorf("labels = %s, want %s", item.Labels, realLabels)
+		}
+	}
+
+	return nil
+}
+
+// Test_concurrent_access will test that concurrent access works. With race-detector enable it might
+// find data-race.
+func Test_concurrent_access(t *testing.T) {
+	defaultTTL := 10 * 24 * time.Hour
+
+	for _, withCluster := range []bool{false, true} {
+		withCluster := withCluster
+
+		name := "without-cluster"
+		if withCluster {
+			name = "with-cluster"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			realStore := &mockStore{}
+			lock := &mockLockFactory{}
+			states := &mockState{}
+
+			var indexes []*CassandraIndex
+
+			index1, err := initialize(
+				context.Background(),
+				realStore,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index1").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			indexes = append(indexes, index1)
+
+			if withCluster {
+				index2, err := initialize(
+					context.Background(),
+					realStore,
+					Options{
+						DefaultTimeToLive: defaultTTL,
+						LockFactory:       lock,
+						States:            states,
+						Cluster:           &dummy.LocalCluster{},
+					},
+					newMetrics(prometheus.NewRegistry()),
+					getTestLogger().With().Str("component", "index2").Logger(),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				indexes = append(indexes, index2)
+			}
+
+			mainctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			ctxShort, cancel := context.WithTimeout(mainctx, 10*time.Second)
+			defer cancel()
+
+			group, ctxShort := errgroup.WithContext(ctxShort)
+
+			now := newMockTime(time.Now())
+
+			group.Go(func() error {
+				rnd := rand.New(rand.NewSource(68464))
+
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ticker.C:
+						idx := indexes[rnd.Intn(len(indexes))]
+						idx.RunOnce(mainctx, now.Now())
+						now.Add(time.Hour)
+					case <-ctxShort.Done():
+						return nil
+					}
+				}
+			})
+
+			rnd := rand.New(rand.NewSource(123456789))
+
+			for n := 0; n < 8; n++ {
+				rndSeed := rnd.Int63()
+				group.Go(func() error {
+					return concurrentAccessWriter(ctxShort, mainctx, indexes, now, rndSeed)
+				})
+			}
+
+			for n := 0; n < 2; n++ {
+				rndSeed := rnd.Int63()
+				group.Go(func() error {
+					return concurrentAccessReader(ctxShort, mainctx, indexes, now, rndSeed)
+				})
+			}
+
+			if err := group.Wait(); err != nil {
+				t.Error(err)
+			}
+
+			tmp, err := indexes[0].expirationLastProcessedDay(context.Background())
+			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", now.Now(), tmp.Format(shardDateFormat), err)
+
+			allIDS, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
+			if err != nil {
+				t.Error(err)
+			}
+
+			labels, err := indexes[0].lookupLabels(context.Background(), allIDS, now.Now())
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, id := range allIDS {
+				t.Logf("ID = %d is %s", id, labels[i])
+			}
+
+			indexes[0].RunOnce(mainctx, now.Now())
+
+			for _, idx := range indexes {
+				buffer := bytes.NewBuffer(nil)
+
+				hadIssue, err := idx.newVerifier(now.Now(), buffer).WithStrictExpiration(false).Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+		})
+	}
+}
+
+func concurrentAccessWriter(
+	ctxShort context.Context, ctxLong context.Context, indexes []*CassandraIndex, now *mockTime, rndSeed int64,
+) error {
+	rnd := rand.New(rand.NewSource(rndSeed))
+
+	fullList := []types.LookupRequest{
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "low-ttl",
+			}),
+			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
+		},
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "medium-ttl",
+			}),
+			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
+		},
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "high-ttl",
+			}),
+			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
+		},
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "low-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
+		},
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "medium-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
+		},
+		{
+			Start: now.Now(),
+			End:   now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "high-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
+		},
+	}
+
+	for ctxShort.Err() == nil {
+		nowValue := now.Now()
+		for i := range fullList {
+			fullList[i].Start = nowValue
+			fullList[i].End = nowValue
+		}
+
+		idxID := rnd.Intn(len(indexes))
+		idx := indexes[idxID]
+
+		_, _, err := idx.lookupIDs(ctxLong, fullList, nowValue)
+		if err != nil {
+			return fmt.Errorf("concurrentAccessWriter idxID=%d: %w", idxID+1, err)
+		}
+	}
+
+	return nil
+}
+
+func concurrentAccessReader(
+	ctxShort context.Context, ctxLong context.Context, indexes []*CassandraIndex, now *mockTime, rndSeed int64,
+) error {
+	rnd := rand.New(rand.NewSource(rndSeed))
+
+	for ctxShort.Err() == nil {
+		idxID := rnd.Intn(len(indexes))
+		idx := indexes[idxID]
+
+		var matchers []*labels.Matcher
+
+		switch rnd.Intn(4) {
+		case 0:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "common"),
+			}
+		case 1:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchRegexp, "item", "(medium-ttl|low-ttl)"),
+			}
+		case 2:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchNotEqual, "unique", ""),
+				{Type: labels.MatchNotEqual, Name: "unique", Value: ""},
+			}
+		case 3:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "unique", fmt.Sprintf("%d", rnd.Int63())),
+			}
+		}
+
+		_, err := idx.Search(ctxLong, now.Now().Add(-14*24*time.Hour), now.Now(), matchers)
+		if err != nil {
+			return fmt.Errorf("concurrentAccessReader idxID=%d: %w", idxID+1, err)
 		}
 	}
 

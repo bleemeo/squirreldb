@@ -1134,6 +1134,10 @@ func truncatedIDList(bitmap *roaring.Bitmap, maxItem int) string {
 		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
 	}
 
+	if len(buffer) == 0 {
+		return "nothing"
+	}
+
 	result := strings.Join(buffer, ", ")
 	if elipsis {
 		result += fmt.Sprintf("... (%d more)", numberMore)
@@ -1156,6 +1160,10 @@ func truncatedSliceIDList(ids []uint64, maxItem int) string {
 		}
 
 		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
+	}
+
+	if len(buffer) == 0 {
+		return "nothing"
 	}
 
 	result := strings.Join(buffer, ", ")
