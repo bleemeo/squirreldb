@@ -25,6 +25,7 @@ import (
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
@@ -859,6 +860,26 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	return results
 }
 
+// getTestLogger return a logger suitable for test.
+// It's default level is error because without that test output will be way too large.
+// To have details log, use SQUIRRELDB_LOG_LEVEL environment variable, likely with running
+// specific test. E.g.:
+//
+//	SQUIRRELDB_LOG_LEVEL=0 go test ./cassandra/index -run Test_cluster_expiration_and_error
+func getTestLogger() zerolog.Logger {
+	levelStr := os.Getenv("SQUIRRELDB_LOG_LEVEL")
+	if levelStr == "" {
+		levelStr = strconv.FormatInt(int64(zerolog.ErrorLevel), 10)
+	}
+
+	level, err := strconv.ParseInt(levelStr, 10, 0)
+	if err != nil {
+		level = int64(zerolog.ErrorLevel)
+	}
+
+	return log.Logger.Level(zerolog.Level(level))
+}
+
 func mockIndexFromMetrics(
 	start, end time.Time,
 	metrics map[types.MetricID]map[string]string,
@@ -872,7 +893,7 @@ func mockIndexFromMetrics(
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		panic(err)
@@ -1045,7 +1066,7 @@ func Benchmark_labelsToID(b *testing.B) {
 				Cluster:           &dummy.LocalCluster{},
 			},
 			newMetrics(prometheus.NewRegistry()),
-			log.With().Str("component", "index1").Logger(),
+			getTestLogger().With().Str("component", "index1").Logger(),
 		)
 		if err != nil {
 			b.Fatal(err)
@@ -2309,7 +2330,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2485,7 +2506,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2505,7 +2526,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index3").Logger(),
+		getTestLogger().With().Str("component", "index3").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4542,7 +4563,7 @@ func Test_cache(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4558,7 +4579,7 @@ func Test_cache(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4659,7 +4680,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -4723,7 +4744,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5066,7 +5087,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5395,7 +5416,7 @@ func Test_expiration_offset(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5619,7 +5640,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -6172,7 +6193,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index").Logger(),
+				getTestLogger().With().Str("component", "index").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -6257,7 +6278,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -7218,7 +7239,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index").Logger(),
+				getTestLogger().With().Str("component", "index").Logger(),
 			)
 			if err != nil {
 				t.Error(err)
@@ -7404,7 +7425,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index2").Logger(),
+				getTestLogger().With().Str("component", "index2").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -7420,7 +7441,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index2").Logger(),
+				getTestLogger().With().Str("component", "index2").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
