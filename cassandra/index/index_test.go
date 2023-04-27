@@ -7784,6 +7784,15 @@ func clusterCheckSearch(
 	return nil
 }
 
+type concurentAccessTestExecution struct {
+	now *mockTime
+
+	pendingRequest int
+	blockRequest   bool
+	stopWorker     bool
+	c              *sync.Cond
+}
+
 // Test_concurrent_access will test that concurrent access works. With race-detector enable it might
 // find data-race.
 func Test_concurrent_access(t *testing.T) {
@@ -7844,15 +7853,31 @@ func Test_concurrent_access(t *testing.T) {
 				indexes = append(indexes, index2)
 			}
 
-			mainctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
-			ctxShort, cancel := context.WithTimeout(mainctx, 10*time.Second)
+			ctxTestDuration, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
-			group, ctxShort := errgroup.WithContext(ctxShort)
+			group, ctxTestDuration := errgroup.WithContext(ctxTestDuration)
 
-			now := newMockTime(time.Now())
+			execution := &concurentAccessTestExecution{
+				now: newMockTime(time.Now()),
+				c:   sync.NewCond(&sync.Mutex{}),
+			}
+
+			go func() {
+				for ctxTestDuration.Err() == nil {
+					// Make time advance a bit
+					execution.now.Add(time.Millisecond)
+					time.Sleep(time.Microsecond)
+				}
+
+				execution.c.L.Lock()
+				defer execution.c.L.Unlock()
+
+				execution.stopWorker = true
+			}()
 
 			group.Go(func() error {
 				rnd := rand.New(rand.NewSource(68464))
@@ -7864,9 +7889,21 @@ func Test_concurrent_access(t *testing.T) {
 					select {
 					case <-ticker.C:
 						idx := indexes[rnd.Intn(len(indexes))]
-						idx.RunOnce(mainctx, now.Now())
-						now.Add(time.Hour)
-					case <-ctxShort.Done():
+						idx.RunOnce(ctx, execution.now.Now())
+						// Advancing the time by one hour while request are in progress is like source of few bugs.
+						// Block request before changing time.
+						execution.c.L.Lock()
+						execution.blockRequest = true
+						for execution.pendingRequest > 0 {
+							execution.c.Wait()
+						}
+
+						execution.blockRequest = false
+						execution.c.Broadcast()
+						execution.c.L.Unlock()
+
+						execution.now.Add(time.Hour)
+					case <-ctxTestDuration.Done():
 						return nil
 					}
 				}
@@ -7877,14 +7914,14 @@ func Test_concurrent_access(t *testing.T) {
 			for n := 0; n < 8; n++ {
 				rndSeed := rnd.Int63()
 				group.Go(func() error {
-					return concurrentAccessWriter(ctxShort, mainctx, indexes, now, rndSeed)
+					return concurrentAccessWriter(ctx, execution, indexes, rndSeed)
 				})
 			}
 
 			for n := 0; n < 2; n++ {
 				rndSeed := rnd.Int63()
 				group.Go(func() error {
-					return concurrentAccessReader(ctxShort, mainctx, indexes, now, rndSeed)
+					return concurrentAccessReader(ctx, execution, indexes, rndSeed)
 				})
 			}
 
@@ -7893,14 +7930,14 @@ func Test_concurrent_access(t *testing.T) {
 			}
 
 			tmp, err := indexes[0].expirationLastProcessedDay(context.Background())
-			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", now.Now(), tmp.Format(shardDateFormat), err)
+			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
 
 			allIDS, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
 			if err != nil {
 				t.Error(err)
 			}
 
-			labels, err := indexes[0].lookupLabels(context.Background(), allIDS, now.Now())
+			labels, err := indexes[0].lookupLabels(context.Background(), allIDS, execution.now.Now())
 			if err != nil {
 				t.Error(err)
 			}
@@ -7909,13 +7946,35 @@ func Test_concurrent_access(t *testing.T) {
 				t.Logf("ID = %d is %s", id, labels[i])
 			}
 
-			indexes[0].RunOnce(mainctx, now.Now())
+			indexes[0].RunOnce(ctx, execution.now.Now())
 
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
 
-				hadIssue, err := idx.newVerifier(now.Now(), buffer).WithStrictExpiration(true).Verify(context.Background())
+				hadIssue, err := idx.newVerifier(
+					execution.now.Now(), buffer).WithStrictExpiration(true).Verify(context.Background())
 				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+
+			for i := 0; i < 400*2; i++ {
+				execution.now.Add(12 * time.Hour)
+				indexes[0].RunOnce(ctx, execution.now.Now())
+			}
+
+			tmp, err = indexes[0].expirationLastProcessedDay(context.Background())
+			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
+
+			for _, idx := range indexes {
+				buffer := bytes.NewBuffer(nil)
+
+				hadIssue, err := idx.newVerifier(
+					execution.now.Now(), buffer).WithPedanticExpiration(true).Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7929,14 +7988,14 @@ func Test_concurrent_access(t *testing.T) {
 }
 
 func concurrentAccessWriter(
-	ctxShort context.Context, ctxLong context.Context, indexes []*CassandraIndex, now *mockTime, rndSeed int64,
+	ctx context.Context, execution *concurentAccessTestExecution, indexes []*CassandraIndex, rndSeed int64,
 ) error {
 	rnd := rand.New(rand.NewSource(rndSeed))
 
 	fullList := []types.LookupRequest{
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "common",
 				"item":     "low-ttl",
@@ -7944,8 +8003,8 @@ func concurrentAccessWriter(
 			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
 		},
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "common",
 				"item":     "medium-ttl",
@@ -7953,8 +8012,8 @@ func concurrentAccessWriter(
 			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
 		},
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "common",
 				"item":     "high-ttl",
@@ -7962,8 +8021,8 @@ func concurrentAccessWriter(
 			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
 		},
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "low-ttl",
@@ -7972,8 +8031,8 @@ func concurrentAccessWriter(
 			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
 		},
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "medium-ttl",
@@ -7982,8 +8041,8 @@ func concurrentAccessWriter(
 			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
 		},
 		{
-			Start: now.Now(),
-			End:   now.Now(),
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "high-ttl",
@@ -7993,8 +8052,23 @@ func concurrentAccessWriter(
 		},
 	}
 
-	for ctxShort.Err() == nil {
-		nowValue := now.Now()
+	for {
+		execution.c.L.Lock()
+		if execution.stopWorker {
+			execution.c.L.Unlock()
+
+			break
+		}
+
+		for execution.blockRequest {
+			execution.c.Wait()
+		}
+
+		execution.pendingRequest++
+
+		execution.c.L.Unlock()
+
+		nowValue := execution.now.Now()
 		for i := range fullList {
 			fullList[i].Start = nowValue
 			fullList[i].End = nowValue
@@ -8003,7 +8077,15 @@ func concurrentAccessWriter(
 		idxID := rnd.Intn(len(indexes))
 		idx := indexes[idxID]
 
-		_, _, err := idx.lookupIDs(ctxLong, fullList, nowValue)
+		_, _, err := idx.lookupIDs(ctx, fullList, nowValue)
+
+		execution.c.L.Lock()
+
+		execution.pendingRequest--
+		execution.c.Broadcast()
+
+		execution.c.L.Unlock()
+
 		if err != nil {
 			return fmt.Errorf("concurrentAccessWriter idxID=%d: %w", idxID+1, err)
 		}
@@ -8013,11 +8095,26 @@ func concurrentAccessWriter(
 }
 
 func concurrentAccessReader(
-	ctxShort context.Context, ctxLong context.Context, indexes []*CassandraIndex, now *mockTime, rndSeed int64,
+	ctx context.Context, execution *concurentAccessTestExecution, indexes []*CassandraIndex, rndSeed int64,
 ) error {
 	rnd := rand.New(rand.NewSource(rndSeed))
 
-	for ctxShort.Err() == nil {
+	for {
+		execution.c.L.Lock()
+		if execution.stopWorker {
+			execution.c.L.Unlock()
+
+			break
+		}
+
+		for execution.blockRequest {
+			execution.c.Wait()
+		}
+
+		execution.pendingRequest++
+
+		execution.c.L.Unlock()
+
 		idxID := rnd.Intn(len(indexes))
 		idx := indexes[idxID]
 
@@ -8043,7 +8140,14 @@ func concurrentAccessReader(
 			}
 		}
 
-		_, err := idx.Search(ctxLong, now.Now().Add(-14*24*time.Hour), now.Now(), matchers)
+		_, err := idx.Search(ctx, execution.now.Now().Add(-14*24*time.Hour), execution.now.Now(), matchers)
+		execution.c.L.Lock()
+
+		execution.pendingRequest--
+		execution.c.Broadcast()
+
+		execution.c.L.Unlock()
+
 		if err != nil {
 			return fmt.Errorf("concurrentAccessReader idxID=%d: %w", idxID+1, err)
 		}
