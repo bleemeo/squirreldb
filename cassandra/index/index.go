@@ -2720,13 +2720,13 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
 
-		err = c.store.InsertExpiration(ctx, candidateDay, buffer.Bytes())
+		err = c.store.InsertExpiration(ctx, candidateDay.UTC(), buffer.Bytes())
 		if err != nil {
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
 	}
 
-	err = c.store.DeleteExpiration(ctx, candidateDay)
+	err = c.store.DeleteExpiration(ctx, candidateDay.UTC())
 	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 		return false, fmt.Errorf("unable to remove processed list of metrics to check for expiration: %w", err)
 	}
@@ -3130,7 +3130,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, expireFrom string
 	}
 
 	if !bitmapExpiration.Any() {
-		err := c.store.DeleteExpiration(ctx, job.Day)
+		err := c.store.DeleteExpiration(ctx, job.Day.UTC())
 		if errors.Is(err, gocql.ErrNotFound) {
 			return nil
 		}
@@ -3145,7 +3145,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, expireFrom string
 		return fmt.Errorf("derialize bitmap: %w", err)
 	}
 
-	return c.store.InsertExpiration(ctx, job.Day, buffer.Bytes())
+	return c.store.InsertExpiration(ctx, job.Day.UTC(), buffer.Bytes())
 }
 
 // idsForMatcher return metric IDs matching given matchers.
@@ -3520,7 +3520,7 @@ func (c *CassandraIndex) inversePostingsForMatcher(
 func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day time.Time) (*roaring.Bitmap, error) {
 	tmp := roaring.NewBTreeBitmap()
 
-	buffer, err := c.store.SelectExpiration(ctx, day)
+	buffer, err := c.store.SelectExpiration(ctx, day.UTC())
 	if errors.Is(err, gocql.ErrNotFound) {
 		return tmp, nil
 	} else if err != nil {
