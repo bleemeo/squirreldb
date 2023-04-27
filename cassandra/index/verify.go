@@ -17,12 +17,13 @@ import (
 )
 
 type indexVerifier struct {
-	index            *CassandraIndex
-	doFix            bool
-	acquireLock      bool
-	strictExpiration bool
-	output           io.Writer
-	now              time.Time
+	index              *CassandraIndex
+	doFix              bool
+	acquireLock        bool
+	strictExpiration   bool
+	pedanticExpiration bool
+	output             io.Writer
+	now                time.Time
 }
 
 type verifierExecution struct {
@@ -75,11 +76,38 @@ func (v indexVerifier) WithLock(enable bool) indexVerifier {
 // WithStrictExpiration enable or disable fail on warning condition for expiration.
 // By default, it's only checked that expiration don't have fatal error (which would cause metric
 // to don't expire at all for example). With this option, it also check that expiration information
-// are fully up-to-date without duplicate information. For this check to works, task like cassandraExpire()
+// are up-to-date but still allow for duplicate. For this check to works, task like cassandraExpire()
 // and applyExpirationUpdateRequests() must have run.
+// To even disallow duplicate, with WithPedanticExpiration
 // It modify the verifier and return it to allow chaining call.
 func (v indexVerifier) WithStrictExpiration(enable bool) indexVerifier {
 	v.strictExpiration = enable
+
+	if !enable {
+		v.pedanticExpiration = false
+	}
+
+	return v
+}
+
+// WithPedanticExpiration enable or disable all check on expiration.
+// It imply WithStrictExpiration and also enable checking the ID aren't duplicated in previous day.
+// This check is advanced as it can't be easily avoided with a cluster:
+//   - Two SquirrelDB have knowledge of the same metric
+//   - SquirrelDB A created the metric, with expiration day D1
+//   - A write on SquirrelDB B cause the TTL to update from D1 to D2
+//   - Later, a write on SquirrelDB A cause another update. SquirrelDB A thing that update is from D1 to D3
+//   - SquirrelDB B restart (or refresh the expiration cache)
+//   - The metric is present in D2 and D3. No SquirrelDBs think that it's present in D2 and will not remove
+//     it from there (excepted when that day is processed by the expiration process).
+//
+// It modify the verifier and return it to allow chaining call.
+func (v indexVerifier) WithPedanticExpiration(enable bool) indexVerifier {
+	v.pedanticExpiration = enable
+
+	if enable {
+		v.strictExpiration = true
+	}
 
 	return v
 }
@@ -1046,7 +1074,7 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 			)
 		}
 
-		if gotExpectedInFuture.Any() && ve.strictExpiration {
+		if gotExpectedInFuture.Any() && ve.pedanticExpiration {
 			hadIssue = true
 
 			fmt.Fprintf(

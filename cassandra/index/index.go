@@ -1518,6 +1518,9 @@ func (c *CassandraIndex) refreshExpiration(
 
 	// Move the metrics ID for the new expiration list, but do it
 	// in a background task to send multiple update at the same time.
+	// Note: it's possible that the oldExpiration isn't the latest value in case of cluster. The other node
+	// might have update the value and we don't yet known about that. It's not a big issue, as not removing
+	// an ID from the expiration day list isn't a big issue and it's handled by cassandraExpire.
 	previousDay := oldExpiration.Truncate(24 * time.Hour)
 	newDay := newExpiration.Truncate(24 * time.Hour)
 

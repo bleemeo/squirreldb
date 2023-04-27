@@ -4752,6 +4752,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	t4 := t3.Add(24 * 30 * time.Hour)
 	t5 := t4.Add(24 * 30 * time.Hour)
 	t6 := t5.Add(24 * 30 * time.Hour)
+	t7 := t6.Add(24 * 370 * time.Hour)
 
 	tmp, _, err := index1.lookupIDs(
 		context.Background(),
@@ -5044,7 +5045,22 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for i, idx := range indexes {
-		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
+		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(true).Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
+	}
+
+	if err := executeRunOnce(t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, idx := range indexes {
+		hadIssue, err := idx.newVerifier(t7, buffer).WithPedanticExpiration(true).Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -5188,7 +5204,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.newVerifier(t0, buffer).WithStrictExpiration(false).Verify(context.Background())
+	hadIssue, err := index.newVerifier(t0, buffer).WithPedanticExpiration(true).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5209,7 +5225,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t0, buffer).WithStrictExpiration(false).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t0, buffer).WithPedanticExpiration(true).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5390,7 +5406,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t5, buffer).WithStrictExpiration(false).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t5, buffer).WithPedanticExpiration(true).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5414,7 +5430,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t6, buffer).WithPedanticExpiration(true).Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5994,7 +6010,7 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.newVerifier(currentTime, buffer).WithStrictExpiration(false).Verify(context.Background())
+	hadError, err := index.newVerifier(currentTime, buffer).WithPedanticExpiration(true).Verify(context.Background())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -7355,7 +7371,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 				shouldFail.SetRate(0, 0)
 
 				verifyHadErrors[batchIdx], err = index.newVerifier(
-					batch.now, verifyResults[batchIdx]).WithStrictExpiration(false).Verify(context.Background())
+					batch.now, verifyResults[batchIdx]).WithPedanticExpiration(true).Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7585,7 +7601,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.newVerifier(currentTime, buffer).WithStrictExpiration(false).Verify(context.Background())
+			hadError, err := index1.newVerifier(currentTime, buffer).WithStrictExpiration(true).Verify(context.Background())
 			if err != nil {
 				t.Error(err)
 			}
@@ -7898,7 +7914,8 @@ func Test_concurrent_access(t *testing.T) {
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
 
-				hadIssue, err := idx.newVerifier(now.Now(), buffer).WithStrictExpiration(false).Verify(context.Background())
+				hadIssue, err := idx.newVerifier(now.Now(), buffer).WithStrictExpiration(true).Verify(context.Background())
+				if err != nil {
 				if err != nil {
 					t.Error(err)
 				}
