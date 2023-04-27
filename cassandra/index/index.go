@@ -2307,8 +2307,6 @@ func (c *CassandraIndex) createShardExpirationMetric(
 	shard int32,
 	expiration time.Time,
 ) error {
-	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", timeForShard(shard), expiration)
-
 	// Choose the TTL to make the metric expire at the given expiration.
 	ttl := int64(expiration.Sub(now).Seconds())
 
@@ -2327,12 +2325,22 @@ func (c *CassandraIndex) createShardExpirationMetric(
 		return errNewMetricLockNotAcquired
 	}
 
-	_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
+	result, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
 
 	c.newMetricGlobalLock.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("create shard expiration metric: %w", err)
+	}
+
+	if len(result) > 0 {
+		c.logger.Debug().Msgf(
+			"Created shard %s expiration metric id = %d with expiration %s", timeForShard(shard), result[0].id, expiration,
+		)
+	} else {
+		c.logger.Debug().Msgf(
+			"Created shard %s expiration metric id with expiration %s but result is empty ?!", timeForShard(shard), expiration,
+		)
 	}
 
 	return nil
@@ -2543,7 +2551,7 @@ func (c *CassandraIndex) createMetrics(
 	for day, req := range expirationUpdateRequests {
 		req.Day = day
 
-		err = c.expirationUpdate(ctx, req)
+		err = c.expirationUpdate(ctx, "createMetrics", req)
 		if err != nil {
 			return nil, err
 		}
@@ -3103,9 +3111,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 		return
 	}
 
-	for _, req := range expireUpdates {
-		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
-	}
+	c.logger.Debug().Msgf("applyExpirationUpdateRequests had %d expiration(s) to apply", len(expireUpdates))
 
 	err := c.applyExpirationUpdateRequestsLock(ctx, now, expireUpdates)
 	if err != nil {
@@ -3163,7 +3169,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
 				copy(newReq.RemoveIDs, req.RemoveIDs)
 
 				task := func() error {
-					return c.expirationUpdate(ctx, newReq)
+					return c.expirationUpdate(ctx, "applyExpirationUpdateRequestsLock", newReq)
 				}
 				select {
 				case work <- task:
@@ -3409,7 +3415,7 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		return false, fmt.Errorf("unable to get list of metrics to check for expiration: %w", err)
 	}
 
-	c.logger.Debug().Msgf("Processing expiration for day %v", candidateDay)
+	c.logger.Debug().Msgf("Processing expiration for day %v, total IDs to process is %d", candidateDay, bitmap.Count())
 
 	results := make([]uint64, expireBatchSize)
 
@@ -3479,6 +3485,8 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 // This purge will also remove entries from the in-memory cache.
 func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64, now time.Time) error {
 	var expireUpdates []expirationUpdateRequest
+
+	c.logger.Debug().Msgf("cassandraCheckExpire will process %d IDs", len(ids))
 
 	dayToExpireUpdates := make(map[time.Time]int)
 	bulkDelete := newBulkDeleter(c)
@@ -3577,7 +3585,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			for _, req := range expireUpdates {
 				req := req
 				task := func() error {
-					return c.expirationUpdate(ctx, req)
+					return c.expirationUpdate(ctx, "cassandraCheckExpire", req)
 				}
 				select {
 				case work <- task:
@@ -3824,7 +3832,11 @@ type expirationUpdateRequest struct {
 // they are expected to expire.
 // Be aware that job.AddIDs and job.RemoveIDs are mutated (do a copy if the slice is shared / reused after this call).
 // The lock newMetricGlobalLock must be held while calling this function.
-func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpdateRequest) error {
+func (c *CassandraIndex) expirationUpdate(ctx context.Context, expireFrom string, job expirationUpdateRequest) error {
+	c.logger.Debug().Msgf(
+		"From task %s, updating expiration day %v, add %v, remove %v", expireFrom, job.Day, job.AddIDs, job.RemoveIDs,
+	)
+
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
 	if err != nil {
 		return err

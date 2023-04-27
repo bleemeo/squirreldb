@@ -92,6 +92,8 @@ func (d *deleter) Delete(ctx context.Context) error {
 	idsCopy := make([]uint64, len(d.deleteIDs))
 	copy(idsCopy, d.deleteIDs)
 
+	d.c.logger.Debug().Msgf("deleting metric ID: %v", d.deleteIDs)
+
 	// Delete metrics from cache *before* processing to Cassandra.
 	// Doing this ensure that if a write for a metric that in being delete will
 	// trigger the creation of a new metrics (which will wait for complet delete since we hold the lock).
