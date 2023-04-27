@@ -199,7 +199,7 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 }
 
 type mockStore struct {
-	expiration    map[time.Time][]byte
+	expiration    map[int64][]byte
 	labels2id     map[string]types.MetricID
 	postings      map[int32]map[string]map[string][]byte
 	id2labels     map[types.MetricID]labels.Labels
@@ -220,7 +220,7 @@ func (s *mockStore) Init(ctx context.Context) error {
 	s.postings = make(map[int32]map[string]map[string][]byte)
 	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
-	s.expiration = make(map[time.Time][]byte)
+	s.expiration = make(map[int64][]byte)
 
 	return ctx.Err()
 }
@@ -476,7 +476,7 @@ func (s *mockStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte
 
 	s.queryCount++
 
-	result, ok := s.expiration[day]
+	result, ok := s.expiration[day.Unix()]
 	if !ok {
 		return nil, gocql.ErrNotFound
 	}
@@ -693,7 +693,7 @@ func (s *mockStore) InsertExpiration(ctx context.Context, day time.Time, bitset 
 
 	s.queryCount++
 
-	s.expiration[day] = bitset
+	s.expiration[day.Unix()] = bitset
 
 	return ctx.Err()
 }
@@ -750,11 +750,11 @@ func (s *mockStore) DeleteExpiration(ctx context.Context, day time.Time) error {
 
 	s.queryCount++
 
-	if _, ok := s.expiration[day]; !ok {
+	if _, ok := s.expiration[day.Unix()]; !ok {
 		return gocql.ErrNotFound
 	}
 
-	delete(s.expiration, day)
+	delete(s.expiration, day.Unix())
 
 	return ctx.Err()
 }
@@ -5261,7 +5261,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		expire := store.id2expiration[id].Truncate(24 * time.Hour)
 		bitmap := roaring.NewBTreeBitmap()
 
-		err = bitmap.UnmarshalBinary(store.expiration[expire])
+		err = bitmap.UnmarshalBinary(store.expiration[expire.Unix()])
 		if err != nil {
 			t.Fatal(err)
 		}
