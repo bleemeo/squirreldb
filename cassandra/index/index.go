@@ -1356,17 +1356,11 @@ func (c *CassandraIndex) lookupIDsFromCache(
 // the new expiration is after the current expiration.
 func (c *CassandraIndex) updateShardExpiration(
 	ctx context.Context,
-	now time.Time,
 	shard int32,
 	newExpiration time.Time,
 ) error {
 	// Get current shard expiration.
 	currentExpiration, expirationID, err := c.getShardExpiration(ctx, shard)
-	if errors.Is(err, errMetricDoesNotExist) {
-		// The shard expiration metric does not exist, create it.
-		return c.createShardExpirationMetric(ctx, now, shard, newExpiration)
-	}
-
 	if err != nil {
 		return err
 	}
@@ -1507,6 +1501,9 @@ func (c *CassandraIndex) createShardExpirationMetric(
 	return nil
 }
 
+// refreshExpiration update a metric expiration date. It also request in background to move
+// the metricID from expiration per day list.
+// The lock lookupIDMutex must be held by caller.
 func (c *CassandraIndex) refreshExpiration(
 	ctx context.Context,
 	id types.MetricID,
@@ -2267,6 +2264,30 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 		c.metrics.ExpirationMoveSeconds.Observe(time.Since(start).Seconds())
 	}()
 
+	if len(c.expirationUpdateRequests) == 0 {
+		c.lookupIDMutex.Unlock()
+
+		return
+	}
+
+	// Update current shard expiration with the highest expiration.
+	maxExpiration := time.Time{}
+	for day := range c.expirationUpdateRequests {
+		if day.After(maxExpiration) {
+			maxExpiration = day
+		}
+	}
+
+	shard := shardForTime(now.Unix())
+	err := c.updateShardExpiration(ctx, shard, maxExpiration)
+	// The possible errMetricDoesNotExist will be handled below, after we release the lock
+	if err != nil && !errors.Is(err, errMetricDoesNotExist) {
+		c.logger.Warn().Err(err).Msg("Update of shard expiration date failed")
+		c.lookupIDMutex.Unlock()
+
+		return
+	}
+
 	expireUpdates := make([]expirationUpdateRequest, 0, len(c.expirationUpdateRequests))
 
 	for day, v := range c.expirationUpdateRequests {
@@ -2278,16 +2299,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 
 	c.lookupIDMutex.Unlock()
 
-	if len(expireUpdates) == 0 {
-		return
-	}
-
-	c.logger.Debug().Msgf("applyExpirationUpdateRequests had %d expiration(s) to apply", len(expireUpdates))
-
-	err := c.applyExpirationUpdateRequestsLock(ctx, now, expireUpdates)
-	if err != nil {
-		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
-
+	revertUpdateRequest := func() {
 		c.lookupIDMutex.Lock()
 
 		for _, v := range expireUpdates {
@@ -2299,30 +2311,35 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 
 		c.lookupIDMutex.Unlock()
 	}
+
+	c.logger.Debug().Msgf("applyExpirationUpdateRequests had %d expiration(s) to apply", len(expireUpdates))
+
+	if errors.Is(err, errMetricDoesNotExist) {
+		if err := c.createShardExpirationMetric(ctx, now, shard, maxExpiration); err != nil {
+			c.logger.Warn().Err(err).Msg("Creation of shard expiration metrics failed")
+
+			revertUpdateRequest()
+
+			return
+		}
+	}
+
+	err = c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
+
+		revertUpdateRequest()
+	}
 }
 
 func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
 	ctx context.Context,
-	now time.Time,
 	expireUpdates []expirationUpdateRequest,
 ) error {
-	// Update current shard expiration with the highest expiration.
-	maxExpiration := time.Time{}
-	for _, update := range expireUpdates {
-		if update.Day.After(maxExpiration) {
-			maxExpiration = update.Day
-		}
-	}
-
-	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
-	if err != nil {
-		return fmt.Errorf("update shard expiration: %w", err)
-	}
-
 	c.newMetricGlobalLock.Lock()
 	defer c.newMetricGlobalLock.Unlock()
 
-	err = c.concurrentTasks(
+	err := c.concurrentTasks(
 		ctx,
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
