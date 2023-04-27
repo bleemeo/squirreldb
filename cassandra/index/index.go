@@ -1629,7 +1629,7 @@ type lookupEntry struct {
 //   - If expired, delete entry for this metric from the index (the opposite of creation)
 //   - If not expired, add the metric IDs to the new expiration day in the table.
 //   - Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(
+func (c *CassandraIndex) createMetrics( //nolint:maintidx
 	ctx context.Context,
 	now time.Time,
 	pending []lookupEntry,
@@ -1653,22 +1653,81 @@ func (c *CassandraIndex) createMetrics(
 		labelsToQuery[i] = entry.sortedLabelsString
 	}
 
+	existingIDs := make([]types.MetricID, 0)
+	existingIDToPendingIndex := make(map[types.MetricID]int)
+
 	// Be sure no-one registered the metric before we took the lock.
 	labels2ID, err := c.selectLabelsList2ID(ctx, labelsToQuery)
 	if err != nil {
 		return nil, fmt.Errorf("check IDs from store: %w", err)
 	}
 
+	// First pass to check which ID is already registered
+	for i, entry := range pending {
+		id, ok := labels2ID[entry.sortedLabelsString]
+
+		if !ok {
+			continue
+		}
+
+		c.metrics.LookupIDConcurrentNew.Inc()
+
+		if !allPosting.Contains(uint64(id)) {
+			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
+
+			// Add the bad ID to next expiration, so it could be cleanup if possible
+			today := time.Now().Truncate(24 * time.Hour)
+			expReq := expirationUpdateRequests[today]
+			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+			expirationUpdateRequests[today] = expReq
+
+			// Do not use this ID. A new ID will be allocated.
+			delete(labels2ID, entry.sortedLabelsString)
+
+			continue
+		}
+
+		existingIDs = append(existingIDs, id)
+		pending[i].id = id
+		existingIDToPendingIndex[id] = i
+	}
+
+	if len(existingIDs) > 0 {
+		_, expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, existingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for id, pendingIdx := range existingIDToPendingIndex {
+			cassandraExpiration, ok := expiration[id]
+			if !ok || cassandraExpiration.Before(now) {
+				c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in ID2Labels or expired!")
+
+				// Add the bad ID to next expiration, so it could be cleanup if possible
+				today := time.Now().Truncate(24 * time.Hour)
+				expReq := expirationUpdateRequests[today]
+				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+				expirationUpdateRequests[today] = expReq
+
+				// Do not use this ID. A new ID will be allocated.
+				delete(existingIDToPendingIndex, id)
+				delete(labels2ID, pending[pendingIdx].sortedLabelsString)
+
+				continue
+			}
+
+			pending[pendingIdx].cassandraEntryExpiration = cassandraExpiration
+		}
+	}
+
 	for i, entry := range pending {
 		var newID types.MetricID
 
-		id, ok := labels2ID[entry.sortedLabelsString]
+		_, ok := labels2ID[entry.sortedLabelsString]
 
 		switch {
 		case ok:
-			newID = id
-
-			c.metrics.LookupIDConcurrentNew.Inc()
+			continue
 		case entry.id != 0 && allowForcingIDAndExpiration:
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
@@ -1734,6 +1793,12 @@ func (c *CassandraIndex) createMetrics(
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
 				entry := entry
+
+				if _, ok := existingIDToPendingIndex[entry.id]; ok {
+					// This ID already exist. Don't re-insert it.
+					continue
+				}
+
 				task := func() error {
 					return c.store.InsertID2Labels(ctx, entry.id, entry.sortedLabels, entry.cassandraEntryExpiration)
 				}
@@ -1761,6 +1826,12 @@ func (c *CassandraIndex) createMetrics(
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
 				entry := entry
+
+				if _, ok := existingIDToPendingIndex[entry.id]; ok {
+					// This ID already exist. Don't re-insert it.
+					continue
+				}
+
 				task := func() error {
 					return c.store.InsertLabels2ID(ctx, entry.sortedLabelsString, entry.id)
 				}
