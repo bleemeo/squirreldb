@@ -3921,7 +3921,9 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.newVerifier(now, buffer).Verify(context.Background())
+	hadIssue, err := index1.newVerifier(now, buffer).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3930,7 +3932,9 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index2.newVerifier(now, buffer).Verify(context.Background())
+	hadIssue, err = index2.newVerifier(now, buffer).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3939,7 +3943,9 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index3.newVerifier(now, buffer).Verify(context.Background())
+	hadIssue, err = index3.newVerifier(now, buffer).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4848,7 +4854,9 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	{
 		buffer := bytes.NewBuffer(nil)
-		hadIssue, err := index1.newVerifier(t0, buffer).Verify(context.Background())
+		hadIssue, err := index1.newVerifier(t0, buffer).
+			WithStrictMetricCreation(true).
+			Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -5030,7 +5038,10 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	for i, idx := range indexes {
 		// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
-		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(false).Verify(context.Background())
+		hadIssue, err := idx.newVerifier(t6, buffer).
+			WithStrictMetricCreation(true).
+			WithStrictExpiration(false).
+			Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -5045,7 +5056,10 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for i, idx := range indexes {
-		hadIssue, err := idx.newVerifier(t6, buffer).WithStrictExpiration(true).Verify(context.Background())
+		hadIssue, err := idx.newVerifier(t6, buffer).
+			WithStrictMetricCreation(true).
+			WithStrictExpiration(true).
+			Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -5060,7 +5074,10 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for i, idx := range indexes {
-		hadIssue, err := idx.newVerifier(t7, buffer).WithPedanticExpiration(true).Verify(context.Background())
+		hadIssue, err := idx.newVerifier(t7, buffer).
+			WithStrictMetricCreation(true).
+			WithPedanticExpiration(true).
+			Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -5204,7 +5221,10 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.newVerifier(t0, buffer).WithPedanticExpiration(true).Verify(context.Background())
+	hadIssue, err := index.newVerifier(t0, buffer).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5225,7 +5245,10 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t0, buffer).WithPedanticExpiration(true).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t0, buffer).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5406,7 +5429,10 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t5, buffer).WithPedanticExpiration(true).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t5, buffer).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5430,7 +5456,10 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.newVerifier(t6, buffer).WithPedanticExpiration(true).Verify(context.Background())
+	hadIssue, err = index.newVerifier(t6, buffer).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -6010,7 +6039,10 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.newVerifier(currentTime, buffer).WithPedanticExpiration(true).Verify(context.Background())
+	hadError, err := index.newVerifier(currentTime, buffer).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -7370,8 +7402,10 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				shouldFail.SetRate(0, 0)
 
-				verifyHadErrors[batchIdx], err = index.newVerifier(
-					batch.now, verifyResults[batchIdx]).WithPedanticExpiration(true).Verify(context.Background())
+				verifyHadErrors[batchIdx], err = index.newVerifier(batch.now, verifyResults[batchIdx]).
+					WithStrictMetricCreation(true).
+					WithPedanticExpiration(true).
+					Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7601,7 +7635,10 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.newVerifier(currentTime, buffer).WithStrictExpiration(true).Verify(context.Background())
+			hadError, err := index1.newVerifier(currentTime, buffer).
+				WithStrictMetricCreation(true).
+				WithStrictExpiration(true).
+				Verify(context.Background())
 			if err != nil {
 				t.Error(err)
 			}
@@ -7952,7 +7989,7 @@ func Test_concurrent_access(t *testing.T) {
 				buffer := bytes.NewBuffer(nil)
 
 				hadIssue, err := idx.newVerifier(
-					execution.now.Now(), buffer).WithStrictExpiration(true).Verify(context.Background())
+					execution.now.Now(), buffer).WithStrictMetricCreation(true).WithStrictExpiration(true).Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7973,8 +8010,10 @@ func Test_concurrent_access(t *testing.T) {
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
 
-				hadIssue, err := idx.newVerifier(
-					execution.now.Now(), buffer).WithPedanticExpiration(true).Verify(context.Background())
+				hadIssue, err := idx.newVerifier(execution.now.Now(), buffer).
+					WithStrictMetricCreation(true).
+					WithPedanticExpiration(true).
+					Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}

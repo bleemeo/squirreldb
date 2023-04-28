@@ -205,9 +205,10 @@ func (i *indexWrapper) Verify(
 	w io.Writer,
 	doFix bool,
 	acquireLock bool,
+	strict bool,
 ) (hadIssue bool, err error) {
 	if verifier, ok := i.index.(types.IndexVerifier); ok {
-		return verifier.Verify(ctx, w, doFix, acquireLock)
+		return verifier.Verify(ctx, w, doFix, acquireLock, strict)
 	}
 
 	return false, errNotImplemented

@@ -69,7 +69,7 @@ type IndexDumper interface {
 }
 
 type IndexVerifier interface {
-	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
+	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool, strict bool) (hadIssue bool, err error)
 }
 
 type IndexInternalExpirerer interface {

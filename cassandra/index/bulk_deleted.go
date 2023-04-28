@@ -148,7 +148,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
-			// The shard exit in existingShardsLabel but is fully empty.
+			// The shard exists in existingShardsLabel but is fully empty.
 			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
 			// deleting it from existingShardsLabel.
 			// Cleanup entry in existingShardsLabel

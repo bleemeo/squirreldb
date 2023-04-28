@@ -17,13 +17,14 @@ import (
 )
 
 type indexVerifier struct {
-	index              *CassandraIndex
-	doFix              bool
-	acquireLock        bool
-	strictExpiration   bool
-	pedanticExpiration bool
-	output             io.Writer
-	now                time.Time
+	index                *CassandraIndex
+	doFix                bool
+	acquireLock          bool
+	strictMetricCreation bool
+	strictExpiration     bool
+	pedanticExpiration   bool
+	output               io.Writer
+	now                  time.Time
 }
 
 type verifierExecution struct {
@@ -86,6 +87,20 @@ func (v indexVerifier) WithStrictExpiration(enable bool) indexVerifier {
 	if !enable {
 		v.pedanticExpiration = false
 	}
+
+	return v
+}
+
+// WithStrictMetricCreation enable or disable fail on warning condition for metric creation.
+// The way metric creation is done, could lead to partially creation metric, that will:
+// * not be used
+// * be cleaned on their expiration
+// So such error don't have significant impact unless they happen way to often. They should
+// only happen if during metric creation something goes wrong (like SquirrelDB crash or just
+// the HTTP client that disconnect during the creation - i.e. timeout).
+// It modify the verifier and return it to allow chaining call.
+func (v indexVerifier) WithStrictMetricCreation(enable bool) indexVerifier {
+	v.strictMetricCreation = enable
 
 	return v
 }
@@ -348,7 +363,7 @@ func (ve *verifierExecution) verifyBulk(
 
 	for _, id := range ids {
 		lbls, ok := id2Labels[id]
-		if !ok {
+		if !ok && ve.strictMetricCreation {
 			fmt.Fprintf(ve.output, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
 
 			hadIssue = true
@@ -356,7 +371,9 @@ func (ve *verifierExecution) verifyBulk(
 			if ve.doFix {
 				ve.bulkDeleter.PrepareDelete(id, nil, false)
 			}
+		}
 
+		if !ok {
 			continue
 		}
 
@@ -415,7 +432,7 @@ func (ve *verifierExecution) verifyBulk(
 		ve.expectedExpiration[expirationDay] = it
 
 		id2, ok := labels2ID[lbls.String()]
-		if !ok {
+		if !ok && ve.strictMetricCreation {
 			fmt.Fprintf(ve.output, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
 
 			hadIssue = true
@@ -423,7 +440,9 @@ func (ve *verifierExecution) verifyBulk(
 			if ve.doFix {
 				ve.bulkDeleter.PrepareDelete(id, lbls, false)
 			}
+		}
 
+		if !ok {
 			continue
 		}
 
@@ -482,7 +501,7 @@ func (ve *verifierExecution) verifyBulk(
 					ve.bulkDeleter.PrepareDelete(id2, lbls2, false)
 					ve.bulkDeleter.PrepareDelete(id, lbls, false)
 				}
-			default:
+			case ve.strictMetricCreation:
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",

@@ -164,7 +164,7 @@ func run(ctx context.Context) error {
 			return fmt.Errorf("can not verify, index isn't a CassandraIndex")
 		}
 
-		_, err = indexVerifier.Verify(ctx, os.Stderr, false, false)
+		_, err = indexVerifier.Verify(ctx, os.Stderr, false, false, true)
 
 		if err != nil {
 			return err

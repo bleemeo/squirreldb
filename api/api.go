@@ -428,8 +428,9 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	if idx, ok := a.Index.(types.IndexVerifier); ok {
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
+		strict := req.FormValue("strict") != ""
 
-		_, err := idx.Verify(ctx, w, doFix, acquireLock)
+		_, err := idx.Verify(ctx, w, doFix, acquireLock, strict)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
 

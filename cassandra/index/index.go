@@ -820,12 +820,18 @@ func (c *CassandraIndex) Verify(
 	w io.Writer,
 	doFix bool,
 	acquireLock bool,
+	strict bool,
 ) (hadIssue bool, err error) {
 	if doFix && !acquireLock {
 		return hadIssue, errors.New("doFix require acquire lock")
 	}
 
-	return c.newVerifier(time.Now(), w).WithDoFix(doFix).WithLock(acquireLock).Verify(ctx)
+	return c.newVerifier(time.Now(), w).
+		WithDoFix(doFix).
+		WithLock(acquireLock).
+		WithStrictExpiration(strict).
+		WithStrictMetricCreation(strict).
+		Verify(ctx)
 }
 
 // AllIDs returns all ids stored in the index.
