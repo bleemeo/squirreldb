@@ -127,7 +127,7 @@ type CassandraIndex struct {
 	lookupIDMutex            sync.Mutex
 	newMetricGlobalLock      types.TryLocker
 	expirationGlobalLock     types.TryLocker
-	expirationUpdateRequests map[time.Time]expirationUpdateRequest
+	expirationUpdateRequests map[int64]expirationUpdateRequest
 	expirationBackoff        backoff.BackOff
 	nextExpirationAt         time.Time
 	labelsToID               map[uint64][]idData
@@ -263,7 +263,7 @@ func initialize(
 			cache: make(map[postingsCacheKey]postingEntry),
 		},
 		shardExpirationCache:     &shardExpirationCache{},
-		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
+		expirationUpdateRequests: make(map[int64]expirationUpdateRequest),
 		expirationBackoff:        expBackoff,
 		newMetricGlobalLock:      options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
 		expirationGlobalLock:     options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive),
@@ -1534,15 +1534,15 @@ func (c *CassandraIndex) refreshExpiration(
 		return nil
 	}
 
-	req := c.expirationUpdateRequests[previousDay]
+	req := c.expirationUpdateRequests[previousDay.Unix()]
 
 	req.RemoveIDs = append(req.RemoveIDs, uint64(id))
-	c.expirationUpdateRequests[previousDay] = req
+	c.expirationUpdateRequests[previousDay.Unix()] = req
 
-	req = c.expirationUpdateRequests[newDay]
+	req = c.expirationUpdateRequests[newDay.Unix()]
 
 	req.AddIDs = append(req.AddIDs, uint64(id))
-	c.expirationUpdateRequests[newDay] = req
+	c.expirationUpdateRequests[newDay.Unix()] = req
 
 	return nil
 }
@@ -1645,7 +1645,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 	allowForcingIDAndExpiration bool,
 ) ([]lookupEntry, error) {
 	start := time.Now()
-	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
+	expirationUpdateRequests := make(map[int64]expirationUpdateRequest)
 
 	defer func() {
 		c.metrics.CreateMetricSeconds.Observe(time.Since(start).Seconds())
@@ -1686,9 +1686,9 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 
 			// Add the bad ID to next expiration, so it could be cleanup if possible
 			today := time.Now().Truncate(24 * time.Hour)
-			expReq := expirationUpdateRequests[today]
+			expReq := expirationUpdateRequests[today.Unix()]
 			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
-			expirationUpdateRequests[today] = expReq
+			expirationUpdateRequests[today.Unix()] = expReq
 
 			// Do not use this ID. A new ID will be allocated.
 			delete(labels2ID, entry.sortedLabelsString)
@@ -1714,9 +1714,9 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 
 				// Add the bad ID to next expiration, so it could be cleanup if possible
 				today := time.Now().Truncate(24 * time.Hour)
-				expReq := expirationUpdateRequests[today]
+				expReq := expirationUpdateRequests[today.Unix()]
 				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
-				expirationUpdateRequests[today] = expReq
+				expirationUpdateRequests[today.Unix()] = expReq
 
 				// Do not use this ID. A new ID will be allocated.
 				delete(existingIDToPendingIndex, id)
@@ -1767,14 +1767,15 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 		pending[i].cassandraEntryExpiration = cassandraExpiration
 
 		day := cassandraExpiration.Truncate(24 * time.Hour)
-		expReq := expirationUpdateRequests[day]
+		expReq := expirationUpdateRequests[day.Unix()]
 
 		expReq.AddIDs = append(expReq.AddIDs, uint64(newID))
 
-		expirationUpdateRequests[day] = expReq
+		expirationUpdateRequests[day.Unix()] = expReq
 	}
 
-	for day, req := range expirationUpdateRequests {
+	for timestamp, req := range expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
 		req.Day = day
 
 		err = c.expirationUpdate(ctx, "createMetrics", req)
@@ -2352,7 +2353,10 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 
 	// Update current shard expiration with the highest expiration.
 	maxExpiration := time.Time{}
-	for day := range c.expirationUpdateRequests {
+
+	for timestamp := range c.expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
+
 		if day.After(maxExpiration) {
 			maxExpiration = day
 		}
@@ -2370,12 +2374,13 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 
 	expireUpdates := make([]expirationUpdateRequest, 0, len(c.expirationUpdateRequests))
 
-	for day, v := range c.expirationUpdateRequests {
+	for timestamp, v := range c.expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
 		v.Day = day
 		expireUpdates = append(expireUpdates, v)
 	}
 
-	c.expirationUpdateRequests = make(map[time.Time]expirationUpdateRequest)
+	c.expirationUpdateRequests = make(map[int64]expirationUpdateRequest)
 
 	c.lookupIDMutex.Unlock()
 
@@ -2383,10 +2388,10 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 		c.lookupIDMutex.Lock()
 
 		for _, v := range expireUpdates {
-			v2 := c.expirationUpdateRequests[v.Day]
+			v2 := c.expirationUpdateRequests[v.Day.Unix()]
 			v2.AddIDs = append(v2.AddIDs, v.AddIDs...)
 			v2.RemoveIDs = append(v2.RemoveIDs, v.RemoveIDs...)
-			c.expirationUpdateRequests[v.Day] = v2
+			c.expirationUpdateRequests[v.Day.Unix()] = v2
 		}
 
 		c.lookupIDMutex.Unlock()
@@ -2757,7 +2762,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 	c.logger.Debug().Msgf("cassandraCheckExpire will process %d IDs", len(ids))
 
-	dayToExpireUpdates := make(map[time.Time]int)
+	dayToExpireUpdates := make(map[int64]int)
 	bulkDelete := newBulkDeleter(c)
 
 	metricIDs := make([]types.MetricID, len(ids))
@@ -2803,13 +2808,13 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		case expire.After(now):
 			expireDay := expire.Truncate(24 * time.Hour)
 
-			idx, ok := dayToExpireUpdates[expireDay]
+			idx, ok := dayToExpireUpdates[expireDay.Unix()]
 			if !ok {
 				idx = len(expireUpdates)
 				expireUpdates = append(expireUpdates, expirationUpdateRequest{
 					Day: expireDay,
 				})
-				dayToExpireUpdates[expireDay] = idx
+				dayToExpireUpdates[expireDay.Unix()] = idx
 			}
 
 			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id))

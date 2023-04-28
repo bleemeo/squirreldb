@@ -36,7 +36,7 @@ type verifierExecution struct {
 	// tables labels2id and id2labels.
 	allGoodIds *roaring.Bitmap
 	// expectedExpiration contains the expected value for index_expiration table (based on id2labels table)
-	expectedExpiration map[time.Time]*roaring.Bitmap
+	expectedExpiration map[int64]*roaring.Bitmap
 }
 
 const maxIDBeforeTruncate = 50
@@ -136,7 +136,7 @@ func (v indexVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
 	execution := &verifierExecution{
 		indexVerifier:      v,
 		bulkDeleter:        newBulkDeleter(v.index),
-		expectedExpiration: make(map[time.Time]*roaring.Bitmap),
+		expectedExpiration: make(map[int64]*roaring.Bitmap),
 	}
 
 	return execution.verify(ctx)
@@ -420,7 +420,7 @@ func (ve *verifierExecution) verifyBulk(
 
 		expirationDay := expiration.Truncate(24 * time.Hour)
 
-		it := ve.expectedExpiration[expirationDay]
+		it := ve.expectedExpiration[expirationDay.Unix()]
 		if it == nil {
 			it = roaring.NewBTreeBitmap()
 		}
@@ -429,7 +429,7 @@ func (ve *verifierExecution) verifyBulk(
 			return false, err
 		}
 
-		ve.expectedExpiration[expirationDay] = it
+		ve.expectedExpiration[expirationDay.Unix()] = it
 
 		id2, ok := labels2ID[lbls.String()]
 		if !ok && ve.strictMetricCreation {
@@ -1013,7 +1013,9 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 	idSeenInExpiration := roaring.NewBTreeBitmap()
 	idExpectedInPast := roaring.NewBTreeBitmap()
 
-	for day, tmp := range ve.expectedExpiration {
+	for timestamp, tmp := range ve.expectedExpiration {
+		day := time.Unix(timestamp, 0)
+
 		if day.Before(startDay) {
 			startDay = day
 		}
@@ -1060,7 +1062,7 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 			return false, err
 		}
 
-		wantExpiration := ve.expectedExpiration[currentDay]
+		wantExpiration := ve.expectedExpiration[currentDay.Unix()]
 
 		if gotExpiration == nil {
 			gotExpiration = roaring.NewBTreeBitmap()
@@ -1154,6 +1156,16 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 		idSeenInExpiration.UnionInPlace(gotExpiration)
 		idExpectedInFuture.DifferenceInPlace(wantExpiration)
 		idExpectedInPast.UnionInPlace(wantExpiration)
+	}
+
+	if idExpectedInFuture.Any() {
+		hadIssue = true
+
+		fmt.Fprintf(
+			ve.output,
+			"there is still ID expected in the future... this is a verifier bug?: %s\n",
+			truncatedIDList(idExpectedInFuture, maxIDBeforeTruncate),
+		)
 	}
 
 	return hadIssue, nil
