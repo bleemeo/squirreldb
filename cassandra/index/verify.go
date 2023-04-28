@@ -37,6 +37,8 @@ type verifierExecution struct {
 	allGoodIds *roaring.Bitmap
 	// expectedExpiration contains the expected value for index_expiration table (based on id2labels table)
 	expectedExpiration map[int64]*roaring.Bitmap
+	// expectedUnknowDate contains the metric ID which should expire but we ignore when.
+	expectedUnknowDate *roaring.Bitmap
 }
 
 const maxIDBeforeTruncate = 50
@@ -137,6 +139,7 @@ func (v indexVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
 		indexVerifier:      v,
 		bulkDeleter:        newBulkDeleter(v.index),
 		expectedExpiration: make(map[int64]*roaring.Bitmap),
+		expectedUnknowDate: roaring.NewBTreeBitmap(),
 	}
 
 	return execution.verify(ctx)
@@ -350,7 +353,7 @@ func (ve *verifierExecution) verifyMissingShard(
 }
 
 // check that given metric IDs existing in labels2id and id2labels.
-func (ve *verifierExecution) verifyBulk(
+func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 	ctx context.Context,
 	ids []types.MetricID,
 ) (hadIssue bool, err error) {
@@ -374,6 +377,10 @@ func (ve *verifierExecution) verifyBulk(
 		}
 
 		if !ok {
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
+				return false, err
+			}
+
 			continue
 		}
 
@@ -389,6 +396,12 @@ func (ve *verifierExecution) verifyBulk(
 			)
 
 			hadIssue = true
+		}
+
+		if !ok {
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
+				return false, err
+			}
 
 			continue
 		}
@@ -1073,11 +1086,14 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 		}
 
 		gotUnexpectedIDs := gotExpiration.Difference(wantExpiration)
-		gotInvalidIDs := gotUnexpectedIDs.Difference(ve.allGoodIds)
-		gotValidUnexpectedIDs := gotUnexpectedIDs.Intersect(ve.allGoodIds)
+		gotInvalidIDs := gotUnexpectedIDs.Difference(ve.allPosting)
+		gotValidUnexpectedIDs := gotUnexpectedIDs.Intersect(ve.allPosting)
 		gotExpectedInPast := gotValidUnexpectedIDs.Intersect(idExpectedInPast)
 		gotExpectedInFuture := gotValidUnexpectedIDs.Intersect(idExpectedInFuture)
-		gotUnexpctedVerifierBug := gotValidUnexpectedIDs.Difference(idExpectedInPast).Difference(idExpectedInFuture)
+		gotUnexpctedVerifierBug := gotValidUnexpectedIDs.
+			Difference(idExpectedInPast).
+			Difference(idExpectedInFuture).
+			Difference(ve.expectedUnknowDate)
 
 		gotMissingIDs := wantExpiration.Difference(gotExpiration)
 		gotMissingSeenInPast := gotMissingIDs.Intersect(idSeenInExpiration)
@@ -1088,7 +1104,7 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 
 			fmt.Fprintf(
 				ve.output,
-				"expiration day %s had %d IDs which are unknown to allGoodIds: %s\n",
+				"expiration day %s had %d IDs which are unknown to allPosting: %s\n",
 				currentDay.Format(shardDateFormat),
 				gotInvalidIDs.Count(),
 				truncatedIDList(gotInvalidIDs, maxIDBeforeTruncate),
@@ -1156,6 +1172,17 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 		idSeenInExpiration.UnionInPlace(gotExpiration)
 		idExpectedInFuture.DifferenceInPlace(wantExpiration)
 		idExpectedInPast.UnionInPlace(wantExpiration)
+	}
+
+	unknownDateNotSeen := ve.expectedUnknowDate.Difference(idSeenInExpiration)
+	if unknownDateNotSeen.Any() {
+		hadIssue = true
+
+		fmt.Fprintf(
+			ve.output,
+			"expirations do not contains expected ID (with unknown date): %s\n",
+			truncatedIDList(unknownDateNotSeen, maxIDBeforeTruncate),
+		)
 	}
 
 	if idExpectedInFuture.Any() {
