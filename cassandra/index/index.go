@@ -814,26 +814,6 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	return nil
 }
 
-// Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-	acquireLock bool,
-	strict bool,
-) (hadIssue bool, err error) {
-	if doFix && !acquireLock {
-		return hadIssue, errors.New("doFix require acquire lock")
-	}
-
-	return c.newVerifier(time.Now(), w).
-		WithDoFix(doFix).
-		WithLock(acquireLock).
-		WithStrictExpiration(strict).
-		WithStrictMetricCreation(strict).
-		Verify(ctx)
-}
-
 // AllIDs returns all ids stored in the index.
 func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
 	shards, err := c.getTimeShards(ctx, start, end, false)

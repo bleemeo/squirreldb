@@ -16,7 +16,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-type indexVerifier struct {
+type verifier struct {
 	index                *CassandraIndex
 	doFix                bool
 	acquireLock          bool
@@ -28,7 +28,7 @@ type indexVerifier struct {
 }
 
 type verifierExecution struct {
-	indexVerifier
+	verifier
 	bulkDeleter *deleter
 	// allPosting is the content of the special posting globalAllPostingLabel
 	allPosting *roaring.Bitmap
@@ -43,16 +43,24 @@ type verifierExecution struct {
 
 const maxIDBeforeTruncate = 50
 
-func (c *CassandraIndex) newVerifier(now time.Time, output io.Writer) indexVerifier {
-	return indexVerifier{
+func (c *CassandraIndex) Verifier(output io.Writer) types.IndexVerifier {
+	return verifier{
 		index:  c,
-		now:    now,
+		now:    time.Now(),
 		output: output,
 	}
 }
 
+// WithNow fixes the time the verify process think we are curretly. This is useful for test AND
+// when running verify on a dump that is few day old.
+func (v verifier) WithNow(now time.Time) types.IndexVerifier {
+	v.now = now
+
+	return v
+}
+
 // WithDoFix enable or disable fix for correctable error found. It imply taking the newMetricGlobalLock lock.
-func (v indexVerifier) WithDoFix(enable bool) indexVerifier {
+func (v verifier) WithDoFix(enable bool) types.IndexVerifier {
 	if enable {
 		v.acquireLock = true
 	}
@@ -66,7 +74,7 @@ func (v indexVerifier) WithDoFix(enable bool) indexVerifier {
 // The lock is required as a metric creation / expiration during the verification process could
 // return a false-positive, but holding the lock will block metric creation during the whole verification process.
 // If disabled, it also disable DoFix.
-func (v indexVerifier) WithLock(enable bool) indexVerifier {
+func (v verifier) WithLock(enable bool) types.IndexVerifier {
 	v.acquireLock = enable
 
 	if !enable {
@@ -83,7 +91,7 @@ func (v indexVerifier) WithLock(enable bool) indexVerifier {
 // and applyExpirationUpdateRequests() must have run.
 // To even disallow duplicate, with WithPedanticExpiration
 // It modify the verifier and return it to allow chaining call.
-func (v indexVerifier) WithStrictExpiration(enable bool) indexVerifier {
+func (v verifier) WithStrictExpiration(enable bool) types.IndexVerifier {
 	v.strictExpiration = enable
 
 	if !enable {
@@ -101,7 +109,7 @@ func (v indexVerifier) WithStrictExpiration(enable bool) indexVerifier {
 // only happen if during metric creation something goes wrong (like SquirrelDB crash or just
 // the HTTP client that disconnect during the creation - i.e. timeout).
 // It modify the verifier and return it to allow chaining call.
-func (v indexVerifier) WithStrictMetricCreation(enable bool) indexVerifier {
+func (v verifier) WithStrictMetricCreation(enable bool) types.IndexVerifier {
 	v.strictMetricCreation = enable
 
 	return v
@@ -119,7 +127,7 @@ func (v indexVerifier) WithStrictMetricCreation(enable bool) indexVerifier {
 //     it from there (excepted when that day is processed by the expiration process).
 //
 // It modify the verifier and return it to allow chaining call.
-func (v indexVerifier) WithPedanticExpiration(enable bool) indexVerifier {
+func (v verifier) WithPedanticExpiration(enable bool) types.IndexVerifier {
 	v.pedanticExpiration = enable
 
 	if enable {
@@ -129,14 +137,14 @@ func (v indexVerifier) WithPedanticExpiration(enable bool) indexVerifier {
 	return v
 }
 
-// verify perform some checks on index consistency.
+// Verify perform some checks on index consistency.
 // It could apply fixes and could acquire the newMetricGlobalLock to ensure a consitent read of the index.
 // When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
 // that some issue might get fixed automatically (e.g. expired metrics that are not yet processed, partial write should
 // be fixed when expiration is applied for them, ...).
-func (v indexVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
+func (v verifier) Verify(ctx context.Context) (hadIssue bool, err error) {
 	execution := &verifierExecution{
-		indexVerifier:      v,
+		verifier:           v,
 		bulkDeleter:        newBulkDeleter(v.index),
 		expectedExpiration: make(map[int64]*roaring.Bitmap),
 		expectedUnknowDate: roaring.NewBTreeBitmap(),

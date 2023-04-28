@@ -1114,6 +1114,29 @@ func Benchmark_labelsToID(b *testing.B) {
 	}
 }
 
+// Test_interfaces make sure the CassandraIndex implement some interfaces.
+func Test_interfaces(t *testing.T) {
+	var iface interface{}
+
+	index := &CassandraIndex{}
+	iface = index
+
+	_, ok := iface.(types.VerifiableIndex)
+	if !ok {
+		t.Error("index isn't a VerifiableIndex")
+	}
+
+	_, ok = iface.(types.IndexDumper)
+	if !ok {
+		t.Error("index isn't a IndexDumper")
+	}
+
+	_, ok = iface.(types.Index)
+	if !ok {
+		t.Error("index isn't a Index")
+	}
+}
+
 func Test_sortLabels(t *testing.T) {
 	type args struct {
 		labels labels.Labels
@@ -3921,7 +3944,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.newVerifier(now, buffer).
+	hadIssue, err := index1.Verifier(buffer).
+		WithNow(now).
 		WithStrictMetricCreation(true).
 		Verify(context.Background())
 	if err != nil {
@@ -3932,7 +3956,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index2.newVerifier(now, buffer).
+	hadIssue, err = index2.Verifier(buffer).
+		WithNow(now).
 		WithStrictMetricCreation(true).
 		Verify(context.Background())
 	if err != nil {
@@ -3943,7 +3968,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index3.newVerifier(now, buffer).
+	hadIssue, err = index3.Verifier(buffer).
+		WithNow(now).
 		WithStrictMetricCreation(true).
 		Verify(context.Background())
 	if err != nil {
@@ -4854,7 +4880,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	{
 		buffer := bytes.NewBuffer(nil)
-		hadIssue, err := index1.newVerifier(t0, buffer).
+		hadIssue, err := index1.Verifier(buffer).
+			WithNow(t0).
 			WithStrictMetricCreation(true).
 			Verify(context.Background())
 		if err != nil {
@@ -5038,7 +5065,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	for i, idx := range indexes {
 		// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
-		hadIssue, err := idx.newVerifier(t6, buffer).
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t6).
 			WithStrictMetricCreation(true).
 			WithStrictExpiration(false).
 			Verify(context.Background())
@@ -5056,7 +5084,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for i, idx := range indexes {
-		hadIssue, err := idx.newVerifier(t6, buffer).
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t6).
 			WithStrictMetricCreation(true).
 			WithStrictExpiration(true).
 			Verify(context.Background())
@@ -5074,7 +5103,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for i, idx := range indexes {
-		hadIssue, err := idx.newVerifier(t7, buffer).
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t7).
 			WithStrictMetricCreation(true).
 			WithPedanticExpiration(true).
 			Verify(context.Background())
@@ -5221,7 +5251,8 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.newVerifier(t0, buffer).
+	hadIssue, err := index.Verifier(buffer).
+		WithNow(t0).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
 		Verify(context.Background())
@@ -5245,7 +5276,8 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t0, buffer).
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t0).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
 		Verify(context.Background())
@@ -5429,7 +5461,8 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.newVerifier(t5, buffer).
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t5).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
 		Verify(context.Background())
@@ -5456,7 +5489,8 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.newVerifier(t6, buffer).
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t6).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
 		Verify(context.Background())
@@ -6039,7 +6073,8 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.newVerifier(currentTime, buffer).
+	hadError, err := index.Verifier(buffer).
+		WithNow(currentTime).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
 		Verify(context.Background())
@@ -7402,7 +7437,8 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				shouldFail.SetRate(0, 0)
 
-				verifyHadErrors[batchIdx], err = index.newVerifier(batch.now, verifyResults[batchIdx]).
+				verifyHadErrors[batchIdx], err = index.Verifier(verifyResults[batchIdx]).
+					WithNow(batch.now).
 					WithStrictMetricCreation(true).
 					WithPedanticExpiration(true).
 					Verify(context.Background())
@@ -7635,7 +7671,8 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.newVerifier(currentTime, buffer).
+			hadError, err := index1.Verifier(buffer).
+				WithNow(currentTime).
 				WithStrictMetricCreation(true).
 				WithStrictExpiration(true).
 				Verify(context.Background())
@@ -7988,8 +8025,11 @@ func Test_concurrent_access(t *testing.T) {
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
 
-				hadIssue, err := idx.newVerifier(
-					execution.now.Now(), buffer).WithStrictMetricCreation(true).WithStrictExpiration(true).Verify(context.Background())
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(execution.now.Now()).
+					WithStrictMetricCreation(true).
+					WithStrictExpiration(true).
+					Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -8010,7 +8050,8 @@ func Test_concurrent_access(t *testing.T) {
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
 
-				hadIssue, err := idx.newVerifier(execution.now.Now(), buffer).
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(execution.now.Now()).
 					WithStrictMetricCreation(true).
 					WithPedanticExpiration(true).
 					Verify(context.Background())

@@ -425,12 +425,38 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexVerifier); ok {
+	if idx, ok := a.Index.(types.VerifiableIndex); ok { //nolint:nestif
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
 		strict := req.FormValue("strict") != ""
 
-		_, err := idx.Verify(ctx, w, doFix, acquireLock, strict)
+		nowList := req.URL.Query()["now"]
+		if len(nowList) > 1 {
+			http.Error(w, `Expect at most one parameter "now"`, http.StatusBadRequest)
+
+			return
+		}
+
+		now := time.Now()
+
+		if len(nowList) == 1 {
+			var err error
+
+			now, err = time.Parse("2006-01-02", nowList[0])
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+
+				return
+			}
+		}
+
+		_, err := idx.Verifier(w).
+			WithNow(now).
+			WithLock(acquireLock).
+			WithDoFix(doFix).
+			WithStrictExpiration(strict).
+			WithStrictMetricCreation(strict).
+			Verify(ctx)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
 
