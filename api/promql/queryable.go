@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -25,6 +26,7 @@ var (
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
 type Store struct {
+	Logger          zerolog.Logger
 	Index           types.Index
 	Reader          types.MetricReader
 	TenantLabelName string
@@ -38,6 +40,8 @@ type Store struct {
 
 type querier struct {
 	ctx                context.Context //nolint:containedctx
+	logger             zerolog.Logger
+	enableDebug        bool
 	index              IndexWithStats
 	reader             MetricReaderWithStats
 	mint               int64
@@ -58,6 +62,7 @@ type IndexWithStats interface {
 }
 
 func NewStore(
+	logger zerolog.Logger,
 	index types.Index,
 	reader types.MetricReader,
 	tenantLabelName string,
@@ -67,6 +72,7 @@ func NewStore(
 	metricRegistry prometheus.Registerer,
 ) storage.SampleAndChunkQueryable {
 	store := Store{
+		Logger:                    logger,
 		Index:                     index,
 		Reader:                    reader,
 		TenantLabelName:           tenantLabelName,
@@ -161,13 +167,29 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
+	enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
+	if enableDebug {
+		minTime := time.UnixMilli(mint)
+		maxTime := time.UnixMilli(maxt)
+		s.Logger.Info().Msgf(
+			"Querier started. mint=%s maxt=%s. tenant=%s maxPoints=%d maxSeries=%d",
+			minTime.Format(time.RFC3339),
+			maxTime.Format(time.RFC3339),
+			tenant,
+			maxEvaluatedPoints,
+			maxEvaluatedSeries,
+		)
+	}
+
 	q := querier{
-		ctx:     ctx,
-		index:   limitIndex,
-		reader:  reader,
-		mint:    mint,
-		maxt:    maxt,
-		metrics: s.metrics,
+		ctx:         ctx,
+		logger:      s.Logger,
+		enableDebug: enableDebug,
+		index:       limitIndex,
+		reader:      reader,
+		mint:        mint,
+		maxt:        maxt,
+		metrics:     s.metrics,
 	}
 
 	value = r.Header.Get(types.HeaderForcePreAggregated)
@@ -220,6 +242,26 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
+	if q.enableDebug {
+		hintsStr := "no hints"
+		if hints != nil {
+			hintsStr = fmt.Sprintf(
+				"hints{start=%s, end=%s, step=%s, Function=%s}",
+				time.UnixMilli(hints.Start).Format(time.RFC3339),
+				time.UnixMilli(hints.End).Format(time.RFC3339),
+				(time.Duration(hints.Step) * time.Millisecond).String(),
+				hints.Func,
+			)
+		}
+
+		q.logger.Info().Msgf(
+			"Select(sort=%v, %s, matchers=%v)",
+			sortSeries,
+			hintsStr,
+			matchers,
+		)
+	}
+
 	metrics, err := q.index.Search(q.ctx, minT, maxT, matchers)
 	if err != nil {
 		return &seriesIter{err: err}
@@ -268,6 +310,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		ToTimestamp:        q.maxt,
 		ForcePreAggregated: q.forcePreAggregated,
 		ForceRaw:           q.forceRaw,
+		EnableDebug:        q.enableDebug,
 	}
 
 	if hints != nil {
@@ -279,6 +322,17 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 	}
 
 	result, err := q.reader.ReadIter(q.ctx, req)
+
+	if q.enableDebug {
+		q.logger.Info().Msgf(
+			"Select(...) returned %d metricID. request = {ForcePreAggregated=%v, ForceRaw=%v, Function=%v, StepMs=%d}",
+			len(req.IDs),
+			req.ForcePreAggregated,
+			req.ForceRaw,
+			req.Function,
+			req.StepMs,
+		)
+	}
 
 	return &seriesIter{
 		list:      result,
@@ -313,6 +367,14 @@ func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warn
 func (q querier) Close() error {
 	q.metrics.RequestsSeries.Observe(q.index.SeriesReturned())
 	q.metrics.RequestsPoints.Observe(q.reader.PointsRead())
+
+	if q.enableDebug {
+		q.logger.Info().Msgf(
+			"End of querier. series count=%f, points count=%f",
+			q.index.SeriesReturned(),
+			q.reader.PointsRead(),
+		)
+	}
 
 	return nil
 }

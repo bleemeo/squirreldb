@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
+	"net/url"
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
@@ -16,6 +17,7 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -70,6 +72,9 @@ type API struct {
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
+
+	l                   sync.Mutex
+	defaultDebugRequest bool
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -111,6 +116,8 @@ func NewPrometheus(
 	} else {
 		queryEngine = ppromql.NewEngine(engineOpts)
 	}
+
+	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -186,6 +193,7 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
+	router.Get("/debug/toggle_debug_query", a.toggleDebugQueryHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
@@ -196,6 +204,7 @@ func (a *API) init() {
 	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
 
 	queryable := promql.NewStore(
+		a.Logger,
 		a.Index,
 		a.Reader,
 		a.TenantLabelName,
@@ -234,6 +243,14 @@ func (a *API) init() {
 		operation := strings.Trim(handlerName, "/")
 
 		h := func(rw http.ResponseWriter, r *http.Request) {
+			a.l.Lock()
+
+			if a.defaultDebugRequest {
+				r.Header.Add(types.HeaderQueryDebug, "1")
+			}
+
+			a.l.Unlock()
+
 			t0 := time.Now()
 			defer func() {
 				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
@@ -250,6 +267,22 @@ func (a *API) init() {
 			}
 
 			handler(rw, r)
+
+			enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
+			if enableDebug {
+				humainURL := r.URL.Path
+				if r.URL.RawQuery != "" {
+					v, _ := url.QueryUnescape(r.URL.RawQuery)
+					humainURL += "?" + v
+				}
+
+				a.Logger.Info().Msgf(
+					"%s %s took %s",
+					r.Method,
+					humainURL,
+					time.Since(t0).String(),
+				)
+			}
 		}
 
 		return h
@@ -656,6 +689,17 @@ func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request
 
 		return
 	}
+}
+
+func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, req *http.Request) {
+	a.l.Lock()
+
+	a.defaultDebugRequest = !a.defaultDebugRequest
+	debugRequest := a.defaultDebugRequest
+
+	a.l.Unlock()
+
+	fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
 }
 
 func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {

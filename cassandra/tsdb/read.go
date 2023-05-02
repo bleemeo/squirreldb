@@ -104,6 +104,12 @@ func (i *readIter) Next() bool {
 	}
 	fromTimestamp := i.request.FromTimestamp
 
+	var (
+		aggrPointRead int
+		rawPointRead  int
+		readRaw       bool
+	)
+
 	if readAggregate {
 		newData, newTmp, err := i.c.readAggregateData(
 			i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function,
@@ -128,13 +134,18 @@ func (i *readIter) Next() bool {
 		if fromTimestamp <= i.aggregatedToTimestamp {
 			fromTimestamp = i.aggregatedToTimestamp
 		}
+
+		aggrPointRead = len(data.Points)
 	}
 
 	if fromTimestamp <= i.request.ToTimestamp {
+		readRaw = true
+
 		newData, newTmp, err := i.c.readRawData(i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp)
 
 		i.tmp = newTmp
 		data = newData
+		rawPointRead = len(data.Points) - aggrPointRead
 
 		if err != nil {
 			i.err = fmt.Errorf("readRawData: %w", err)
@@ -183,6 +194,18 @@ func (i *readIter) Next() bool {
 				TimeToLive: aggregatedData.TimeToLive,
 			}
 		}
+	}
+
+	if i.request.EnableDebug {
+		i.c.logger.Info().Msgf(
+			"Read ID=%d: %d points (useAggr=%v useRaw=%v. aggr points read=%d, raw points read=%d)",
+			data.ID,
+			len(data.Points),
+			readAggregate,
+			readRaw,
+			aggrPointRead,
+			rawPointRead,
+		)
 	}
 
 	reversePoints(data.Points)
@@ -306,6 +329,7 @@ func (c *CassandraTSDB) readRawData(
 	tmp []types.MetricPoint,
 ) (rawData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
+	initialPointCount := len(buffer.Points)
 
 	fromBaseTimestamp := fromTimestamp - (fromTimestamp % rawPartitionSize.Milliseconds())
 	toBaseTimestamp := toTimestamp - (toTimestamp % rawPartitionSize.Milliseconds())
@@ -316,13 +340,13 @@ func (c *CassandraTSDB) readRawData(
 
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
-			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points)))
+			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points) - initialPointCount))
 
 			return buffer, tmp, err
 		}
 	}
 
-	c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points)))
+	c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points) - initialPointCount))
 	c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
 
 	return buffer, tmp, nil
