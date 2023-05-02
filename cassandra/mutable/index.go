@@ -200,17 +200,12 @@ func (i *indexWrapper) DumpByLabels(
 }
 
 // Verify implements the IndexVerifier interface used by the API.
-func (i *indexWrapper) Verify(
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-	acquireLock bool,
-) (hadIssue bool, err error) {
-	if verifier, ok := i.index.(types.IndexVerifier); ok {
-		return verifier.Verify(ctx, w, doFix, acquireLock)
+func (i *indexWrapper) Verifier(w io.Writer) types.IndexVerifier {
+	if verifier, ok := i.index.(types.VerifiableIndex); ok {
+		return verifier.Verifier(w)
 	}
 
-	return false, errNotImplemented
+	return notImplementedVerifier{}
 }
 
 // Dump implements the IndexDumper interface used by the API.
@@ -269,15 +264,6 @@ func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
 	}
 
 	return false
-}
-
-// InternalUpdateAllShards implements the IndexInternalShardExpirer interface.
-func (i *indexWrapper) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
-	if expirerer, ok := i.index.(types.IndexInternalShardExpirer); ok {
-		return expirerer.InternalUpdateAllShards(ctx, ttl)
-	}
-
-	return errNotImplemented
 }
 
 // mutableMetricsSet wraps a metric set to add mutable labels to the results.

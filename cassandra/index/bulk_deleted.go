@@ -70,7 +70,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 	}
 }
 
-// Delete perform the deletion and REQUIRE the newMetricLockName.
+// Delete perform the deletion and REQUIRE the newMetricGlobalLock.
 //
 // The method should be called only once, a new deleter should be created to reuse it.
 //
@@ -91,6 +91,8 @@ func (d *deleter) Delete(ctx context.Context) error {
 
 	idsCopy := make([]uint64, len(d.deleteIDs))
 	copy(idsCopy, d.deleteIDs)
+
+	d.c.logger.Debug().Msgf("deleting metric ID: %v", truncatedSliceIDList(d.deleteIDs, 50))
 
 	// Delete metrics from cache *before* processing to Cassandra.
 	// Doing this ensure that if a write for a metric that in being delete will
@@ -146,7 +148,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
-			// The shard exit in existingShardsLabel but is fully empty.
+			// The shard exists in existingShardsLabel but is fully empty.
 			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
 			// deleting it from existingShardsLabel.
 			// Cleanup entry in existingShardsLabel

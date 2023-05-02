@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"math/rand"
-	"net/http"
 	"regexp/syntax"
 	"sort"
 	"squirreldb/cassandra/connection"
@@ -27,7 +26,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -89,7 +87,7 @@ var (
 	errTimeOutOfRange           = errors.New("time out of range")
 	errBitmapEmpty              = errors.New("the result bitmap is empty")
 	errNotASimpleRegex          = errors.New("not a simple regex")
-	errNewMetricLockNotAcquired = errors.New("newMetricLock is not acquired")
+	errNewMetricLockNotAcquired = errors.New("newMetricGlobalLock is not acquired")
 	errMetricDoesNotExist       = errors.New("metric doesn't exist")
 )
 
@@ -119,9 +117,17 @@ type CassandraIndex struct {
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 
+	// The three locks used in index are:
+	// * lookupIDMutex is a local lock and only protect local (in-memory) value.
+	// * newMetricGlobalLock is a global lock and protect values in Cassandra. It protect any
+	//   value that could be written during metric creation. Since metric creation is done
+	//   synchroniously when writing points, this lock should not be held for too long.
+	// * expirationGlobalLock is a global lock and protect values in Cassandra. Unlike newMetricGlobalLock
+	//   it protect value that can't we written on metric creation.
 	lookupIDMutex            sync.Mutex
-	newMetricLock            types.TryLocker
-	expirationUpdateRequests map[time.Time]expirationUpdateRequest
+	newMetricGlobalLock      types.TryLocker
+	expirationGlobalLock     types.TryLocker
+	expirationUpdateRequests map[int64]expirationUpdateRequest
 	expirationBackoff        backoff.BackOff
 	nextExpirationAt         time.Time
 	labelsToID               map[uint64][]idData
@@ -257,9 +263,10 @@ func initialize(
 			cache: make(map[postingsCacheKey]postingEntry),
 		},
 		shardExpirationCache:     &shardExpirationCache{},
-		expirationUpdateRequests: make(map[time.Time]expirationUpdateRequest),
+		expirationUpdateRequests: make(map[int64]expirationUpdateRequest),
 		expirationBackoff:        expBackoff,
-		newMetricLock:            options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+		newMetricGlobalLock:      options.LockFactory.CreateLock(newMetricLockName, metricCreationLockTimeToLive),
+		expirationGlobalLock:     options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive),
 		metrics:                  metrics,
 		logger:                   logger,
 	}
@@ -807,856 +814,6 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	return nil
 }
 
-// Verify perform some verification of the indexes health.
-func (c *CassandraIndex) Verify(
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-	acquireLock bool,
-) (hadIssue bool, err error) {
-	return c.verify(ctx, time.Now(), w, doFix, acquireLock)
-}
-
-// verify perform some checks on index consistency.
-// It could apply fixes and could acquire the newMetricLock to ensure a consitent read of the index.
-// The lock is required as a metric creation / expiration during the verification process could
-// return a false-positive, but holding the lock will block metric creation during the whole verification process.
-// When any issue is found, the hadIssue will be true (and description of the issue is written to w). Note
-// that some issue might get fixed automatically (e.g. expired metrics that are not yet processed, partial write should
-// be fixed when expiration is applied for them, ...).
-func (c *CassandraIndex) verify(
-	ctx context.Context,
-	now time.Time,
-	w io.Writer,
-	doFix bool,
-	acquireLock bool,
-) (hadIssue bool, err error) {
-	bulkDeleter := newBulkDeleter(c)
-
-	if doFix && !acquireLock {
-		return hadIssue, errors.New("doFix require acquire lock")
-	}
-
-	if acquireLock {
-		c.newMetricLock.Lock()
-		defer c.newMetricLock.Unlock()
-	}
-
-	issueCount, shards, err := c.verifyMissingShard(ctx, w, doFix)
-	if err != nil {
-		return hadIssue, err
-	}
-
-	hadIssue = hadIssue || issueCount > 0
-
-	allGoodIds := roaring.NewBTreeBitmap()
-
-	allPosting, err := c.postings(ctx, []int32{globalShardNumber}, globalAllPostingLabel, globalAllPostingLabel, false)
-	if err != nil {
-		return hadIssue, err
-	}
-
-	fmt.Fprintf(w, "Index had %d shards and should have %d metrics\n", shards.Count(), allPosting.Count())
-
-	if respf, ok := w.(http.Flusher); ok {
-		respf.Flush()
-	}
-
-	count := 0
-	it := allPosting.Iterator()
-
-	pendingIds := make([]types.MetricID, 0, 10000)
-
-	for ctx.Err() == nil {
-		pendingIds = pendingIds[:0]
-
-		for ctx.Err() == nil {
-			id, eof := it.Next()
-			if eof {
-				break
-			}
-
-			metricID := types.MetricID(id)
-
-			count++
-
-			pendingIds = append(pendingIds, metricID)
-
-			if len(pendingIds) > verifyBulkSize {
-				break
-			}
-		}
-
-		if len(pendingIds) == 0 {
-			break
-		}
-
-		if len(pendingIds) > 0 {
-			bulkHadIssue, err := c.verifyBulk(ctx, now, w, doFix, pendingIds, bulkDeleter, allPosting, allGoodIds)
-			if err != nil {
-				return hadIssue, err
-			}
-
-			hadIssue = hadIssue || bulkHadIssue
-		}
-	}
-
-	fmt.Fprintf(w, "Index contains %d metrics and %d ok\n", count, allGoodIds.Count())
-
-	if respf, ok := w.(http.Flusher); ok {
-		respf.Flush()
-	}
-
-	if doFix {
-		fmt.Fprintf(w, "Applying fix...")
-
-		if err := bulkDeleter.Delete(ctx); err != nil {
-			return hadIssue, err
-		}
-	}
-
-	for _, shard := range shards.Slice() {
-		shard := int32(shard)
-		fmt.Fprintf(w, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
-
-		shardHadIssue, err := c.verifyShard(ctx, w, doFix, shard, allPosting)
-		if err != nil {
-			return hadIssue, err
-		}
-
-		hadIssue = hadIssue || shardHadIssue
-
-		if respf, ok := w.(http.Flusher); ok {
-			respf.Flush()
-		}
-	}
-
-	return hadIssue, ctx.Err()
-}
-
-// verifyMissingShard search from now+3 weeks to 100 weeks before this points for shard not present in existingShards.
-// It also verify that all shards in existingShards actually exists.
-func (c *CassandraIndex) verifyMissingShard(
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-) (errorCount int, shards *roaring.Bitmap, err error) {
-	shards, err = c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
-	if err != nil {
-		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
-	}
-
-	current := time.Now().Add(3 * postingShardSize)
-
-	for n := 0; n < 100; n++ {
-		if ctx.Err() != nil {
-			return 0, shards, ctx.Err()
-		}
-
-		queryShard := []int32{shardForTime(current.Unix())}
-
-		it, err := c.postings(ctx, queryShard, maybePostingLabel, maybePostingLabel, false)
-		if err != nil {
-			return 0, shards, err
-		}
-
-		if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
-			errorCount++
-
-			fmt.Fprintf(
-				w,
-				"Shard %s for time %v isn't in all shards",
-				timeForShard(queryShard[0]).Format(shardDateFormat),
-				current.String(),
-			)
-
-			if doFix {
-				_, err = shards.AddN(uint64(queryShard[0]))
-				if err != nil {
-					return 0, shards, fmt.Errorf("update bitmap: %w", err)
-				}
-			}
-		}
-
-		current = current.Add(-postingShardSize)
-	}
-
-	slice := shards.Slice()
-	for _, shard := range slice {
-		if ctx.Err() != nil {
-			return 0, shards, ctx.Err()
-		}
-
-		shard := int32(shard)
-
-		it, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
-		if err != nil {
-			return 0, shards, fmt.Errorf("get postings for maybe metric IDs: %w", err)
-		}
-
-		if it == nil || !it.Any() {
-			errorCount++
-
-			fmt.Fprintf(w, "Shard %s is listed in all shards but don't exists\n", timeForShard(shard).Format(shardDateFormat))
-
-			if doFix {
-				_, err = shards.RemoveN(uint64(shard))
-				if err != nil {
-					return 0, shards, fmt.Errorf("update bitmap: %w", err)
-				}
-			}
-		}
-	}
-
-	if errorCount > 0 && doFix {
-		var buffer bytes.Buffer
-
-		_, err = shards.WriteTo(&buffer)
-
-		if err != nil {
-			return errorCount, shards, fmt.Errorf("serialize bitmap: %w", err)
-		}
-
-		err = c.store.InsertPostings(ctx, globalShardNumber, existingShardsLabel, existingShardsLabel, buffer.Bytes())
-		if err != nil {
-			return errorCount, shards, fmt.Errorf("update existing shards: %w", err)
-		}
-	}
-
-	return errorCount, shards, nil
-}
-
-// check that given metric IDs existing in labels2id and id2labels.
-func (c *CassandraIndex) verifyBulk(
-	ctx context.Context,
-	now time.Time,
-	w io.Writer,
-	doFix bool,
-	ids []types.MetricID,
-	bulkDeleter *deleter,
-	allPosting *roaring.Bitmap,
-	allGoodIds *roaring.Bitmap,
-) (hadIssue bool, err error) {
-	id2Labels, id2expiration, err := c.selectIDS2LabelsAndExpiration(ctx, ids)
-	if err != nil {
-		return hadIssue, fmt.Errorf("get labels: %w", err)
-	}
-
-	allLabelsString := make([]string, 0, len(ids))
-
-	for _, id := range ids {
-		lbls, ok := id2Labels[id]
-		if !ok {
-			fmt.Fprintf(w, "ID %10d does not exists in ID2Labels, partial write ?\n", id)
-
-			hadIssue = true
-
-			if doFix {
-				bulkDeleter.PrepareDelete(id, nil, false)
-			}
-
-			continue
-		}
-
-		allLabelsString = append(allLabelsString, lbls.String())
-
-		_, ok = id2expiration[id]
-		if !ok {
-			fmt.Fprintf(
-				w,
-				"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify\n",
-				id,
-				lbls.String(),
-			)
-
-			hadIssue = true
-
-			continue
-		}
-	}
-
-	if ctx.Err() != nil {
-		return hadIssue, ctx.Err()
-	}
-
-	labels2ID, err := c.selectLabelsList2ID(ctx, allLabelsString)
-	if err != nil {
-		return hadIssue, fmt.Errorf("get labels2ID: %w", err)
-	}
-
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return hadIssue, ctx.Err()
-		}
-
-		lbls, ok := id2Labels[id]
-		if !ok {
-			continue
-		}
-
-		expiration, ok := id2expiration[id]
-		if !ok {
-			continue
-		}
-
-		id2, ok := labels2ID[lbls.String()]
-		if !ok {
-			fmt.Fprintf(w, "ID %10d (%v) not found in Labels2ID, partial write ?\n", id, lbls.String())
-
-			hadIssue = true
-
-			if doFix {
-				bulkDeleter.PrepareDelete(id, lbls, false)
-			}
-
-			continue
-		}
-
-		if id != id2 { //nolint:nestif
-			tmp, tmp2, err := c.selectIDS2LabelsAndExpiration(ctx, []types.MetricID{id2})
-			if err != nil {
-				return hadIssue, fmt.Errorf("get labels from store: %w", err)
-			}
-
-			lbls2 := tmp[id2]
-			expiration2, ok := tmp2[id2]
-
-			if !ok && lbls2 != nil {
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify",
-					id2,
-					lbls2.String(),
-				)
-
-				hadIssue = true
-
-				continue
-			}
-
-			switch {
-			case lbls2 == nil:
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
-					id,
-					lbls.String(),
-					id2,
-				)
-
-				hadIssue = true
-
-				if doFix {
-					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(id2, lbls, false)
-					bulkDeleter.PrepareDelete(id, lbls, false)
-				}
-			case !allPosting.Contains(uint64(id2)):
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
-					id,
-					lbls.String(),
-					id2,
-				)
-
-				hadIssue = true
-
-				if doFix {
-					// well, the only solution is to delete *both* ID.
-					bulkDeleter.PrepareDelete(id2, lbls2, false)
-					bulkDeleter.PrepareDelete(id, lbls, false)
-				}
-			default:
-				fmt.Fprintf(
-					w,
-					"ID %10d (%v) conflict with ID %d (%v). first expire at %v, second at %v\n",
-					id,
-					lbls.String(),
-					id2,
-					lbls2.String(),
-					expiration,
-					expiration2,
-				)
-
-				hadIssue = true
-
-				// Assume that metric2 is better. It has id2labels, labels2id and in all postings
-				if doFix {
-					bulkDeleter.PrepareDelete(id, lbls, true)
-				}
-			}
-
-			continue
-		}
-
-		if now.After(expiration.Add(24 * time.Hour)) {
-			fmt.Fprintf(w, "ID %10d (%v) should have expired on %v\n", id, lbls.String(), expiration)
-
-			hadIssue = true
-
-			if doFix {
-				bulkDeleter.PrepareDelete(id, lbls, false)
-			}
-
-			continue
-		}
-
-		_, err = allGoodIds.AddN(uint64(id))
-		if err != nil {
-			return hadIssue, fmt.Errorf("update bitmap: %w", err)
-		}
-	}
-
-	return hadIssue, nil
-}
-
-// check that postings for given shard is consistent.
-func (c *CassandraIndex) verifyShard( //nolint:maintidx
-	ctx context.Context,
-	w io.Writer,
-	doFix bool,
-	shard int32,
-	allPosting *roaring.Bitmap,
-) (hadIssue bool, err error) {
-	updates := make([]postingUpdateRequest, 0)
-	labelToIndex := make(map[labels.Label]int)
-
-	localAll, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
-	if err != nil {
-		return false, err
-	}
-
-	localMaybe, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
-	if err != nil {
-		return false, err
-	}
-
-	if !localAll.Any() {
-		hadIssue = true
-
-		fmt.Fprintf(
-			w,
-			"shard %s is empty (automatic cleanup may fix this)!\n",
-			timeForShard(shard).Format(shardDateFormat),
-		)
-	}
-
-	if !localMaybe.Any() {
-		hadIssue = true
-
-		fmt.Fprintf(
-			w,
-			"shard %s is empty!\n",
-			timeForShard(shard).Format(shardDateFormat),
-		)
-	}
-
-	tmp := localAll.Difference(localMaybe)
-	it := tmp.Iterator()
-
-	for {
-		id, eof := it.Next()
-		if eof {
-			break
-		}
-
-		hadIssue = true
-
-		fmt.Fprintf(
-			w,
-			"shard %s: ID %d is present in localAll but not in localMaybe!\n",
-			timeForShard(shard).Format(shardDateFormat),
-			id,
-		)
-
-		if doFix {
-			lbl := labels.Label{
-				Name:  maybePostingLabel,
-				Value: maybePostingLabel,
-			}
-
-			idx, ok := labelToIndex[lbl]
-			if !ok {
-				idx = len(updates)
-				updates = append(updates, postingUpdateRequest{
-					Label: lbl,
-					Shard: shard,
-				})
-				labelToIndex[lbl] = idx
-			}
-
-			updates[idx].AddIDs = append(updates[idx].AddIDs, id)
-		}
-	}
-
-	tmp = localMaybe.Difference(localAll)
-	it = tmp.Iterator()
-
-	for {
-		id, eof := it.Next()
-		if eof {
-			break
-		}
-
-		hadIssue = true
-
-		fmt.Fprintf(
-			w,
-			"shard %s: ID %d is present in localMaybe but not in localAll (automatic cleanup may fix this)!\n",
-			timeForShard(shard).Format(shardDateFormat),
-			id,
-		)
-
-		if doFix {
-			lbl := labels.Label{
-				Name:  maybePostingLabel,
-				Value: maybePostingLabel,
-			}
-
-			idx, ok := labelToIndex[lbl]
-			if !ok {
-				idx = len(updates)
-				updates = append(updates, postingUpdateRequest{
-					Label: lbl,
-					Shard: shard,
-				})
-				labelToIndex[lbl] = idx
-			}
-
-			updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, id)
-		}
-	}
-
-	wantedPostings := make(map[labels.Label]*roaring.Bitmap)
-	labelNames := make(map[string]interface{})
-	it = localAll.Iterator()
-
-	pendingIds := make([]types.MetricID, 0, 10000)
-
-	for ctx.Err() == nil {
-		pendingIds = pendingIds[:0]
-
-		for ctx.Err() == nil {
-			id, eof := it.Next()
-			if eof {
-				break
-			}
-
-			pendingIds = append(pendingIds, types.MetricID(id))
-			if len(pendingIds) > 1000 {
-				break
-			}
-		}
-
-		if len(pendingIds) == 0 {
-			break
-		}
-
-		tmp, _, err := c.selectIDS2LabelsAndExpiration(ctx, pendingIds)
-		if err != nil {
-			return true, fmt.Errorf("get labels: %w", err)
-		}
-
-		for id, lbls := range tmp {
-			for _, lbl := range lbls {
-				labelNames[lbl.Name] = nil
-
-				bitset := wantedPostings[lbl]
-				if bitset == nil {
-					bitset = roaring.NewBTreeBitmap()
-				}
-
-				_, err = bitset.AddN(uint64(id))
-				if err != nil {
-					return true, fmt.Errorf("update bitmap: %w", err)
-				}
-
-				wantedPostings[lbl] = bitset
-
-				lbl2 := labels.Label{
-					Name:  postinglabelName,
-					Value: lbl.Name,
-				}
-
-				bitset = wantedPostings[lbl2]
-				if bitset == nil {
-					bitset = roaring.NewBTreeBitmap()
-				}
-
-				_, err = bitset.AddN(uint64(id))
-				if err != nil {
-					return true, fmt.Errorf("update bitmap: %w", err)
-				}
-
-				wantedPostings[lbl2] = bitset
-			}
-		}
-	}
-
-	references := []struct {
-		it   *roaring.Bitmap
-		name string
-	}{
-		{name: "global all IDs", it: allPosting},
-		{name: "shard all IDs", it: localAll},
-		{name: "shard maybe present IDs", it: localMaybe},
-	}
-
-	labelNames[postinglabelName] = true
-
-	iter := c.store.SelectPostingByName(ctx, shard, postinglabelName)
-	defer iter.Close()
-
-	for iter.HasNext() {
-		labelValue, buffer := iter.Next()
-
-		if _, ok := labelNames[labelValue]; !ok { //nolint:nestif
-			hadIssue = true
-
-			fmt.Fprintf(
-				w,
-				"shard %s: postinglabelName has extra name=%s\n",
-				timeForShard(shard).Format(shardDateFormat),
-				labelValue,
-			)
-
-			if doFix {
-				lbl := labels.Label{
-					Name:  postinglabelName,
-					Value: labelValue,
-				}
-				tmp := roaring.NewBTreeBitmap()
-
-				err := tmp.UnmarshalBinary(buffer)
-				if err != nil {
-					return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
-				}
-
-				idx, ok := labelToIndex[lbl]
-				if !ok {
-					idx = len(updates)
-					updates = append(updates, postingUpdateRequest{
-						Label: lbl,
-						Shard: shard,
-					})
-					labelToIndex[lbl] = idx
-				}
-
-				updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, tmp.Slice()...)
-			}
-		}
-	}
-
-	for name := range labelNames {
-		if ctx.Err() != nil {
-			break
-		}
-
-		iter := c.store.SelectPostingByName(ctx, shard, name)
-		defer iter.Close()
-
-		for iter.HasNext() {
-			tmp := roaring.NewBTreeBitmap()
-			labelValue, buffer := iter.Next()
-
-			err := tmp.UnmarshalBinary(buffer)
-			if err != nil {
-				return hadIssue, fmt.Errorf("unmarshal fail: %w", err)
-			}
-
-			lbl := labels.Label{
-				Name:  name,
-				Value: labelValue,
-			}
-
-			wanted := wantedPostings[lbl]
-			if wanted == nil { //nolint:nestif
-				hadIssue = true
-
-				fmt.Fprintf(
-					w,
-					"shard %s: extra posting for %s=%s exists (with %d IDs)\n",
-					timeForShard(shard).Format(shardDateFormat),
-					name,
-					labelValue,
-					tmp.Count(),
-				)
-
-				if doFix {
-					idx, ok := labelToIndex[lbl]
-					if !ok {
-						idx = len(updates)
-						updates = append(updates, postingUpdateRequest{
-							Label: lbl,
-							Shard: shard,
-						})
-						labelToIndex[lbl] = idx
-					}
-
-					updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, tmp.Slice()...)
-				}
-			} else {
-				delete(wantedPostings, lbl)
-
-				tmp2 := wanted.Difference(tmp)
-				it := tmp2.Iterator()
-				for {
-					id, eof := it.Next()
-					if eof {
-						break
-					}
-
-					hadIssue = true
-
-					fmt.Fprintf(
-						w,
-						"shard %s: missing ID %d in posting for %s=%s\n",
-						timeForShard(shard).Format(shardDateFormat),
-						id,
-						name,
-						labelValue,
-					)
-
-					if doFix {
-						idx, ok := labelToIndex[lbl]
-						if !ok {
-							idx = len(updates)
-							updates = append(updates, postingUpdateRequest{
-								Label: lbl,
-								Shard: shard,
-							})
-							labelToIndex[lbl] = idx
-						}
-
-						updates[idx].AddIDs = append(updates[idx].AddIDs, id)
-					}
-				}
-
-				tmp2 = tmp.Difference(wanted)
-				it = tmp2.Iterator()
-				for {
-					id, eof := it.Next()
-					if eof {
-						break
-					}
-
-					hadIssue = true
-
-					fmt.Fprintf(
-						w,
-						"shard %s: extra ID %d in posting for %s=%s (present in maybe=%v allId=%v globalAll=%v)\n",
-						timeForShard(shard).Format(shardDateFormat),
-						id,
-						name,
-						labelValue,
-						localMaybe.Contains(id),
-						localAll.Contains(id),
-						allPosting.Contains(id),
-					)
-
-					if doFix {
-						idx, ok := labelToIndex[lbl]
-						if !ok {
-							idx = len(updates)
-							updates = append(updates, postingUpdateRequest{
-								Label: lbl,
-								Shard: shard,
-							})
-							labelToIndex[lbl] = idx
-						}
-
-						updates[idx].RemoveIDs = append(updates[idx].RemoveIDs, id)
-					}
-				}
-			}
-
-			for _, reference := range references {
-				tmp = tmp.Difference(reference.it)
-				it := tmp.Iterator()
-
-				for ctx.Err() == nil {
-					id, eof := it.Next()
-					if eof {
-						break
-					}
-
-					hadIssue = true
-
-					fmt.Fprintf(
-						w,
-						"shard %s: posting for %s=%s has ID %d which is not in %s!\n",
-						timeForShard(shard).Format(shardDateFormat),
-						name,
-						labelValue,
-						id,
-						reference.name,
-					)
-				}
-			}
-		}
-	}
-
-	for lbl, wantValue := range wantedPostings {
-		hadIssue = true
-
-		fmt.Fprintf(
-			w,
-			"shard %s: posting %s=%s was expected to exists\n",
-			timeForShard(shard).Format(shardDateFormat),
-			lbl.Name,
-			lbl.Value,
-		)
-
-		if doFix {
-			idx, ok := labelToIndex[lbl]
-			if !ok {
-				idx = len(updates)
-				updates = append(updates, postingUpdateRequest{
-					Label: lbl,
-					Shard: shard,
-				})
-				labelToIndex[lbl] = idx
-			}
-
-			updates[idx].AddIDs = append(updates[idx].AddIDs, wantValue.Slice()...)
-		}
-	}
-
-	if doFix && len(updates) > 0 {
-		err = c.concurrentTasks(
-			ctx,
-			concurrentInsert,
-			func(ctx context.Context, work chan<- func() error) error {
-				for _, req := range updates {
-					req := req
-					task := func() error {
-						_, err := c.postingUpdate(ctx, req)
-
-						if errors.Is(err, errBitmapEmpty) {
-							err = nil
-						}
-
-						return err
-					}
-					select {
-					case work <- task:
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				}
-
-				return nil
-			},
-		)
-		if err != nil {
-			return hadIssue, err
-		}
-	}
-
-	return hadIssue, nil
-}
-
 // AllIDs returns all ids stored in the index.
 func (c *CassandraIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
 	shards, err := c.getTimeShards(ctx, start, end, false)
@@ -1786,13 +943,11 @@ func (c *CassandraIndex) lookupLabels(
 				var ok bool
 
 				labelList[i], ok = idToLabels[id]
-				if !ok {
-					return nil, fmt.Errorf("labels for metric ID %d not found", id)
+				if ok {
+					size := c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
+
+					c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 				}
-
-				size := c.idsToLabels.Set(now, id, labelList[i], idToExpiration[id])
-
-				c.metrics.CacheSize.WithLabelValues("lookup-labels").Set(float64(size))
 			}
 		}
 	}
@@ -2027,7 +1182,7 @@ func (c *CassandraIndex) lookupIDs(
 			pending[i] = entries[idx]
 		}
 
-		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}
@@ -2037,7 +1192,7 @@ func (c *CassandraIndex) lookupIDs(
 
 		done, err := c.createMetrics(ctx, now, pending, false)
 
-		c.newMetricLock.Unlock()
+		c.newMetricGlobalLock.Unlock()
 
 		if err != nil {
 			return nil, nil, err
@@ -2187,17 +1342,11 @@ func (c *CassandraIndex) lookupIDsFromCache(
 // the new expiration is after the current expiration.
 func (c *CassandraIndex) updateShardExpiration(
 	ctx context.Context,
-	now time.Time,
 	shard int32,
 	newExpiration time.Time,
 ) error {
 	// Get current shard expiration.
 	currentExpiration, expirationID, err := c.getShardExpiration(ctx, shard)
-	if errors.Is(err, errMetricDoesNotExist) {
-		// The shard expiration metric does not exist, create it.
-		return c.createShardExpirationMetric(ctx, now, shard, newExpiration)
-	}
-
 	if err != nil {
 		return err
 	}
@@ -2299,8 +1448,6 @@ func (c *CassandraIndex) createShardExpirationMetric(
 	shard int32,
 	expiration time.Time,
 ) error {
-	c.logger.Debug().Msgf("Creating shard %s expiration metric with expiration %s", timeForShard(shard), expiration)
-
 	// Choose the TTL to make the metric expire at the given expiration.
 	ttl := int64(expiration.Sub(now).Seconds())
 
@@ -2311,7 +1458,7 @@ func (c *CassandraIndex) createShardExpirationMetric(
 		ttl:                ttl,
 	}
 
-	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+	if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -2319,17 +1466,30 @@ func (c *CassandraIndex) createShardExpirationMetric(
 		return errNewMetricLockNotAcquired
 	}
 
-	_, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
+	result, err := c.createMetrics(ctx, now, []lookupEntry{expirationEntry}, false)
 
-	c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("create shard expiration metric: %w", err)
 	}
 
+	if len(result) > 0 {
+		c.logger.Debug().Msgf(
+			"Created shard %s expiration metric id = %d with expiration %s", timeForShard(shard), result[0].id, expiration,
+		)
+	} else {
+		c.logger.Debug().Msgf(
+			"Created shard %s expiration metric id with expiration %s but result is empty ?!", timeForShard(shard), expiration,
+		)
+	}
+
 	return nil
 }
 
+// refreshExpiration update a metric expiration date. It also request in background to move
+// the metricID from expiration per day list.
+// The lock lookupIDMutex must be held by caller.
 func (c *CassandraIndex) refreshExpiration(
 	ctx context.Context,
 	id types.MetricID,
@@ -2344,6 +1504,9 @@ func (c *CassandraIndex) refreshExpiration(
 
 	// Move the metrics ID for the new expiration list, but do it
 	// in a background task to send multiple update at the same time.
+	// Note: it's possible that the oldExpiration isn't the latest value in case of cluster. The other node
+	// might have update the value and we don't yet known about that. It's not a big issue, as not removing
+	// an ID from the expiration day list isn't a big issue and it's handled by cassandraExpire.
 	previousDay := oldExpiration.Truncate(24 * time.Hour)
 	newDay := newExpiration.Truncate(24 * time.Hour)
 
@@ -2351,15 +1514,15 @@ func (c *CassandraIndex) refreshExpiration(
 		return nil
 	}
 
-	req := c.expirationUpdateRequests[previousDay]
+	req := c.expirationUpdateRequests[previousDay.Unix()]
 
 	req.RemoveIDs = append(req.RemoveIDs, uint64(id))
-	c.expirationUpdateRequests[previousDay] = req
+	c.expirationUpdateRequests[previousDay.Unix()] = req
 
-	req = c.expirationUpdateRequests[newDay]
+	req = c.expirationUpdateRequests[newDay.Unix()]
 
 	req.AddIDs = append(req.AddIDs, uint64(id))
-	c.expirationUpdateRequests[newDay] = req
+	c.expirationUpdateRequests[newDay.Unix()] = req
 
 	return nil
 }
@@ -2424,7 +1587,7 @@ type lookupEntry struct {
 }
 
 // createMetrics creates a new metric IDs associated with provided request
-// The lock newMetricLock is assumed to be held.
+// The lock newMetricGlobalLock is assumed to be held.
 // Some care should be taken to avoid assigning the same ID from two SquirrelDB instance, so:
 //
 // * To avoid race-condition, redo a check that metrics are not yet registered now that the lock is acquired
@@ -2455,14 +1618,14 @@ type lookupEntry struct {
 //   - If expired, delete entry for this metric from the index (the opposite of creation)
 //   - If not expired, add the metric IDs to the new expiration day in the table.
 //   - Once finished, delete the processed day.
-func (c *CassandraIndex) createMetrics(
+func (c *CassandraIndex) createMetrics( //nolint:maintidx
 	ctx context.Context,
 	now time.Time,
 	pending []lookupEntry,
 	allowForcingIDAndExpiration bool,
 ) ([]lookupEntry, error) {
 	start := time.Now()
-	expirationUpdateRequests := make(map[time.Time]expirationUpdateRequest)
+	expirationUpdateRequests := make(map[int64]expirationUpdateRequest)
 
 	defer func() {
 		c.metrics.CreateMetricSeconds.Observe(time.Since(start).Seconds())
@@ -2479,22 +1642,81 @@ func (c *CassandraIndex) createMetrics(
 		labelsToQuery[i] = entry.sortedLabelsString
 	}
 
+	existingIDs := make([]types.MetricID, 0)
+	existingIDToPendingIndex := make(map[types.MetricID]int)
+
 	// Be sure no-one registered the metric before we took the lock.
 	labels2ID, err := c.selectLabelsList2ID(ctx, labelsToQuery)
 	if err != nil {
 		return nil, fmt.Errorf("check IDs from store: %w", err)
 	}
 
+	// First pass to check which ID is already registered
+	for i, entry := range pending {
+		id, ok := labels2ID[entry.sortedLabelsString]
+
+		if !ok {
+			continue
+		}
+
+		c.metrics.LookupIDConcurrentNew.Inc()
+
+		if !allPosting.Contains(uint64(id)) {
+			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
+
+			// Add the bad ID to next expiration, so it could be cleanup if possible
+			today := time.Now().Truncate(24 * time.Hour)
+			expReq := expirationUpdateRequests[today.Unix()]
+			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+			expirationUpdateRequests[today.Unix()] = expReq
+
+			// Do not use this ID. A new ID will be allocated.
+			delete(labels2ID, entry.sortedLabelsString)
+
+			continue
+		}
+
+		existingIDs = append(existingIDs, id)
+		pending[i].id = id
+		existingIDToPendingIndex[id] = i
+	}
+
+	if len(existingIDs) > 0 {
+		_, expiration, err := c.store.SelectIDS2LabelsAndExpiration(ctx, existingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for id, pendingIdx := range existingIDToPendingIndex {
+			cassandraExpiration, ok := expiration[id]
+			if !ok || cassandraExpiration.Before(now) {
+				c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in ID2Labels or expired!")
+
+				// Add the bad ID to next expiration, so it could be cleanup if possible
+				today := time.Now().Truncate(24 * time.Hour)
+				expReq := expirationUpdateRequests[today.Unix()]
+				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+				expirationUpdateRequests[today.Unix()] = expReq
+
+				// Do not use this ID. A new ID will be allocated.
+				delete(existingIDToPendingIndex, id)
+				delete(labels2ID, pending[pendingIdx].sortedLabelsString)
+
+				continue
+			}
+
+			pending[pendingIdx].cassandraEntryExpiration = cassandraExpiration
+		}
+	}
+
 	for i, entry := range pending {
 		var newID types.MetricID
 
-		id, ok := labels2ID[entry.sortedLabelsString]
+		_, ok := labels2ID[entry.sortedLabelsString]
 
 		switch {
 		case ok:
-			newID = id
-
-			c.metrics.LookupIDConcurrentNew.Inc()
+			continue
 		case entry.id != 0 && allowForcingIDAndExpiration:
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
@@ -2525,17 +1747,18 @@ func (c *CassandraIndex) createMetrics(
 		pending[i].cassandraEntryExpiration = cassandraExpiration
 
 		day := cassandraExpiration.Truncate(24 * time.Hour)
-		expReq := expirationUpdateRequests[day]
+		expReq := expirationUpdateRequests[day.Unix()]
 
 		expReq.AddIDs = append(expReq.AddIDs, uint64(newID))
 
-		expirationUpdateRequests[day] = expReq
+		expirationUpdateRequests[day.Unix()] = expReq
 	}
 
-	for day, req := range expirationUpdateRequests {
+	for timestamp, req := range expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
 		req.Day = day
 
-		err = c.expirationUpdate(ctx, req)
+		err = c.expirationUpdate(ctx, "createMetrics", req)
 		if err != nil {
 			return nil, err
 		}
@@ -2560,6 +1783,12 @@ func (c *CassandraIndex) createMetrics(
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
 				entry := entry
+
+				if _, ok := existingIDToPendingIndex[entry.id]; ok {
+					// This ID already exist. Don't re-insert it.
+					continue
+				}
+
 				task := func() error {
 					return c.store.InsertID2Labels(ctx, entry.id, entry.sortedLabels, entry.cassandraEntryExpiration)
 				}
@@ -2587,6 +1816,12 @@ func (c *CassandraIndex) createMetrics(
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
 				entry := entry
+
+				if _, ok := existingIDToPendingIndex[entry.id]; ok {
+					// This ID already exist. Don't re-insert it.
+					continue
+				}
+
 				task := func() error {
 					return c.store.InsertLabels2ID(ctx, entry.sortedLabelsString, entry.id)
 				}
@@ -2732,7 +1967,7 @@ func (c *CassandraIndex) updatePostingShards(
 	c.invalidatePostings(ctx, keysToInvalidate)
 
 	if len(maybePresent) > 0 {
-		if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+		if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -2742,7 +1977,7 @@ func (c *CassandraIndex) updatePostingShards(
 
 		err := c.applyUpdatePostingShards(ctx, maybePresent, updates, precense)
 
-		c.newMetricLock.Unlock()
+		c.newMetricGlobalLock.Unlock()
 
 		if err != nil {
 			return err
@@ -2993,40 +2228,50 @@ func (c *CassandraIndex) Search(
 		return nil, nil
 	}
 
-	ids, labelsList, err := c.idsForMatchers(ctx, shards, matchers, 3)
+	result, err := c.idsForMatchers(ctx, shards, matchers, 3)
 	if err != nil {
 		return nil, err
 	}
 
-	c.metrics.SearchMetrics.Add(float64(len(ids)))
+	c.metrics.SearchMetrics.Add(float64(result.Count()))
 
-	return &metricsLabels{c: c, ctx: ctx, ids: ids, labelsList: labelsList}, nil
+	return result, nil
 }
 
 type metricsLabels struct {
-	ctx        context.Context //nolint:containedctx
-	err        error
-	c          *CassandraIndex
-	ids        []types.MetricID
-	labelsList []labels.Labels
-	next       int
+	ctx            context.Context //nolint:containedctx
+	err            error
+	c              *CassandraIndex
+	ids            []types.MetricID
+	labelsList     []labels.Labels
+	matchers       []*labels.Matcher
+	needLabelCheck bool
+	next           int
 }
 
 func (l *metricsLabels) Next() bool {
-	if l.next >= len(l.ids) {
-		return false
-	}
-
-	if l.labelsList == nil {
+	if l.labelsList == nil && len(l.ids) > 0 {
 		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
 		if l.err != nil {
 			return false
 		}
 	}
 
-	l.next++
+	for l.next < len(l.ids) {
+		l.next++
 
-	return true
+		if l.labelsList[l.next-1] == nil {
+			continue
+		}
+
+		if l.needLabelCheck && !matcherMatches(l.matchers, l.labelsList[l.next-1]) {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }
 
 func (l *metricsLabels) At() types.MetricLabel {
@@ -3080,64 +2325,86 @@ func (c *CassandraIndex) applyExpirationUpdateRequests(ctx context.Context, now 
 		c.metrics.ExpirationMoveSeconds.Observe(time.Since(start).Seconds())
 	}()
 
+	if len(c.expirationUpdateRequests) == 0 {
+		c.lookupIDMutex.Unlock()
+
+		return
+	}
+
+	// Update current shard expiration with the highest expiration.
+	maxExpiration := time.Time{}
+
+	for timestamp := range c.expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
+
+		if day.After(maxExpiration) {
+			maxExpiration = day
+		}
+	}
+
+	shard := shardForTime(now.Unix())
+	err := c.updateShardExpiration(ctx, shard, maxExpiration)
+	// The possible errMetricDoesNotExist will be handled below, after we release the lock
+	if err != nil && !errors.Is(err, errMetricDoesNotExist) {
+		c.logger.Warn().Err(err).Msg("Update of shard expiration date failed")
+		c.lookupIDMutex.Unlock()
+
+		return
+	}
+
 	expireUpdates := make([]expirationUpdateRequest, 0, len(c.expirationUpdateRequests))
 
-	for day, v := range c.expirationUpdateRequests {
+	for timestamp, v := range c.expirationUpdateRequests {
+		day := time.Unix(timestamp, 0)
 		v.Day = day
 		expireUpdates = append(expireUpdates, v)
 	}
 
-	c.expirationUpdateRequests = make(map[time.Time]expirationUpdateRequest)
+	c.expirationUpdateRequests = make(map[int64]expirationUpdateRequest)
 
 	c.lookupIDMutex.Unlock()
 
-	if len(expireUpdates) == 0 {
-		return
-	}
-
-	for _, req := range expireUpdates {
-		c.logger.Debug().Msgf("Updating expiration day %v, add %v, remove %v", req.Day, req.AddIDs, req.RemoveIDs)
-	}
-
-	err := c.applyExpirationUpdateRequestsLock(ctx, now, expireUpdates)
-	if err != nil {
-		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
-
+	revertUpdateRequest := func() {
 		c.lookupIDMutex.Lock()
 
 		for _, v := range expireUpdates {
-			v2 := c.expirationUpdateRequests[v.Day]
+			v2 := c.expirationUpdateRequests[v.Day.Unix()]
 			v2.AddIDs = append(v2.AddIDs, v.AddIDs...)
 			v2.RemoveIDs = append(v2.RemoveIDs, v.RemoveIDs...)
-			c.expirationUpdateRequests[v.Day] = v2
+			c.expirationUpdateRequests[v.Day.Unix()] = v2
 		}
 
 		c.lookupIDMutex.Unlock()
+	}
+
+	c.logger.Debug().Msgf("applyExpirationUpdateRequests had %d expiration(s) to apply", len(expireUpdates))
+
+	if errors.Is(err, errMetricDoesNotExist) {
+		if err := c.createShardExpirationMetric(ctx, now, shard, maxExpiration); err != nil {
+			c.logger.Warn().Err(err).Msg("Creation of shard expiration metrics failed")
+
+			revertUpdateRequest()
+
+			return
+		}
+	}
+
+	err = c.applyExpirationUpdateRequestsLock(ctx, expireUpdates)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Update of expiration date failed")
+
+		revertUpdateRequest()
 	}
 }
 
 func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
 	ctx context.Context,
-	now time.Time,
 	expireUpdates []expirationUpdateRequest,
 ) error {
-	// Update current shard expiration with the highest expiration.
-	maxExpiration := time.Time{}
-	for _, update := range expireUpdates {
-		if update.Day.After(maxExpiration) {
-			maxExpiration = update.Day
-		}
-	}
+	c.newMetricGlobalLock.Lock()
+	defer c.newMetricGlobalLock.Unlock()
 
-	err := c.updateShardExpiration(ctx, now, shardForTime(now.Unix()), maxExpiration)
-	if err != nil {
-		return fmt.Errorf("update shard expiration: %w", err)
-	}
-
-	c.newMetricLock.Lock()
-	defer c.newMetricLock.Unlock()
-
-	err = c.concurrentTasks(
+	err := c.concurrentTasks(
 		ctx,
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
@@ -3155,7 +2422,7 @@ func (c *CassandraIndex) applyExpirationUpdateRequestsLock(
 				copy(newReq.RemoveIDs, req.RemoveIDs)
 
 				task := func() error {
-					return c.expirationUpdate(ctx, newReq)
+					return c.expirationUpdate(ctx, "applyExpirationUpdateRequestsLock", newReq)
 				}
 				select {
 				case work <- task:
@@ -3247,7 +2514,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 		}
 	}
 
-	if ok := c.newMetricLock.TryLock(ctx, 15*time.Second); !ok {
+	if ok := c.newMetricGlobalLock.TryLock(ctx, 15*time.Second); !ok {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -3257,7 +2524,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 
 	done, err := c.createMetrics(ctx, time.Now(), requests, true)
 
-	c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Unlock()
 
 	if err != nil {
 		return nil, err
@@ -3281,12 +2548,11 @@ func (c *CassandraIndex) InternalCreateMetric(
 // InternalForceExpirationTimestamp will force the state for the most recently processed day of metrics expiration
 // This should only be used in test & benchmark.
 func (c *CassandraIndex) InternalForceExpirationTimestamp(ctx context.Context, value time.Time) error {
-	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(ctx, 0); !acquired {
+	if acquired := c.expirationGlobalLock.TryLock(ctx, 0); !acquired {
 		return errors.New("lock held, please retry")
 	}
 
-	defer lock.Unlock()
+	defer c.expirationGlobalLock.Unlock()
 
 	return c.options.States.Write(ctx, expireMetricStateName, value.Format(time.RFC3339))
 }
@@ -3305,9 +2571,10 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 		}
 	}
 
+	_, err := c.getExistingShards(ctx, true)
+
 	c.lookupIDMutex.Unlock()
 
-	_, err := c.getExistingShards(ctx, true)
 	if err != nil {
 		c.logger.Debug().Err(err).Msg("Refresh existingsShards failed")
 	}
@@ -3318,10 +2585,10 @@ func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.
 	}
 }
 
+// getExistingShards return the bitmap of existing shard. It use a cache which is refreshed if forceUpdate is true
+// or the cache is empty.
+// The lock c.lookupIDMutex must be held while calling this method AND while using the result bitmap.
 func (c *CassandraIndex) getExistingShards(ctx context.Context, forceUpdate bool) (*roaring.Bitmap, error) {
-	c.lookupIDMutex.Lock()
-	defer c.lookupIDMutex.Unlock()
-
 	if c.existingShards == nil || forceUpdate {
 		tmp, err := c.postings(ctx, []int32{globalShardNumber}, existingShardsLabel, existingShardsLabel, false)
 		if err != nil {
@@ -3353,11 +2620,10 @@ func (c *CassandraIndex) expirationLastProcessedDay(ctx context.Context) (time.T
 
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bool, error) {
-	lock := c.options.LockFactory.CreateLock(expireMetricLockName, metricExpiratorLockTimeToLive)
-	if acquired := lock.TryLock(ctx, 0); !acquired {
+	if acquired := c.expirationGlobalLock.TryLock(ctx, 0); !acquired {
 		return false, nil
 	}
-	defer lock.Unlock()
+	defer c.expirationGlobalLock.Unlock()
 
 	start := time.Now()
 
@@ -3396,14 +2662,14 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 		return false, nil
 	}
 
-	// We don't need the newMetricLockName lock here, because newly created metrics
+	// We don't need the newMetricGlobalLock lock here, because newly created metrics
 	// won't be added in candidateDay (which is in the past).
 	bitmap, err := c.cassandraGetExpirationList(ctx, candidateDay)
 	if err != nil {
 		return false, fmt.Errorf("unable to get list of metrics to check for expiration: %w", err)
 	}
 
-	c.logger.Debug().Msgf("Processing expiration for day %v", candidateDay)
+	c.logger.Debug().Msgf("Processing expiration for day %v, total IDs to process is %d", candidateDay, bitmap.Count())
 
 	results := make([]uint64, expireBatchSize)
 
@@ -3445,13 +2711,13 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
 
-		err = c.store.InsertExpiration(ctx, candidateDay, buffer.Bytes())
+		err = c.store.InsertExpiration(ctx, candidateDay.UTC(), buffer.Bytes())
 		if err != nil {
 			return false, fmt.Errorf("unable to update list of metrics to check for expiration: %w", err)
 		}
 	}
 
-	err = c.store.DeleteExpiration(ctx, candidateDay)
+	err = c.store.DeleteExpiration(ctx, candidateDay.UTC())
 	if err != nil && !errors.Is(err, gocql.ErrNotFound) {
 		return false, fmt.Errorf("unable to remove processed list of metrics to check for expiration: %w", err)
 	}
@@ -3465,16 +2731,18 @@ func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bo
 }
 
 // cassandraCheckExpire actually checks for metric expired or not, and perform changes.
-// It assumes that Cassandra lock expireMetricLockName is taken.
+// It assumes that Cassandra lock expirationGlobalLock is taken.
 //
-// This method performs changes at the end, because changes will require the Cassandra lock newMetricLockName,
+// This method performs changes at the end, because changes will require the Cassandra lock newMetricGlobalLock,
 // and we want to hold this lock only a very short time.
 //
 // This purge will also remove entries from the in-memory cache.
 func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64, now time.Time) error {
 	var expireUpdates []expirationUpdateRequest
 
-	dayToExpireUpdates := make(map[time.Time]int)
+	c.logger.Debug().Msgf("cassandraCheckExpire will process %d IDs", len(ids))
+
+	dayToExpireUpdates := make(map[int64]int)
 	bulkDelete := newBulkDeleter(c)
 
 	metricIDs := make([]types.MetricID, len(ids))
@@ -3520,13 +2788,13 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		case expire.After(now):
 			expireDay := expire.Truncate(24 * time.Hour)
 
-			idx, ok := dayToExpireUpdates[expireDay]
+			idx, ok := dayToExpireUpdates[expireDay.Unix()]
 			if !ok {
 				idx = len(expireUpdates)
 				expireUpdates = append(expireUpdates, expirationUpdateRequest{
 					Day: expireDay,
 				})
-				dayToExpireUpdates[expireDay] = idx
+				dayToExpireUpdates[expireDay.Unix()] = idx
 			}
 
 			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id))
@@ -3554,8 +2822,8 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		bulkDelete.PrepareDelete(id, idToLabels[id], false)
 	}
 
-	c.newMetricLock.Lock()
-	defer c.newMetricLock.Unlock()
+	c.newMetricGlobalLock.Lock()
+	defer c.newMetricGlobalLock.Unlock()
 
 	start := time.Now()
 
@@ -3571,7 +2839,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			for _, req := range expireUpdates {
 				req := req
 				task := func() error {
-					return c.expirationUpdate(ctx, req)
+					return c.expirationUpdate(ctx, "cassandraCheckExpire", req)
 				}
 				select {
 				case work <- task:
@@ -3817,7 +3085,16 @@ type expirationUpdateRequest struct {
 // expirationUpdate apply an expirationUpdateRequest, which is a request to move metricID between day at which
 // they are expected to expire.
 // Be aware that job.AddIDs and job.RemoveIDs are mutated (do a copy if the slice is shared / reused after this call).
-func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpdateRequest) error {
+// The lock newMetricGlobalLock must be held while calling this function.
+func (c *CassandraIndex) expirationUpdate(ctx context.Context, expireFrom string, job expirationUpdateRequest) error {
+	c.logger.Debug().Msgf(
+		"From task %s, updating expiration day %v, add %v, remove %v",
+		expireFrom,
+		job.Day,
+		truncatedSliceIDList(job.AddIDs, 25),
+		truncatedSliceIDList(job.RemoveIDs, 25),
+	)
+
 	bitmapExpiration, err := c.cassandraGetExpirationList(ctx, job.Day)
 	if err != nil {
 		return err
@@ -3844,7 +3121,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 	}
 
 	if !bitmapExpiration.Any() {
-		err := c.store.DeleteExpiration(ctx, job.Day)
+		err := c.store.DeleteExpiration(ctx, job.Day.UTC())
 		if errors.Is(err, gocql.ErrNotFound) {
 			return nil
 		}
@@ -3859,7 +3136,7 @@ func (c *CassandraIndex) expirationUpdate(ctx context.Context, job expirationUpd
 		return fmt.Errorf("derialize bitmap: %w", err)
 	}
 
-	return c.store.InsertExpiration(ctx, job.Day, buffer.Bytes())
+	return c.store.InsertExpiration(ctx, job.Day.UTC(), buffer.Bytes())
 }
 
 // idsForMatcher return metric IDs matching given matchers.
@@ -3869,41 +3146,45 @@ func (c *CassandraIndex) idsForMatchers(
 	shards []int32,
 	matchers []*labels.Matcher,
 	directCheckThreshold int,
-) (ids []types.MetricID, labelsList []labels.Labels, err error) {
+) (*metricsLabels, error) {
 	results, checkMatches, err := c.postingsForMatchers(ctx, shards, matchers, directCheckThreshold)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	if results == nil {
-		return nil, nil, nil
-	}
+	ids := bitsetToIDs(results)
 
-	ids = bitsetToIDs(results)
+	result := &metricsLabels{
+		c:              c,
+		ctx:            ctx,
+		ids:            ids,
+		matchers:       matchers,
+		needLabelCheck: !checkMatches,
+	}
 
 	if checkMatches {
-		labelsList, err = c.lookupLabels(ctx, ids, time.Now())
+		result.labelsList, err = c.lookupLabels(ctx, ids, time.Now())
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		newIds := make([]types.MetricID, 0, len(ids))
 		newLabels := make([]labels.Labels, 0, len(ids))
 
 		for i, id := range ids {
-			lbls := labelsList[i]
+			lbls := result.labelsList[i]
 
-			if matcherMatches(matchers, lbls) {
+			if lbls != nil && matcherMatches(matchers, lbls) {
 				newIds = append(newIds, id)
 				newLabels = append(newLabels, lbls)
 			}
 		}
 
-		ids = newIds
-		labelsList = newLabels
+		result.ids = newIds
+		result.labelsList = newLabels
 	}
 
-	return ids, labelsList, nil
+	return result, nil
 }
 
 // postingsForMatchers return metric IDs matching given matcher.
@@ -4230,7 +3511,7 @@ func (c *CassandraIndex) inversePostingsForMatcher(
 func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day time.Time) (*roaring.Bitmap, error) {
 	tmp := roaring.NewBTreeBitmap()
 
-	buffer, err := c.store.SelectExpiration(ctx, day)
+	buffer, err := c.store.SelectExpiration(ctx, day.UTC())
 	if errors.Is(err, gocql.ErrNotFound) {
 		return tmp, nil
 	} else if err != nil {
@@ -4270,6 +3551,9 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	)
 
 	if !returnAll {
+		c.lookupIDMutex.Lock()
+		defer c.lookupIDMutex.Unlock()
+
 		existingShards, err = c.getExistingShards(ctx, false)
 		if err != nil {
 			return nil, err
@@ -4439,58 +3723,11 @@ func sortLabels(labelList labels.Labels) labels.Labels {
 	return sortedLabels
 }
 
-// InternalUpdateAllShards updates the expiration of all shards.
-// Shards older than the TTL will be deleted, other shard will have their expiration created or updated.
-func (c *CassandraIndex) InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error {
-	// Get all known shards.
-	shardBitmap, err := c.getExistingShards(ctx, true)
-	if err != nil {
-		return fmt.Errorf("get existing shards: %w", err)
-	}
-
-	it := shardBitmap.Iterator()
-
-	for ctx.Err() == nil {
-		shard, eof := it.Next()
-		if eof {
-			break
-		}
-
-		err := c.internalUpdateShard(ctx, int32(shard), ttl)
-		if err != nil {
-			return fmt.Errorf("update shard: %w", err)
-		}
-	}
-
-	c.applyExpirationUpdateRequests(ctx, time.Now())
-
-	return nil
-}
-
-// internalUpdateShard updates a single shard expiration.
-// The shard is deleted if the expiration is in the past.
-func (c *CassandraIndex) internalUpdateShard(ctx context.Context, shard int32, ttl time.Duration) error {
-	now := time.Now()
-	shardTime := timeForShard(shard)
-
-	// The expiration is calculated from the shard time.
-	expiration := shardTime.Add(ttl).Add(postingShardSize)
-
-	log.Info().Msgf("Updating shard %s with new expiration %s", shardTime, expiration)
-
-	if expiration.Before(now) {
-		err := c.deleteShard(ctx, shard)
-		if err != nil {
-			return err
-		}
-
+func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
+	if it == nil {
 		return nil
 	}
 
-	return c.updateShardExpiration(ctx, now, shard, expiration)
-}
-
-func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 	resultInts := it.Slice()
 	results := make([]types.MetricID, len(resultInts))
 

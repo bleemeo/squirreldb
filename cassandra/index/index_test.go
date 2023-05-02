@@ -25,6 +25,7 @@ import (
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
@@ -48,6 +49,38 @@ const (
 	MetricIDTest14
 	MetricIDTest15
 )
+
+type mockTime struct {
+	l   sync.Mutex
+	now time.Time
+}
+
+func newMockTime(value time.Time) *mockTime {
+	return &mockTime{
+		now: value,
+	}
+}
+
+func (m *mockTime) Now() time.Time {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	return m.now
+}
+
+func (m *mockTime) Set(value time.Time) {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	m.now = value
+}
+
+func (m *mockTime) Add(delta time.Duration) {
+	m.l.Lock()
+	defer m.l.Unlock()
+
+	m.now = m.now.Add(delta)
+}
 
 type mockState struct {
 	l      sync.Mutex
@@ -166,7 +199,7 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 }
 
 type mockStore struct {
-	expiration    map[time.Time][]byte
+	expiration    map[int64][]byte
 	labels2id     map[string]types.MetricID
 	postings      map[int32]map[string]map[string][]byte
 	id2labels     map[types.MetricID]labels.Labels
@@ -187,7 +220,7 @@ func (s *mockStore) Init(ctx context.Context) error {
 	s.postings = make(map[int32]map[string]map[string][]byte)
 	s.id2labels = make(map[types.MetricID]labels.Labels)
 	s.id2expiration = make(map[types.MetricID]time.Time)
-	s.expiration = make(map[time.Time][]byte)
+	s.expiration = make(map[int64][]byte)
 
 	return ctx.Err()
 }
@@ -443,7 +476,7 @@ func (s *mockStore) SelectExpiration(ctx context.Context, day time.Time) ([]byte
 
 	s.queryCount++
 
-	result, ok := s.expiration[day]
+	result, ok := s.expiration[day.Unix()]
 	if !ok {
 		return nil, gocql.ErrNotFound
 	}
@@ -660,7 +693,7 @@ func (s *mockStore) InsertExpiration(ctx context.Context, day time.Time, bitset 
 
 	s.queryCount++
 
-	s.expiration[day] = bitset
+	s.expiration[day.Unix()] = bitset
 
 	return ctx.Err()
 }
@@ -717,11 +750,11 @@ func (s *mockStore) DeleteExpiration(ctx context.Context, day time.Time) error {
 
 	s.queryCount++
 
-	if _, ok := s.expiration[day]; !ok {
+	if _, ok := s.expiration[day.Unix()]; !ok {
 		return gocql.ErrNotFound
 	}
 
-	delete(s.expiration, day)
+	delete(s.expiration, day.Unix())
 
 	return ctx.Err()
 }
@@ -859,6 +892,26 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 	return results
 }
 
+// getTestLogger return a logger suitable for test.
+// It's default level is error because without that test output will be way too large.
+// To have details log, use SQUIRRELDB_LOG_LEVEL environment variable, likely with running
+// specific test. E.g.:
+//
+//	SQUIRRELDB_LOG_LEVEL=0 go test ./cassandra/index -run Test_cluster_expiration_and_error
+func getTestLogger() zerolog.Logger {
+	levelStr := os.Getenv("SQUIRRELDB_LOG_LEVEL")
+	if levelStr == "" {
+		levelStr = strconv.FormatInt(int64(zerolog.ErrorLevel), 10)
+	}
+
+	level, err := strconv.ParseInt(levelStr, 10, 0)
+	if err != nil {
+		level = int64(zerolog.ErrorLevel)
+	}
+
+	return log.Logger.Level(zerolog.Level(level))
+}
+
 func mockIndexFromMetrics(
 	start, end time.Time,
 	metrics map[types.MetricID]map[string]string,
@@ -872,7 +925,7 @@ func mockIndexFromMetrics(
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		panic(err)
@@ -1036,8 +1089,19 @@ func Benchmark_labelsToID(b *testing.B) {
 		},
 	}
 	for _, tt := range tests {
-		c := CassandraIndex{
-			labelsToID: make(map[uint64][]idData),
+		c, err := initialize(
+			context.Background(),
+			&mockStore{},
+			Options{
+				DefaultTimeToLive: 365 * 24 * time.Hour,
+				LockFactory:       &mockLockFactory{},
+				Cluster:           &dummy.LocalCluster{},
+			},
+			newMetrics(prometheus.NewRegistry()),
+			getTestLogger().With().Str("component", "index1").Logger(),
+		)
+		if err != nil {
+			b.Fatal(err)
 		}
 
 		b.Run(tt.name, func(b *testing.B) {
@@ -1047,6 +1111,29 @@ func Benchmark_labelsToID(b *testing.B) {
 				c.setIDData(key, idData)
 			}
 		})
+	}
+}
+
+// Test_interfaces make sure the CassandraIndex implement some interfaces.
+func Test_interfaces(t *testing.T) {
+	var iface interface{}
+
+	index := &CassandraIndex{}
+	iface = index
+
+	_, ok := iface.(types.VerifiableIndex)
+	if !ok {
+		t.Error("index isn't a VerifiableIndex")
+	}
+
+	_, ok = iface.(types.IndexDumper)
+	if !ok {
+		t.Error("index isn't a IndexDumper")
+	}
+
+	_, ok = iface.(types.Index)
+	if !ok {
+		t.Error("index isn't a Index")
 	}
 }
 
@@ -1960,6 +2047,63 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			},
 		},
 		{
+			name:     "no-matcher",
+			index:    index1,
+			matchers: []*labels.Matcher{},
+			want:     []types.MetricID{},
+		},
+		{
+			name:  "empty-result-simple",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"this_name_does_not_exists",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:  "empty-result-complex1",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchNotEqual,
+					"this_label_is_always_empty_so_nothing_will_match",
+					"",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
+			name:  "empty-result-complex2",
+			index: index1,
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"__name__",
+					"node_filesystem_avail_bytes",
+				),
+				labels.MustNewMatcher(
+					labels.MatchNotRegexp,
+					"environment",
+					"^$",
+				),
+				labels.MustNewMatcher(
+					labels.MatchEqual,
+					"environment",
+					"devel",
+				),
+				labels.MustNewMatcher(
+					labels.MatchRegexp,
+					"__name__",
+					"node_.*total$",
+				),
+			},
+			want: []types.MetricID{},
+		},
+		{
 			name:  "index2-eq",
 			index: index2,
 			matchers: []*labels.Matcher{
@@ -2139,9 +2283,9 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
+				t.Errorf("idsForMatchers() error = %v", err)
 
 				return
 			}
@@ -2149,22 +2293,25 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
-				t.Errorf("postingsForMatchers() error = %v", err)
+				t.Errorf("idsForMatchers() error = %v", err)
 
 				return
 			}
@@ -2172,15 +2319,18 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
@@ -2190,7 +2340,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -2200,15 +2350,18 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 	}
@@ -2230,9 +2383,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &mockState{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2406,9 +2560,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &dummy.States{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2426,9 +2581,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			DefaultTimeToLive: 365 * 24 * time.Hour,
 			LockFactory:       &mockLockFactory{},
 			Cluster:           &dummy.LocalCluster{},
+			States:            &dummy.States{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index3").Logger(),
+		getTestLogger().With().Str("component", "index3").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -3675,7 +3831,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		}
 
 		t.Run(tt.name+" shardsAll", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3685,20 +3841,23 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3708,20 +3867,24 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
 
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3731,15 +3894,18 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
-
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
@@ -3749,7 +3915,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, _, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -3759,22 +3925,29 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
-			if len(got) != tt.wantLen {
-				t.Errorf("postingsForMatchers() len()=%v, want %v", len(got), tt.wantLen)
 
-				return
+			if got.Count() != tt.wantLen {
+				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
-			got = got[:len(tt.want)]
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("postingsForMatchers() = %v, want %v", got, tt.want)
+			gotIds := make([]types.MetricID, 0, len(tt.want))
+
+			for got.Next() {
+				gotIds = append(gotIds, got.At().ID)
+			}
+
+			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 	}
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err := index1.Verifier(buffer).
+		WithNow(now).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3783,7 +3956,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index2.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err = index2.Verifier(buffer).
+		WithNow(now).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -3792,7 +3968,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 	}
 
-	hadIssue, err = index3.verify(context.Background(), now, buffer, false, false)
+	hadIssue, err = index3.Verifier(buffer).
+		WithNow(now).
+		WithStrictMetricCreation(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4451,7 +4630,7 @@ func Test_cache(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4467,7 +4646,7 @@ func Test_cache(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4568,7 +4747,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -4605,6 +4784,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	t4 := t3.Add(24 * 30 * time.Hour)
 	t5 := t4.Add(24 * 30 * time.Hour)
 	t6 := t5.Add(24 * 30 * time.Hour)
+	t7 := t6.Add(24 * 370 * time.Hour)
 
 	tmp, _, err := index1.lookupIDs(
 		context.Background(),
@@ -4632,7 +4812,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index2").Logger(),
+		getTestLogger().With().Str("component", "index2").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -4700,7 +4880,10 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	{
 		buffer := bytes.NewBuffer(nil)
-		hadIssue, err := index1.verify(context.Background(), t0, buffer, false, false)
+		hadIssue, err := index1.Verifier(buffer).
+			WithNow(t0).
+			WithStrictMetricCreation(true).
+			Verify(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
@@ -4878,22 +5061,60 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index1.verify(context.Background(), t6, buffer, false, false)
-	if err != nil {
-		t.Error(err)
+	indexes := []*CassandraIndex{index1, index2}
+
+	for i, idx := range indexes {
+		// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t6).
+			WithStrictMetricCreation(true).
+			WithStrictExpiration(false).
+			Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
 	}
 
-	if hadIssue {
-		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
-	hadIssue, err = index2.verify(context.Background(), t6, buffer, false, false)
-	if err != nil {
-		t.Error(err)
+	for i, idx := range indexes {
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t6).
+			WithStrictMetricCreation(true).
+			WithStrictExpiration(true).
+			Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
 	}
 
-	if hadIssue {
-		t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+	if err := executeRunOnce(t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, idx := range indexes {
+		hadIssue, err := idx.Verifier(buffer).
+			WithNow(t7).
+			WithStrictMetricCreation(true).
+			WithPedanticExpiration(true).
+			Verify(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+
+		if hadIssue {
+			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+		}
 	}
 }
 
@@ -4975,7 +5196,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5030,7 +5251,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadIssue, err := index.verify(context.Background(), t0, buffer, false, false)
+	hadIssue, err := index.Verifier(buffer).
+		WithNow(t0).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5051,7 +5276,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 4", len(allIds))
 	}
 
-	hadIssue, err = index.verify(context.Background(), t0, buffer, false, false)
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t0).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5087,7 +5316,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		expire := store.id2expiration[id].Truncate(24 * time.Hour)
 		bitmap := roaring.NewBTreeBitmap()
 
-		err = bitmap.UnmarshalBinary(store.expiration[expire])
+		err = bitmap.UnmarshalBinary(store.expiration[expire.Unix()])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5232,7 +5461,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("len(allIds) = %d, want 2", len(allIds))
 	}
 
-	hadIssue, err = index.verify(context.Background(), t5, buffer, false, false)
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t5).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5256,7 +5489,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("allIds = %v, want []", allIds)
 	}
 
-	hadIssue, err = index.verify(context.Background(), t6, buffer, false, false)
+	hadIssue, err = index.Verifier(buffer).
+		WithNow(t6).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5304,7 +5541,7 @@ func Test_expiration_offset(t *testing.T) {
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5528,7 +5765,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index").Logger(),
+		getTestLogger().With().Str("component", "index").Logger(),
 	)
 	if err != nil {
 		t.Error(err)
@@ -5836,13 +6073,11 @@ func expirationLonglivedEndOfPhaseCheck(
 
 	buffer := bytes.NewBuffer(nil)
 
-	hadError, err := index.verify(
-		context.Background(),
-		currentTime,
-		buffer,
-		false,
-		false,
-	)
+	hadError, err := index.Verifier(buffer).
+		WithNow(currentTime).
+		WithStrictMetricCreation(true).
+		WithPedanticExpiration(true).
+		Verify(context.Background())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -6081,7 +6316,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index").Logger(),
+				getTestLogger().With().Str("component", "index").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -6166,7 +6401,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			Cluster:           &dummy.LocalCluster{},
 		},
 		newMetrics(prometheus.NewRegistry()),
-		log.With().Str("component", "index1").Logger(),
+		getTestLogger().With().Str("component", "index1").Logger(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -7127,7 +7362,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index").Logger(),
+				getTestLogger().With().Str("component", "index").Logger(),
 			)
 			if err != nil {
 				t.Error(err)
@@ -7202,13 +7437,11 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				shouldFail.SetRate(0, 0)
 
-				verifyHadErrors[batchIdx], err = index.verify(
-					context.Background(),
-					batch.now,
-					verifyResults[batchIdx],
-					false,
-					false,
-				)
+				verifyHadErrors[batchIdx], err = index.Verifier(verifyResults[batchIdx]).
+					WithNow(batch.now).
+					WithStrictMetricCreation(true).
+					WithPedanticExpiration(true).
+					Verify(context.Background())
 				if err != nil {
 					t.Error(err)
 				}
@@ -7313,7 +7546,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index2").Logger(),
+				getTestLogger().With().Str("component", "index2").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -7329,7 +7562,7 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 					Cluster:           &dummy.LocalCluster{},
 				},
 				newMetrics(prometheus.NewRegistry()),
-				log.With().Str("component", "index2").Logger(),
+				getTestLogger().With().Str("component", "index2").Logger(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -7438,13 +7671,11 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 
 			buffer := bytes.NewBuffer(nil)
 
-			hadError, err := index1.verify(
-				context.Background(),
-				currentTime,
-				buffer,
-				false,
-				false,
-			)
+			hadError, err := index1.Verifier(buffer).
+				WithNow(currentTime).
+				WithStrictMetricCreation(true).
+				WithStrictExpiration(true).
+				Verify(context.Background())
 			if err != nil {
 				t.Error(err)
 			}
@@ -7621,6 +7852,384 @@ func clusterCheckSearch(
 		realLabels := realStore.id2labels[item.ID]
 		if !labels.Equal(realLabels, item.Labels) {
 			return fmt.Errorf("labels = %s, want %s", item.Labels, realLabels)
+		}
+	}
+
+	return nil
+}
+
+type concurentAccessTestExecution struct {
+	now *mockTime
+
+	pendingRequest int
+	blockRequest   bool
+	stopWorker     bool
+	c              *sync.Cond
+}
+
+// Test_concurrent_access will test that concurrent access works. With race-detector enable it might
+// find data-race.
+func Test_concurrent_access(t *testing.T) {
+	defaultTTL := 10 * 24 * time.Hour
+
+	for _, withCluster := range []bool{false, true} {
+		withCluster := withCluster
+
+		name := "without-cluster"
+		if withCluster {
+			name = "with-cluster"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			realStore := &mockStore{}
+			lock := &mockLockFactory{}
+			states := &mockState{}
+
+			var indexes []*CassandraIndex
+
+			index1, err := initialize(
+				context.Background(),
+				realStore,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           &dummy.LocalCluster{},
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index1").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			indexes = append(indexes, index1)
+
+			if withCluster {
+				index2, err := initialize(
+					context.Background(),
+					realStore,
+					Options{
+						DefaultTimeToLive: defaultTTL,
+						LockFactory:       lock,
+						States:            states,
+						Cluster:           &dummy.LocalCluster{},
+					},
+					newMetrics(prometheus.NewRegistry()),
+					getTestLogger().With().Str("component", "index2").Logger(),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				indexes = append(indexes, index2)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			ctxTestDuration, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
+			group, ctxTestDuration := errgroup.WithContext(ctxTestDuration)
+
+			execution := &concurentAccessTestExecution{
+				now: newMockTime(time.Now()),
+				c:   sync.NewCond(&sync.Mutex{}),
+			}
+
+			go func() {
+				for ctxTestDuration.Err() == nil {
+					// Make time advance a bit
+					execution.now.Add(time.Millisecond)
+					time.Sleep(time.Microsecond)
+				}
+
+				execution.c.L.Lock()
+				defer execution.c.L.Unlock()
+
+				execution.stopWorker = true
+			}()
+
+			group.Go(func() error {
+				rnd := rand.New(rand.NewSource(68464))
+
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ticker.C:
+						idx := indexes[rnd.Intn(len(indexes))]
+						idx.RunOnce(ctx, execution.now.Now())
+						// Advancing the time by one hour while request are in progress is like source of few bugs.
+						// Block request before changing time.
+						execution.c.L.Lock()
+						execution.blockRequest = true
+						for execution.pendingRequest > 0 {
+							execution.c.Wait()
+						}
+
+						execution.blockRequest = false
+						execution.c.Broadcast()
+						execution.c.L.Unlock()
+
+						execution.now.Add(time.Hour)
+					case <-ctxTestDuration.Done():
+						return nil
+					}
+				}
+			})
+
+			rnd := rand.New(rand.NewSource(123456789))
+
+			for n := 0; n < 8; n++ {
+				rndSeed := rnd.Int63()
+				group.Go(func() error {
+					return concurrentAccessWriter(ctx, execution, indexes, rndSeed)
+				})
+			}
+
+			for n := 0; n < 2; n++ {
+				rndSeed := rnd.Int63()
+				group.Go(func() error {
+					return concurrentAccessReader(ctx, execution, indexes, rndSeed)
+				})
+			}
+
+			if err := group.Wait(); err != nil {
+				t.Error(err)
+			}
+
+			tmp, err := indexes[0].expirationLastProcessedDay(context.Background())
+			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
+
+			allIDS, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
+			if err != nil {
+				t.Error(err)
+			}
+
+			labels, err := indexes[0].lookupLabels(context.Background(), allIDS, execution.now.Now())
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, id := range allIDS {
+				t.Logf("ID = %d is %s", id, labels[i])
+			}
+
+			indexes[0].RunOnce(ctx, execution.now.Now())
+
+			for _, idx := range indexes {
+				buffer := bytes.NewBuffer(nil)
+
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(execution.now.Now()).
+					WithStrictMetricCreation(true).
+					WithStrictExpiration(true).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+
+			for i := 0; i < 400*2; i++ {
+				execution.now.Add(12 * time.Hour)
+				indexes[0].RunOnce(ctx, execution.now.Now())
+			}
+
+			tmp, err = indexes[0].expirationLastProcessedDay(context.Background())
+			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
+
+			for _, idx := range indexes {
+				buffer := bytes.NewBuffer(nil)
+
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(execution.now.Now()).
+					WithStrictMetricCreation(true).
+					WithPedanticExpiration(true).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+		})
+	}
+}
+
+func concurrentAccessWriter(
+	ctx context.Context, execution *concurentAccessTestExecution, indexes []*CassandraIndex, rndSeed int64,
+) error {
+	rnd := rand.New(rand.NewSource(rndSeed))
+
+	fullList := []types.LookupRequest{
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "low-ttl",
+			}),
+			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
+		},
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "medium-ttl",
+			}),
+			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
+		},
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "common",
+				"item":     "high-ttl",
+			}),
+			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
+		},
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "low-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
+		},
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "medium-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
+		},
+		{
+			Start: execution.now.Now(),
+			End:   execution.now.Now(),
+			Labels: labels.FromMap(map[string]string{
+				"__name__": "not_common",
+				"item":     "high-ttl",
+				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+			}),
+			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
+		},
+	}
+
+	for {
+		execution.c.L.Lock()
+		if execution.stopWorker {
+			execution.c.L.Unlock()
+
+			break
+		}
+
+		for execution.blockRequest {
+			execution.c.Wait()
+		}
+
+		execution.pendingRequest++
+
+		execution.c.L.Unlock()
+
+		nowValue := execution.now.Now()
+		for i := range fullList {
+			fullList[i].Start = nowValue
+			fullList[i].End = nowValue
+		}
+
+		idxID := rnd.Intn(len(indexes))
+		idx := indexes[idxID]
+
+		_, _, err := idx.lookupIDs(ctx, fullList, nowValue)
+
+		execution.c.L.Lock()
+
+		execution.pendingRequest--
+		execution.c.Broadcast()
+
+		execution.c.L.Unlock()
+
+		if err != nil {
+			return fmt.Errorf("concurrentAccessWriter idxID=%d: %w", idxID+1, err)
+		}
+	}
+
+	return nil
+}
+
+func concurrentAccessReader(
+	ctx context.Context, execution *concurentAccessTestExecution, indexes []*CassandraIndex, rndSeed int64,
+) error {
+	rnd := rand.New(rand.NewSource(rndSeed))
+
+	for {
+		execution.c.L.Lock()
+		if execution.stopWorker {
+			execution.c.L.Unlock()
+
+			break
+		}
+
+		for execution.blockRequest {
+			execution.c.Wait()
+		}
+
+		execution.pendingRequest++
+
+		execution.c.L.Unlock()
+
+		idxID := rnd.Intn(len(indexes))
+		idx := indexes[idxID]
+
+		var matchers []*labels.Matcher
+
+		switch rnd.Intn(4) {
+		case 0:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "common"),
+			}
+		case 1:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchRegexp, "item", "(medium-ttl|low-ttl)"),
+			}
+		case 2:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchNotEqual, "unique", ""),
+				{Type: labels.MatchNotEqual, Name: "unique", Value: ""},
+			}
+		case 3:
+			matchers = []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "unique", fmt.Sprintf("%d", rnd.Int63())),
+			}
+		}
+
+		_, err := idx.Search(ctx, execution.now.Now().Add(-14*24*time.Hour), execution.now.Now(), matchers)
+		execution.c.L.Lock()
+
+		execution.pendingRequest--
+		execution.c.Broadcast()
+
+		execution.c.L.Unlock()
+
+		if err != nil {
+			return fmt.Errorf("concurrentAccessReader idxID=%d: %w", idxID+1, err)
 		}
 	}
 

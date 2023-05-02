@@ -68,8 +68,18 @@ type IndexDumper interface {
 	DumpByPosting(ctx context.Context, w io.Writer, shard time.Time, name string, value string) error
 }
 
+type VerifiableIndex interface {
+	Verifier(w io.Writer) IndexVerifier
+}
+
 type IndexVerifier interface {
-	Verify(ctx context.Context, w io.Writer, doFix bool, acquireLock bool) (hadIssue bool, err error)
+	WithNow(now time.Time) IndexVerifier
+	WithDoFix(enable bool) IndexVerifier
+	WithLock(enable bool) IndexVerifier
+	WithStrictExpiration(enable bool) IndexVerifier
+	WithStrictMetricCreation(enable bool) IndexVerifier
+	WithPedanticExpiration(enable bool) IndexVerifier
+	Verify(ctx context.Context) (hadIssue bool, err error)
 }
 
 type IndexInternalExpirerer interface {
@@ -78,10 +88,6 @@ type IndexInternalExpirerer interface {
 
 type IndexRunner interface {
 	RunOnce(ctx context.Context, now time.Time) bool
-}
-
-type IndexInternalShardExpirer interface {
-	InternalUpdateAllShards(ctx context.Context, ttl time.Duration) error
 }
 
 type MetricsSet interface {

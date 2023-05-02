@@ -188,7 +188,6 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
-	router.Get("/debug/update_shard_expiration", a.indexUpdateShardExpirationHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
@@ -426,11 +425,38 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexVerifier); ok {
+	if idx, ok := a.Index.(types.VerifiableIndex); ok { //nolint:nestif
 		doFix := req.FormValue("fix") != ""
 		acquireLock := req.FormValue("lock") != ""
+		strict := req.FormValue("strict") != ""
 
-		_, err := idx.Verify(ctx, w, doFix, acquireLock)
+		nowList := req.URL.Query()["now"]
+		if len(nowList) > 1 {
+			http.Error(w, `Expect at most one parameter "now"`, http.StatusBadRequest)
+
+			return
+		}
+
+		now := time.Now()
+
+		if len(nowList) == 1 {
+			var err error
+
+			now, err = time.Parse("2006-01-02", nowList[0])
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+
+				return
+			}
+		}
+
+		_, err := idx.Verifier(w).
+			WithNow(now).
+			WithLock(acquireLock).
+			WithDoFix(doFix).
+			WithStrictExpiration(strict).
+			WithStrictMetricCreation(strict).
+			Verify(ctx)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Index verification failed: %v", err), http.StatusInternalServerError)
 
@@ -622,36 +648,6 @@ func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request)
 
 		if err := idx.DumpByPosting(ctx, w, date, name, value); err != nil {
 			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
-
-			return
-		}
-	} else {
-		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
-
-		return
-	}
-}
-
-func (a API) indexUpdateShardExpirationHandler(w http.ResponseWriter, req *http.Request) {
-	ttlRaw := req.URL.Query().Get("ttlDays")
-	if ttlRaw == "" {
-		http.Error(w, `param "ttlDays" required"`, http.StatusBadRequest)
-
-		return
-	}
-
-	ttlDays, err := strconv.Atoi(ttlRaw)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`can't convert "ttlDays" to int: %s"`, err), http.StatusBadRequest)
-
-		return
-	}
-
-	ttl := time.Duration(ttlDays) * 24 * time.Hour
-
-	if index, ok := a.Index.(types.IndexInternalShardExpirer); ok {
-		if err := index.InternalUpdateAllShards(req.Context(), ttl); err != nil {
-			http.Error(w, fmt.Sprintf("Update shard failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}

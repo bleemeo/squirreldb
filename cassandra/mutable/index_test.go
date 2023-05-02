@@ -12,6 +12,34 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
+// Test_interfaces make sure the indexWrapper implement some interfaces.
+func Test_interfaces(t *testing.T) {
+	var iface interface{}
+
+	dummyIndex := dummy.NewIndex(nil)
+	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
+	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
+	labelProcessor := mutable.NewLabelProcessor(provider, "__account_id")
+	index := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger(true))
+
+	iface = index
+
+	_, ok := iface.(types.VerifiableIndex)
+	if !ok {
+		t.Error("index isn't a VerifiableIndex")
+	}
+
+	_, ok = iface.(types.IndexDumper)
+	if !ok {
+		t.Error("index isn't a IndexDumper")
+	}
+
+	_, ok = iface.(types.Index)
+	if !ok {
+		t.Error("index isn't a Index")
+	}
+}
+
 func TestMutableIndex(t *testing.T) {
 	t.Parallel()
 
