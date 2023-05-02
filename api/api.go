@@ -337,7 +337,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.Error(w, "Server not yet ready", http.StatusServiceUnavailable)
 }
 
-func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 
 	if a.FlushCallback != nil {
@@ -376,7 +376,7 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "")
 }
 
-func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -399,7 +399,7 @@ func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (a API) indexInfoIDs(
+func (a *API) indexInfoIDs(
 	ctx context.Context,
 	w http.ResponseWriter,
 	idx types.IndexDumper,
@@ -421,7 +421,7 @@ func (a API) indexInfoIDs(
 	}
 }
 
-func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
@@ -471,7 +471,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
-func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -487,7 +487,7 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (a API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	idx, ok := a.Index.(types.IndexDumper)
@@ -539,7 +539,7 @@ func (a API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) 
 	}
 }
 
-func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -569,7 +569,7 @@ func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.R
 	}
 }
 
-func (a API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -635,7 +635,7 @@ func getIndexDumpByPostingArgument(req *http.Request) (time.Time, string, string
 	return date, names[0], value, ""
 }
 
-func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -658,7 +658,7 @@ func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request)
 	}
 }
 
-func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fromRaw := req.URL.Query().Get("from")
 	toRaw := req.URL.Query().Get("to")
 	threadRaw := req.URL.Query().Get("thread")
@@ -716,7 +716,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 }
 
-func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithValues
@@ -756,7 +756,7 @@ func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Req
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+func (a *API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.Label
@@ -787,7 +787,7 @@ func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Re
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+func (a *API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithName
@@ -818,7 +818,7 @@ func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Requ
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var labelKeys []mutable.LabelKey
