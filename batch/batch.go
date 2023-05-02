@@ -756,6 +756,7 @@ func (i *readIter) tryNext(id types.MetricID) bool {
 		Function:           i.request.Function,
 		ForcePreAggregated: i.request.ForcePreAggregated,
 		ForceRaw:           i.request.ForceRaw,
+		EnableDebug:        i.request.EnableDebug,
 	}
 
 	temporaryMetrics, err := i.b.readTemporary(

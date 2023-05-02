@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
+	"net/url"
 	"runtime"
 	"squirreldb/api/promql"
 	"squirreldb/api/remotestorage"
@@ -16,6 +17,7 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -70,6 +72,9 @@ type API struct {
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
+
+	l                   sync.Mutex
+	defaultDebugRequest bool
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -111,6 +116,8 @@ func NewPrometheus(
 	} else {
 		queryEngine = ppromql.NewEngine(engineOpts)
 	}
+
+	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -186,6 +193,7 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
+	router.Get("/debug/toggle_debug_query", a.toggleDebugQueryHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
@@ -196,6 +204,7 @@ func (a *API) init() {
 	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
 
 	queryable := promql.NewStore(
+		a.Logger,
 		a.Index,
 		a.Reader,
 		a.TenantLabelName,
@@ -234,6 +243,14 @@ func (a *API) init() {
 		operation := strings.Trim(handlerName, "/")
 
 		h := func(rw http.ResponseWriter, r *http.Request) {
+			a.l.Lock()
+
+			if a.defaultDebugRequest {
+				r.Header.Add(types.HeaderQueryDebug, "1")
+			}
+
+			a.l.Unlock()
+
 			t0 := time.Now()
 			defer func() {
 				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
@@ -250,6 +267,22 @@ func (a *API) init() {
 			}
 
 			handler(rw, r)
+
+			enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
+			if enableDebug {
+				humainURL := r.URL.Path
+				if r.URL.RawQuery != "" {
+					v, _ := url.QueryUnescape(r.URL.RawQuery)
+					humainURL += "?" + v
+				}
+
+				a.Logger.Info().Msgf(
+					"%s %s took %s",
+					r.Method,
+					humainURL,
+					time.Since(t0).String(),
+				)
+			}
 		}
 
 		return h
@@ -337,7 +370,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.Error(w, "Server not yet ready", http.StatusServiceUnavailable)
 }
 
-func (a API) flushHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 
 	if a.FlushCallback != nil {
@@ -376,7 +409,7 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintln(w, "")
 }
 
-func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -399,7 +432,7 @@ func (a API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (a API) indexInfoIDs(
+func (a *API) indexInfoIDs(
 	ctx context.Context,
 	w http.ResponseWriter,
 	idx types.IndexDumper,
@@ -421,7 +454,7 @@ func (a API) indexInfoIDs(
 	}
 }
 
-func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
@@ -471,7 +504,7 @@ func (a API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Index verification took %v\n", time.Since(start))
 }
 
-func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -487,7 +520,7 @@ func (a API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (a API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	idx, ok := a.Index.(types.IndexDumper)
@@ -539,7 +572,7 @@ func (a API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) 
 	}
 }
 
-func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -569,7 +602,7 @@ func (a API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.R
 	}
 }
 
-func (a API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -635,7 +668,7 @@ func getIndexDumpByPostingArgument(req *http.Request) (time.Time, string, string
 	return date, names[0], value, ""
 }
 
-func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.IndexDumper); ok {
@@ -658,7 +691,18 @@ func (a API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request)
 	}
 }
 
-func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, req *http.Request) {
+	a.l.Lock()
+
+	a.defaultDebugRequest = !a.defaultDebugRequest
+	debugRequest := a.defaultDebugRequest
+
+	a.l.Unlock()
+
+	fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
+}
+
+func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fromRaw := req.URL.Query().Get("from")
 	toRaw := req.URL.Query().Get("to")
 	threadRaw := req.URL.Query().Get("thread")
@@ -716,7 +760,7 @@ func (a API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Pre-aggregation terminated in %v\n", time.Since(start))
 }
 
-func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithValues
@@ -756,7 +800,7 @@ func (a API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Req
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+func (a *API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.Label
@@ -787,7 +831,7 @@ func (a API) mutableLabelValuesDeleteHandler(w http.ResponseWriter, req *http.Re
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
+func (a *API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Request) { //nolint:dupl
 	decoder := json.NewDecoder(req.Body)
 
 	var lbls []mutable.LabelWithName
@@ -818,7 +862,7 @@ func (a API) mutableLabelNamesWriteHandler(w http.ResponseWriter, req *http.Requ
 	fmt.Fprint(w, "ok")
 }
 
-func (a API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 
 	var labelKeys []mutable.LabelKey
