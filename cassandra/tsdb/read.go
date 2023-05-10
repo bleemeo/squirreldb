@@ -36,6 +36,23 @@ const (
 	promqlFunctionCount
 )
 
+// RequestUseAggregatedData returns whether a request will try to use aggregated data or
+// only raw data.
+// A request may always use some raw data if querying recent time range.
+func RequestUseAggregatedData(request types.MetricRequest) bool {
+	readAggregate := request.StepMs >= aggregateResolution.Milliseconds()
+
+	if request.ForcePreAggregated {
+		readAggregate = true
+	}
+
+	if request.ForceRaw {
+		readAggregate = false
+	}
+
+	return readAggregate
+}
+
 // ReadIter returns metrics according to the request made.
 func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	c.l.Lock()
@@ -80,15 +97,7 @@ func (i *readIter) At() types.MetricData {
 }
 
 func (i *readIter) Next() bool {
-	readAggregate := i.request.StepMs >= aggregateResolution.Milliseconds()
-
-	if i.request.ForcePreAggregated {
-		readAggregate = true
-	}
-
-	if i.request.ForceRaw {
-		readAggregate = false
-	}
+	readAggregate := RequestUseAggregatedData(i.request)
 
 	if i.offset >= len(i.request.IDs) {
 		i.close()

@@ -31,6 +31,14 @@ func (rdr *limitingReader) PointsRead() float64 {
 	return float64(v)
 }
 
+func (rdr *limitingReader) PointsCached() float64 {
+	if reader, ok := rdr.reader.(metricReaderWithCache); ok {
+		return reader.PointsCached()
+	}
+
+	return 0
+}
+
 type limitDataSet struct {
 	rdr *limitingReader
 	set types.MetricDataSet

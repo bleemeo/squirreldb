@@ -98,6 +98,18 @@ func (s *mockStore) PointsRead() float64 {
 	return 0
 }
 
+func (s *mockStore) PointsCached() float64 {
+	return 0
+}
+
+type mockStoreFixedResponse struct {
+	response []types.MetricData
+}
+
+func (s *mockStoreFixedResponse) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+	return types.MetricIterFromList(s.response), nil
+}
+
 type mockIndex struct {
 	lookupMap   map[types.MetricID]labels.Labels
 	searchReply []types.MetricLabel

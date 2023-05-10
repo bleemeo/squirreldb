@@ -26,12 +26,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
-	ppromql "github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
-	"github.com/thanos-community/promql-engine/engine"
 )
 
 const (
@@ -90,33 +88,7 @@ func NewPrometheus(
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
-	engineOpts := ppromql.EngineOpts{
-		Logger:               logger.NewKitLogger(&queryLogger),
-		Reg:                  metricRegistry,
-		MaxSamples:           50000000,
-		Timeout:              2 * time.Minute,
-		ActiveQueryTracker:   nil,
-		LookbackDelta:        5 * time.Minute,
-		EnableAtModifier:     true,
-		EnableNegativeOffset: true,
-		EnablePerStepStats:   false,
-	}
-
-	var queryEngine v1.QueryEngine
-
-	if useThanosPromQLEngine {
-		apiLogger.Info().Msg("Using Thanos PromQL engine")
-
-		queryEngine = engine.New(engine.Opts{
-			EngineOpts:        engineOpts,
-			LogicalOptimizers: nil,
-			DebugWriter:       nil,
-			DisableFallback:   false,
-		})
-	} else {
-		queryEngine = ppromql.NewEngine(engineOpts)
-	}
-
+	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
 	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
 
 	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }

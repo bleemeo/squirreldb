@@ -54,6 +54,12 @@ type querier struct {
 type MetricReaderWithStats interface {
 	types.MetricReader
 	PointsRead() float64
+	PointsCached() float64
+}
+
+type metricReaderWithCache interface {
+	types.MetricReader
+	PointsCached() float64
 }
 
 type IndexWithStats interface {
@@ -163,7 +169,7 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	reader := &limitingReader{
-		reader:         s.Reader,
+		reader:         &cachingReader{reader: s.Reader},
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
@@ -367,6 +373,7 @@ func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warn
 func (q querier) Close() error {
 	q.metrics.RequestsSeries.Observe(q.index.SeriesReturned())
 	q.metrics.RequestsPoints.Observe(q.reader.PointsRead())
+	q.metrics.CachedPoints.Add(q.reader.PointsCached())
 
 	if q.enableDebug {
 		q.logger.Info().Msgf(
