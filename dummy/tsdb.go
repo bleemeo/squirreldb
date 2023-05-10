@@ -114,18 +114,25 @@ func (db *MemoryTSDB) Write(ctx context.Context, metrics []types.MetricData) err
 }
 
 func (r *readIter) Next() bool {
-	if r.offset >= len(r.request.IDs) {
-		return false
-	}
-
-	id := r.request.IDs[r.offset]
-	r.offset++
-
 	r.db.mutex.Lock()
 	defer r.db.mutex.Unlock()
-	r.current = r.db.Data[id]
 
-	return true
+	for {
+		if r.offset >= len(r.request.IDs) {
+			return false
+		}
+
+		id := r.request.IDs[r.offset]
+		r.offset++
+		r.current = r.db.Data[id]
+
+		r.current.Points = filterPoints(r.current.Points, r.request)
+		if len(r.current.Points) == 0 {
+			continue
+		}
+
+		return true
+	}
 }
 
 func (r *readIter) At() types.MetricData {
@@ -134,4 +141,33 @@ func (r *readIter) At() types.MetricData {
 
 func (r *readIter) Err() error {
 	return nil
+}
+
+func filterPoints(points []types.MetricPoint, request types.MetricRequest) []types.MetricPoint {
+	// Avoid allocation if all points matches
+	needFilter := false
+
+	for _, p := range points {
+		if p.Timestamp < request.FromTimestamp || p.Timestamp > request.ToTimestamp {
+			needFilter = true
+
+			break
+		}
+	}
+
+	if !needFilter {
+		return points
+	}
+
+	result := make([]types.MetricPoint, 0, len(points))
+
+	for _, p := range points {
+		if p.Timestamp < request.FromTimestamp || p.Timestamp > request.ToTimestamp {
+			continue
+		}
+
+		result = append(result, p)
+	}
+
+	return result
 }
