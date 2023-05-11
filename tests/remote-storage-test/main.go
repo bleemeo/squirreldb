@@ -57,10 +57,16 @@ func run(ctx context.Context) error {
 
 	squirrelDBURL := *argURL
 
+	var squirreldb *daemon.SquirrelDB
+
 	if squirrelDBURL == "" {
-		squirreldb := &daemon.SquirrelDB{
+		squirreldb = &daemon.SquirrelDB{
 			Config: cfg,
 			Logger: log.With().Str("component", "daemon").Logger(),
+			MetricRegistry: prometheus.WrapRegistererWith(
+				map[string]string{"restarted": "false"},
+				prometheus.DefaultRegisterer,
+			),
 		}
 		defer squirreldb.Stop()
 
@@ -80,8 +86,6 @@ func run(ctx context.Context) error {
 		}
 
 		squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())
-
-		defer squirreldb.Stop()
 	} else if !strings.HasSuffix(squirrelDBURL, "/") {
 		squirrelDBURL += "/"
 	}
@@ -99,19 +103,50 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	if !*skipRead {
-		if err := read(ctx, now, squirrelDBURL+"api/v1/read", *tenant); err != nil {
-			return err
-		}
-
-		if err := readPromQL(ctx, now, squirrelDBURL, *tenant); err != nil {
-			if errors.Is(err, errMatrixDiffError) {
-				log.Print(err)
-
-				err = fmt.Errorf("%w: see above for details", errMatrixDiffError)
+	if !*skipRead { //nolint:nestif
+		for _, withRestart := range []bool{false, true} {
+			if withRestart && squirreldb == nil {
+				// can't restart if not using built-in SquirrelDB
+				continue
 			}
 
-			return err
+			if withRestart {
+				squirreldb.Stop()
+
+				cfg.Redis.Addresses = nil
+
+				squirreldb = &daemon.SquirrelDB{
+					Config: cfg,
+					Logger: log.With().Str("component", "daemon").Logger(),
+					MetricRegistry: prometheus.WrapRegistererWith(
+						map[string]string{"restarted": "true"},
+						prometheus.DefaultRegisterer,
+					),
+				}
+
+				defer squirreldb.Stop()
+
+				err = squirreldb.Start(ctx)
+				if err != nil {
+					return err
+				}
+
+				squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())
+			}
+
+			if err := read(ctx, now, squirrelDBURL+"api/v1/read", *tenant); err != nil {
+				return err
+			}
+
+			if err := readPromQL(ctx, now, squirrelDBURL, *tenant); err != nil {
+				if errors.Is(err, errMatrixDiffError) {
+					log.Print(err)
+
+					err = fmt.Errorf("%w: see above for details", errMatrixDiffError)
+				}
+
+				return err
+			}
 		}
 	}
 
