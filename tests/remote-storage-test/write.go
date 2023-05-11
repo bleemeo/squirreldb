@@ -4,18 +4,18 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
 func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
-	log.Println("Starting write phase")
+	log.Print("Starting write phase")
 
 	workChannel := make(chan prompb.WriteRequest, *threads)
 
@@ -149,7 +149,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 
 	err := group.Wait()
 
-	log.Println("Finished write phase")
+	log.Print("Finished write phase")
 
 	return err
 }
