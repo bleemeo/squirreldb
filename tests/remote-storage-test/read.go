@@ -28,7 +28,7 @@ type readRequest struct {
 }
 
 func read(ctx context.Context, now time.Time, readURL, tenant string) error { //nolint:maintidx
-	log.Print("Starting read phase")
+	log.Print("Starting remote read phase")
 
 	workChannel := make(chan readRequest, *threads)
 
@@ -314,7 +314,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 
 	err := group.Wait()
 
-	log.Print("Finished read phase")
+	log.Print("Finished remote read phase")
 
 	return err
 }

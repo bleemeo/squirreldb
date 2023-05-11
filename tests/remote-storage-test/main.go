@@ -7,24 +7,25 @@ import (
 	"fmt"
 	"os"
 	"squirreldb/daemon"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
 )
 
-//nolint:lll,gochecknoglobals
+//nolint:gochecknoglobals
 var (
-	remoteWrite = flag.String("write-url", "", "URL of remote write (if both url are unset, start a built-in SquirrelDB and use it)")
-	remoteRead  = flag.String("read-url", "", "URL of read write (if both url are unset, start a built-in SquirrelDB and use it)")
-	tenant      = flag.String("tenant", "", "Tenant header")
-	threads     = flag.Int("threads", 2, "Number of writing/reading threads")
-	scale       = flag.Int("scale", 5, "Scaling factor")
-	skipWrite   = flag.Bool("skip-write", false, "Skip write phase")
-	skipRead    = flag.Bool("skip-read", false, "Skip read phase")
-	nowStr      = flag.String("now", time.Now().Round(10*time.Second).Format(time.RFC3339), "Value for \"now\"")
+	argURL    = flag.String("squirreldb-url", "", "URL of SquirrelDB (if unset, a built-in SquirrelDB will be used)")
+	tenant    = flag.String("tenant", "", "Tenant header")
+	threads   = flag.Int("threads", 2, "Number of writing/reading threads")
+	scale     = flag.Int("scale", 5, "Scaling factor")
+	skipWrite = flag.Bool("skip-write", false, "Skip write phase")
+	skipRead  = flag.Bool("skip-read", false, "Skip read phase")
+	nowStr    = flag.String("now", time.Now().Round(10*time.Second).Format(time.RFC3339), "Value for \"now\"")
 )
 
 func main() {
@@ -32,7 +33,7 @@ func main() {
 
 	err := daemon.RunWithSignalHandler(run)
 
-	if *remoteRead == "" && *remoteWrite == "" {
+	if *argURL == "" {
 		metricResult, _ := prometheus.DefaultGatherer.Gather()
 		for _, mf := range metricResult {
 			_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
@@ -54,10 +55,9 @@ func run(ctx context.Context) error {
 		return warnings
 	}
 
-	readURL := *remoteRead
-	writeURL := *remoteWrite
+	squirrelDBURL := *argURL
 
-	if *remoteRead == "" && *remoteWrite == "" {
+	if squirrelDBURL == "" {
 		squirreldb := &daemon.SquirrelDB{
 			Config: cfg,
 			Logger: log.With().Str("component", "daemon").Logger(),
@@ -79,18 +79,11 @@ func run(ctx context.Context) error {
 			return err
 		}
 
-		readURL = fmt.Sprintf("http://127.0.0.1:%d/api/v1/read", squirreldb.ListenPort())
-		writeURL = fmt.Sprintf("http://127.0.0.1:%d/api/v1/write", squirreldb.ListenPort())
+		squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())
 
 		defer squirreldb.Stop()
-	}
-
-	if readURL == "" && !*skipRead {
-		return errors.New("remote-read url is unset")
-	}
-
-	if writeURL == "" && !*skipWrite {
-		return errors.New("remote-write url is unset")
+	} else if !strings.HasSuffix(squirrelDBURL, "/") {
+		squirrelDBURL += "/"
 	}
 
 	now, err := time.Parse(time.RFC3339, *nowStr)
@@ -101,13 +94,23 @@ func run(ctx context.Context) error {
 	log.Printf("now = %v", now)
 
 	if !*skipWrite {
-		if err := write(ctx, now, writeURL, *tenant); err != nil {
+		if err := write(ctx, now, squirrelDBURL+"api/v1/write", *tenant); err != nil {
 			return err
 		}
 	}
 
 	if !*skipRead {
-		if err := read(ctx, now, readURL, *tenant); err != nil {
+		if err := read(ctx, now, squirrelDBURL+"api/v1/read", *tenant); err != nil {
+			return err
+		}
+
+		if err := readPromQL(ctx, now, squirrelDBURL, *tenant); err != nil {
+			if errors.Is(err, errMatrixDiffError) {
+				log.Print(err)
+
+				err = fmt.Errorf("%w: see above for details", errMatrixDiffError)
+			}
+
 			return err
 		}
 	}
@@ -119,6 +122,26 @@ func time2Millisecond(t time.Time) int64 {
 	return t.Unix()*1000 + (t.UnixNano()%1e9)/1e6
 }
 
+func makeSampleModel(
+	fromTime time.Time,
+	stepTime time.Duration,
+	fromValue float64,
+	stepValue float64,
+	count int,
+) []model.SamplePair {
+	result := make([]model.SamplePair, count)
+
+	for i := range result {
+		currentTime := fromTime.Add(stepTime * time.Duration(i))
+		result[i] = model.SamplePair{
+			Value:     model.SampleValue(fromValue + stepValue*float64(i)),
+			Timestamp: model.TimeFromUnixNano(currentTime.UnixNano()),
+		}
+	}
+
+	return result
+}
+
 func makeSample(
 	fromTime time.Time,
 	stepTime time.Duration,
@@ -126,13 +149,13 @@ func makeSample(
 	stepValue float64,
 	count int,
 ) []prompb.Sample {
-	result := make([]prompb.Sample, count)
+	resultBase := makeSampleModel(fromTime, stepTime, fromValue, stepValue, count)
+	result := make([]prompb.Sample, len(resultBase))
 
-	for i := range result {
-		currentTime := fromTime.Add(stepTime * time.Duration(i))
+	for i, row := range resultBase {
 		result[i] = prompb.Sample{
-			Value:     fromValue + stepValue*float64(i),
-			Timestamp: time2Millisecond(currentTime),
+			Value:     float64(row.Value),
+			Timestamp: time2Millisecond(row.Timestamp.Time()),
 		}
 	}
 
