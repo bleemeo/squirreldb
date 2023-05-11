@@ -36,7 +36,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := readWorker(ctx, workChannel, readURL)
+			err := readWorker(ctx, workChannel, readURL, tenant)
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -319,7 +319,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 	return err
 }
 
-func readWorker(ctx context.Context, workChannel chan readRequest, readURL string) (err error) {
+func readWorker(ctx context.Context, workChannel chan readRequest, readURL string, tenant string) (err error) {
 	for req := range workChannel {
 		if ctx.Err() != nil {
 			if err == nil {
@@ -348,6 +348,10 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		request.Header.Set("Content-Encoding", "snappy")
 		request.Header.Set("Content-Type", "application/x-protobuf")
 		request.Header.Set("X-Prometheus-Remote-Read-Version", "2.0.0")
+
+		if tenant != "" {
+			request.Header.Set("X-SquirrelDB-Tenant", tenant)
+		}
 
 		response, newErr := http.DefaultClient.Do(request)
 		if newErr != nil {
