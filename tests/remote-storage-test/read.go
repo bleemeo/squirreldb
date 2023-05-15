@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -28,6 +29,13 @@ type readRequest struct {
 }
 
 func read(ctx context.Context, now time.Time, readURL, tenant string) error { //nolint:maintidx
+	var (
+		mutex    sync.Mutex
+		reqCount int
+	)
+
+	start := time.Now()
+
 	log.Print("Starting remote read phase")
 
 	workChannel := make(chan readRequest, *threads)
@@ -36,7 +44,11 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := readWorker(ctx, workChannel, readURL, tenant)
+			count, err := readWorker(ctx, workChannel, readURL, tenant)
+
+			mutex.Lock()
+			reqCount += count
+			mutex.Unlock()
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -314,13 +326,26 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 
 	err := group.Wait()
 
-	log.Print("Finished remote read phase")
+	duration := time.Since(start)
+	log.Printf(
+		"Finished remote read phase in %s with %d request (%.0f req/seconds)",
+		duration,
+		reqCount,
+		float64(reqCount)/duration.Seconds(),
+	)
 
 	return err
 }
 
-func readWorker(ctx context.Context, workChannel chan readRequest, readURL string, tenant string) (err error) {
+func readWorker(
+	ctx context.Context,
+	workChannel chan readRequest,
+	readURL string,
+	tenant string,
+) (count int, err error) {
 	for req := range workChannel {
+		count++
+
 		if ctx.Err() != nil {
 			if err == nil {
 				err = ctx.Err()
@@ -333,7 +358,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if newErr != nil {
 			log.Printf("Unable to marshal req: %v", newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		compressedBody := snappy.Encode(nil, body)
@@ -342,7 +367,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if newErr != nil {
 			log.Printf("unable to create request: %v", newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		request.Header.Set("Content-Encoding", "snappy")
@@ -357,7 +382,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if newErr != nil {
 			log.Printf("read failed: %v", newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		content, _ := io.ReadAll(response.Body)
@@ -367,7 +392,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 
 			log.Print(newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		response.Body.Close()
@@ -376,7 +401,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if newErr != nil {
 			log.Printf("failed to uncompress: %v", newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		var pbResponce prompb.ReadResponse
@@ -384,7 +409,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		if newErr := proto.Unmarshal(uncompressed, &pbResponce); newErr != nil {
 			log.Printf("failed to decode: %v", newErr)
 
-			return newErr
+			return count, newErr
 		}
 
 		if newErr := equal(req.name, pbResponce, req.response); newErr != nil {
@@ -392,7 +417,7 @@ func readWorker(ctx context.Context, workChannel chan readRequest, readURL strin
 		}
 	}
 
-	return err
+	return count, err
 }
 
 func addTenantIfNotEmpty(l []prompb.Label, tenant string) []prompb.Label {

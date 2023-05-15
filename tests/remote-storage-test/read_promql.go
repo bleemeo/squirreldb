@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -27,6 +28,13 @@ type readPromQLRequest struct {
 }
 
 func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant string) error { //nolint:maintidx
+	var (
+		mutex    sync.Mutex
+		reqCount int
+	)
+
+	start := time.Now()
+
 	log.Print("Starting PromQL read phase")
 
 	workChannel := make(chan readPromQLRequest, *threads)
@@ -35,7 +43,11 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 
 	for n := 0; n < *threads; n++ {
 		group.Go(func() error {
-			err := readPromQLWorker(ctx, workChannel, promQLURL, tenant)
+			count, err := readPromQLWorker(ctx, workChannel, promQLURL, tenant)
+
+			mutex.Lock()
+			reqCount += count
+			mutex.Unlock()
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -331,7 +343,13 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 
 	err := group.Wait()
 
-	log.Print("Finished PromQL read phase")
+	duration := time.Since(start)
+	log.Printf(
+		"Finished PromQL read phase in %s with %d request (%.0f req/seconds)",
+		duration,
+		reqCount,
+		float64(reqCount)/duration.Seconds(),
+	)
 
 	return err
 }
@@ -352,14 +370,17 @@ func readPromQLWorker(
 	workChannel chan readPromQLRequest,
 	readURL string,
 	squirrelDBTenantHeader string,
-) error {
-	var lastEqualError error
+) (int, error) {
+	var (
+		lastEqualError error
+		count          int
+	)
 
 	client, err := api.NewClient(api.Config{
 		Address: readURL,
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if squirrelDBTenantHeader != "" {
@@ -369,6 +390,8 @@ func readPromQLWorker(
 	promQLAPI := v1.NewAPI(client)
 
 	for req := range workChannel {
+		count++
+
 		if ctx.Err() != nil {
 			if lastEqualError == nil {
 				lastEqualError = ctx.Err()
@@ -379,7 +402,7 @@ func readPromQLWorker(
 
 		result, warnings, err := promQLAPI.QueryRange(ctx, req.query, req.rangeParam)
 		if err != nil {
-			return err
+			return count, err
 		}
 
 		if warnings != nil {
@@ -387,12 +410,12 @@ func readPromQLWorker(
 		}
 
 		if result.Type() != model.ValMatrix {
-			return fmt.Errorf("unexpected type %s, want %s", result.Type(), model.ValMatrix)
+			return count, fmt.Errorf("unexpected type %s, want %s", result.Type(), model.ValMatrix)
 		}
 
 		matrix, ok := result.(model.Matrix)
 		if !ok {
-			return fmt.Errorf("unexpected type it's not a Matrix")
+			return count, fmt.Errorf("unexpected type it's not a Matrix")
 		}
 
 		opts := []cmp.Option{
@@ -406,7 +429,7 @@ func readPromQLWorker(
 		}
 	}
 
-	return lastEqualError
+	return count, lastEqualError
 }
 
 func addTenantIfNotEmptyPromQL(metric model.Metric, tenant string) model.Metric {
