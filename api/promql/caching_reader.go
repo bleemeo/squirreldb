@@ -88,19 +88,7 @@ func (d *cachingDataSet) Next() bool {
 			return result
 		}
 
-		i := 0
-
-		for _, id := range d.request.IDs {
-			if _, ok := d.seenIDs[id]; ok {
-				// This ID was already returned by the cache, skip it
-				continue
-			}
-
-			d.request.IDs[i] = id
-			i++
-		}
-
-		d.request.IDs = d.request.IDs[:i]
+		d.filterRequestIDs()
 		// We re-created the request, reset nextCounter
 		d.nextCount = 0
 
@@ -143,6 +131,10 @@ func (d *cachingDataSet) nextFromCache() (cacheHit bool, returnValue bool) {
 
 	d.nextCount++
 
+	if d.nextCount != d.rdr.cachedCurrentNext && d.nextCount != d.rdr.cachedMaxNext {
+		return false, false
+	}
+
 	reqEqual := requestSameCache(d.rdr.cachedRequest, d.request)
 
 	if reqEqual && d.nextCount == d.rdr.cachedCurrentNext {
@@ -164,6 +156,29 @@ func (d *cachingDataSet) nextFromCache() (cacheHit bool, returnValue bool) {
 	}
 
 	return false, false
+}
+
+// filterRequestIDs remove IDs that were already seen using the cache.
+// d.request is modified.
+func (d *cachingDataSet) filterRequestIDs() {
+	// No need to filter when nextCount == 1, because seenIDs will be empty.
+	if d.nextCount == 1 {
+		return
+	}
+
+	i := 0
+
+	for _, id := range d.request.IDs {
+		if _, ok := d.seenIDs[id]; ok {
+			// This ID was already returned by the cache, skip it
+			continue
+		}
+
+		d.request.IDs[i] = id
+		i++
+	}
+
+	d.request.IDs = d.request.IDs[:i]
 }
 
 func (d *cachingDataSet) At() types.MetricData {
