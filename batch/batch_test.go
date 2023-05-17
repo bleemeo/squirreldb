@@ -98,17 +98,6 @@ func newPersistentStore(initialData []types.MetricData) *dummy.MemoryTSDB {
 	return db
 }
 
-func iterToList(i types.MetricDataSet) ([]types.MetricData, error) {
-	results := make([]types.MetricData, 0)
-
-	for i.Next() {
-		tmp := i.At()
-		results = append(results, tmp)
-	}
-
-	return results, i.Err()
-}
-
 func TestBatch_read(t *testing.T) { //nolint:maintidx
 	type fields struct {
 		memoryStore     TemporaryStore
@@ -749,7 +738,7 @@ func TestBatch_read(t *testing.T) { //nolint:maintidx
 				return
 			}
 
-			gotList, err := iterToList(got)
+			gotList, err := types.MetricIterToList(got, 0)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
 

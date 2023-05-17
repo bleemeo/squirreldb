@@ -67,31 +67,6 @@ var (
 	}
 )
 
-type mockDataSet struct {
-	reply   []types.MetricData
-	current types.MetricData
-	offset  int
-}
-
-func (d *mockDataSet) Next() bool {
-	if d.offset >= len(d.reply) {
-		return false
-	}
-
-	d.current = d.reply[d.offset]
-	d.offset++
-
-	return true
-}
-
-func (d *mockDataSet) At() types.MetricData {
-	return d.current
-}
-
-func (d *mockDataSet) Err() error {
-	return nil
-}
-
 type mockStore struct {
 	l               sync.Mutex
 	pointsPerSeries int
@@ -116,15 +91,23 @@ func (s *mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (type
 		}
 	}
 
-	m := &mockDataSet{
-		reply: fakeData,
-	}
-
-	return m, nil
+	return types.MetricIterFromList(fakeData), nil
 }
 
 func (s *mockStore) PointsRead() float64 {
 	return 0
+}
+
+func (s *mockStore) PointsCached() float64 {
+	return 0
+}
+
+type mockStoreFixedResponse struct {
+	response []types.MetricData
+}
+
+func (s *mockStoreFixedResponse) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+	return types.MetricIterFromList(s.response), nil
 }
 
 type mockIndex struct {

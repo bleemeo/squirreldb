@@ -8,6 +8,7 @@ import (
 type metrics struct {
 	RequestsPoints prometheus.Histogram
 	RequestsSeries prometheus.Histogram
+	CachedPoints   prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -25,6 +26,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name:      "series_evaluated",
 			Help:      "Total series evaluated by SquirrelDB PromQL",
 			Buckets:   []float64{0, 1, 5, 10, 100, 1000, 10000},
+		}),
+		CachedPoints: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Namespace: "squirreldb",
+			Subsystem: "queryable",
+			Name:      "cached_points_total",
+			Help:      "Total points processed by SquirrelDB PromQL which reads were cached",
 		}),
 	}
 }

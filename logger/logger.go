@@ -11,7 +11,7 @@ import (
 // NewConsoleWriter returns a zerolog writer with colored console output.
 func NewConsoleWriter(disableColor bool) io.Writer {
 	writer := zerolog.ConsoleWriter{
-		Out:        os.Stdout,
+		Out:        os.Stderr,
 		TimeFormat: "2006-01-02 15:04:05.000",
 		NoColor:    disableColor,
 	}
