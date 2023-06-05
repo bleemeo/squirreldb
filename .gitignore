@@ -3,6 +3,7 @@
 /dist*
 /work
 /tests/promql-compliance-test/compliance
+/sstable_data_content
 
 /.idea
 .vscode
