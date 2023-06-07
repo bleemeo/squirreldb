@@ -73,7 +73,7 @@ type mockStore struct {
 	readRequest     []types.MetricRequest
 }
 
-func (s *mockStore) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+func (s *mockStore) ReadIter(_ context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
 	s.l.Lock()
 	s.readRequest = append(s.readRequest, req)
 	s.l.Unlock()
@@ -106,7 +106,7 @@ type mockStoreFixedResponse struct {
 	response []types.MetricData
 }
 
-func (s *mockStoreFixedResponse) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
+func (s *mockStoreFixedResponse) ReadIter(_ context.Context, _ types.MetricRequest) (types.MetricDataSet, error) {
 	return types.MetricIterFromList(s.response), nil
 }
 
@@ -116,33 +116,33 @@ type mockIndex struct {
 }
 
 func (idx mockIndex) Search(
-	ctx context.Context,
-	start, end time.Time,
-	matchers []*labels.Matcher,
+	_ context.Context,
+	_, _ time.Time,
+	_ []*labels.Matcher,
 ) (types.MetricsSet, error) {
 	return &dummy.MetricsLabel{List: idx.searchReply}, nil
 }
 
-func (idx mockIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (idx mockIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (idx mockIndex) LookupIDs(ctx context.Context, request []types.LookupRequest) ([]types.MetricID, []int64, error) {
+func (idx mockIndex) LookupIDs(_ context.Context, _ []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
 func (idx mockIndex) LabelNames(
-	ctx context.Context,
-	start, end time.Time,
-	matchers []*labels.Matcher,
+	_ context.Context,
+	_, _ time.Time,
+	_ []*labels.Matcher,
 ) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (idx mockIndex) LabelValues(
-	ctx context.Context,
-	start, end time.Time,
-	name string, matchers []*labels.Matcher,
+	_ context.Context,
+	_, _ time.Time,
+	_ string, _ []*labels.Matcher,
 ) ([]string, error) {
 	return nil, errors.New("not implemented")
 }

@@ -54,6 +54,6 @@ func TestAppenderInvalidRequest(t *testing.T) {
 
 type mockMutableLAbel struct{}
 
-func (mockMutableLAbel) IsMutableLabel(ctx context.Context, tenant, name string) (bool, error) {
+func (mockMutableLAbel) IsMutableLabel(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

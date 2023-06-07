@@ -14,13 +14,13 @@ type filteringIndex struct {
 	matcher *labels.Matcher
 }
 
-func (idx filteringIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (idx filteringIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (idx filteringIndex) LookupIDs(
-	ctx context.Context,
-	requests []types.LookupRequest,
+	_ context.Context,
+	_ []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }

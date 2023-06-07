@@ -8,30 +8,30 @@ import (
 
 type notImplementedVerifier struct{}
 
-func (v notImplementedVerifier) WithNow(now time.Time) types.IndexVerifier {
+func (v notImplementedVerifier) WithNow(_ time.Time) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) WithDoFix(enable bool) types.IndexVerifier {
+func (v notImplementedVerifier) WithDoFix(_ bool) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) WithLock(enable bool) types.IndexVerifier {
+func (v notImplementedVerifier) WithLock(_ bool) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) WithStrictExpiration(enable bool) types.IndexVerifier {
+func (v notImplementedVerifier) WithStrictExpiration(_ bool) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) WithStrictMetricCreation(enable bool) types.IndexVerifier {
+func (v notImplementedVerifier) WithStrictMetricCreation(_ bool) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) WithPedanticExpiration(enable bool) types.IndexVerifier {
+func (v notImplementedVerifier) WithPedanticExpiration(_ bool) types.IndexVerifier {
 	return v
 }
 
-func (v notImplementedVerifier) Verify(ctx context.Context) (hadIssue bool, err error) {
+func (v notImplementedVerifier) Verify(_ context.Context) (hadIssue bool, err error) {
 	return false, errNotImplemented
 }

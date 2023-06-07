@@ -43,7 +43,7 @@ func (r *randomShouldFail) SetRate(rateBefore float64, rateAfter float64) {
 	r.rateAfter = rateAfter
 }
 
-func (r *randomShouldFail) ShouldFailBefore(ctx context.Context) error {
+func (r *randomShouldFail) ShouldFailBefore(_ context.Context) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
@@ -54,7 +54,7 @@ func (r *randomShouldFail) ShouldFailBefore(ctx context.Context) error {
 	return nil
 }
 
-func (r *randomShouldFail) ShouldFailAfter(ctx context.Context) error {
+func (r *randomShouldFail) ShouldFailAfter(_ context.Context) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
@@ -67,11 +67,11 @@ func (r *randomShouldFail) ShouldFailAfter(ctx context.Context) error {
 
 type dontFail struct{}
 
-func (dontFail) ShouldFailBefore(ctx context.Context) error {
+func (dontFail) ShouldFailBefore(_ context.Context) error {
 	return nil
 }
 
-func (dontFail) ShouldFailAfter(ctx context.Context) error {
+func (dontFail) ShouldFailAfter(_ context.Context) error {
 	return nil
 }
 

@@ -11,7 +11,7 @@ type LocalCluster struct {
 	l         sync.Mutex
 }
 
-func (c *LocalCluster) Publish(ctx context.Context, topic string, message []byte) error {
+func (c *LocalCluster) Publish(_ context.Context, topic string, message []byte) error {
 	c.l.Lock()
 	defer c.l.Unlock()
 

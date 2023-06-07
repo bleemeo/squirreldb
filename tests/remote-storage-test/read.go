@@ -51,7 +51,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 			mutex.Unlock()
 
 			// make sure workChannel is drained
-			for range workChannel {
+			for range workChannel { //nolint:revive
 			}
 
 			return err
