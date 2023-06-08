@@ -7,7 +7,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/fatih/structs v1.1.0
 	github.com/go-kit/log v0.2.1
-	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gocql/gocql v1.4.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
@@ -23,6 +22,7 @@ require (
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/procfs v0.10.1
 	github.com/prometheus/prometheus v0.43.0
+	github.com/redis/go-redis/v9 v9.0.5
 	github.com/rs/zerolog v1.29.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/spf13/pflag v1.0.5
