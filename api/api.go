@@ -342,7 +342,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.Error(w, "Server not yet ready", http.StatusServiceUnavailable)
 }
 
-func (a *API) flushHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) flushHandler(w http.ResponseWriter, _ *http.Request) {
 	start := time.Now()
 
 	if a.FlushCallback != nil {
@@ -358,11 +358,11 @@ func (a *API) flushHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, msg, time.Since(start))
 }
 
-func (a *API) readyHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) readyHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
-func (a *API) debugHelpHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "The following debug enpoints exists")
 	fmt.Fprintln(w, "/debug/index_info: provide global information")
 	fmt.Fprintln(w, "/debug/index_info?metricID=XXX: provide information on given metric ID")
@@ -663,7 +663,7 @@ func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request
 	}
 }
 
-func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, req *http.Request) {
+func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, _ *http.Request) {
 	a.l.Lock()
 
 	a.defaultDebugRequest = !a.defaultDebugRequest

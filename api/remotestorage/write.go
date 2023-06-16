@@ -52,7 +52,7 @@ type timeSeries struct {
 }
 
 // Append adds a sample pair for the given series.
-func (w *writeMetrics) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+func (w *writeMetrics) Append(_ storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if w.tenantLabel.Value != "" {
 		// Add or replace the tenant label with the tenant header.
 		builder := labels.NewBuilder(l)

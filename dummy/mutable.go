@@ -86,18 +86,18 @@ func (s mutableLabelStore) AssociatedValues(_ context.Context, tenant, name stri
 	return associatedValues, nil
 }
 
-func (s mutableLabelStore) DeleteAssociatedName(_ context.Context, tenant, name string) error {
+func (s mutableLabelStore) DeleteAssociatedName(_ context.Context, _, _ string) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) DeleteAssociatedValues(_ context.Context, label mutable.Label) error {
+func (s mutableLabelStore) DeleteAssociatedValues(_ context.Context, _ mutable.Label) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) SetAssociatedName(_ context.Context, label mutable.LabelWithName) error {
+func (s mutableLabelStore) SetAssociatedName(_ context.Context, _ mutable.LabelWithName) error {
 	return errNotImplemented
 }
 
-func (s mutableLabelStore) SetAssociatedValues(_ context.Context, label mutable.LabelWithValues) error {
+func (s mutableLabelStore) SetAssociatedValues(_ context.Context, _ mutable.LabelWithValues) error {
 	return errNotImplemented
 }

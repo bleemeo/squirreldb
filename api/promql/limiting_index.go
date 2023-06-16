@@ -17,13 +17,13 @@ type limitingIndex struct {
 	returnedSeries uint32
 }
 
-func (idx *limitingIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (idx *limitingIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (idx *limitingIndex) LookupIDs(
-	ctx context.Context,
-	requests []types.LookupRequest,
+	_ context.Context,
+	_ []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }

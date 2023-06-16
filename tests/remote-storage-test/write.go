@@ -26,7 +26,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			err := writeWorker(ctx, workChannel, writeURL, tenant)
 
 			// make sure workChannel is drained
-			for range workChannel {
+			for range workChannel { //nolint:revive
 			}
 
 			return err

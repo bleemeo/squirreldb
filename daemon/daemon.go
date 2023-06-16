@@ -29,9 +29,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )

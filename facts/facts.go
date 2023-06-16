@@ -14,7 +14,7 @@ import (
 	"github.com/shirou/gopsutil/mem"
 )
 
-func Facts(ctx context.Context) map[string]string {
+func Facts(_ context.Context) map[string]string {
 	newFacts := make(map[string]string)
 
 	for k, v := range platformFacts() {

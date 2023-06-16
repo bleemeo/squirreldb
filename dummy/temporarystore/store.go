@@ -45,7 +45,7 @@ func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
 }
 
 // Append implement batch.TemporaryStore interface.
-func (s *Store) Append(ctx context.Context, points []types.MetricData) ([]int, error) {
+func (s *Store) Append(_ context.Context, points []types.MetricData) ([]int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -75,7 +75,7 @@ func (s *Store) Append(ctx context.Context, points []types.MetricData) ([]int, e
 
 // GetSetPointsAndOffset implement batch.TemporaryStore interface.
 func (s *Store) GetSetPointsAndOffset(
-	ctx context.Context,
+	_ context.Context,
 	points []types.MetricData,
 	offsets []int,
 ) ([]types.MetricData, error) {
@@ -123,7 +123,7 @@ func (s *Store) getSetPointsAndOffset(
 }
 
 // ReadPointsAndOffset implement batch.TemporaryStore interface.
-func (s *Store) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) {
+func (s *Store) ReadPointsAndOffset(_ context.Context, ids []types.MetricID) ([]types.MetricData, []int, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -147,7 +147,7 @@ func (s *Store) ReadPointsAndOffset(ctx context.Context, ids []types.MetricID) (
 }
 
 // MarkToExpire implement batch.TemporaryStore interface.
-func (s *Store) MarkToExpire(ctx context.Context, ids []types.MetricID, ttl time.Duration) error {
+func (s *Store) MarkToExpire(_ context.Context, ids []types.MetricID, ttl time.Duration) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -169,7 +169,7 @@ func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.T
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
 func (s *Store) GetSetFlushDeadline(
-	ctx context.Context,
+	_ context.Context,
 	deadlines map[types.MetricID]time.Time,
 ) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
@@ -188,7 +188,7 @@ func (s *Store) GetSetFlushDeadline(
 }
 
 // AddToTransfert implement batch.TemporaryStore interface.
-func (s *Store) AddToTransfert(ctx context.Context, ids []types.MetricID) error {
+func (s *Store) AddToTransfert(_ context.Context, ids []types.MetricID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -198,7 +198,7 @@ func (s *Store) AddToTransfert(ctx context.Context, ids []types.MetricID) error 
 }
 
 // GetTransfert implement batch.TemporaryStore interface.
-func (s *Store) GetTransfert(ctx context.Context, count int) (map[types.MetricID]time.Time, error) {
+func (s *Store) GetTransfert(_ context.Context, count int) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -221,7 +221,7 @@ func (s *Store) GetTransfert(ctx context.Context, count int) (map[types.MetricID
 }
 
 // GetAllKnownMetrics implement batch.TemporaryStore interface.
-func (s *Store) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time.Time, error) {
+func (s *Store) GetAllKnownMetrics(_ context.Context) (map[types.MetricID]time.Time, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

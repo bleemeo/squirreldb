@@ -23,11 +23,11 @@ type mockIndex struct {
 	fixedLabels   labels.Labels
 }
 
-func (i mockIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (i mockIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (i mockIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
+func (i mockIndex) LookupIDs(_ context.Context, requests []types.LookupRequest) ([]types.MetricID, []int64, error) {
 	if len(requests) != 1 {
 		return nil, nil, errors.New("not implemented for more than one metrics")
 	}
@@ -36,23 +36,23 @@ func (i mockIndex) LookupIDs(ctx context.Context, requests []types.LookupRequest
 }
 
 func (i mockIndex) Search(
-	ctx context.Context,
-	start, end time.Time,
-	matchers []*labels.Matcher,
+	_ context.Context,
+	_, _ time.Time,
+	_ []*labels.Matcher,
 ) (types.MetricsSet, error) {
 	return &dummy.MetricsLabel{
 		List: []types.MetricLabel{{ID: i.fixedSearchID, Labels: i.fixedLabels}},
 	}, nil
 }
 
-func (i mockIndex) LabelNames(ctx context.Context, start, end time.Time, matchers []*labels.Matcher) ([]string, error) {
+func (i mockIndex) LabelNames(_ context.Context, _, _ time.Time, _ []*labels.Matcher) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (i mockIndex) LabelValues(
-	ctx context.Context,
-	start, end time.Time,
-	name string, matchers []*labels.Matcher,
+	_ context.Context,
+	_, _ time.Time,
+	_ string, _ []*labels.Matcher,
 ) ([]string, error) {
 	return nil, errors.New("not implemented")
 }

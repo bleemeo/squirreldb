@@ -19,13 +19,13 @@ var errNotImplemented = errors.New("not implemented")
 // mockExemplarQueryable implements storage.ExemplarQueryable.
 type mockExemplarQueryable struct{}
 
-func (mockExemplarQueryable) ExemplarQuerier(ctx context.Context) (storage.ExemplarQuerier, error) {
+func (mockExemplarQueryable) ExemplarQuerier(_ context.Context) (storage.ExemplarQuerier, error) {
 	return mockExemplarQuerier{}, errNotImplemented
 }
 
 type mockExemplarQuerier struct{}
 
-func (mockExemplarQuerier) Select(start, end int64, matchers ...[]*labels.Matcher) ([]exemplar.QueryResult, error) {
+func (mockExemplarQuerier) Select(_, _ int64, _ ...[]*labels.Matcher) ([]exemplar.QueryResult, error) {
 	return nil, errNotImplemented
 }
 
@@ -55,13 +55,13 @@ type mockTSDBAdminStat struct{}
 
 func (mockTSDBAdminStat) CleanTombstones() error { return errNotImplemented }
 
-func (mockTSDBAdminStat) Delete(mint, maxt int64, ms ...*labels.Matcher) error {
+func (mockTSDBAdminStat) Delete(_, _ int64, _ ...*labels.Matcher) error {
 	return errNotImplemented
 }
 
-func (mockTSDBAdminStat) Snapshot(dir string, withHead bool) error { return errNotImplemented }
+func (mockTSDBAdminStat) Snapshot(_ string, _ bool) error { return errNotImplemented }
 
-func (mockTSDBAdminStat) Stats(statsByLabelName string) (*tsdb.Stats, error) {
+func (mockTSDBAdminStat) Stats(_ string) (*tsdb.Stats, error) {
 	return nil, errNotImplemented
 }
 

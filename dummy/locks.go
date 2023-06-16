@@ -22,7 +22,7 @@ type tryLocker struct {
 // CreateLock return a TryLocker for given name.
 // This locker is NOT common across all SquirrelDB and not even this process. It's only common to this factory.
 // timeToLive is ignored, as it normally only used in case of crash to release the lock.
-func (l *Locks) CreateLock(name string, timeToLive time.Duration) types.TryLocker {
+func (l *Locks) CreateLock(name string, _ time.Duration) types.TryLocker {
 	l.globalMutex.Lock()
 	defer l.globalMutex.Unlock()
 

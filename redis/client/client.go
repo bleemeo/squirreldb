@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	goredis "github.com/go-redis/redis/v8"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 var errNotPem = errors.New("not a PEM file")

@@ -52,6 +52,6 @@ func (s *provider) ReadBytes() ([]byte, error) {
 }
 
 // Watch is not supported by the structs provider.
-func (s *provider) Watch(cb func(event interface{}, err error)) error {
+func (s *provider) Watch(_ func(event interface{}, err error)) error {
 	return errNotSupported
 }

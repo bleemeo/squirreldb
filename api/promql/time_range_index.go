@@ -33,13 +33,13 @@ func fixTime(t time.Time) time.Time {
 	return t
 }
 
-func (idx reducedTimeRangeIndex) AllIDs(ctx context.Context, start time.Time, end time.Time) ([]types.MetricID, error) {
+func (idx reducedTimeRangeIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (idx reducedTimeRangeIndex) LookupIDs(
-	ctx context.Context,
-	requests []types.LookupRequest,
+	_ context.Context,
+	_ []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
 	return nil, nil, errors.New("not implemented")
 }

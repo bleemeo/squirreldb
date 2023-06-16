@@ -129,7 +129,7 @@ type mockLockFactory struct {
 	mutex sync.Mutex
 }
 
-func (f *mockLockFactory) CreateLock(name string, ttl time.Duration) types.TryLocker {
+func (f *mockLockFactory) CreateLock(name string, _ time.Duration) types.TryLocker {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
