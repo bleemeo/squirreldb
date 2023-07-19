@@ -144,6 +144,10 @@ func (w *writeMetrics) Rollback() error {
 	return nil
 }
 
+const pointInPastLogPeriod = 10 * time.Second
+
+var lastLogPointInPastAt time.Time //nolint:gochecknoglobals
+
 // Returns a metric list generated from a TimeSeries list.
 func metricsFromTimeseries(
 	ctx context.Context,
@@ -177,7 +181,10 @@ func metricsFromTimeseries(
 		}
 
 		if min < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
-			log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
+			if lastLogPointInPastAt.Before(time.Now().Add(-pointInPastLogPeriod)) {
+				log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
+				lastLogPointInPastAt = time.Now()
+			}
 		}
 
 		requests = append(requests, types.LookupRequest{
