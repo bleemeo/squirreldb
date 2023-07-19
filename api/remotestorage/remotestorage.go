@@ -22,6 +22,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const pointInPastLogPeriod = 10 * time.Second
+
 var (
 	ErrMissingTenantHeader = errors.New("the tenant header is missing")
 	ErrParseTTLHeader      = errors.New("can't parse time to live header ")

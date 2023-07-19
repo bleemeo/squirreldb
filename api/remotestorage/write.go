@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"squirreldb/types"
-	"time"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/exemplar"
@@ -14,8 +13,6 @@ import (
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
 )
-
-const pointInPastLogPeriod = 10 * time.Second
 
 var (
 	ErrInvalidMatcher = errors.New("invalid labels")
