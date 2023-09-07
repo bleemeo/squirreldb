@@ -101,7 +101,7 @@ func run(ctx context.Context) error {
 	wg.Wait()
 	log.Print("Publish stopped")
 
-	maxDeadline := time.Now().Add(*runTime / 2)
+	maxDeadline := time.Now().Add(*runTime)
 	totalTopic1 := 0
 	totalTopic2 := 0
 
