@@ -53,6 +53,13 @@ linters-settings:
         json: snake
         yaml: snake
 
+  depguard:
+    rules:
+      main:
+        deny:
+          - pkg: "io/ioutil"
+            desc: "ioutil is deprecated starting with Go 1.16"
+
   # Project specific settings.
   gomoddirectives:
     # List of allowed `replace` directives. Needed because go.mod doesn't support nolint comments.
