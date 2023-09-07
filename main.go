@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
-	"math/rand"
 	"squirreldb/config"
 	"squirreldb/daemon"
 	"squirreldb/logger"
-	"time"
 
 	zlogsentry "github.com/archdx/zerolog-sentry"
 	"github.com/rs/zerolog"
@@ -54,8 +52,6 @@ func setupSentryLogger(cfg config.Config) io.Closer {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
-
 	daemon.Version = version
 	daemon.Commit = commit
 	daemon.Date = date

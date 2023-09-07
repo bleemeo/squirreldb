@@ -8,6 +8,7 @@ import (
 	"squirreldb/dummy"
 	"squirreldb/logger"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -137,7 +138,7 @@ func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableL
 func randomString(length int) string {
 	b := make([]byte, length)
 
-	rand.Read(b)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(b)
 
 	return fmt.Sprintf("%x", b)[:length]
 }

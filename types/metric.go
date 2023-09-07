@@ -119,10 +119,10 @@ func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond i
 }
 
 // AddDuplicateForTest add duplicate points to a list of MetricPoint for testing.
-func AddDuplicateForTest(input []MetricPoint, numberDuplicate int) []MetricPoint {
+func AddDuplicateForTest(input []MetricPoint, numberDuplicate int, rnd *rand.Rand) []MetricPoint {
 	duplicates := make([]int, numberDuplicate)
 	for i := 0; i < numberDuplicate; i++ {
-		duplicates[i] = rand.Intn(len(input)) //nolint:gosec
+		duplicates[i] = rnd.Intn(len(input))
 	}
 	sort.Ints(duplicates)
 
@@ -149,8 +149,8 @@ func AddDuplicateForTest(input []MetricPoint, numberDuplicate int) []MetricPoint
 }
 
 // ShuffleForTest shuffle a list of MetricPoint for testing.
-func ShuffleForTest(input []MetricPoint) []MetricPoint {
-	rand.Shuffle(len(input), func(i, j int) {
+func ShuffleForTest(input []MetricPoint, rnd *rand.Rand) []MetricPoint {
+	rnd.Shuffle(len(input), func(i, j int) {
 		input[i], input[j] = input[j], input[i]
 	})
 

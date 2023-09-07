@@ -451,7 +451,7 @@ func TestSortPoints(t *testing.T) {
 }
 
 func BenchmarkDeduplicatePoints(b *testing.B) {
-	rand.Seed(42)
+	rnd := rand.New(rand.NewSource(42))
 
 	tests := []struct {
 		name   string
@@ -471,11 +471,11 @@ func BenchmarkDeduplicatePoints(b *testing.B) {
 		},
 		{
 			name:   "duplicated_sorted_1100",
-			points: AddDuplicateForTest(MakePointsForTest(1000), 100),
+			points: AddDuplicateForTest(MakePointsForTest(1000), 100, rnd),
 		},
 		{
 			name:   "duplicated_1100",
-			points: ShuffleForTest(AddDuplicateForTest(MakePointsForTest(1000), 100)),
+			points: ShuffleForTest(AddDuplicateForTest(MakePointsForTest(1000), 100, rnd), rnd),
 		},
 		{
 			name:   "two_duplicated_block_2000",

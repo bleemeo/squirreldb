@@ -73,8 +73,6 @@ func run(ctx context.Context) error {
 		return warnings
 	}
 
-	rand.Seed(*seed)
-
 	ctx, cancel := context.WithTimeout(ctx, *runDuration)
 	resultChan := make(chan result, (*workerProcesses)*(*workerThreads)*(*count))
 	jobRunning := make([]int32, *count)
@@ -83,6 +81,7 @@ func run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
+	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 	start := time.Now()
 
 	for p := 0; p < *workerProcesses; p++ {
@@ -107,7 +106,7 @@ func run(ctx context.Context) error {
 			lock := lockFactory.CreateLock(subLockName, *lockTTL)
 
 			for t := 0; t < *workerThreads; t++ {
-				workerSeed := rand.Int63() //nolint:gosec
+				workerSeed := rnd.Int63()
 				p := p
 				t := t
 				n := n

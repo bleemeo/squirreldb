@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"math/rand"
 	"testing"
+	"time"
 )
 
 func Test_decode(t *testing.T) {
 	blob := make([]byte, 66000)
-	rand.Read(blob)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(blob)
 
 	tests := []struct {
 		name    string
