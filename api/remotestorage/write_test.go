@@ -57,7 +57,7 @@ func (i mockIndex) LabelValues(
 	return nil, errors.New("not implemented")
 }
 
-func Test_metricsFromTimeseries(t *testing.T) {
+func Test_metricsFromTimeSeries(t *testing.T) {
 	nowTS := time.Now().Unix() * 1000
 
 	type args struct {
@@ -166,14 +166,17 @@ func Test_metricsFromTimeseries(t *testing.T) {
 		},
 	}
 
+	var rs RemoteStorage // Using this sole instance for all test cases because the only
+	// fields used in metricsFromTimeSeries are for logging purposes.
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := metricsFromTimeseries(context.Background(), tt.args.promTimeseries, tt.args.index, 0)
+			got, _, err := rs.metricsFromTimeSeries(context.Background(), tt.args.promTimeseries, tt.args.index, 0)
 			if err != nil {
-				t.Errorf("metricsFromTimeseries() failed: %v", err)
+				t.Errorf("metricsFromTimeSeries() failed: %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("metricsFromTimeseries() = %v, want %v", got, tt.want)
+				t.Errorf("metricsFromTimeSeries() = %v, want %v", got, tt.want)
 			}
 		})
 	}
