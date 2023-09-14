@@ -160,5 +160,5 @@ const (
 	// Set the metric Time To Live when writing.
 	HeaderTimeToLive = "X-SquirrelDB-TTL"
 	// Enable debugging information printed in SquirrelDB server log about a query.
-	HeaderQueryDebug = "X-SquirrelDB-Query-Debug"
+	HeaderQueryDebug = "X-SquirrelDB-Query-Debug" //nolint:gosec
 )

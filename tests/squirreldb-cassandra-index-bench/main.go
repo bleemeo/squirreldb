@@ -91,8 +91,6 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	rand.Seed(*seed)
-
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
