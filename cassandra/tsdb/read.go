@@ -217,6 +217,10 @@ func (i *readIter) Next() bool {
 		)
 	}
 
+	if i.request.EnableVerboseDebug {
+		i.c.logger.Info().Msgf("Read ID=%d, points=%v", id, data.Points)
+	}
+
 	reversePoints(data.Points)
 
 	i.current = data
