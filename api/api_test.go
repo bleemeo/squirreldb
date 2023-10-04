@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sort"
 	"squirreldb/api/remotestorage"
 	"squirreldb/cassandra/mutable"
 	"squirreldb/dummy"
@@ -20,7 +22,11 @@ import (
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/google/go-cmp/cmp"
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
@@ -530,4 +536,446 @@ func TestWriteHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
+	t0 := time.Date(2023, 10, 2, 13, 46, 18, 0, time.UTC)
+
+	tests := []struct {
+		name        string
+		promql      string
+		storeData   []metricLabelsPoints
+		time        time.Time
+		wantSamples []*model.Sample
+	}{
+		{
+			name:   "simple",
+			promql: "cpu_used",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "cpu_used",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: t0.UnixMilli(), Value: 12},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{"__name__": "cpu_used"},
+					Value:     12,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "multiple",
+			promql: "cpu_used",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "cpu_used",
+						"instance": "server1:8015",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
+						{Timestamp: t0.UnixMilli(), Value: 10},
+					},
+				},
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "cpu_used",
+						"instance": "server2:8015",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{"__name__": "cpu_used", "instance": "server1:8015"},
+					Value:     10,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+				{
+					Metric:    model.Metric{"__name__": "cpu_used", "instance": "server2:8015"},
+					Value:     9,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_multiple",
+			promql: "sum(cpu_used)",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "cpu_used",
+						"instance": "server1:8015",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
+						{Timestamp: t0.UnixMilli(), Value: 10},
+					},
+				},
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "cpu_used",
+						"instance": "server2:8015",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     19,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time",
+			promql: "rate(request_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "request_total",
+					}),
+					points: []types.MetricPoint{
+						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
+						// and assuming no reset of counter, then the counter was zero before.
+						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
+						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
+						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 200},
+						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 400},
+						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 600},
+						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						{Timestamp: t0.UnixMilli(), Value: 1000},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     16.66666666,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time_few_data_on_big_range",
+			promql: "rate(request_total[2m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "request_total",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: (t0.Add(-70 * time.Second)).UnixMilli(), Value: 500},
+						{Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 510},
+						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 520},
+						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 530},
+						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 540},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{},
+					// Prometheus does some extrapolation:
+					// * make as if the value continued to grow at the same rate near first/last timestamp.
+					//   But up to half the resolution (unless close enough to query range boundary).
+					//   In this example it assumes that value continued to change between t0-75s and t0-25s.
+					// * outside this extrapolated range, it assumes value didn't changed
+					// * do the rate over the whole query range of 120s
+					// So in our case:
+					// * the measured rate is 1.0 (increase of 40 over 40 seconds)
+					// * it extrapolates the value of 495 at t0-75s and 545 at t0-25s
+					// This give a increase of 50 over a period of 120s -> 0.41666
+					Value:     0.41666,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time_not_rounded",
+			promql: "rate(request_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "request_total",
+					}),
+					points: []types.MetricPoint{
+						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
+						// and assuming no reset of counter, then the counter was zero before.
+						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
+						{Timestamp: (t0.Add(-50 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 0},
+						{Timestamp: (t0.Add(-40 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 200},
+						{Timestamp: (t0.Add(-30 * time.Second).Add(124 * time.Millisecond)).UnixMilli(), Value: 400},
+						{Timestamp: (t0.Add(-20 * time.Second).Add(122 * time.Millisecond)).UnixMilli(), Value: 600},
+						{Timestamp: (t0.Add(-10 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 800},
+						{Timestamp: t0.Add(123 * time.Millisecond).UnixMilli(), Value: 1000},
+					},
+				},
+			},
+			time: t0.Add(257 * time.Millisecond),
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     16.711, // I'm ensure if that should be a bug or not. The target value is 1000 / 60s -> 16.666
+					Timestamp: model.TimeFromUnixNano(t0.Add(257 * time.Millisecond).UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time_less_stable_value",
+			promql: "rate(request_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "request_total",
+					}),
+					points: []types.MetricPoint{
+						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
+						// and assuming no reset of counter, then the counter was zero before.
+						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
+						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
+						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 207},
+						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 410},
+						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 580},
+						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						{Timestamp: t0.UnixMilli(), Value: 1000},
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     16.6666,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time_missing_last_point",
+			promql: "rate(request_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "request_total",
+					}),
+					points: []types.MetricPoint{
+						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
+						// and assuming no reset of counter, then the counter was zero before.
+						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
+						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
+						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 207},
+						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 410},
+						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 580},
+						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						// {Timestamp: t0.UnixMilli(), Value: 1000},  <-- missing point due to ingestion latency
+					},
+				},
+			},
+			time: t0,
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     16.666,
+					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
+				},
+			},
+		},
+		{
+			name:   "aggregate_time_actual_bug",
+			promql: "rate(squirreldb_requests_points_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "squirreldb_requests_points_total",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: 1696257630000, Value: 2.524386e+06},
+						{Timestamp: 1696257640000, Value: 2.525197e+06},
+						{Timestamp: 1696257650000, Value: 2.525945e+06},
+						{Timestamp: 1696257660000, Value: 2.526637e+06},
+						{Timestamp: 1696257670000, Value: 2.527391e+06},
+					},
+				},
+			},
+			time: time.UnixMilli(1696257685488),
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{},
+					// This is were we hit the limitation of PromQL extrapolation. We want the value of 75.125,
+					// but because last point is too far away from query range end time (it's
+					// 15.488 seconds before end of query range, when the limit is 11 seconds).
+					Value:     61.99315,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			// If the same query as aggregate_time_actual_bug is re-done a bit later when
+			// last point had time to be ingested, the result will be the expected one.
+			name:   "aggregate_time_actual_bug_re_query",
+			promql: "rate(squirreldb_requests_points_total[1m])",
+			storeData: []metricLabelsPoints{
+				{
+					labels: labels.FromMap(map[string]string{
+						"__name__": "squirreldb_requests_points_total",
+					}),
+					points: []types.MetricPoint{
+						{Timestamp: 1696257630000, Value: 2.524386e+06},
+						{Timestamp: 1696257640000, Value: 2.525197e+06},
+						{Timestamp: 1696257650000, Value: 2.525945e+06},
+						{Timestamp: 1696257660000, Value: 2.526637e+06},
+						{Timestamp: 1696257670000, Value: 2.527391e+06},
+						{Timestamp: 1696257680000, Value: 2.528114e+06},
+					},
+				},
+			},
+			time: time.UnixMilli(1696257685488),
+			wantSamples: []*model.Sample{
+				{
+					Metric:    model.Metric{},
+					Value:     74.56,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+
+		if tt.name != "aggregate_time_actual_bug" && false {
+			continue
+		}
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			idx, store := makeIdxAndStore(tt.storeData)
+			squirrelDBAPI := &API{
+				Logger:         logger.NewTestLogger(true),
+				Index:          idx,
+				Reader:         store,
+				MetricRegistry: prometheus.NewRegistry(),
+				Writer:         dummy.DiscardTSDB{},
+			}
+			squirrelDBAPI.init()
+			squirrelDBAPI.Ready()
+
+			client, err := api.NewClient(api.Config{
+				RoundTripper: roundTripperFromHTTPHandler{handler: squirrelDBAPI},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			apiClient := v1.NewAPI(client)
+
+			response, warning, err := apiClient.Query(context.Background(), tt.promql, tt.time)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if warning != nil {
+				t.Fatal(warning)
+			}
+
+			if response.Type() != model.ValVector {
+				t.Fatalf("this test only work with ValVector response, got %v", response.Type())
+			}
+
+			valueVector := []*model.Sample(response.(model.Vector)) //nolint:forcetypeassert // checked just above
+
+			sort.Sort(model.Samples(valueVector))
+			sort.Sort(model.Samples(tt.wantSamples))
+
+			// This is cmpopts.EquateApprox rewrite for model.SampleValue
+			approx := cmp.FilterValues(
+				func(x, y model.SampleValue) bool {
+					return !math.IsNaN(float64(x)) &&
+						!math.IsNaN(float64(y)) &&
+						!math.IsInf(float64(x), 0) &&
+						!math.IsInf(float64(y), 0)
+				},
+				cmp.Comparer(func(x, y model.SampleValue) bool {
+					const (
+						frac = 0.001
+						marg = 0
+					)
+					relMarg := frac * math.Min(math.Abs(float64(x)), math.Abs(float64(y)))
+
+					return math.Abs(float64(x-y)) <= math.Max(marg, relMarg)
+				}),
+			)
+
+			// we convert []*Sample to []Sample, or else cmp.Diff don't use our approx function on
+			// SampleValue inside the pointer.
+			if diff := cmp.Diff(samplesPointerToValue(tt.wantSamples), samplesPointerToValue(valueVector), approx); diff != "" {
+				t.Errorf("result mismatch (-want +got)\n%s", diff)
+			}
+		})
+	}
+}
+
+type roundTripperFromHTTPHandler struct {
+	handler http.Handler
+}
+
+func (rt roundTripperFromHTTPHandler) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	rt.handler.ServeHTTP(rec, req)
+
+	return rec.Result(), nil
+}
+
+type metricLabelsPoints struct {
+	labels labels.Labels
+	points []types.MetricPoint
+}
+
+func makeIdxAndStore(data []metricLabelsPoints) (*dummy.Index, *dummy.MemoryTSDB) {
+	metrics := make([]types.MetricLabel, len(data))
+	store := &dummy.MemoryTSDB{Data: make(map[types.MetricID]types.MetricData)}
+
+	for idx, m := range data {
+		metrics[idx] = types.MetricLabel{
+			Labels: m.labels,
+			ID:     types.MetricID(idx),
+		}
+		store.Data[types.MetricID(idx)] = types.MetricData{
+			ID:         types.MetricID(idx),
+			Points:     m.points,
+			TimeToLive: 86400,
+		}
+	}
+
+	idx := dummy.NewIndex(metrics)
+
+	return idx, store
+}
+
+func samplesPointerToValue(in []*model.Sample) []model.Sample {
+	result := make([]model.Sample, len(in))
+
+	for i, v := range in {
+		result[i] = *v
+	}
+
+	return result
 }
