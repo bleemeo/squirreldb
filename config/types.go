@@ -30,6 +30,7 @@ type Internal struct {
 	Store                   string       `yaml:"store"`
 	MutableLabelsProvider   string       `yaml:"mutable_labels_provider"`
 	DisableBackgroundTask   bool         `yaml:"disable_background_task"`
+	ReadOnly                bool         `yaml:"read_only"`
 	UseThanosPromQLEngine   bool         `yaml:"use_thanos_promql_engine"`
 }
 

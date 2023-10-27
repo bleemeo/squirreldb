@@ -275,7 +275,7 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 
 	start := time.Now()
 
-	session, err := c.connection.Session()
+	session, err := c.connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (c *CassandraTSDB) readRawPartitionData(
 
 	start := time.Now()
 
-	session, err := c.connection.Session()
+	session, err := c.connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}

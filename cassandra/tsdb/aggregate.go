@@ -281,6 +281,18 @@ func (c *CassandraTSDB) aggregateShard(
 	lastNotifiedAggretedFrom *time.Time,
 ) (bool, time.Time) {
 	name := shardStatePrefix + strconv.Itoa(shard)
+	now := time.Now()
+	maxTime := now.Truncate(aggregateSize)
+
+	if c.options.ReadOnly {
+		if maxTime.After(*lastNotifiedAggretedFrom) {
+			c.logger.Debug().Str("shard-name", name).Msg("read-only is enabled, skip aggregation")
+
+			*lastNotifiedAggretedFrom = maxTime
+		}
+
+		return false, time.Time{}
+	}
 
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
 	if acquired := lock.TryLock(ctx, 0); !acquired {
@@ -309,9 +321,6 @@ func (c *CassandraTSDB) aggregateShard(
 			fromTime, _ = time.Parse(time.RFC3339, fromTimeStr)
 		}
 	}
-
-	now := time.Now()
-	maxTime := now.Truncate(aggregateSize)
 
 	if fromTime.IsZero() {
 		fromTime = maxTime

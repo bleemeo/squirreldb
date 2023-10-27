@@ -36,6 +36,7 @@ type Options struct {
 	SchemaLock                sync.Locker
 	DefaultTimeToLive         time.Duration
 	AggregateIntendedDuration time.Duration
+	ReadOnly                  bool
 }
 
 type lockFactory interface {
@@ -73,15 +74,19 @@ func New(
 	state types.State,
 	logger zerolog.Logger,
 ) (*CassandraTSDB, error) {
-	options.SchemaLock.Lock()
-	defer options.SchemaLock.Unlock()
+	if options.ReadOnly {
+		logger.Debug().Msg("Read-only mode is activated. Not trying to create tables and assuming they exist")
+	} else {
+		options.SchemaLock.Lock()
+		defer options.SchemaLock.Unlock()
 
-	if err := dataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
-		return nil, fmt.Errorf("create table data: %w", err)
-	}
+		if err := dataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
+			return nil, fmt.Errorf("create table data: %w", err)
+		}
 
-	if err := aggregateDataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
-		return nil, fmt.Errorf("create table data_aggregated: %w", err)
+		if err := aggregateDataTableCreate(ctx, connection, options.DefaultTimeToLive); err != nil {
+			return nil, fmt.Errorf("create table data_aggregated: %w", err)
+		}
 	}
 
 	tsdb := &CassandraTSDB{

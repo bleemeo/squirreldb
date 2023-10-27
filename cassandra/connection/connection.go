@@ -15,7 +15,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var ErrConnectionClosed = errors.New("connection closed")
+var (
+	ErrConnectionClosed = errors.New("connection closed")
+	ErrIsReadOnly       = errors.New("trying to write but read-only mode is enabled")
+)
 
 // Connection wraps a Cassandra connection (wrapper around gocql.ClusterConfig) and allow to acquire
 // a (cached) gocql.Session. The session is returned to every call to Session() unless Connection
@@ -24,6 +27,7 @@ var ErrConnectionClosed = errors.New("connection closed")
 type Connection struct {
 	l                         sync.Mutex
 	logger                    zerolog.Logger
+	readOnly                  bool
 	cluster                   *gocql.ClusterConfig
 	currentSessionID          int
 	sessionUserCount          map[int]int
@@ -37,7 +41,11 @@ type Connection struct {
 }
 
 // New creates a new Cassandra session and return if the keyspace was create by this instance.
-func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (*Connection, bool, error) {
+func New(ctx context.Context,
+	options config.Cassandra,
+	readOnly bool,
+	logger zerolog.Logger,
+) (*Connection, bool, error) {
 	cluster := gocql.NewCluster(options.Addresses...)
 	cluster.Timeout = 5 * time.Second
 	cluster.Consistency = gocql.All
@@ -104,6 +112,7 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 		cancel:           cancel,
 		wakeRunLoop:      wakeRunLoop,
 		observer:         &connectObserver{wakeRunLoop: wakeRunLoop},
+		readOnly:         readOnly,
 	}
 
 	manager.wg.Add(1)
@@ -116,7 +125,23 @@ func New(ctx context.Context, options config.Cassandra, logger zerolog.Logger) (
 }
 
 // Session return a *gocql.Session, possibly using a cached one. The returned session should be short-lived.
+// The returned session could be used for writing. If read-only mode is enabled, this function will fail with
+// ErrIsReadOnly. Prefer SessionReadOnly for read-only access.
 func (c *Connection) Session() (*SessionWrapper, error) {
+	return c.session(true)
+}
+
+// SessionReadOnly return a *gocql.Session, possibly using a cached one. The returned session should be short-lived.
+// The returned session should only be used for reading, not writing.
+func (c *Connection) SessionReadOnly() (*SessionWrapper, error) {
+	return c.session(false)
+}
+
+func (c *Connection) session(withWrite bool) (*SessionWrapper, error) {
+	if withWrite && c.readOnly {
+		return nil, ErrIsReadOnly
+	}
+
 	c.l.Lock()
 	defer c.l.Unlock()
 

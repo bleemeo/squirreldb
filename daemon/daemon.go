@@ -84,6 +84,15 @@ type SquirrelDB struct {
 // is ready.
 // On error, we can retry calling Start() which will resume starting SquirrelDB.
 func (s *SquirrelDB) Start(ctx context.Context) error {
+	if s.Config.Internal.ReadOnly {
+		s.Logger.Warn().Msg("internal.read_only is enabled. All writes will fail.")
+
+		if s.Config.Telemetry.Enabled {
+			s.Logger.Debug().Msg("Disable telemetry since read-only mode is activated")
+			s.Config.Telemetry.Enabled = false
+		}
+	}
+
 	if s.Config.Internal.DisableBackgroundTask {
 		s.Logger.Warn().Msg("internal.disable_background_task is enabled. Don't use this on production.")
 	}
@@ -433,6 +442,7 @@ func (s *SquirrelDB) CassandraConnection(ctx context.Context) (*connection.Conne
 		session, keyspaceCreated, err := connection.New(
 			ctx,
 			s.Config.Cassandra,
+			s.Config.Internal.ReadOnly,
 			s.Logger.With().Str("component", "connection").Logger(),
 		)
 		if err != nil {
@@ -461,6 +471,7 @@ func (s *SquirrelDB) LockFactory(ctx context.Context) (LockFactory, error) {
 				s.MetricRegistry,
 				connection,
 				s.cassandraKeyspaceCreated,
+				s.Config.Internal.ReadOnly,
 				s.Logger.With().Str("component", "locks").Logger(),
 			)
 			if err != nil {
@@ -494,7 +505,12 @@ func (s *SquirrelDB) States(ctx context.Context) (types.State, error) {
 				return nil, err
 			}
 
-			states, err := states.New(ctx, connection, lock)
+			states, err := states.New(ctx, states.Options{
+				Connection: connection,
+				Lock:       lock,
+				ReadOnly:   s.Config.Internal.ReadOnly,
+				Logger:     s.Logger.With().Str("component", "states").Logger(),
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -521,6 +537,7 @@ type namedTasks struct {
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.ListenAddress = s.Config.ListenAddress
+	s.api.ReadOnly = s.Config.Internal.ReadOnly
 	s.api.Index = s.index
 	s.api.Reader = s.store
 	s.api.Writer = s.store
@@ -669,6 +686,8 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 				States:            states,
 				SchemaLock:        schemaLock,
 				Cluster:           cluster,
+				ReadOnly:          s.Config.Internal.ReadOnly,
+				Logger:            s.Logger.With().Str("component", "index").Logger(),
 			}
 
 			wrappedIndex, err = index.New(
@@ -750,6 +769,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 				DefaultTimeToLive:         s.Config.Cassandra.DefaultTimeToLive,
 				AggregateIntendedDuration: s.Config.Cassandra.Aggregate.IntendedDuration,
 				SchemaLock:                schemaLock,
+				ReadOnly:                  s.Config.Internal.ReadOnly,
 			}
 
 			tsdb, err := tsdb.New(
@@ -835,7 +855,12 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.Provider
 				return nil, err
 			}
 
-			store, err = mutable.NewCassandraStore(ctx, connection)
+			store, err = mutable.NewCassandraStore(ctx, mutable.Options{
+				Connection: connection,
+				ReadOnly:   s.Config.Internal.ReadOnly,
+				Logger:     s.Logger.With().Str("component", "mutable-labels").Logger(),
+			})
+
 			if err != nil {
 				return nil, err
 			}
