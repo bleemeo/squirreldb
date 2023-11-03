@@ -166,10 +166,10 @@ func (a *API) init() {
 	router := route.New()
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
-	router.Get("/flush", a.flushHandler)
 	router.Get("/ready", a.readyHandler)
 	router.Get("/debug/", a.debugHelpHandler)
 	router.Get("/debug/index_info", a.indexInfoHandler)
+	router.Get("/debug/flush", a.flushHandler)
 	router.Get("/debug/index_verify", a.indexVerifyHandler)
 	router.Get("/debug/index_dump", a.indexDumpHandler)
 	router.Get("/debug/index_dump_by_labels", a.indexDumpByLabelsHandler)
@@ -180,7 +180,6 @@ func (a *API) init() {
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
 	router.Post("/debug/mutable_import", a.mutableImportHandler)
-	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
@@ -399,6 +398,14 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 
 /debug/pprof/
 	Golang pprof endpoints
+
+/debug/flush
+	Write metric from the memory store to Cassandra.
+	SquirrelDB first write incoming points to a memory store with fast random access (Redis or local memory),
+	and after some time write them to Cassandra. This is done to improve compression and reduce number of writes
+	to Cassandra.
+	You can force flushing this memory store to Cassandra with this endpoints. This only apply to this SquirrelDB
+	instance, so in a cluster you need to call this endpoint on all SquirrelDB instance.
 
 /debug/mutable_dump
 	Produce a CSV with all known mutable labels.
