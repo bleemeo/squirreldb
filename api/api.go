@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
@@ -52,7 +53,7 @@ type API struct {
 	Index                       types.Index
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
-	MutableLabelWriter          mutable.LabelWriter
+	MutableLabelWriter          MutableLabelInterface
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
@@ -74,6 +75,15 @@ type API struct {
 
 	l                   sync.Mutex
 	defaultDebugRequest bool
+}
+
+type MutableLabelInterface interface {
+	WriteLabelValues(ctx context.Context, lbls []mutable.LabelWithValues) error
+	DeleteLabelValues(ctx context.Context, lbls []mutable.Label) error
+	WriteLabelNames(ctx context.Context, lbls []mutable.LabelWithName) error
+	DeleteLabelNames(ctx context.Context, names []mutable.LabelKey) error
+	Dump(ctx context.Context, w io.Writer) error
+	Import(ctx context.Context, r io.Reader, w io.Writer, dryRun bool) error
 }
 
 // NewPrometheus returns a new initialized Prometheus web API.
@@ -168,6 +178,8 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
 	router.Get("/debug/toggle_debug_query", a.toggleDebugQueryHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
+	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
+	router.Post("/debug/mutable_import", a.mutableImportHandler)
 	router.Get("/debug_preaggregate", a.aggregateHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
@@ -494,6 +506,35 @@ func (a *API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
 
 		return
+	}
+}
+
+func (a *API) mutableDumpHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if err := a.MutableLabelWriter.Dump(ctx, w); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+}
+
+func (a *API) mutableImportHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	force := len(req.URL.Query()["force"]) > 1
+
+	if err := a.MutableLabelWriter.Import(ctx, req.Body, w, !force); err != nil {
+		http.Error(w, fmt.Sprintf("Index import failed: %v", err), http.StatusInternalServerError)
+
+		return
+	}
+
+	if !force {
+		fmt.Fprintln(
+			w,
+			"To apply change, add \"force\" parameter (e.g. curl http://localhost:9201/debug/mutable_import?force [...])",
+		)
 	}
 }
 

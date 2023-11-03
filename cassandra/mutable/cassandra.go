@@ -26,6 +26,7 @@ type Store interface {
 	DeleteAssociatedValues(ctx context.Context, label Label) error
 	SetAssociatedName(ctx context.Context, label LabelWithName) error
 	SetAssociatedValues(ctx context.Context, label LabelWithValues) error
+	AllMutableLabels(ctx context.Context) ([]LabelWithName, error)
 }
 
 // NewCassandraStore returns a new Cassandra mutable label store.
@@ -246,4 +247,28 @@ func (cp *cassandra) DeleteAssociatedName(ctx context.Context, tenant, name stri
 	}
 
 	return nil
+}
+
+// AllMutableLabels return the list of all known mutable labels from all tenants.
+// Currently this function is not optimized (it does a Cassandra full scan) and should be avoided if possible.
+func (cp *cassandra) AllMutableLabels(ctx context.Context) ([]LabelWithName, error) {
+	session, err := cp.options.Connection.SessionReadOnly()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]LabelWithName, 0)
+	iter := session.Query("SELECT tenant, name, associated_name FROM mutable_label_names").WithContext(ctx).Iter()
+
+	var currentLabel LabelWithName
+
+	for iter.Scan(&currentLabel.Tenant, &currentLabel.Name, &currentLabel.AssociatedName) {
+		result = append(result, currentLabel)
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, fmt.Errorf("select tenants: %w", err)
+	}
+
+	return result, ctx.Err()
 }
