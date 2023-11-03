@@ -380,22 +380,67 @@ func (a *API) readyHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
-	fmt.Fprintln(w, "The following debug enpoints exists")
-	fmt.Fprintln(w, "/debug/index_info: provide global information")
-	fmt.Fprintln(w, "/debug/index_info?metricID=XXX: provide information on given metric ID")
-	fmt.Fprintln(w, "/debug/index_info?verbose&metricID=XXX: provide more information on given metric ID")
-	fmt.Fprintln(w, "/debug/index_dump: all known metrics")
-	fmt.Fprintln(w, "/debug/index_dump_by_labels?query=cpu_used{instance=\"my_server\"}&start=2006-01-02&end=2006-01-02")
-	fmt.Fprintln(w, "/debug/index_dump_by_expiration?date=2006-01-02: metrics to check for expiration at given date")
-	fmt.Fprintln(w, "/debug/index_dump_by_shard?shard_time=2006-01-02: metrics in given shard")
-	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used&value=/: metrics in given posting")
-	fmt.Fprintln(w, "/debug/index_dump_by_posting?shard_time=2006-01-02&name=disk_used: metrics in given postings ")
-	fmt.Fprintln(w, "/debug/update_shard_expiration?ttlDays=365: update all shard expirations with a ttl of one year")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "With the dump_by_posting you can omit the shard_time, which will query the special global shard.")
-	fmt.Fprintln(w, "This allows to query the globalShardNumber which contains few special values (like all ")
-	fmt.Fprintln(w, "assigned ID, existing shard,...)")
-	fmt.Fprintln(w, "")
+	fmt.Fprint(w, `The following index info enpoints exists
+
+/debug/index_info
+	provide global information about index
+
+/debug/index_info?metricID=XXX
+	provide information on given metric ID
+
+/debug/toggle_debug_query
+	Enable or disable some tracing of query submitted to SquirrelDB. This could be very verbose.
+	By using the header X-SquirrelDB-Query-Debug you could enable tracing for a single query.
+
+/debug/preaggregate?from=2006-01-02&to=2006-01-02
+	(Re)-run the preaggragation on specified day(s). If you inserted data with timestamp older than
+	ingestion window (8 hours), the pre-aggregation might already have processed that day.
+	This endpoints allow to force re-running the pre-aggregations on that day.
+
+/debug/pprof/
+	Golang pprof endpoints
+
+/debug/mutable_dump
+	Produce a CSV with all known mutable labels.
+
+/debug/mutable_import
+	Remove all known mutable labels and add all labels provided by input CSV.
+	Example of curl to export/import:
+	$ curl http://localhost:9201/debug/mutable_dump > file.csv
+	$ curl http://localhost:9201/debug/mutable_import --data-binary @file.csv
+
+The is some index dump enpoints, that produce CSV export of the index information.
+The CSV format is: metricID, labels,expirationDate
+
+/debug/index_dump
+	Returns all known metrics
+
+/debug/index_dump_by_labels?query=cpu_used{instance=\"my_server\"}
+	Returns metrics matching a PromQL query. The "query" parameter is required.
+	You can optionally provide "start" and "end" parameters (format 2006-01-02) to limit the search
+	to a time range. Default is from 1971 to now
+
+/debug/index_dump_by_expiration?date=2006-01-02
+	Returns metrics that will be checked for expiration at "date" parameter.
+	The metrics don't necessary expire at this date, but SquirrelDB will check for their expiration at this date.
+	The way expiration works is that SquirrelDB write in a bucket per day metrics that need to be checked for expiration
+	to avoid scanning the whole index for expiration.
+
+/debug/index_dump_by_shard?shard_time=2006-01-02
+	Returns metrics contained in shard for given "shard_time" parameter.
+	SquirrelDB index is sharded by time, the shard size is 7 days. Each week a new shard is created.
+
+/debug/index_dump_by_posting?name=__name__
+	Returns metrics matching label name/value couple (called posting in SquirrelDB index)
+	If only "name" parameter is provided, returns metrics that had a label with that name regardless of the label value.
+	If both "name" and "value" parameters are provided, returns metrics that had the same label name and value matching
+	You can optionally provide "shard_time" parameter to query a specific index shard. Default is now.
+
+	You can also use the value "0001-01-01" for shard_time, in order to query the SquirrelDB special global shard. This
+	shard contains special value. Example (remember to use quote in your shell):
+	/debug/index_dump_by_posting?shard_time=0001-01-01&name=__global__all|metrics__
+
+`)
 }
 
 func (a *API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
@@ -656,7 +701,7 @@ func getIndexDumpByPostingArgument(req *http.Request) (time.Time, string, string
 		return time.Time{}, "", "", `Expect at most one parameter "shard_time"`
 	}
 
-	var date time.Time
+	date := time.Now()
 
 	if len(dates) == 1 {
 		var err error
