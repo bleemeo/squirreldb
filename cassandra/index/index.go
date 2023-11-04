@@ -48,6 +48,7 @@ const (
 const (
 	metricCreationLockTimeToLive  = 15 * time.Second
 	metricExpiratorLockTimeToLive = 10 * time.Minute
+	blockLockTimeToLive           = 5 * time.Minute
 )
 
 // Update TTL of index entries in Cassandra every update delay.
@@ -712,6 +713,28 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		)
 	}
 
+	block, ttl, err := c.newMetricGlobalLock.BlockStatus(ctx)
+	if err != nil {
+		return err
+	}
+
+	if block {
+		fmt.Fprintf(w, "Lock %s is blocked with remaining TTL of %v\n", newMetricLockName, ttl)
+	} else {
+		fmt.Fprintf(w, "Lock %s is unblocked\n", newMetricLockName)
+	}
+
+	block, ttl, err = c.expirationGlobalLock.BlockStatus(ctx)
+	if err != nil {
+		return err
+	}
+
+	if block {
+		fmt.Fprintf(w, "Lock %s is blocked with remaining TTL of %v\n", expireMetricLockName, ttl)
+	} else {
+		fmt.Fprintf(w, "Lock %s is unblocked\n", expireMetricLockName)
+	}
+
 	return nil
 }
 
@@ -815,6 +838,30 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 				fmt.Fprintf(w, "Shard %s: all postings are present\n", timeForShard(int32(shard)).Format(shardDateFormat))
 			}
 		}
+	}
+
+	return nil
+}
+
+func (c *CassandraIndex) BlockCassandraWrite(ctx context.Context) error {
+	if err := c.expirationGlobalLock.BlockLock(ctx, blockLockTimeToLive); err != nil {
+		return fmt.Errorf("block expirationGlobalLock fail: %w", err)
+	}
+
+	if err := c.newMetricGlobalLock.BlockLock(ctx, blockLockTimeToLive); err != nil {
+		return fmt.Errorf("block newMetricGlobalLock fail: %w", err)
+	}
+
+	return nil
+}
+
+func (c *CassandraIndex) UnblockCassandraWrite(ctx context.Context) error {
+	if err := c.expirationGlobalLock.UnblockLock(ctx); err != nil {
+		return fmt.Errorf("unblock expirationGlobalLock fail: %w", err)
+	}
+
+	if err := c.newMetricGlobalLock.UnblockLock(ctx); err != nil {
+		return fmt.Errorf("unblock newMetricGlobalLock fail: %w", err)
 	}
 
 	return nil

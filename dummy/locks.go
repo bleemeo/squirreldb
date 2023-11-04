@@ -17,6 +17,7 @@ type Locks struct {
 type tryLocker struct {
 	l        sync.Mutex
 	acquired bool
+	blocked  bool
 }
 
 // CreateLock return a TryLocker for given name.
@@ -86,4 +87,50 @@ func (l *tryLocker) Unlock() {
 
 func (l *tryLocker) Lock() {
 	l.TryLock(context.Background(), 10*time.Second)
+}
+
+// BlockLock block Lock() from other thread. blockTTL isn't used on dummy Lock.
+func (l *tryLocker) BlockLock(ctx context.Context, blockTTL time.Duration) error {
+	_ = blockTTL
+	blockDone := false
+
+	for ctx.Err() == nil && !blockDone {
+		l.l.Lock()
+
+		if l.blocked {
+			// we can re-call BlockLock to refresh the blocking status
+			blockDone = true
+		}
+
+		if !l.blocked && !l.acquired {
+			l.blocked = true
+			l.acquired = true
+			blockDone = true
+		}
+
+		l.l.Unlock()
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return ctx.Err()
+}
+
+func (l *tryLocker) UnblockLock(_ context.Context) error {
+	l.l.Lock()
+	defer l.l.Unlock()
+
+	if l.blocked {
+		l.acquired = false
+		l.blocked = false
+	}
+
+	return nil
+}
+
+func (l *tryLocker) BlockStatus(_ context.Context) (bool, time.Duration, error) {
+	l.l.Lock()
+	defer l.l.Unlock()
+
+	return l.blocked, time.Second, nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 //nolint:lll,gochecknoglobals
@@ -29,9 +30,15 @@ var (
 	workerDelay     = flag.Duration("worker-delay", 10*time.Millisecond, "Delay after a successful task and the next attempt for thread")
 	tryLockDelay    = flag.Duration("try-lock-duration", 2*time.Second, "If delay given to TryLock()")
 	recreateLock    = flag.Bool("recreate-lock", false, "Create the lock object in each time needed (default is create it once per processes)")
+	withBlock       = flag.Bool("with-block", false, "Use Block/Unblock from time to time")
 	lockTTL         = flag.Duration("lock-ttl", 5*time.Second, "TTL of the locks")
 	lockName        = flag.String("lock-name", "benchmarking-lock", "Name prefix of the lock")
 	count           = flag.Int("count", 1, "Number of different lock/task")
+)
+
+const (
+	blockDuration = 3 * time.Second
+	blockDelay    = 6 * time.Second
 )
 
 type result struct {
@@ -120,6 +127,16 @@ func run(ctx context.Context) error {
 					resultChan <- stats
 				}()
 			}
+		}
+
+		if *withBlock && p == 0 {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				blockerWorker(ctx, jobRunning, lockFactory)
+			}()
 		}
 	}
 
@@ -290,6 +307,91 @@ func worker(
 			cancel()
 		}
 	}
+
+	return r
+}
+
+func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.LockFactory) result {
+	r := result{}
+	blockCount := 0
+
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+		case <-time.After(blockDelay):
+		}
+
+		if ctx.Err() != nil {
+			break
+		}
+
+		var grp errgroup.Group
+
+		for n := 0; n < *count; n++ {
+			n := n
+			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
+
+			grp.Go(func() error {
+				lock := lockFactory.CreateLock(subLockName, *lockTTL)
+
+				if err := lock.BlockLock(ctx, time.Minute); err != nil {
+					return fmt.Errorf("failed to acquire lock for n=%d: %w", n, err)
+				}
+
+				return nil
+			})
+		}
+
+		if err := grp.Wait(); err != nil {
+			log.Error().Err(err).Msg("BlockLock failed, aborting block-lock")
+			r.ErrCount++
+
+			break
+		}
+
+		blockCount++
+
+		deadline := time.Now().Add(blockDuration)
+
+		for ctx.Err() == nil && time.Now().Before(deadline) {
+			for n := 0; n < *count; n++ {
+				running := atomic.LoadInt32(&jobRunning[n])
+				if running > 0 {
+					log.Error().Int("n", n).Msgf("job are running while lock is blocked ! jobRunning=%d", running)
+
+					r.ErrCount++
+
+					deadline = time.Now()
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		for n := 0; n < *count; n++ {
+			n := n
+			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
+
+			grp.Go(func() error {
+				lock := lockFactory.CreateLock(subLockName, *lockTTL)
+
+				if err := lock.UnblockLock(ctx); err != nil {
+					return fmt.Errorf("failed to release lock for n=%d: %w", n, err)
+				}
+
+				return nil
+			})
+		}
+
+		if err := grp.Wait(); err != nil {
+			log.Error().Err(err).Msg("BlockLock failed, aborting block-lock")
+			r.ErrCount++
+
+			break
+		}
+	}
+
+	log.Info().Int("blockCount", blockCount).Msg("blockerWorker finished")
 
 	return r
 }
