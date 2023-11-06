@@ -742,6 +742,18 @@ func (i *readIter) Next() bool {
 
 		hasNext := i.tryNext(id)
 		if hasNext {
+			if i.request.EnableDebug {
+				i.b.logger.Info().Msgf(
+					"Read ID=%d: %d points",
+					id,
+					len(i.current.Points),
+				)
+			}
+
+			if i.request.EnableVerboseDebug {
+				i.b.logger.Info().Msgf("Read ID=%d, points=%v", id, i.current.Points)
+			}
+
 			return true
 		}
 	}
@@ -757,6 +769,7 @@ func (i *readIter) tryNext(id types.MetricID) bool {
 		ForcePreAggregated: i.request.ForcePreAggregated,
 		ForceRaw:           i.request.ForceRaw,
 		EnableDebug:        i.request.EnableDebug,
+		EnableVerboseDebug: i.request.EnableVerboseDebug,
 	}
 
 	temporaryMetrics, err := i.b.readTemporary(

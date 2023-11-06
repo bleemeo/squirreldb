@@ -35,6 +35,7 @@ type MetricRequest struct {
 	ForceRaw           bool
 	StepMs             int64
 	EnableDebug        bool
+	EnableVerboseDebug bool
 }
 
 // CopyPoints returns a copy of points.

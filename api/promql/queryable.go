@@ -42,6 +42,7 @@ type querier struct {
 	ctx                context.Context //nolint:containedctx
 	logger             zerolog.Logger
 	enableDebug        bool
+	enableVerboseDebug bool
 	index              IndexWithStats
 	reader             MetricReaderWithStats
 	mint               int64
@@ -174,6 +175,12 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
+	enableVerboseDebug := r.Header.Get(types.HeaderQueryVerboseDebug) != ""
+
+	if enableVerboseDebug {
+		enableDebug = true
+	}
+
 	if enableDebug {
 		minTime := time.UnixMilli(mint)
 		maxTime := time.UnixMilli(maxt)
@@ -188,14 +195,15 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	q := querier{
-		ctx:         ctx,
-		logger:      s.Logger,
-		enableDebug: enableDebug,
-		index:       limitIndex,
-		reader:      reader,
-		mint:        mint,
-		maxt:        maxt,
-		metrics:     s.metrics,
+		ctx:                ctx,
+		logger:             s.Logger,
+		enableDebug:        enableDebug,
+		enableVerboseDebug: enableVerboseDebug,
+		index:              limitIndex,
+		reader:             reader,
+		mint:               mint,
+		maxt:               maxt,
+		metrics:            s.metrics,
 	}
 
 	value = r.Header.Get(types.HeaderForcePreAggregated)
@@ -317,6 +325,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		ForcePreAggregated: q.forcePreAggregated,
 		ForceRaw:           q.forceRaw,
 		EnableDebug:        q.enableDebug,
+		EnableVerboseDebug: q.enableVerboseDebug,
 	}
 
 	if hints != nil {
