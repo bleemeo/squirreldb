@@ -21,7 +21,10 @@ import (
 const (
 	retryMaxDelay = 30 * time.Second
 	unlockTimeout = 15 * time.Second
+	blockLockID   = "this-lock-is-blocked"
 )
+
+var errBlockExpired = errors.New("unable to clear lock, this should mean the block TTL expired")
 
 type CassandraLocks struct {
 	connection *connection.Connection
@@ -141,41 +144,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 		panic("impossible case: tryLock should never be called when Cassandra lock is acquired")
 	}
 
-	start := time.Now()
-
-	holder, acquired, err := l.locksTableInsertLock(ctx)
-
-	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
-
-	if err != nil {
-		l.logger.Err(err).Str("lock-name", l.name).Msgf("Unable to acquire lock")
-
-		// Be careful, it indeed a pointer and we took the address...
-		// We have to guess that gocql will return a pointer to this error
-		// or errors.As won't work :(
-		var unused *gocql.RequestErrWriteTimeout
-
-		// The context *may* be canceled after C* took the look. So try to unlock it.
-		// Also if C* reply with timeout, we actually don't known if write succeeded or not.
-		if ctx.Err() != nil || errors.As(err, &unused) {
-			cassStart := time.Now()
-
-			subCtx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
-			defer cancel()
-
-			// It will try to delete the lock even if main context is cancelled, so use
-			// a new background context for this.
-			_, err = l.locksTableDeleteLock(subCtx) //nolint: contextcheck
-			if err != nil {
-				l.logger.Debug().Err(err).Str("lock-name", l.name).Msg("Opportunistic unlock failed")
-			}
-
-			l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
-		}
-
-		return false
-	}
-
+	acquired, holder := l.tryLockCassandra(ctx, l.lockID, l.timeToLive)
 	if !acquired {
 		l.logger.
 			Debug().
@@ -202,6 +171,95 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}()
 
 	return true
+}
+
+// tryLockCassandra try to acquire the Lock on Cassandra.
+func (l *Lock) tryLockCassandra(ctx context.Context, lockID string, ttl time.Duration) (bool, string) {
+	start := time.Now()
+
+	holder, acquired, err := l.locksTableInsertLock(ctx, lockID, ttl)
+
+	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		l.logger.Err(err).Str("lock-name", l.name).Msgf("Unable to acquire lock")
+
+		// Be careful, it indeed a pointer and we took the address...
+		// We have to guess that gocql will return a pointer to this error
+		// or errors.As won't work :(
+		var unused *gocql.RequestErrWriteTimeout
+
+		// The context *may* be canceled after C* took the look. So try to unlock it.
+		// Also if C* reply with timeout, we actually don't known if write succeeded or not.
+		if ctx.Err() != nil || errors.As(err, &unused) {
+			cassStart := time.Now()
+
+			subCtx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
+			defer cancel()
+
+			// It will try to delete the lock even if main context is cancelled, so use
+			// a new background context for this.
+			_, err = l.locksTableDeleteLock(subCtx, lockID) //nolint: contextcheck
+			if err != nil {
+				l.logger.Debug().Err(err).Str("lock-name", l.name).Msg("Opportunistic unlock failed")
+			}
+
+			l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
+		}
+
+		return false, ""
+	}
+
+	return acquired, holder
+}
+
+// BlockLock will block this locks on Cassandra for at least TTL.
+// This method is mostly taking the lock, but in a way that both refreshing it or unlocking it
+// could be done by any SquirrelDB in the cluster.
+// It's usage is to temporary block a process that use a lock, for example by calling a curl on dedicated URL.
+// Refreshing the lock also use this same function, so that function either take the lock or if already taken
+// (by a previous call to BlockLock) it will refresh it.
+func (l *Lock) BlockLock(ctx context.Context, blockTTL time.Duration) error {
+	for ctx.Err() == nil {
+		acquired, _ := l.tryLockCassandra(ctx, blockLockID, blockTTL)
+
+		if acquired {
+			break
+		}
+
+		jitter := 1 + rand.Float64()/5 //nolint:gosec
+		select {
+		case <-time.After(time.Duration(jitter) * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return nil
+}
+
+// UnblockLock will unblock a lock previously blocked by BlockLock.
+func (l *Lock) UnblockLock(ctx context.Context) error {
+	applied, err := l.locksTableDeleteLock(ctx, blockLockID)
+	if err == nil && !applied {
+		return errBlockExpired
+	}
+
+	return err
+}
+
+// BlockStatus returns whether the lock is block and the remaining TTL duration.
+func (l *Lock) BlockStatus(ctx context.Context) (bool, time.Duration, error) {
+	holder, ttl, err := l.locksReadLock(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if holder == blockLockID {
+		return true, ttl, nil
+	}
+
+	return false, 0, nil
 }
 
 // TryLock will try to acquire the lock until ctx expire.
@@ -312,7 +370,7 @@ func (l *Lock) Unlock() {
 		ctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
 		defer cancel()
 
-		applied, err := l.locksTableDeleteLock(ctx)
+		applied, err := l.locksTableDeleteLock(ctx, l.lockID)
 		if err == nil && !applied {
 			l.logger.
 				Warn().
@@ -363,7 +421,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 	}
 }
 
-func (l *Lock) locksTableDeleteLock(ctx context.Context) (bool, error) {
+func (l *Lock) locksTableDeleteLock(ctx context.Context, lockID string) (bool, error) {
 	session, err := l.c.connection.Session()
 	if err != nil {
 		return false, err
@@ -375,13 +433,47 @@ func (l *Lock) locksTableDeleteLock(ctx context.Context) (bool, error) {
 		DELETE FROM "locks"
 		WHERE name = ?
 		IF lock_id = ?`,
-		l.name, l.lockID,
+		l.name, lockID,
 	).SerialConsistency(gocql.LocalSerial).WithContext(ctx)
 
 	return query.ScanCAS(nil)
 }
 
-func (l *Lock) locksTableInsertLock(ctx context.Context) (string, bool, error) {
+// locksReadLock return the lock holder and the remaining TTL.
+// Lock holder is the empty string if lock is no acquired.
+func (l *Lock) locksReadLock(ctx context.Context) (string, time.Duration, error) {
+	var (
+		holder     string
+		ttlSeconds int
+	)
+
+	session, err := l.c.connection.Session()
+	if err != nil {
+		return "", 0, err
+	}
+
+	defer session.Close()
+
+	query := session.Query(`
+		SELECT lock_id, ttl(lock_id)
+		FROM "locks"
+		WHERE name = ?`,
+		l.name,
+	).WithContext(ctx)
+
+	err = query.Scan(&holder, &ttlSeconds)
+	if errors.Is(err, gocql.ErrNotFound) {
+		return "", 0, nil
+	}
+
+	if err != nil {
+		return "", 0, err
+	}
+
+	return holder, time.Duration(ttlSeconds) * time.Second, nil
+}
+
+func (l *Lock) locksTableInsertLock(ctx context.Context, lockID string, ttl time.Duration) (string, bool, error) {
 	var holder string
 
 	session, err := l.c.connection.Session()
@@ -397,7 +489,7 @@ func (l *Lock) locksTableInsertLock(ctx context.Context) (string, bool, error) {
 		SET lock_id = ?, timestamp = toUnixTimestamp(now())
 		WHERE name = ?
 		IF lock_id in (?, NULL)`,
-		int64(l.timeToLive.Seconds()), l.lockID, l.name, l.lockID,
+		int64(ttl.Seconds()), lockID, l.name, lockID,
 	).SerialConsistency(gocql.LocalSerial).WithContext(ctx)
 
 	acquired, err := query.ScanCAS(&holder)

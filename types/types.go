@@ -68,6 +68,11 @@ type IndexDumper interface {
 	DumpByPosting(ctx context.Context, w io.Writer, shard time.Time, name string, value string) error
 }
 
+type IndexBlocker interface {
+	BlockCassandraWrite(context.Context) error
+	UnblockCassandraWrite(context.Context) error
+}
+
 type VerifiableIndex interface {
 	Verifier(w io.Writer) IndexVerifier
 }
@@ -116,12 +121,15 @@ type MetricReadWriter interface {
 	MetricWriter
 }
 
-// TryLocker is a Locker with an additional TryLock() method.
+// TryLocker is a Locker with an additional TryLock() method and blocking methods.
 type TryLocker interface {
 	sync.Locker
 
 	// TryLock try to acquire a lock but return false if unable to acquire it.
 	TryLock(ctx context.Context, retryDelay time.Duration) bool
+	BlockLock(ctx context.Context, blockTTL time.Duration) error
+	UnblockLock(ctx context.Context) error
+	BlockStatus(ctx context.Context) (bool, time.Duration, error)
 }
 
 type State interface {

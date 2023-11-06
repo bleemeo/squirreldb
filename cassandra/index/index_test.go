@@ -50,6 +50,8 @@ const (
 	MetricIDTest15
 )
 
+var errNotImplemented = errors.New("not implemented")
+
 type mockTime struct {
 	l   sync.Mutex
 	now time.Time
@@ -153,6 +155,20 @@ type mockLock struct {
 
 func (l *mockLock) Lock() {
 	l.TryLock(context.Background(), 10*time.Second)
+}
+
+func (l *mockLock) BlockLock(_ context.Context, blockTTL time.Duration) error {
+	_ = blockTTL
+
+	return errNotImplemented
+}
+
+func (l *mockLock) UnblockLock(_ context.Context) error {
+	return errNotImplemented
+}
+
+func (l *mockLock) BlockStatus(_ context.Context) (bool, time.Duration, error) {
+	return false, 0, errNotImplemented
 }
 
 func (l *mockLock) Unlock() {

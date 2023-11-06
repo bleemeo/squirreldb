@@ -185,6 +185,22 @@ func (i *indexWrapper) InfoByID(ctx context.Context, w io.Writer, id types.Metri
 	return errNotImplemented
 }
 
+func (i *indexWrapper) BlockCassandraWrite(ctx context.Context) error {
+	if blocker, ok := i.index.(types.IndexBlocker); ok {
+		return blocker.BlockCassandraWrite(ctx)
+	}
+
+	return errNotImplemented
+}
+
+func (i *indexWrapper) UnblockCassandraWrite(ctx context.Context) error {
+	if blocker, ok := i.index.(types.IndexBlocker); ok {
+		return blocker.UnblockCassandraWrite(ctx)
+	}
+
+	return errNotImplemented
+}
+
 // DumpByLabels implements the IndexDumper interface used by the API.
 func (i *indexWrapper) DumpByLabels(
 	ctx context.Context,

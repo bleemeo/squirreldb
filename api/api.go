@@ -176,6 +176,8 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
 	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
+	router.Get("/debug/index_block", a.indexBlockHandler)
+	router.Get("/debug/index_unblock", a.indexUnblockHandler)
 	router.Get("/debug/toggle_debug_query", a.toggleDebugQueryHandler)
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
@@ -415,6 +417,14 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 	Example of curl to export/import:
 	$ curl http://localhost:9201/debug/mutable_dump > file.csv
 	$ curl http://localhost:9201/debug/mutable_import --data-binary @file.csv
+
+/debug/index_block
+	Block write on Cassandra for 5 minutes. Use /debug/index_unblock to
+	release the block before the 5 minutes delay. Re-use /debug/index_block
+	to extend to block duration.
+
+/debug/index_unblock
+	Undo the block from /debug/index_block
 
 The is some index dump enpoints, that produce CSV export of the index information.
 The CSV format is: metricID, labels,expirationDate
@@ -756,6 +766,42 @@ func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request
 		}
 	} else {
 		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a *API) indexBlockHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(types.IndexBlocker); ok {
+		if err := idx.BlockCassandraWrite(ctx); err != nil {
+			http.Error(w, fmt.Sprintf("Index block failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+
+		fmt.Fprintln(w, "Write to Cassandra blocked")
+	} else {
+		http.Error(w, "Index does not implement BlockCassandraWrite()", http.StatusNotImplemented)
+
+		return
+	}
+}
+
+func (a *API) indexUnblockHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	if idx, ok := a.Index.(types.IndexBlocker); ok {
+		if err := idx.UnblockCassandraWrite(ctx); err != nil {
+			http.Error(w, fmt.Sprintf("Index block failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
+
+		fmt.Fprintln(w, "Write to Cassandra unblocked")
+	} else {
+		http.Error(w, "Index does not implement UnblockCassandraWrite()", http.StatusNotImplemented)
 
 		return
 	}
