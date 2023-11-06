@@ -73,7 +73,7 @@ type SquirrelDB struct {
 	persistentStore          MetricReadWriter
 	store                    MetricReadWriter
 	api                      api.API
-	mutableLabelProvider     mutable.ProviderAndWriter
+	mutableLabelProvider     mutable.LabelProvider
 	mutableLabelProcessor    *mutable.LabelProcessor
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
@@ -844,7 +844,7 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 	return s.mutableLabelProcessor, nil
 }
 
-func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.ProviderAndWriter, error) {
+func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.LabelProvider, error) {
 	if s.mutableLabelProvider == nil {
 		var store mutable.Store
 

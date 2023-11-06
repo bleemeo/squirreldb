@@ -101,3 +101,19 @@ func (s mutableLabelStore) SetAssociatedName(_ context.Context, _ mutable.LabelW
 func (s mutableLabelStore) SetAssociatedValues(_ context.Context, _ mutable.LabelWithValues) error {
 	return errNotImplemented
 }
+
+func (s mutableLabelStore) AllMutableLabels(_ context.Context) ([]mutable.LabelWithName, error) {
+	result := make([]mutable.LabelWithName, 0)
+
+	for tenant, subMap := range s.labels.AssociatedNames {
+		for labelName, associatedName := range subMap {
+			result = append(result, mutable.LabelWithName{
+				Tenant:         tenant,
+				Name:           labelName,
+				AssociatedName: associatedName,
+			})
+		}
+	}
+
+	return result, nil
+}
