@@ -6,10 +6,17 @@ import (
 	"squirreldb/cassandra/connection"
 
 	"github.com/gocql/gocql"
+	"github.com/rs/zerolog"
 )
 
+type Options struct {
+	Connection *connection.Connection
+	ReadOnly   bool
+	Logger     zerolog.Logger
+}
+
 type cassandra struct {
-	connection *connection.Connection
+	options Options
 }
 
 type Store interface {
@@ -22,9 +29,9 @@ type Store interface {
 }
 
 // NewCassandraStore returns a new Cassandra mutable label store.
-func NewCassandraStore(ctx context.Context, connection *connection.Connection) (Store, error) {
+func NewCassandraStore(ctx context.Context, options Options) (Store, error) {
 	cp := &cassandra{
-		connection: connection,
+		options: options,
 	}
 
 	if err := cp.createTables(ctx); err != nil {
@@ -36,7 +43,13 @@ func NewCassandraStore(ctx context.Context, connection *connection.Connection) (
 
 // createTables creates the mutable labels table if it doesn't exist.
 func (cp *cassandra) createTables(ctx context.Context) error {
-	session, err := cp.connection.Session()
+	if cp.options.ReadOnly {
+		cp.options.Logger.Debug().Msg("Read-only mode is activated. Not trying to create tables and assuming they exist")
+
+		return nil
+	}
+
+	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
 	}
@@ -75,7 +88,7 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 
 // AssociatedNames return the associated names map[mutable label name] -> non mutable label name.
 func (cp *cassandra) AssociatedNames(ctx context.Context, tenant string) (map[string]string, error) {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +120,7 @@ func (cp *cassandra) AssociatedNames(ctx context.Context, tenant string) (map[st
 
 // AssociatedValues returns the associated values for a mutable label name and tenant.
 func (cp *cassandra) AssociatedValues(ctx context.Context, tenant, name string) (map[string][]string, error) {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +152,7 @@ func (cp *cassandra) AssociatedValues(ctx context.Context, tenant, name string) 
 
 // SetAssociatedValues sets the non mutable label values associated to a mutable label.
 func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithValues) error {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
 	}
@@ -161,7 +174,7 @@ func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithVal
 
 // DeleteAssociatedValues deletes the non mutable label values associated to a mutable label.
 func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) error {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
 	}
@@ -183,7 +196,7 @@ func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) er
 
 // SetAssociatedName sets the non mutable label name associated to a mutable label name.
 func (cp *cassandra) SetAssociatedName(ctx context.Context, label LabelWithName) error {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
 	}
@@ -205,7 +218,7 @@ func (cp *cassandra) SetAssociatedName(ctx context.Context, label LabelWithName)
 
 // DeleteAssociatedName deletes a mutable label name.
 func (cp *cassandra) DeleteAssociatedName(ctx context.Context, tenant, name string) error {
-	session, err := cp.connection.Session()
+	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
 	}

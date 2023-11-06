@@ -10,23 +10,35 @@ import (
 	"sync"
 
 	"github.com/gocql/gocql"
+	"github.com/rs/zerolog"
 )
 
+type Options struct {
+	Connection *connection.Connection
+	Lock       sync.Locker
+	ReadOnly   bool
+	Logger     zerolog.Logger
+}
+
 type CassandraStates struct {
-	connection *connection.Connection
+	options Options
 }
 
 // New creates a new CassandraStates object.
-func New(ctx context.Context, connection *connection.Connection, lock sync.Locker) (*CassandraStates, error) {
-	lock.Lock()
-	defer lock.Unlock()
+func New(ctx context.Context, options Options) (*CassandraStates, error) {
+	if options.ReadOnly {
+		options.Logger.Debug().Msg("Read-only mode is activated. Not trying to create tables and assuming they exist")
+	} else {
+		options.Lock.Lock()
+		defer options.Lock.Unlock()
 
-	if err := statesTableCreate(ctx, connection); err != nil {
-		return nil, fmt.Errorf("create tables: %w", err)
+		if err := statesTableCreate(ctx, options.Connection); err != nil {
+			return nil, fmt.Errorf("create tables: %w", err)
+		}
 	}
 
 	states := &CassandraStates{
-		connection: connection,
+		options: options,
 	}
 
 	return states, nil
@@ -93,7 +105,7 @@ func (c *CassandraStates) Write(ctx context.Context, name string, value interfac
 
 // Returns states table insert state Query.
 func (c *CassandraStates) statesTableInsertState(ctx context.Context, name string, value string) error {
-	session, err := c.connection.Session()
+	session, err := c.options.Connection.Session()
 	if err != nil {
 		return err
 	}
@@ -113,7 +125,7 @@ func (c *CassandraStates) statesTableInsertState(ctx context.Context, name strin
 func (c *CassandraStates) statesTableSelectState(ctx context.Context, name string) (string, error) {
 	var valueString string
 
-	session, err := c.connection.Session()
+	session, err := c.options.Connection.SessionReadOnly()
 	if err != nil {
 		return "", err
 	}

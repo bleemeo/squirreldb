@@ -108,6 +108,8 @@ type Options struct {
 	SchemaLock        sync.Locker
 	Cluster           types.Cluster
 	DefaultTimeToLive time.Duration
+	ReadOnly          bool
+	Logger            zerolog.Logger
 }
 
 type CassandraIndex struct {
@@ -271,8 +273,12 @@ func initialize(
 		logger:                   logger,
 	}
 
-	if err := index.store.Init(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize store: %w", err)
+	if options.ReadOnly {
+		options.Logger.Debug().Msg("Read-only mode is activated. Not trying to initialize store and assuming it's done")
+	} else {
+		if err := index.store.Init(ctx); err != nil {
+			return nil, fmt.Errorf("failed to initialize store: %w", err)
+		}
 	}
 
 	options.Cluster.Subscribe(clusterChannelPostingInvalidate, index.invalidatePostingsListenner)
@@ -2620,6 +2626,12 @@ func (c *CassandraIndex) expirationLastProcessedDay(ctx context.Context) (time.T
 
 // cassandraExpire remove all entry in Cassandra that have expired.
 func (c *CassandraIndex) cassandraExpire(ctx context.Context, now time.Time) (bool, error) {
+	if c.options.ReadOnly {
+		c.options.Logger.Debug().Msg("Read-only mode is activated. Skipping Cassandra expiration")
+
+		return false, nil
+	}
+
 	if acquired := c.expirationGlobalLock.TryLock(ctx, 0); !acquired {
 		return false, nil
 	}
@@ -4072,7 +4084,7 @@ func (s cassandraStore) SelectLabelsList2ID(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -4110,7 +4122,7 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4148,7 +4160,7 @@ func (s cassandraStore) SelectExpiration(ctx context.Context, day time.Time) ([]
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -4196,7 +4208,7 @@ func (s cassandraStore) SelectPostingByName(ctx context.Context, shard int32, na
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return &cassandraByteIter{err: err}
 	}
@@ -4224,7 +4236,7 @@ func (s cassandraStore) SelectPostingByNameValue(
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -4248,7 +4260,7 @@ func (s cassandraStore) SelectValueForName(ctx context.Context, shard int32, nam
 		s.metrics.CassandraQueriesSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
 	}()
 
-	session, err := s.connection.Session()
+	session, err := s.connection.SessionReadOnly()
 	if err != nil {
 		return nil, nil, err
 	}

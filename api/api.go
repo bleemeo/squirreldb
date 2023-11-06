@@ -48,6 +48,7 @@ var (
 // API it the SquirrelDB HTTP API server.
 type API struct {
 	ListenAddress               string
+	ReadOnly                    bool
 	Index                       types.Index
 	Reader                      types.MetricReader
 	Writer                      types.MetricWriter
@@ -191,15 +192,19 @@ func (a *API) init() {
 		maxConcurrent = runtime.GOMAXPROCS(0) * 2
 	}
 
-	appendable := remotestorage.New(
-		a.Writer,
-		a.Index,
-		maxConcurrent,
-		a.TenantLabelName,
-		a.MutableLabelDetector,
-		a.RequireTenantHeader,
-		a.MetricRegistry,
-	)
+	appendable := remotestorage.NewReadOnly()
+
+	if !a.ReadOnly {
+		appendable = remotestorage.New(
+			a.Writer,
+			a.Index,
+			maxConcurrent,
+			a.TenantLabelName,
+			a.MutableLabelDetector,
+			a.RequireTenantHeader,
+			a.MetricRegistry,
+		)
+	}
 
 	api := NewPrometheus(
 		queryable,

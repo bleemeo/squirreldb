@@ -52,24 +52,29 @@ func New(
 	reg prometheus.Registerer,
 	connection *connection.Connection,
 	createdKeySpace bool,
+	readOnly bool,
 	logger zerolog.Logger,
 ) (*CassandraLocks, error) {
 	var err error
 
-	// Creation of tables concurrently is not possible on Cassandra.
-	// But we don't yet have lock, so use random jitter to reduce change of
-	// collision.
-	// Improve a bit, and make sure the one which created the keyspace
-	// try first to create the tables.
-	if createdKeySpace {
-		time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) //nolint:gosec
+	if readOnly {
+		logger.Debug().Msg("Read-only mode is activated. Not trying to create tables and assuming they exist")
+	} else {
+		// Creation of tables concurrently is not possible on Cassandra.
+		// But we don't yet have lock, so use random jitter to reduce change of
+		// collision.
+		// Improve a bit, and make sure the one which created the keyspace
+		// try first to create the tables.
+		if createdKeySpace {
+			time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) //nolint:gosec
 
-		err = initTable(ctx, connection)
-	} else if !tableExists(ctx, connection) {
-		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint:gosec
-		logger.Debug().Msg("Created lock tables")
+			err = initTable(ctx, connection)
+		} else if !tableExists(ctx, connection) {
+			time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond) //nolint:gosec
+			logger.Debug().Msg("Created lock tables")
 
-		err = initTable(ctx, connection)
+			err = initTable(ctx, connection)
+		}
 	}
 
 	if err != nil {
@@ -90,7 +95,7 @@ func initTable(ctx context.Context, connection *connection.Connection) error {
 }
 
 func tableExists(ctx context.Context, connection *connection.Connection) bool {
-	session, err := connection.Session()
+	session, err := connection.SessionReadOnly()
 	if err != nil {
 		return false
 	}
@@ -143,7 +148,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	l.c.metrics.CassandraQueriesSeconds.WithLabelValues("lock").Observe(time.Since(start).Seconds())
 
 	if err != nil {
-		l.logger.Err(err).Msgf("Unable to acquire lock")
+		l.logger.Err(err).Str("lock-name", l.name).Msgf("Unable to acquire lock")
 
 		// Be careful, it indeed a pointer and we took the address...
 		// We have to guess that gocql will return a pointer to this error
@@ -162,7 +167,7 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 			// a new background context for this.
 			_, err = l.locksTableDeleteLock(subCtx) //nolint: contextcheck
 			if err != nil {
-				l.logger.Debug().Err(err).Msg("Opportunistic unlock failed")
+				l.logger.Debug().Err(err).Str("lock-name", l.name).Msg("Opportunistic unlock failed")
 			}
 
 			l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
@@ -172,7 +177,10 @@ func (l *Lock) tryLock(ctx context.Context) bool {
 	}
 
 	if !acquired {
-		l.logger.Debug().Msgf("tryLock: can't acquire lock %s as it is held by %s (i'm %s)", l.name, holder, l.lockID)
+		l.logger.
+			Debug().
+			Str("lock-name", l.name).
+			Msgf("tryLock: can't acquire lock %s as it is held by %s (i'm %s)", l.name, holder, l.lockID)
 
 		return false
 	}
@@ -306,7 +314,10 @@ func (l *Lock) Unlock() {
 
 		applied, err := l.locksTableDeleteLock(ctx)
 		if err == nil && !applied {
-			l.logger.Warn().Msgf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
+			l.logger.
+				Warn().
+				Str("lock-name", l.name).
+				Msgf("Unable to clear lock %s, this should mean someone took the lock while I held it", l.name)
 		}
 
 		l.c.metrics.CassandraQueriesSeconds.WithLabelValues("unlock").Observe(time.Since(cassStart).Seconds())
@@ -314,7 +325,7 @@ func (l *Lock) Unlock() {
 		return err //nolint:wrapcheck
 	},
 		retry.NewExponentialBackOff(context.Background(), retryMaxDelay),
-		l.logger,
+		l.logger.With().Str("lock-name", l.name).Logger(),
 		"free lock",
 	)
 
@@ -343,7 +354,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 
 				return err //nolint:wrapcheck
 			}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
-				l.logger,
+				l.logger.With().Str("lock-name", l.name).Logger(),
 				"refresh lock "+l.name,
 			)
 		case <-ctx.Done():
