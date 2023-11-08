@@ -92,7 +92,7 @@ type IndexInternalExpirerer interface {
 }
 
 type IndexRunner interface {
-	RunOnce(ctx context.Context, now time.Time) bool
+	InternalRunOnce(ctx context.Context, now time.Time) bool
 }
 
 type MetricsSet interface {

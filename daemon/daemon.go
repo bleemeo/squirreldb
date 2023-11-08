@@ -102,7 +102,7 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, err = s.Index(ctx)
+	_, err = s.Index(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -654,7 +654,7 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 }
 
 // Index return an Index. If started is true the index is started.
-func (s *SquirrelDB) Index(ctx context.Context) (types.Index, error) {
+func (s *SquirrelDB) Index(ctx context.Context, manualRunOnce bool) (types.Index, error) {
 	if s.index == nil { //nolint:nestif
 		var wrappedIndex types.Index
 
@@ -681,13 +681,14 @@ func (s *SquirrelDB) Index(ctx context.Context) (types.Index, error) {
 			}
 
 			options := index.Options{
-				DefaultTimeToLive: s.Config.Cassandra.DefaultTimeToLive,
-				LockFactory:       s.lockFactory,
-				States:            states,
-				SchemaLock:        schemaLock,
-				Cluster:           cluster,
-				ReadOnly:          s.Config.Internal.ReadOnly,
-				Logger:            s.Logger.With().Str("component", "index").Logger(),
+				DefaultTimeToLive:     s.Config.Cassandra.DefaultTimeToLive,
+				LockFactory:           s.lockFactory,
+				States:                states,
+				SchemaLock:            schemaLock,
+				Cluster:               cluster,
+				ReadOnly:              s.Config.Internal.ReadOnly,
+				Logger:                s.Logger.With().Str("component", "index").Logger(),
+				InternalRunOnceCalled: manualRunOnce,
 			}
 
 			wrappedIndex, err = index.New(
@@ -750,7 +751,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context) (MetricReadWriter, error) {
 				return nil, err
 			}
 
-			index, err := s.Index(ctx)
+			index, err := s.Index(ctx, false)
 			if err != nil {
 				return nil, err
 			}

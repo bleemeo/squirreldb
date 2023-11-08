@@ -274,9 +274,9 @@ func (i *indexWrapper) InternalForceExpirationTimestamp(ctx context.Context, val
 }
 
 // RunOnce implements the IndexRunner interface used in tests.
-func (i *indexWrapper) RunOnce(ctx context.Context, now time.Time) bool {
+func (i *indexWrapper) InternalRunOnce(ctx context.Context, now time.Time) bool {
 	if runner, ok := i.index.(types.IndexRunner); ok {
-		return runner.RunOnce(ctx, now)
+		return runner.InternalRunOnce(ctx, now)
 	}
 
 	return false

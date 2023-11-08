@@ -111,6 +111,9 @@ type Options struct {
 	DefaultTimeToLive time.Duration
 	ReadOnly          bool
 	Logger            zerolog.Logger
+	// InternalRunOnceCalled is true if this index is used by some testings/benchmarking tools
+	// that will call RunOnce directly.
+	InternalRunOnceCalled bool
 }
 
 type CassandraIndex struct {
@@ -328,7 +331,11 @@ func (c *CassandraIndex) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			c.RunOnce(ctx, time.Now())
+			if c.options.InternalRunOnceCalled {
+				continue
+			}
+
+			c.InternalRunOnce(ctx, time.Now())
 		case <-ctx.Done():
 			c.logger.Trace().Msg("Cassandra index service stopped")
 
@@ -337,10 +344,12 @@ func (c *CassandraIndex) run(ctx context.Context) {
 	}
 }
 
-// RunOnce run the tasks scheduled by Run, return true if more work is pending.
-// Prefer using Start() than calling RunOnce multiple time. RunOnce is mostly here
+// InternalRunOnce run the tasks scheduled by Run, return true if more work is pending.
+// Prefer using Start() than calling InternalRunOnce multiple time. InternalRunOnce is mostly here
 // for squirreldb-cassandra-index-bench program.
-func (c *CassandraIndex) RunOnce(ctx context.Context, now time.Time) bool {
+// When using InternalRunOnce you should set option InternalRunOnceCalled to true or you could cause
+// some race condition.
+func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) bool {
 	c.expire(now)
 	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)

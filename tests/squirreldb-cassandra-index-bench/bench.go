@@ -103,7 +103,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 	}
 	defer squirreldb.Stop()
 
-	idx, err := squirreldb.Index(ctx)
+	idx, err := squirreldb.Index(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 
 			defer squirreldb.Stop()
 
-			localIndex, err := squirreldb.Index(ctx)
+			localIndex, err := squirreldb.Index(ctx, false)
 			if err != nil {
 				return err
 			}
@@ -326,7 +326,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 
 		start = time.Now()
 
-		indexRunner.RunOnce(ctx, time.Now())
+		indexRunner.InternalRunOnce(ctx, time.Now())
 
 		stop := time.Now()
 

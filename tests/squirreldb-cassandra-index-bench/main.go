@@ -105,7 +105,7 @@ func run(ctx context.Context) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	cassandraIndex, err := squirreldb.Index(ctx)
+	cassandraIndex, err := squirreldb.Index(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb2.Stop()
 
-		cassandraIndex2, err := squirreldb2.Index(ctx)
+		cassandraIndex2, err := squirreldb2.Index(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -151,7 +151,7 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb3.Stop()
 
-		idx, err := squirreldb3.Index(ctx)
+		idx, err := squirreldb3.Index(ctx, true)
 		if err != nil {
 			return err
 		}
