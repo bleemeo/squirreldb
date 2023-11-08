@@ -93,21 +93,17 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		}
 	}
 
-	if s.Config.Internal.DisableBackgroundTask {
-		s.Logger.Warn().Msg("internal.disable_background_task is enabled. Don't use this on production.")
-	}
-
 	err := s.Init()
 	if err != nil {
 		return err
 	}
 
-	_, err = s.Index(ctx, !s.Config.Internal.DisableBackgroundTask)
+	_, err = s.Index(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.TSDB(ctx, !s.Config.Internal.DisableBackgroundTask)
+	_, err = s.TSDB(ctx)
 	if err != nil {
 		return err
 	}
@@ -654,7 +650,7 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 }
 
 // Index return an Index. If started is true the index is started.
-func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, error) {
+func (s *SquirrelDB) Index(ctx context.Context) (types.Index, error) {
 	if s.index == nil { //nolint:nestif
 		var wrappedIndex types.Index
 
@@ -723,12 +719,12 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 		)
 
 		s.index = indexWrapper
-	}
 
-	if task, ok := s.index.(types.Task); started && ok {
-		err := task.Start(ctx)
-		if err != nil {
-			return s.index, fmt.Errorf("start index task: %w", err)
+		if task, ok := s.index.(types.Task); ok {
+			err := task.Start(ctx)
+			if err != nil {
+				return s.index, fmt.Errorf("start index task: %w", err)
+			}
 		}
 	}
 
@@ -736,7 +732,7 @@ func (s *SquirrelDB) Index(ctx context.Context, started bool) (types.Index, erro
 }
 
 // TSDB return the metric persistent store. If started is true the tsdb is started.
-func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (MetricReadWriter, error) {
+func (s *SquirrelDB) TSDB(ctx context.Context) (MetricReadWriter, error) {
 	if s.persistentStore == nil { //nolint:nestif
 		switch s.Config.Internal.TSDB {
 		case backendCassandra:
@@ -750,7 +746,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 				return nil, err
 			}
 
-			index, err := s.Index(ctx, false)
+			index, err := s.Index(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -797,7 +793,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context, preAggregationStarted bool) (Metr
 		}
 	}
 
-	if task, ok := s.persistentStore.(types.Task); preAggregationStarted && ok {
+	if task, ok := s.persistentStore.(types.Task); ok {
 		err := task.Start(ctx)
 		if err != nil {
 			return s.persistentStore, fmt.Errorf("start persitent store task: %w", err)

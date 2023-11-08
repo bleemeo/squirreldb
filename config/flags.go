@@ -51,12 +51,6 @@ func configFlags() []flag {
 
 	return []flag{
 		{
-			name:  "internal.disable_background_task",
-			short: "",
-			value: false,
-			usage: "Debug option that disable (some) background tasks like index metric expiration",
-		},
-		{
 			name:  "cassandra.addresses",
 			short: "",
 			value: defaultCfg.Cassandra.Addresses,

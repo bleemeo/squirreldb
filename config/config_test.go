@@ -72,7 +72,6 @@ func TestStructuredConfig(t *testing.T) {
 			States:                "cassandra",
 			Store:                 "batcher",
 			MutableLabelsProvider: "cassandra",
-			DisableBackgroundTask: true,
 		},
 		Telemetry: Telemetry{
 			Address: "http://example.com",
@@ -132,7 +131,6 @@ func TestFlags(t *testing.T) {
 	expectedConfig := DefaultConfig()
 
 	// Values set from config file.
-	expectedConfig.Internal.DisableBackgroundTask = true
 	expectedConfig.Cassandra.Addresses = []string{"192.168.0.2:9042"}
 
 	// Value set from config, env and flag, only the flag should be kept.
