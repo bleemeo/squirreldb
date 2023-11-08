@@ -93,6 +93,10 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		}
 	}
 
+	if s.Config.Internal.DisablePreAggregation {
+		s.Logger.Warn().Msg("internal.disable_pre_aggregation is enabled, pre-aggregated data won't be calculated")
+	}
+
 	err := s.Init()
 	if err != nil {
 		return err
@@ -766,6 +770,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context) (MetricReadWriter, error) {
 				AggregateIntendedDuration: s.Config.Cassandra.Aggregate.IntendedDuration,
 				SchemaLock:                schemaLock,
 				ReadOnly:                  s.Config.Internal.ReadOnly,
+				DisablePreAggregation:     s.Config.Internal.DisablePreAggregation,
 			}
 
 			tsdb, err := tsdb.New(

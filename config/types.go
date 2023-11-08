@@ -29,6 +29,7 @@ type Internal struct {
 	States                  string       `yaml:"states"`
 	Store                   string       `yaml:"store"`
 	MutableLabelsProvider   string       `yaml:"mutable_labels_provider"`
+	DisablePreAggregation   bool         `yaml:"disable_pre_aggregation"`
 	ReadOnly                bool         `yaml:"read_only"`
 	UseThanosPromQLEngine   bool         `yaml:"use_thanos_promql_engine"`
 }

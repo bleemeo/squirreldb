@@ -294,6 +294,16 @@ func (c *CassandraTSDB) aggregateShard(
 		return false, time.Time{}
 	}
 
+	if c.options.DisablePreAggregation {
+		if maxTime.After(*lastNotifiedAggretedFrom) {
+			c.logger.Debug().Str("shard-name", name).Msg("pre-aggregation is disabled, skipping it")
+
+			*lastNotifiedAggretedFrom = maxTime
+		}
+
+		return false, time.Time{}
+	}
+
 	lock := c.lockFactory.CreateLock(name, lockTimeToLive)
 	if acquired := lock.TryLock(ctx, 0); !acquired {
 		return false, time.Time{}
