@@ -5847,7 +5847,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			t.Fatal(err)
 		}
 
-		index.RunOnce(context.Background(), currentTime)
+		index.InternalRunOnce(context.Background(), currentTime)
 
 		writeTime := currentTime
 		currentTime = currentTime.Add(step)
@@ -7049,7 +7049,7 @@ func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTi
 			ctx = contextSkipError(ctx)
 		}
 
-		moreWore := index.RunOnce(ctx, currentNow)
+		moreWore := index.InternalRunOnce(ctx, currentNow)
 
 		if moreWore {
 			// when moreWork is true, run call to cassandraExpire isn't delayed
@@ -7804,7 +7804,7 @@ func clusterDoOneBatch(t *testing.T,
 				return fmt.Errorf("worker %d: %w", workerID, err)
 			}
 
-			index.RunOnce(ctx, currentTime)
+			index.InternalRunOnce(ctx, currentTime)
 
 			return nil
 		})
@@ -7979,7 +7979,7 @@ func Test_concurrent_access(t *testing.T) {
 					select {
 					case <-ticker.C:
 						idx := indexes[rnd.Intn(len(indexes))]
-						idx.RunOnce(ctx, execution.now.Now())
+						idx.InternalRunOnce(ctx, execution.now.Now())
 						// Advancing the time by one hour while request are in progress is like source of few bugs.
 						// Block request before changing time.
 						execution.c.L.Lock()
@@ -8036,7 +8036,7 @@ func Test_concurrent_access(t *testing.T) {
 				t.Logf("ID = %d is %s", id, labels[i])
 			}
 
-			indexes[0].RunOnce(ctx, execution.now.Now())
+			indexes[0].InternalRunOnce(ctx, execution.now.Now())
 
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
@@ -8057,7 +8057,7 @@ func Test_concurrent_access(t *testing.T) {
 
 			for i := 0; i < 400*2; i++ {
 				execution.now.Add(12 * time.Hour)
-				indexes[0].RunOnce(ctx, execution.now.Now())
+				indexes[0].InternalRunOnce(ctx, execution.now.Now())
 			}
 
 			tmp, err = indexes[0].expirationLastProcessedDay(context.Background())

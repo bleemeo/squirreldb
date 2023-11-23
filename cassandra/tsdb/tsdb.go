@@ -37,6 +37,7 @@ type Options struct {
 	DefaultTimeToLive         time.Duration
 	AggregateIntendedDuration time.Duration
 	ReadOnly                  bool
+	DisablePreAggregation     bool
 }
 
 type lockFactory interface {

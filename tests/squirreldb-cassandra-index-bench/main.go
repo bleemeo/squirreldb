@@ -151,7 +151,7 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb3.Stop()
 
-		idx, err := squirreldb3.Index(ctx, false)
+		idx, err := squirreldb3.Index(ctx, true)
 		if err != nil {
 			return err
 		}
