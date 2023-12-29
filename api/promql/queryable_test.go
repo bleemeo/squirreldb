@@ -3,6 +3,8 @@ package promql
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"squirreldb/dummy"
 	"squirreldb/types"
 	"sync"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/util/annotations"
 )
 
 const (
@@ -176,7 +179,7 @@ func (s *mockSeries) Err() error {
 	return nil
 }
 
-func (s *mockSeries) Warnings() storage.Warnings {
+func (s *mockSeries) Warnings() annotations.Annotations {
 	return nil
 }
 
@@ -260,15 +263,20 @@ func Test_querier_Select(t *testing.T) {
 		},
 	}
 
+	reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q := querier{
-				index:  tt.fields.index,
-				reader: tt.fields.reader,
-				mint:   tt.fields.mint,
-				maxt:   tt.fields.maxt,
+			s := Store{
+				Index:  tt.fields.index,
+				Reader: tt.fields.reader,
 			}
-			got := q.Select(tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
+			q := querier{
+				store: s,
+				mint:  tt.fields.mint,
+				maxt:  tt.fields.maxt,
+			}
+			got := q.Select(reqCtx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(t, got, tt.want) {
 				return
 			}

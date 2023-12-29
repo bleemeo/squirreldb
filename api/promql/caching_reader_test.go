@@ -1388,7 +1388,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			)
 
 			reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
-			querierIntf, err := store.Querier(reqCtx, tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
+			querierIntf, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1402,19 +1402,19 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 
 				switch action.action {
 				case actionCallSelect:
-					result := querierIntf.Select(true, action.selectHints, action.selectMatcher...)
+					result := querierIntf.Select(reqCtx, true, action.selectHints, action.selectMatcher...)
 					openSelect[action.selectIdx] = result
 
 					// Open another Querier, because cache is never shared between two Querier (it is only between Select()
 					// in the same querier) we use this other Querier as validator.
-					validator, err := unCountedStore.Querier(reqCtx, tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
+					validator, err := unCountedStore.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 					if err != nil {
 						t.Fatal(err)
 					}
 
 					closes = append(closes, validator.Close)
 
-					validatorSelect[action.selectIdx] = validator.Select(true, action.selectHints, action.selectMatcher...)
+					validatorSelect[action.selectIdx] = validator.Select(reqCtx, true, action.selectHints, action.selectMatcher...)
 				case actionClose:
 					err := querierIntf.Close()
 					if err != nil {
@@ -1631,7 +1631,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
 
 				if req.isInstant { //nolint:nestif
-					query, err := engine.NewInstantQuery(store, nil, req.query, req.start)
+					query, err := engine.NewInstantQuery(reqCtx, store, nil, req.query, req.start)
 					if err != nil {
 						t.Error(err)
 
@@ -1648,7 +1648,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 						t.Error(result.Err)
 					}
 				} else {
-					query, err := engine.NewRangeQuery(store, nil, req.query, req.start, req.end, req.step)
+					query, err := engine.NewRangeQuery(reqCtx, store, nil, req.query, req.start, req.end, req.step)
 					if err != nil {
 						t.Error(err)
 

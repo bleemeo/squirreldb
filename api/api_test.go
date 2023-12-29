@@ -468,6 +468,7 @@ func TestWriteHandler(t *testing.T) {
 			dummyIndex := &dummy.Index{
 				StoreMetricIDInMemory: true,
 			}
+			reg := prometheus.NewRegistry()
 			appendable := remotestorage.New(
 				&dummy.MemoryTSDB{},
 				dummyIndex,
@@ -475,9 +476,9 @@ func TestWriteHandler(t *testing.T) {
 				tenantLabelName,
 				labelProcessor,
 				true,
-				prometheus.NewRegistry(),
+				reg,
 			)
-			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
+			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{

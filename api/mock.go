@@ -39,6 +39,8 @@ func (mockScrapePoolRetriever) ScrapePools() []string {
 // mockTargetRetriever implements v1.TargetRetriever.
 type mockTargetRetriever struct{}
 
+func (mockTargetRetriever) TargetsDroppedCounts() map[string]int { return nil }
+
 func (mockTargetRetriever) TargetsActive() map[string][]*scrape.Target { return nil }
 
 func (mockTargetRetriever) TargetsDropped() map[string][]*scrape.Target { return nil }
@@ -55,13 +57,13 @@ type mockTSDBAdminStat struct{}
 
 func (mockTSDBAdminStat) CleanTombstones() error { return errNotImplemented }
 
-func (mockTSDBAdminStat) Delete(_, _ int64, _ ...*labels.Matcher) error {
+func (mockTSDBAdminStat) Delete(_ context.Context, _, _ int64, _ ...*labels.Matcher) error {
 	return errNotImplemented
 }
 
 func (mockTSDBAdminStat) Snapshot(_ string, _ bool) error { return errNotImplemented }
 
-func (mockTSDBAdminStat) Stats(_ string) (*tsdb.Stats, error) {
+func (mockTSDBAdminStat) Stats(_ string, _ int) (*tsdb.Stats, error) {
 	return nil, errNotImplemented
 }
 

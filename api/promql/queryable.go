@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/util/annotations"
 	"github.com/rs/zerolog"
 )
 
@@ -39,17 +40,11 @@ type Store struct {
 }
 
 type querier struct {
-	ctx                context.Context //nolint:containedctx
-	logger             zerolog.Logger
-	enableDebug        bool
-	enableVerboseDebug bool
-	index              IndexWithStats
-	reader             MetricReaderWithStats
-	mint               int64
-	maxt               int64
-	forcePreAggregated bool
-	forceRaw           bool
-	metrics            *metrics
+	store   Store
+	logger  zerolog.Logger
+	mint    int64
+	maxt    int64
+	metrics *metrics
 }
 
 type MetricReaderWithStats interface {
@@ -96,23 +91,39 @@ func NewStore(
 // the HTTP headers. Available headers are: HeaderForcedMatcher, HeaderMaxEvaluatedSeries,
 // HeaderMaxEvaluatedPoints, HeaderForcePreAggregated and HeaderForceRaw. See their declaration
 // for documentation.
-func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (querier, error) {
-	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
-	if !ok {
-		return querier{}, errMissingRequest
+func (s Store) newQuerierFromHeaders(mint, maxt int64) querier {
+	return querier{
+		store:   s,
+		logger:  s.Logger,
+		mint:    mint,
+		maxt:    maxt,
+		metrics: s.metrics,
 	}
+}
 
+// Querier returns a storage.Querier to read from SquirrelDB store.
+func (s Store) Querier(mint, maxt int64) (storage.Querier, error) {
+	return s.newQuerierFromHeaders(mint, maxt), nil
+}
+
+// ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
+func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
+	return chunkquerier{s.newQuerierFromHeaders(mint, maxt)}, nil
+}
+
+func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
 	var index types.Index
 
 	index = reducedTimeRangeIndex{
-		index: s.Index,
+		index: q.store.Index,
 	}
 
 	value := r.Header.Get(types.HeaderForcedMatcher)
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			return querier{}, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
+			return "", 0, nil, 0, nil, false,
+				false, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
 		}
 
 		index = filteringIndex{
@@ -126,125 +137,62 @@ func (s Store) newQuerierFromHeaders(ctx context.Context, mint, maxt int64) (que
 	}
 
 	// The tenant header makes queries match only metrics from this tenant.
-	tenant := r.Header.Get(types.HeaderTenant)
+	tenant = r.Header.Get(types.HeaderTenant)
 	if tenant != "" {
 		index = filteringIndex{
 			index: index,
 			matcher: labels.MustNewMatcher(
 				labels.MatchEqual,
-				s.TenantLabelName,
+				q.store.TenantLabelName,
 				tenant,
 			),
 		}
-	} else if s.RequireTenantHeader {
-		return querier{}, errMissingTenantHeader
+	} else if q.store.RequireTenantHeader {
+		return "", 0, nil, 0, nil, false, false, errMissingTenantHeader
 	}
 
-	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
+	maxEvaluatedSeries = q.store.DefaultMaxEvaluatedSeries
 
 	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
 	if maxEvaluatedSeriesText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
 		if err != nil {
-			return querier{}, err
+			return "", 0, nil, 0, nil, false, false, err
 		}
 
 		maxEvaluatedSeries = uint32(tmp)
 	}
 
-	limitIndex := &limitingIndex{
+	limitIndex = &limitingIndex{
 		index:          index,
 		maxTotalSeries: maxEvaluatedSeries,
 	}
 
-	maxEvaluatedPoints := s.DefaultMaxEvaluatedPoints
+	maxEvaluatedPoints = q.store.DefaultMaxEvaluatedPoints
 
 	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
 	if maxEvaluatedPointsText != "" {
 		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
 		if err != nil {
-			return querier{}, err
+			return "", 0, nil, 0, nil, false, false, err
 		}
 
 		maxEvaluatedPoints = tmp
 	}
 
-	reader := &limitingReader{
-		reader:         &cachingReader{reader: s.Reader},
+	reader = &limitingReader{
+		reader:         &cachingReader{reader: q.store.Reader},
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
-	enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
-	enableVerboseDebug := r.Header.Get(types.HeaderQueryVerboseDebug) != ""
+	enableDebug = r.Header.Get(types.HeaderQueryDebug) != ""
+	enableVerboseDebug = r.Header.Get(types.HeaderQueryVerboseDebug) != ""
 
 	if enableVerboseDebug {
 		enableDebug = true
 	}
 
-	if enableDebug {
-		minTime := time.UnixMilli(mint)
-		maxTime := time.UnixMilli(maxt)
-		s.Logger.Info().Msgf(
-			"Querier started. mint=%s maxt=%s. tenant=%s maxPoints=%d maxSeries=%d",
-			minTime.Format(time.RFC3339),
-			maxTime.Format(time.RFC3339),
-			tenant,
-			maxEvaluatedPoints,
-			maxEvaluatedSeries,
-		)
-	}
-
-	q := querier{
-		ctx:                ctx,
-		logger:             s.Logger,
-		enableDebug:        enableDebug,
-		enableVerboseDebug: enableVerboseDebug,
-		index:              limitIndex,
-		reader:             reader,
-		mint:               mint,
-		maxt:               maxt,
-		metrics:            s.metrics,
-	}
-
-	value = r.Header.Get(types.HeaderForcePreAggregated)
-	if value != "" {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			return querier{}, err
-		}
-
-		q.forcePreAggregated = tmp
-	}
-
-	value = r.Header.Get(types.HeaderForceRaw)
-	if value != "" {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			return querier{}, err
-		}
-
-		q.forceRaw = tmp
-		if q.forceRaw {
-			q.forcePreAggregated = false
-		}
-	}
-
-	return q, nil
-}
-
-// Querier returns a storage.Querier to read from SquirrelDB store.
-func (s Store) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
-	return s.newQuerierFromHeaders(ctx, mint, maxt)
-}
-
-// ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
-func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.ChunkQuerier, error) {
-	q, err := s.newQuerierFromHeaders(ctx, mint, maxt)
-	if err != nil {
-		return nil, err
-	}
-
-	return chunkquerier{q}, nil
+	return tenant, maxEvaluatedSeries, limitIndex, maxEvaluatedPoints, reader, enableDebug, enableVerboseDebug, nil
 }
 
 // Select returns a set of series that matches the given label matchers.
@@ -252,11 +200,57 @@ func (s Store) ChunkQuerier(ctx context.Context, mint, maxt int64) (storage.Chun
 // Prefer not requiring sorting for better performance.
 // It allows passing hints that can help in optimising select,
 // but it's up to implementation how this is used if used at all.
-func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
+func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet { //nolint: lll
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	if q.enableDebug {
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return &seriesIter{err: errMissingRequest}
+	}
+
+	tenant, maxEvaluatedSeries, limitIndex, maxEvaluatedPoints, reader, enableDebug, enableVerboseDebug, err := q.parseRequest(r) //nolint: lll
+	if err != nil {
+		return &seriesIter{err: err}
+	}
+
+	if enableDebug {
+		q.store.Logger.Info().Msgf(
+			"Querier started. mint=%s maxt=%s. tenant=%s maxPoints=%d maxSeries=%d",
+			minT.Format(time.RFC3339),
+			maxT.Format(time.RFC3339),
+			tenant,
+			maxEvaluatedPoints,
+			maxEvaluatedSeries,
+		)
+	}
+
+	var forcePreAggregated, forceRaw bool
+
+	value := r.Header.Get(types.HeaderForcePreAggregated)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return &seriesIter{err: err}
+		}
+
+		forcePreAggregated = tmp
+	}
+
+	value = r.Header.Get(types.HeaderForceRaw)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return &seriesIter{err: err}
+		}
+
+		forceRaw = tmp
+		if forceRaw {
+			forcePreAggregated = false
+		}
+	}
+
+	if enableDebug {
 		hintsStr := "no hints"
 		if hints != nil {
 			hintsStr = fmt.Sprintf(
@@ -276,7 +270,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		)
 	}
 
-	metrics, err := q.index.Search(q.ctx, minT, maxT, matchers)
+	metrics, err := limitIndex.Search(ctx, minT, maxT, matchers)
 	if err != nil {
 		return &seriesIter{err: err}
 	}
@@ -320,12 +314,12 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 
 	req := types.MetricRequest{
 		IDs:                ids,
-		FromTimestamp:      q.mint,
-		ToTimestamp:        q.maxt,
-		ForcePreAggregated: q.forcePreAggregated,
-		ForceRaw:           q.forceRaw,
-		EnableDebug:        q.enableDebug,
-		EnableVerboseDebug: q.enableVerboseDebug,
+		FromTimestamp:      minT.UnixMilli(),
+		ToTimestamp:        maxT.UnixMilli(),
+		ForcePreAggregated: forcePreAggregated,
+		ForceRaw:           forceRaw,
+		EnableDebug:        enableDebug,
+		EnableVerboseDebug: enableVerboseDebug,
 	}
 
 	if hints != nil {
@@ -336,9 +330,9 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 		req.StepMs = hints.Step
 	}
 
-	result, err := q.reader.ReadIter(q.ctx, req)
+	result, err := reader.ReadIter(ctx, req)
 
-	if q.enableDebug {
+	if enableDebug {
 		q.logger.Info().Msgf(
 			"Select(...) returned %d metricID. request = {ForcePreAggregated=%v, ForceRaw=%v, Function=%v, StepMs=%d}",
 			len(req.IDs),
@@ -351,7 +345,7 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 
 	return &seriesIter{
 		list:      result,
-		index:     q.index,
+		index:     limitIndex,
 		id2Labels: id2Labels,
 		err:       err,
 	}
@@ -359,39 +353,47 @@ func (q querier) Select(sortSeries bool, hints *storage.SelectHints, matchers ..
 
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
-func (q querier) LabelValues(name string, matchers ...*labels.Matcher) ([]string, storage.Warnings, error) {
+func (q querier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelValues(q.ctx, minT, maxT, name, matchers)
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return nil, nil, errMissingRequest
+	}
+
+	_, _, limitIndex, _, _, _, _, err := q.parseRequest(r) //nolint: dogsled
+	if err != nil {
+		return nil, nil, err
+	}
+
+	res, err := limitIndex.LabelValues(ctx, minT, maxT, name, matchers)
 
 	return res, nil, err
 }
 
 // LabelNames returns all the unique label names present in the block in sorted order.
-func (q querier) LabelNames(matchers ...*labels.Matcher) ([]string, storage.Warnings, error) {
+func (q querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.Unix(q.mint/1000, q.mint%1000)
 	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
 
-	res, err := q.index.LabelNames(q.ctx, minT, maxT, matchers)
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return nil, nil, errMissingRequest
+	}
+
+	_, _, limitIndex, _, _, _, _, err := q.parseRequest(r) //nolint: dogsled
+	if err != nil {
+		return nil, nil, err
+	}
+
+	res, err := limitIndex.LabelNames(ctx, minT, maxT, matchers)
 
 	return res, nil, err
 }
 
 // Close releases the resources of the Querier.
 func (q querier) Close() error {
-	q.metrics.RequestsSeries.Observe(q.index.SeriesReturned())
-	q.metrics.RequestsPoints.Observe(q.reader.PointsRead())
-	q.metrics.CachedPoints.Add(q.reader.PointsCached())
-
-	if q.enableDebug {
-		q.logger.Info().Msgf(
-			"End of querier. series count=%f, points count=%f",
-			q.index.SeriesReturned(),
-			q.reader.PointsRead(),
-		)
-	}
-
 	return nil
 }
 
@@ -400,11 +402,12 @@ type chunkquerier struct {
 }
 
 func (q chunkquerier) Select(
+	ctx context.Context,
 	sortSeries bool,
 	hints *storage.SelectHints,
 	matchers ...*labels.Matcher,
 ) storage.ChunkSeriesSet {
-	sset := q.querier.Select(sortSeries, hints, matchers...)
+	sset := q.querier.Select(ctx, sortSeries, hints, matchers...)
 
 	return storage.NewSeriesSetToChunkSet(sset)
 }

@@ -155,6 +155,8 @@ func NewPrometheus(
 		mockGatherer{},
 		metricRegistry,
 		nil,
+		true,
+		true,
 	)
 
 	return api
