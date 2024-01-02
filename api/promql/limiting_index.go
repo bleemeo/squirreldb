@@ -14,7 +14,7 @@ import (
 type limitingIndex struct {
 	index          types.Index
 	maxTotalSeries uint32
-	returnedSeries uint32
+	returnedSeries *uint32
 }
 
 func (idx *limitingIndex) AllIDs(_ context.Context, _ time.Time, _ time.Time) ([]types.MetricID, error) {
@@ -38,7 +38,7 @@ func (idx *limitingIndex) Search(
 		return r, err //nolint:wrapcheck
 	}
 
-	totalSeries := atomic.AddUint32(&idx.returnedSeries, uint32(r.Count()))
+	totalSeries := atomic.AddUint32(idx.returnedSeries, uint32(r.Count()))
 	if idx.maxTotalSeries != 0 && totalSeries > idx.maxTotalSeries {
 		return &dummy.MetricsLabel{}, errors.New("too many series evaluated by this PromQL")
 	}
@@ -64,7 +64,7 @@ func (idx *limitingIndex) LabelNames(
 }
 
 func (idx *limitingIndex) SeriesReturned() float64 {
-	v := atomic.LoadUint32(&idx.returnedSeries)
+	v := atomic.LoadUint32(idx.returnedSeries)
 
 	return float64(v)
 }

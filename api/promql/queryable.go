@@ -40,11 +40,13 @@ type Store struct {
 }
 
 type querier struct {
-	store   Store
-	logger  zerolog.Logger
-	mint    int64
-	maxt    int64
-	metrics *metrics
+	store          Store
+	logger         zerolog.Logger
+	mint           int64
+	maxt           int64
+	metrics        *metrics
+	cachingReader  *cachingReader
+	returnedSeries *uint32
 }
 
 type MetricReaderWithStats interface {
@@ -93,11 +95,13 @@ func NewStore(
 // for documentation.
 func (s Store) newQuerierFromHeaders(mint, maxt int64) querier {
 	return querier{
-		store:   s,
-		logger:  s.Logger,
-		mint:    mint,
-		maxt:    maxt,
-		metrics: s.metrics,
+		store:          s,
+		logger:         s.Logger,
+		mint:           mint,
+		maxt:           maxt,
+		metrics:        s.metrics,
+		cachingReader:  &cachingReader{reader: s.Reader},
+		returnedSeries: new(uint32),
 	}
 }
 
@@ -114,7 +118,7 @@ func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
 func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
 	var index types.Index
 
-	index = reducedTimeRangeIndex{
+	index = reducedTimeRangeIndex{ // TODO: instantiate at querier init ?
 		index: q.store.Index,
 	}
 
@@ -166,6 +170,7 @@ func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSerie
 	limitIndex = &limitingIndex{
 		index:          index,
 		maxTotalSeries: maxEvaluatedSeries,
+		returnedSeries: q.returnedSeries,
 	}
 
 	maxEvaluatedPoints = q.store.DefaultMaxEvaluatedPoints
@@ -181,7 +186,7 @@ func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSerie
 	}
 
 	reader = &limitingReader{
-		reader:         &cachingReader{reader: q.store.Reader},
+		reader:         q.cachingReader,
 		maxTotalPoints: maxEvaluatedPoints,
 	}
 
