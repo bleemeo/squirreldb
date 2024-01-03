@@ -23,4 +23,5 @@ ENV SQUIRRELDB_TELEMETRY_ID_PATH="/tmp/telemetry.json"
 
 COPY --from=build /squirreldb /usr/sbin/squirreldb
 
+USER daemon
 CMD ["/usr/sbin/squirreldb"]
