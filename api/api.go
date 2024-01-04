@@ -584,7 +584,7 @@ func (a *API) mutableDumpHandler(w http.ResponseWriter, req *http.Request) {
 func (a *API) mutableImportHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	force := len(req.URL.Query()["force"]) > 1
+	force := len(req.URL.Query()["force"]) > 0
 
 	if err := a.MutableLabelWriter.Import(ctx, req.Body, w, !force); err != nil {
 		http.Error(w, fmt.Sprintf("Index import failed: %v", err), http.StatusInternalServerError)
