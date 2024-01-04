@@ -5288,7 +5288,6 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			}
 
 			_ = ids
-			t.Skip("TODO: this commit add test to show the issue, next commit will fix it")
 
 			if diff, err := cmpMetricsSetByLabels(ids, tt.want); err != nil {
 				t.Error(err)

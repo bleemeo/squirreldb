@@ -131,6 +131,7 @@ type CassandraIndex struct {
 	// * expirationGlobalLock is a global lock and protect values in Cassandra. Unlike newMetricGlobalLock
 	//   it protect value that can't we written on metric creation.
 	lookupIDMutex            sync.Mutex
+	postingCacheAccess       sync.Mutex
 	newMetricGlobalLock      types.TryLocker
 	expirationGlobalLock     types.TryLocker
 	expirationUpdateRequests map[int64]expirationUpdateRequest
@@ -917,39 +918,9 @@ func (c *CassandraIndex) postings(
 			return nil, ctx.Err()
 		}
 
-		var tmp *roaring.Bitmap
-
-		if useCache {
-			tmp = c.postingsCache.Get(shard, name, value)
-
-			status := "miss"
-			if tmp != nil {
-				status = "hit"
-			}
-
-			c.metrics.CacheAccess.WithLabelValues("postings", status).Inc()
-		}
-
-		if tmp == nil {
-			tmp = roaring.NewBTreeBitmap()
-
-			buffer, err := c.store.SelectPostingByNameValue(ctx, shard, name, value)
-
-			if errors.Is(err, gocql.ErrNotFound) {
-				err = nil
-			} else if err == nil {
-				err = tmp.UnmarshalBinary(buffer)
-			}
-
-			if err != nil {
-				return nil, fmt.Errorf("unmarshal fail: %w", err)
-			}
-
-			if useCache {
-				size := c.postingsCache.Set(shard, name, value, tmp)
-
-				c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
-			}
+		tmp, err := c.postingsLocked(ctx, shard, name, value, useCache)
+		if err != nil {
+			return nil, err
 		}
 
 		if result == nil {
@@ -969,6 +940,56 @@ func (c *CassandraIndex) postings(
 	}
 
 	return result, nil
+}
+
+func (c *CassandraIndex) postingsLocked(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+	useCache bool,
+) (*roaring.Bitmap, error) {
+	if useCache {
+		c.postingCacheAccess.Lock()
+		defer c.postingCacheAccess.Unlock()
+	}
+
+	var tmp *roaring.Bitmap
+
+	if useCache {
+		tmp = c.postingsCache.Get(shard, name, value)
+
+		status := "miss"
+		if tmp != nil {
+			status = "hit"
+		}
+
+		c.metrics.CacheAccess.WithLabelValues("postings", status).Inc()
+	}
+
+	if tmp == nil {
+		tmp = roaring.NewBTreeBitmap()
+
+		buffer, err := c.store.SelectPostingByNameValue(ctx, shard, name, value)
+
+		if errors.Is(err, gocql.ErrNotFound) {
+			err = nil
+		} else if err == nil {
+			err = tmp.UnmarshalBinary(buffer)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal fail: %w", err)
+		}
+
+		if useCache {
+			size := c.postingsCache.Set(shard, name, value, tmp)
+
+			c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
+		}
+	}
+
+	return tmp, nil
 }
 
 func (c *CassandraIndex) lookupLabels(
@@ -2057,6 +2078,9 @@ func (c *CassandraIndex) invalidatePostingsListenner(message []byte) {
 	if err := dec.Decode(&keys); err != nil {
 		c.logger.Err(err).Msg("Unable to deserialize new metrics message. Search cache may be wrong.")
 	} else {
+		c.postingCacheAccess.Lock()
+		defer c.postingCacheAccess.Unlock()
+
 		size := c.postingsCache.Invalidate(keys)
 		c.metrics.CacheSize.WithLabelValues("postings").Set(float64(size))
 	}
