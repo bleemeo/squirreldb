@@ -222,6 +222,9 @@ type mockStore struct {
 	id2expiration map[types.MetricID]time.Time
 	queryCount    int
 	mutex         sync.Mutex
+
+	HookSelectPostingByNameValueStart func(ctx context.Context, shard int32, name string, value string) context.Context
+	HookSelectPostingByNameValueEnd   func(ctx context.Context, shard int32, name string, value string)
 }
 
 func (s *mockStore) Init(ctx context.Context) error {
@@ -441,6 +444,115 @@ func (s *mockStore) verifyStoreEmpty(t *testing.T) error {
 	return nil
 }
 
+type blockContextKey struct {
+	Name string
+}
+
+func getBlockContext(ctx context.Context, name string) *blockContext {
+	blockList, ok := ctx.Value(blockContextKey{Name: name}).(*blockContext)
+	if !ok {
+		return nil
+	}
+
+	return blockList
+}
+
+// withBlockContext return a context and blockContext that could be used to control execution timing some method.
+// The context should be used in call to method you want to block. The method should call WaitStart,
+// NotifyEndReached and WaitEnd.
+//
+// The method will block at most maxWait when it call WaitStart or WaitEnd.
+//
+// The storeBlock contains:
+//   - a function unblockStartAndWait: which allow the method to start and wait until it block at end of invocation.
+//     unblockStart only return once method is blocked at the end
+//   - a function unblockEnd: which allow the method to return. It also call unblockStart() which
+//     is a no-op if it was already called.
+//
+// This is likely useful with store hooks, like HookSelectPostingByNameValueStart and HookSelectPostingByNameValueEnd.
+func withBlockContext(ctx context.Context, name string, maxWait time.Duration) (context.Context, *blockContext) {
+	result := &blockContext{maxWait: maxWait}
+	result.cond = sync.NewCond(&result.l)
+
+	return context.WithValue(ctx, blockContextKey{Name: name}, result), result
+}
+
+type blockContext struct {
+	l             sync.Mutex
+	cond          *sync.Cond
+	maxWait       time.Duration
+	startUnlocked bool
+	endReached    bool
+	endUnlocked   bool
+}
+
+func (b *blockContext) unblockStartAndWait() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.startUnlocked = true
+	b.cond.Broadcast()
+
+	for !b.endReached {
+		b.cond.Wait()
+	}
+}
+
+func (b *blockContext) unblockEnd() {
+	b.unblockStartAndWait()
+
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endUnlocked = true
+	b.cond.Broadcast()
+}
+
+func (b *blockContext) WaitStart() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), b.maxWait)
+	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		b.cond.Broadcast()
+	}()
+
+	for !b.startUnlocked && ctx.Err() == nil {
+		b.cond.Wait()
+	}
+}
+
+func (b *blockContext) NotifyEndReached() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endReached = true
+	b.cond.Broadcast()
+}
+
+func (b *blockContext) WaitEnd() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endReached = true
+	b.cond.Broadcast()
+
+	ctx, cancel := context.WithTimeout(context.Background(), b.maxWait)
+	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		b.cond.Broadcast()
+	}()
+
+	for !b.endUnlocked && ctx.Err() == nil {
+		b.cond.Wait()
+	}
+}
+
 func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (map[string]types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -585,6 +697,25 @@ func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name s
 }
 
 func (s *mockStore) SelectPostingByNameValue(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+) ([]byte, error) {
+	if s.HookSelectPostingByNameValueStart != nil {
+		ctx = s.HookSelectPostingByNameValueStart(ctx, shard, name, value)
+	}
+
+	if s.HookSelectPostingByNameValueEnd != nil {
+		defer s.HookSelectPostingByNameValueEnd(ctx, shard, name, value)
+	}
+
+	r, e := s.selectPostingByNameValue(ctx, shard, name, value)
+
+	return r, e
+}
+
+func (s *mockStore) selectPostingByNameValue(
 	ctx context.Context,
 	shard int32,
 	name string,
@@ -841,6 +972,62 @@ func (s *mockStore) DeletePostingsByNames(ctx context.Context, shard int32, name
 	}
 
 	return ctx.Err()
+}
+
+type mockCluster struct {
+	*dummy.LocalCluster
+
+	l            sync.Mutex
+	callbackChan chan interface{}
+	wg           *sync.WaitGroup
+}
+
+func newMockCluster(cluster *dummy.LocalCluster) *mockCluster {
+	return &mockCluster{
+		LocalCluster: cluster,
+		callbackChan: make(chan interface{}),
+		wg:           &sync.WaitGroup{},
+	}
+}
+
+func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
+	wrappedCallback := func(in []byte) {
+		c.l.Lock()
+		wg := c.wg
+		callbackChan := c.callbackChan
+		c.l.Unlock()
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			// wait for callbackGate to be closed, signifing message should be processed
+			<-callbackChan
+
+			callback(in)
+		}()
+	}
+
+	c.LocalCluster.Subscribe(topic, wrappedCallback)
+}
+
+// ProcessMessage will allow all currently pending message to process and wait for their completing.
+// This only apply to message currently pending, new message (and possibly one that arrive during
+// ProcessMessage() won't be processed and won't be waited).
+func (c *mockCluster) ProcessMessage() {
+	c.l.Lock()
+	// We take copy of the waitgroup & chanel before creating a new one.
+	// This ensure we unblock & wait only currently pending messages.
+	wg := c.wg
+	callbackChan := c.callbackChan
+
+	c.wg = &sync.WaitGroup{}
+	c.callbackChan = make(chan interface{})
+	c.l.Unlock()
+
+	close(callbackChan)
+	wg.Wait()
 }
 
 func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest {
@@ -4744,6 +4931,377 @@ func Test_cache(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_cache_bug_posting_invalidation will run a scenario on index cache to show invalidation issue.
+// It happened that a 2-node SquirrelDB cluster returned inconsitent result between SquirrelDB A and SquirrelDB B
+// on a query that used newly-created metrics. This issue resolved by itself after 15 minutes. For that reason
+// I suspect the posting cache to not being invalidated correctly on SquirrelDB B after metric creation on
+// SquirrelDB A.
+// After looking at code, I even think it could be possible to have issue on a single node. Step to reproduce (what
+// this test does):
+// - Run a query on SquirrelDB B.
+//   - The result will not be in cache and Cassandra will be queried
+//   - To simulate concurrency issue, once Cassandra get the data, sleep the goroutine
+//     (e.g. delay return from SelectPostingByNameValue)
+//
+// - While query on SquirrelDB B is waiting, create a metric on SquirrelDB A
+// - Once the creation is done SquirrelDB B cache is invalidated (strictly speaking a message to invalidate it is sent)
+// - Resume query on SquirrelDB B. The bug was that Cassandra already read old value and we write result in cache.
+// - Since cache was already invalidated, it would be persistent with old/wrong value.
+func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
+	defaultTTL := 365 * 24 * time.Hour
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t1 := t0.Add(5 * time.Hour)
+
+	type clusterMessageBehavior int
+
+	const (
+		clusterSynchronious clusterMessageBehavior = 1
+		clusterFast         clusterMessageBehavior = 2
+		clusterDelay        clusterMessageBehavior = 3
+	)
+
+	// The test will actually write 2 time:
+	// * write write1Metrics with t0 and ensure cluster message are processed. This simulate an old writes.
+	// * start the query with t1
+	// * write write2Metrics with t1
+	// * if clusterMessageBeforeUnblock process cluster message
+	// * end the query
+	// * if not clusterMessageBeforeUnblock, process cluster message
+	// * re-run the query without any blocking. Check that result match wanted value
+	tests := []struct {
+		name                   string
+		useTwoSquirrelDB       bool
+		clusterMessageBehavior clusterMessageBehavior
+		write1Metrics          []labels.Labels
+		write2Metrics          []labels.Labels
+		query                  []*labels.Matcher
+		want                   []labels.Labels
+	}{
+		{
+			name:                   "Two SquirrelDB",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterSynchronious,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "One SquirrelDB",
+			useTwoSquirrelDB:       false,
+			clusterMessageBehavior: clusterSynchronious,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "Two SquirrelDB, async cluster",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterFast,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "Two SquirrelDB, slow cluster",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterDelay,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "One SquirrelDB, slow cluster",
+			useTwoSquirrelDB:       false,
+			clusterMessageBehavior: clusterDelay,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cluster := &dummy.LocalCluster{}
+			storeSubCtx, unblock := withBlockContext(context.Background(), "blockQuery", time.Second)
+			wrappedCluster := newMockCluster(cluster)
+
+			var usedCluster types.Cluster
+
+			if tt.clusterMessageBehavior == clusterSynchronious {
+				usedCluster = cluster
+			} else {
+				usedCluster = wrappedCluster
+			}
+
+			store := &mockStore{
+				HookSelectPostingByNameValueStart: func(ctx context.Context, shard int32, name, value string) context.Context {
+					if shard != -1 {
+						block := getBlockContext(ctx, "blockQuery")
+						if block != nil {
+							block.WaitStart()
+						}
+					}
+
+					return ctx
+				},
+				HookSelectPostingByNameValueEnd: func(ctx context.Context, shard int32, name, value string) {
+					if shard != -1 {
+						block := getBlockContext(ctx, "blockQuery")
+						if block != nil {
+							block.WaitEnd() //nolint:contextcheck
+						}
+					}
+				},
+			}
+			lock := &mockLockFactory{}
+			states := &mockState{}
+
+			index1, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           usedCluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index1").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			index2, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           usedCluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index2").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			writeIndex := index1
+			readIndex := index1
+
+			if tt.useTwoSquirrelDB {
+				readIndex = index2
+			}
+
+			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write1Metrics, t0), t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			wrappedCluster.ProcessMessage()
+
+			group, _ := errgroup.WithContext(context.Background())
+
+			group.Go(func() error {
+				_, err := readIndex.Search(storeSubCtx, t1, t1, tt.query)
+
+				return err
+			})
+
+			unblock.unblockStartAndWait()
+
+			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write2Metrics, t1), t1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.clusterMessageBehavior == clusterFast {
+				wrappedCluster.ProcessMessage()
+			}
+
+			unblock.unblockEnd()
+
+			if err := group.Wait(); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.clusterMessageBehavior == clusterDelay {
+				wrappedCluster.ProcessMessage()
+			}
+
+			ids, err := readIndex.Search(context.Background(), t1, t1, tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_ = ids
+			t.Skip("TODO: this commit add test to show the issue, next commit will fix it")
+
+			if diff, err := cmpMetricsSetByLabels(ids, tt.want); err != nil {
+				t.Error(err)
+			} else if diff != "" {
+				t.Errorf("Search mismatch: (-got +want)\n%s", diff)
+			}
+
+			// re-do the request, but this time ensure it has cache
+			previousQueryCount := store.queryCount
+			// 1 query will be done, for fetch labels value for IDs. There is currently no
+			// cache for labels values.
+			expectedQueryCount := previousQueryCount + 1
+
+			ids, err = readIndex.Search(context.Background(), t1, t1, tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if diff, err := cmpMetricsSetByLabels(ids, tt.want); err != nil {
+				t.Error(err)
+			} else if diff != "" {
+				t.Errorf("Search mismatch: (-got +want)\n%s", diff)
+			}
+
+			if store.queryCount != expectedQueryCount {
+				t.Errorf("Store query count = %d, want %d", store.queryCount, expectedQueryCount)
+			}
+		})
+	}
+}
+
+func cmpMetricsSetByLabels(ids types.MetricsSet, want []labels.Labels) (string, error) {
+	got := make([]labels.Labels, 0, len(want))
+
+	for ids.Next() {
+		m := ids.At()
+		got = append(got, m.Labels)
+	}
+
+	if err := ids.Err(); err != nil {
+		return "", err
+	}
+
+	sorter := cmpopts.SortSlices(func(a, b labels.Labels) bool {
+		return labels.Compare(a, b) < 0
+	})
+
+	return cmp.Diff(got, want, sorter), nil
 }
 
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
