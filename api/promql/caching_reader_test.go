@@ -601,7 +601,7 @@ func Test_cachingReader_ReadIter(t *testing.T) { //nolint:maintidx
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			countingReader := &limitingReader{reader: tt.reader}
+			countingReader := &limitingReader{reader: tt.reader, returnedPoints: new(uint64)}
 			cacheReader := &cachingReader{
 				reader: countingReader,
 			}
@@ -1363,7 +1363,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			countingReader := &limitingReader{reader: tsdb}
+			countingReader := &limitingReader{reader: tsdb, returnedPoints: new(uint64)}
 
 			unCountedStore := NewStore(
 				zlog,
@@ -1609,7 +1609,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				prometheus.NewRegistry(),
 			)
 
-			countingReader := &limitingReader{reader: tsdb}
+			countingReader := &limitingReader{reader: tsdb, returnedPoints: new(uint64)}
 
 			store := NewStore(
 				zlog,

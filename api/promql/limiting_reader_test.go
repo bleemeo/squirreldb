@@ -138,6 +138,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 			rdr := &limitingReader{
 				reader:         tt.fields.reader,
 				maxTotalPoints: tt.fields.maxTotalPoints,
+				returnedPoints: new(uint64),
 			}
 
 			for i, r := range tt.reads {

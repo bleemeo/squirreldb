@@ -275,8 +275,10 @@ func Test_querier_Select(t *testing.T) {
 				store:          s,
 				mint:           tt.fields.mint,
 				maxt:           tt.fields.maxt,
+				rtrIndex:       reducedTimeRangeIndex{index: s.Index},
 				cachingReader:  &cachingReader{reader: s.Reader},
 				returnedSeries: new(uint32),
+				returnedPoints: new(uint64),
 			}
 			got := q.Select(reqCtx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(t, got, tt.want) {

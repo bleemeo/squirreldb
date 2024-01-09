@@ -45,8 +45,10 @@ type querier struct {
 	mint           int64
 	maxt           int64
 	metrics        *metrics
+	rtrIndex       reducedTimeRangeIndex
 	cachingReader  *cachingReader
 	returnedSeries *uint32
+	returnedPoints *uint64
 }
 
 type MetricReaderWithStats interface {
@@ -100,8 +102,10 @@ func (s Store) newQuerierFromHeaders(mint, maxt int64) querier {
 		mint:           mint,
 		maxt:           maxt,
 		metrics:        s.metrics,
+		rtrIndex:       reducedTimeRangeIndex{index: s.Index},
 		cachingReader:  &cachingReader{reader: s.Reader},
 		returnedSeries: new(uint32),
+		returnedPoints: new(uint64),
 	}
 }
 
@@ -116,11 +120,7 @@ func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
 }
 
 func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
-	var index types.Index
-
-	index = reducedTimeRangeIndex{ // TODO: instantiate at querier init ?
-		index: q.store.Index,
-	}
+	var index types.Index = q.rtrIndex
 
 	value := r.Header.Get(types.HeaderForcedMatcher)
 	if value != "" {
@@ -188,6 +188,7 @@ func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSerie
 	reader = &limitingReader{
 		reader:         q.cachingReader,
 		maxTotalPoints: maxEvaluatedPoints,
+		returnedPoints: q.returnedPoints,
 	}
 
 	enableDebug = r.Header.Get(types.HeaderQueryDebug) != ""
@@ -206,8 +207,8 @@ func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSerie
 // It allows passing hints that can help in optimising select,
 // but it's up to implementation how this is used if used at all.
 func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet { //nolint: lll
-	minT := time.Unix(q.mint/1000, q.mint%1000)
-	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+	minT := time.UnixMilli(q.mint)
+	maxT := time.UnixMilli(q.maxt)
 
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
@@ -359,8 +360,8 @@ func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.Sel
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
 func (q querier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
-	minT := time.Unix(q.mint/1000, q.mint%1000)
-	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+	minT := time.UnixMilli(q.mint)
+	maxT := time.UnixMilli(q.maxt)
 
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
@@ -379,8 +380,8 @@ func (q querier) LabelValues(ctx context.Context, name string, matchers ...*labe
 
 // LabelNames returns all the unique label names present in the block in sorted order.
 func (q querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
-	minT := time.Unix(q.mint/1000, q.mint%1000)
-	maxT := time.Unix(q.maxt/1000, q.maxt%1000)
+	minT := time.UnixMilli(q.mint)
+	maxT := time.UnixMilli(q.maxt)
 
 	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
 	if !ok {
