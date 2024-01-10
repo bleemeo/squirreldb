@@ -395,11 +395,12 @@ func TestWriteHandler(t *testing.T) {
 	)
 
 	tests := []struct {
-		name             string
-		labels           []prompb.Label
-		skipTenantHeader bool
-		expectStatus     int
-		absentMatchers   []*labels.Matcher
+		name                 string
+		labels               []prompb.Label
+		skipTenantHeader     bool
+		expectStatus         int
+		expectedMetricsCount int
+		absentMatchers       []*labels.Matcher
 	}{
 		// Test that when we try to write an invalid label or metric name we get an HTTP 400 status code.
 		// We rely on Prometheus returning a 500 error by default that we convert to a 400, but this behaviour
@@ -411,7 +412,8 @@ func TestWriteHandler(t *testing.T) {
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "__name__", Value: "na-me"},
 			},
-			expectStatus: http.StatusBadRequest,
+			expectStatus:         http.StatusOK,
+			expectedMetricsCount: 0,
 		},
 		{
 			name: "invalid-label-name",
@@ -419,15 +421,17 @@ func TestWriteHandler(t *testing.T) {
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "la-bel", Value: "val"},
 			},
-			expectStatus: http.StatusBadRequest,
+			expectStatus:         http.StatusOK,
+			expectedMetricsCount: 0,
 		},
 		{
 			name: "missing-tenant-header",
 			labels: []prompb.Label{
 				{Name: "label", Value: "value"},
 			},
-			expectStatus:     http.StatusBadRequest,
-			skipTenantHeader: true,
+			expectStatus:         http.StatusBadRequest,
+			expectedMetricsCount: 0,
+			skipTenantHeader:     true,
 		},
 		// Mutable labels should be removed when writing.
 		{
@@ -436,7 +440,8 @@ func TestWriteHandler(t *testing.T) {
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "group", Value: "my_group"},
 			},
-			expectStatus: http.StatusOK,
+			expectStatus:         http.StatusOK,
+			expectedMetricsCount: 1,
 			absentMatchers: []*labels.Matcher{
 				{Name: "group", Value: "my_group"},
 			},
@@ -465,19 +470,21 @@ func TestWriteHandler(t *testing.T) {
 			)
 			labelProcessor := mutable.NewLabelProcessor(provider, tenantLabelName)
 
+			dummyWriter := new(dummy.MemoryTSDB)
 			dummyIndex := &dummy.Index{
 				StoreMetricIDInMemory: true,
 			}
+			reg := prometheus.NewRegistry()
 			appendable := remotestorage.New(
-				&dummy.MemoryTSDB{},
+				dummyWriter,
 				dummyIndex,
 				1,
 				tenantLabelName,
 				labelProcessor,
 				true,
-				prometheus.NewRegistry(),
+				reg,
 			)
-			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), appendable)
+			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{
@@ -522,6 +529,10 @@ func TestWriteHandler(t *testing.T) {
 
 			if resp.StatusCode != test.expectStatus {
 				t.Fatalf("wanted status %d, got %v", test.expectStatus, resp.StatusCode)
+			}
+
+			if len(dummyWriter.Data) != test.expectedMetricsCount {
+				t.Fatalf("wanted %d metrics written, got %d", test.expectedMetricsCount, len(dummyWriter.Data))
 			}
 
 			if len(test.absentMatchers) > 0 {

@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
-	"github.com/thanos-community/promql-engine/engine"
+	"github.com/thanos-io/promql-engine/engine"
 )
 
 func NewEngine(
@@ -36,7 +36,6 @@ func NewEngine(
 		queryEngine = engine.New(engine.Opts{
 			EngineOpts:        engineOpts,
 			LogicalOptimizers: nil,
-			DebugWriter:       nil,
 			DisableFallback:   false,
 		})
 	} else {

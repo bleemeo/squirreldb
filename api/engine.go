@@ -19,16 +19,17 @@ type wrapperEngine struct {
 }
 
 func (e wrapperEngine) NewInstantQuery(
+	ctx context.Context,
 	q storage.Queryable,
-	opts *promql.QueryOpts,
+	opts promql.QueryOpts,
 	qs string,
 	ts time.Time,
 ) (promql.Query, error) {
-	query, err := e.QueryEngine.NewInstantQuery(q, opts, qs, ts)
+	query, err := e.QueryEngine.NewInstantQuery(ctx, q, opts, qs, ts)
 
 	optsStr := "noOptions"
 	if opts != nil {
-		optsStr = fmt.Sprintf("options=%#v", *opts)
+		optsStr = fmt.Sprintf("options=%#v", opts)
 	}
 
 	query = wrapperQuery{
@@ -46,18 +47,19 @@ func (e wrapperEngine) NewInstantQuery(
 }
 
 func (e wrapperEngine) NewRangeQuery(
+	ctx context.Context,
 	q storage.Queryable,
-	opts *promql.QueryOpts,
+	opts promql.QueryOpts,
 	qs string,
 	start,
 	end time.Time,
 	interval time.Duration,
 ) (promql.Query, error) {
-	query, err := e.QueryEngine.NewRangeQuery(q, opts, qs, start, end, interval)
+	query, err := e.QueryEngine.NewRangeQuery(ctx, q, opts, qs, start, end, interval)
 
 	optsStr := "noOptions"
 	if opts != nil {
-		optsStr = fmt.Sprintf("options=%#v", *opts)
+		optsStr = fmt.Sprintf("options=%#v", opts)
 	}
 
 	query = wrapperQuery{

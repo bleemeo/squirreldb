@@ -275,7 +275,7 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 		}
 	}
 
-	return builder.Labels(nil), nil
+	return builder.Labels(), nil
 }
 
 // MutableLabelNames returns all the mutable label names possible for a tenant.

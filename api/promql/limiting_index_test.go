@@ -165,6 +165,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 			idx := limitingIndex{
 				index:          tt.fields.index,
 				maxTotalSeries: tt.fields.maxTotalSeries,
+				returnedSeries: new(uint32),
 			}
 			for i, query := range tt.searches {
 				got, err := idx.Search(context.Background(), now, now, query.matchers)

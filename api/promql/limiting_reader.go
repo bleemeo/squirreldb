@@ -10,7 +10,7 @@ import (
 type limitingReader struct {
 	reader         types.MetricReader
 	maxTotalPoints uint64
-	returnedPoints uint64
+	returnedPoints *uint64
 }
 
 func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest) (types.MetricDataSet, error) {
@@ -26,7 +26,7 @@ func (rdr *limitingReader) ReadIter(ctx context.Context, req types.MetricRequest
 }
 
 func (rdr *limitingReader) PointsRead() float64 {
-	v := atomic.LoadUint64(&rdr.returnedPoints)
+	v := atomic.LoadUint64(rdr.returnedPoints)
 
 	return float64(v)
 }
@@ -45,7 +45,7 @@ type limitDataSet struct {
 }
 
 func (d limitDataSet) Next() bool {
-	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
+	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
 		return false
 	}
 
@@ -55,7 +55,7 @@ func (d limitDataSet) Next() bool {
 
 	count := len(d.set.At().Points)
 
-	newSize := atomic.AddUint64(&d.rdr.returnedPoints, uint64(count))
+	newSize := atomic.AddUint64(d.rdr.returnedPoints, uint64(count))
 
 	return d.rdr.maxTotalPoints == 0 || newSize <= d.rdr.maxTotalPoints
 }
@@ -65,7 +65,7 @@ func (d limitDataSet) At() types.MetricData {
 }
 
 func (d limitDataSet) Err() error {
-	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(&d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
+	if d.rdr.maxTotalPoints != 0 && atomic.LoadUint64(d.rdr.returnedPoints) > d.rdr.maxTotalPoints {
 		return errors.New("too many points evaluated by this PromQL")
 	}
 

@@ -128,6 +128,9 @@ func NewPrometheus(
 	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
 	CORSOrigin := regexp.MustCompile(".*")
 
+	// We enable both remote-write and OTLP-write handlers, even if we don't explicitly support OTLP.
+	rwEnabled, otlpEnabled := true, true
+
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
@@ -155,6 +158,8 @@ func NewPrometheus(
 		mockGatherer{},
 		metricRegistry,
 		nil,
+		rwEnabled,
+		otlpEnabled,
 	)
 
 	return api

@@ -1084,7 +1084,7 @@ func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest
 
 			builder := labels.NewBuilder(l)
 			builder.Del(ttlLabel)
-			l = builder.Labels(nil)
+			l = builder.Labels()
 		}
 
 		results[i] = types.LookupRequest{
@@ -1105,7 +1105,7 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 		builder := labels.NewBuilder(metric)
 		builder.Del(ttlLabel)
 
-		result = append(result, builder.Labels(nil))
+		result = append(result, builder.Labels())
 	}
 
 	return result
@@ -1734,9 +1734,9 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				"__name__":   fmt.Sprintf("generated_%03d", x),
 				"label_x":    fmt.Sprintf("%03d", x),
 				"label_y":    fmt.Sprintf("%03d", y),
-				"multiple_2": fmt.Sprintf("%v", y%2 == 0),
-				"multiple_3": fmt.Sprintf("%v", y%3 == 0),
-				"multiple_5": fmt.Sprintf("%v", y%5 == 0),
+				"multiple_2": strconv.FormatBool(y%2 == 0),
+				"multiple_3": strconv.FormatBool(y%3 == 0),
+				"multiple_5": strconv.FormatBool(y%5 == 0),
 			}
 		}
 	}
@@ -2781,9 +2781,9 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 					"__name__":   fmt.Sprintf("generated_%03d", x),
 					"label_x":    fmt.Sprintf("%03d", x),
 					"label_y":    fmt.Sprintf("%03d", y),
-					"multiple_2": fmt.Sprintf("%v", y%2 == 0),
-					"multiple_3": fmt.Sprintf("%v", y%3 == 0),
-					"multiple_5": fmt.Sprintf("%v", y%5 == 0),
+					"multiple_2": strconv.FormatBool(y%2 == 0),
+					"multiple_3": strconv.FormatBool(y%3 == 0),
+					"multiple_5": strconv.FormatBool(y%5 == 0),
 				}),
 				Start: start,
 				End:   end,
@@ -6460,7 +6460,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				// randomize between shortestTTL & longTTL
 				rndSecond := shortestTTL.Seconds() + rnd.Float64()*(longTTL.Seconds()-shortestTTL.Seconds())
 				builder.Set(ttlLabel, strconv.FormatInt(int64(rndSecond), 10))
-				metricsRandomTTL[i] = builder.Labels(nil)
+				metricsRandomTTL[i] = builder.Labels()
 
 				rndExpirationByShard[i][nextShard] = currentTime.Add(time.Duration(rndSecond) * time.Second)
 			}
@@ -6574,13 +6574,13 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			for i := range metricsLongToShortTTL {
 				builder := labels.NewBuilder(metricsLongToShortTTL[i])
 				builder.Set(ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10))
-				metricsLongToShortTTL[i] = builder.Labels(nil)
+				metricsLongToShortTTL[i] = builder.Labels()
 			}
 
 			for i := range metricsShortToLongTTL {
 				builder := labels.NewBuilder(metricsShortToLongTTL[i])
 				builder.Set(ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10))
-				metricsShortToLongTTL[i] = builder.Labels(nil)
+				metricsShortToLongTTL[i] = builder.Labels()
 			}
 		case currentPhase == 2 && nextPhase == 3:
 			// End of phase 2
@@ -8798,7 +8798,7 @@ func concurrentAccessWriter(
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "low-ttl",
-				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+				"unique":   strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
 		},
@@ -8808,7 +8808,7 @@ func concurrentAccessWriter(
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "medium-ttl",
-				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+				"unique":   strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
 		},
@@ -8818,7 +8818,7 @@ func concurrentAccessWriter(
 			Labels: labels.FromMap(map[string]string{
 				"__name__": "not_common",
 				"item":     "high-ttl",
-				"unique":   fmt.Sprintf("%d", rnd.Int63()),
+				"unique":   strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
 		},
@@ -8908,7 +8908,7 @@ func concurrentAccessReader(
 			}
 		case 3:
 			matchers = []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "unique", fmt.Sprintf("%d", rnd.Int63())),
+				labels.MustNewMatcher(labels.MatchEqual, "unique", strconv.FormatInt(rnd.Int63(), 10)),
 			}
 		}
 

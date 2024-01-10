@@ -69,8 +69,8 @@ type IndexDumper interface {
 }
 
 type IndexBlocker interface {
-	BlockCassandraWrite(context.Context) error
-	UnblockCassandraWrite(context.Context) error
+	BlockCassandraWrite(ctx context.Context) error
+	UnblockCassandraWrite(ctx context.Context) error
 }
 
 type VerifiableIndex interface {
@@ -168,6 +168,6 @@ const (
 	// Set the metric Time To Live when writing.
 	HeaderTimeToLive = "X-SquirrelDB-TTL"
 	// Enable debugging information printed in SquirrelDB server log about a query.
-	HeaderQueryDebug        = "X-SquirrelDB-Query-Debug"         //nolint:gosec
-	HeaderQueryVerboseDebug = "X-SquirrelDB-Query-Verbose-Debug" //nolint:gosec
+	HeaderQueryDebug        = "X-SquirrelDB-Query-Debug"
+	HeaderQueryVerboseDebug = "X-SquirrelDB-Query-Verbose-Debug"
 )

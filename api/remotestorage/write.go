@@ -76,7 +76,7 @@ func (w *writeMetrics) Append(_ storage.SeriesRef, l labels.Labels, t int64, v f
 			}
 		}
 
-		l = builder.Labels(nil)
+		l = builder.Labels()
 	}
 
 	if err := validateLabels(l); err != nil {

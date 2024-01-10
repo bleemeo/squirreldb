@@ -2,6 +2,7 @@ package mutable_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"squirreldb/cassandra/mutable"
@@ -140,5 +141,5 @@ func randomString(length int) string {
 
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(b)
 
-	return fmt.Sprintf("%x", b)[:length]
+	return hex.EncodeToString(b)[:length]
 }
