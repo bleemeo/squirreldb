@@ -40,13 +40,18 @@ type Store struct {
 }
 
 type querier struct {
-	store          Store
-	logger         zerolog.Logger
-	mint           int64
-	maxt           int64
-	metrics        *metrics
-	rtrIndex       reducedTimeRangeIndex
-	cachingReader  *cachingReader
+	store         Store
+	logger        zerolog.Logger
+	mint          int64
+	maxt          int64
+	metrics       *metrics
+	rtrIndex      reducedTimeRangeIndex
+	cachingReader *cachingReader
+	// We must store the two following counters here
+	// to keep incrementing them across each Select(),
+	// and not having them reinitialized every time,
+	// because the limits they're compared to
+	// are only given when calling Select().
 	returnedSeries *uint32
 	returnedPoints *uint64
 }
