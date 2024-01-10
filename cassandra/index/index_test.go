@@ -222,6 +222,9 @@ type mockStore struct {
 	id2expiration map[types.MetricID]time.Time
 	queryCount    int
 	mutex         sync.Mutex
+
+	HookSelectPostingByNameValueStart func(ctx context.Context, shard int32, name string, value string) context.Context
+	HookSelectPostingByNameValueEnd   func(ctx context.Context, shard int32, name string, value string)
 }
 
 func (s *mockStore) Init(ctx context.Context) error {
@@ -441,6 +444,115 @@ func (s *mockStore) verifyStoreEmpty(t *testing.T) error {
 	return nil
 }
 
+type blockContextKey struct {
+	Name string
+}
+
+func getBlockContext(ctx context.Context, name string) *blockContext {
+	blockList, ok := ctx.Value(blockContextKey{Name: name}).(*blockContext)
+	if !ok {
+		return nil
+	}
+
+	return blockList
+}
+
+// withBlockContext return a context and blockContext that could be used to control execution timing some method.
+// The context should be used in call to method you want to block. The method should call WaitStart,
+// NotifyEndReached and WaitEnd.
+//
+// The method will block at most maxWait when it call WaitStart or WaitEnd.
+//
+// The storeBlock contains:
+//   - a function unblockStartAndWait: which allow the method to start and wait until it block at end of invocation.
+//     unblockStart only return once method is blocked at the end
+//   - a function unblockEnd: which allow the method to return. It also call unblockStart() which
+//     is a no-op if it was already called.
+//
+// This is likely useful with store hooks, like HookSelectPostingByNameValueStart and HookSelectPostingByNameValueEnd.
+func withBlockContext(ctx context.Context, name string, maxWait time.Duration) (context.Context, *blockContext) {
+	result := &blockContext{maxWait: maxWait}
+	result.cond = sync.NewCond(&result.l)
+
+	return context.WithValue(ctx, blockContextKey{Name: name}, result), result
+}
+
+type blockContext struct {
+	l             sync.Mutex
+	cond          *sync.Cond
+	maxWait       time.Duration
+	startUnlocked bool
+	endReached    bool
+	endUnlocked   bool
+}
+
+func (b *blockContext) unblockStartAndWait() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.startUnlocked = true
+	b.cond.Broadcast()
+
+	for !b.endReached {
+		b.cond.Wait()
+	}
+}
+
+func (b *blockContext) unblockEnd() {
+	b.unblockStartAndWait()
+
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endUnlocked = true
+	b.cond.Broadcast()
+}
+
+func (b *blockContext) WaitStart() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), b.maxWait)
+	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		b.cond.Broadcast()
+	}()
+
+	for !b.startUnlocked && ctx.Err() == nil {
+		b.cond.Wait()
+	}
+}
+
+func (b *blockContext) NotifyEndReached() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endReached = true
+	b.cond.Broadcast()
+}
+
+func (b *blockContext) WaitEnd() {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	b.endReached = true
+	b.cond.Broadcast()
+
+	ctx, cancel := context.WithTimeout(context.Background(), b.maxWait)
+	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		b.cond.Broadcast()
+	}()
+
+	for !b.endUnlocked && ctx.Err() == nil {
+		b.cond.Wait()
+	}
+}
+
 func (s *mockStore) SelectLabelsList2ID(ctx context.Context, input []string) (map[string]types.MetricID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -585,6 +697,25 @@ func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name s
 }
 
 func (s *mockStore) SelectPostingByNameValue(
+	ctx context.Context,
+	shard int32,
+	name string,
+	value string,
+) ([]byte, error) {
+	if s.HookSelectPostingByNameValueStart != nil {
+		ctx = s.HookSelectPostingByNameValueStart(ctx, shard, name, value)
+	}
+
+	if s.HookSelectPostingByNameValueEnd != nil {
+		defer s.HookSelectPostingByNameValueEnd(ctx, shard, name, value)
+	}
+
+	r, e := s.selectPostingByNameValue(ctx, shard, name, value)
+
+	return r, e
+}
+
+func (s *mockStore) selectPostingByNameValue(
 	ctx context.Context,
 	shard int32,
 	name string,
@@ -841,6 +972,97 @@ func (s *mockStore) DeletePostingsByNames(ctx context.Context, shard int32, name
 	}
 
 	return ctx.Err()
+}
+
+type mockCluster struct {
+	*dummy.LocalCluster
+
+	l            sync.Mutex
+	delay        time.Duration
+	callbackChan chan interface{}
+	wg           *sync.WaitGroup
+}
+
+func newMockCluster(cluster *dummy.LocalCluster) *mockCluster {
+	return &mockCluster{
+		LocalCluster: cluster,
+		callbackChan: make(chan interface{}),
+		wg:           &sync.WaitGroup{},
+	}
+}
+
+func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
+	wrappedCallback := func(in []byte) {
+		c.l.Lock()
+		wg := c.wg
+		callbackChan := c.callbackChan
+		delay := c.delay
+		c.l.Unlock()
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			// wait for callbackGate to be closed, signifing message should be processed
+			<-callbackChan
+
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+
+			callback(in)
+		}()
+	}
+
+	c.LocalCluster.Subscribe(topic, wrappedCallback)
+}
+
+// AutoProcessWithDelay allow cluster message to be processed without need to call ProcessMessage()
+// but after a delay which must be > 0.
+// You can still use ProcessMessage() to wait for currently pending messages.
+func (c *mockCluster) AutoProcessWithDelay(delay time.Duration) {
+	if delay == 0 {
+		panic("delay could not be 0")
+	}
+
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	// When delay != 0, c.callbackChan is already closed.
+	if c.delay == 0 {
+		close(c.callbackChan)
+	}
+
+	c.delay = delay
+}
+
+// ProcessMessage will allow all currently pending message to process and wait for their completing.
+// This only apply to message currently pending, new message (and possibly one that arrive during
+// ProcessMessage() won't be processed and won't be waited).
+func (c *mockCluster) ProcessMessage() {
+	c.l.Lock()
+	// We take copy of the waitgroup & chanel before creating a new one.
+	// This ensure we unblock & wait only currently pending messages.
+	wg := c.wg
+	callbackChan := c.callbackChan
+	delay := c.delay
+
+	c.wg = &sync.WaitGroup{}
+	c.callbackChan = make(chan interface{})
+
+	if c.delay != 0 {
+		close(c.callbackChan)
+	}
+
+	c.l.Unlock()
+
+	// When delay != 0, c.callbackChan is already closed.
+	if delay == 0 {
+		close(callbackChan)
+	}
+
+	wg.Wait()
 }
 
 func toLookupRequests(list []labels.Labels, now time.Time) []types.LookupRequest {
@@ -4746,391 +4968,821 @@ func Test_cache(t *testing.T) {
 	}
 }
 
+// Test_cache_bug_posting_invalidation will run a scenario on index cache to show invalidation issue.
+// It happened that a 2-node SquirrelDB cluster returned inconsitent result between SquirrelDB A and SquirrelDB B
+// on a query that used newly-created metrics. This issue resolved by itself after 15 minutes. For that reason
+// I suspect the posting cache to not being invalidated correctly on SquirrelDB B after metric creation on
+// SquirrelDB A.
+// After looking at code, I even think it could be possible to have issue on a single node. Step to reproduce (what
+// this test does):
+// - Run a query on SquirrelDB B.
+//   - The result will not be in cache and Cassandra will be queried
+//   - To simulate concurrency issue, once Cassandra get the data, sleep the goroutine
+//     (e.g. delay return from SelectPostingByNameValue)
+//
+// - While query on SquirrelDB B is waiting, create a metric on SquirrelDB A
+// - Once the creation is done SquirrelDB B cache is invalidated (strictly speaking a message to invalidate it is sent)
+// - Resume query on SquirrelDB B. The bug was that Cassandra already read old value and we write result in cache.
+// - Since cache was already invalidated, it would be persistent with old/wrong value.
+func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
+	defaultTTL := 365 * 24 * time.Hour
+	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+	t1 := t0.Add(5 * time.Hour)
+
+	type clusterMessageBehavior int
+
+	const (
+		clusterSynchronious clusterMessageBehavior = 1
+		clusterFast         clusterMessageBehavior = 2
+		clusterDelay        clusterMessageBehavior = 3
+	)
+
+	// The test will actually write 2 time:
+	// * write write1Metrics with t0 and ensure cluster message are processed. This simulate an old writes.
+	// * start the query with t1
+	// * write write2Metrics with t1
+	// * if clusterMessageBeforeUnblock process cluster message
+	// * end the query
+	// * if not clusterMessageBeforeUnblock, process cluster message
+	// * re-run the query without any blocking. Check that result match wanted value
+	tests := []struct {
+		name                   string
+		useTwoSquirrelDB       bool
+		clusterMessageBehavior clusterMessageBehavior
+		write1Metrics          []labels.Labels
+		write2Metrics          []labels.Labels
+		query                  []*labels.Matcher
+		want                   []labels.Labels
+	}{
+		{
+			name:                   "Two SquirrelDB",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterSynchronious,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "One SquirrelDB",
+			useTwoSquirrelDB:       false,
+			clusterMessageBehavior: clusterSynchronious,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "Two SquirrelDB, async cluster",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterFast,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "Two SquirrelDB, slow cluster",
+			useTwoSquirrelDB:       true,
+			clusterMessageBehavior: clusterDelay,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+		{
+			name:                   "One SquirrelDB, slow cluster",
+			useTwoSquirrelDB:       false,
+			clusterMessageBehavior: clusterDelay,
+			write1Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+			},
+			write2Metrics: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+			query: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+			},
+			want: []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item1",
+				}),
+				labels.FromMap(map[string]string{
+					"__name__": "counter_total",
+					"item":     "item2",
+				}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cluster := &dummy.LocalCluster{}
+			storeSubCtx, unblock := withBlockContext(context.Background(), "blockQuery", time.Second)
+			wrappedCluster := newMockCluster(cluster)
+
+			var usedCluster types.Cluster
+
+			if tt.clusterMessageBehavior == clusterSynchronious {
+				usedCluster = cluster
+			} else {
+				usedCluster = wrappedCluster
+			}
+
+			store := &mockStore{
+				HookSelectPostingByNameValueStart: func(ctx context.Context, shard int32, name, value string) context.Context {
+					if shard != -1 {
+						block := getBlockContext(ctx, "blockQuery")
+						if block != nil {
+							block.WaitStart()
+						}
+					}
+
+					return ctx
+				},
+				HookSelectPostingByNameValueEnd: func(ctx context.Context, shard int32, name, value string) {
+					if shard != -1 {
+						block := getBlockContext(ctx, "blockQuery")
+						if block != nil {
+							block.WaitEnd() //nolint:contextcheck
+						}
+					}
+				},
+			}
+			lock := &mockLockFactory{}
+			states := &mockState{}
+
+			index1, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           usedCluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index1").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			index2, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           usedCluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index2").Logger(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			writeIndex := index1
+			readIndex := index1
+
+			if tt.useTwoSquirrelDB {
+				readIndex = index2
+			}
+
+			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write1Metrics, t0), t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			wrappedCluster.ProcessMessage()
+
+			group, _ := errgroup.WithContext(context.Background())
+
+			group.Go(func() error {
+				_, err := readIndex.Search(storeSubCtx, t1, t1, tt.query)
+
+				return err
+			})
+
+			unblock.unblockStartAndWait()
+
+			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write2Metrics, t1), t1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.clusterMessageBehavior == clusterFast {
+				wrappedCluster.ProcessMessage()
+			}
+
+			unblock.unblockEnd()
+
+			if err := group.Wait(); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.clusterMessageBehavior == clusterDelay {
+				wrappedCluster.ProcessMessage()
+			}
+
+			ids, err := readIndex.Search(context.Background(), t1, t1, tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_ = ids
+
+			if diff, err := cmpMetricsSetByLabels(ids, tt.want); err != nil {
+				t.Error(err)
+			} else if diff != "" {
+				t.Errorf("Search mismatch: (-got +want)\n%s", diff)
+			}
+
+			// re-do the request, but this time ensure it has cache
+			previousQueryCount := store.queryCount
+			// 1 query will be done, for fetch labels value for IDs. There is currently no
+			// cache for labels values.
+			expectedQueryCount := previousQueryCount + 1
+
+			ids, err = readIndex.Search(context.Background(), t1, t1, tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if diff, err := cmpMetricsSetByLabels(ids, tt.want); err != nil {
+				t.Error(err)
+			} else if diff != "" {
+				t.Errorf("Search mismatch: (-got +want)\n%s", diff)
+			}
+
+			if store.queryCount != expectedQueryCount {
+				t.Errorf("Store query count = %d, want %d", store.queryCount, expectedQueryCount)
+			}
+		})
+	}
+}
+
+func cmpMetricsSetByLabels(ids types.MetricsSet, want []labels.Labels) (string, error) {
+	got := make([]labels.Labels, 0, len(want))
+
+	for ids.Next() {
+		m := ids.At()
+		got = append(got, m.Labels)
+	}
+
+	if err := ids.Err(); err != nil {
+		return "", err
+	}
+
+	sorter := cmpopts.SortSlices(func(a, b labels.Labels) bool {
+		return labels.Compare(a, b) < 0
+	})
+
+	return cmp.Diff(got, want, sorter), nil
+}
+
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
 func Test_cluster(t *testing.T) { //nolint:maintidx
 	defaultTTL := 365 * 24 * time.Hour
-	store := &mockStore{}
-	lock := &mockLockFactory{}
-	states := &mockState{}
 
-	index1, err := initialize(
-		context.Background(),
-		store,
-		Options{
-			DefaultTimeToLive: defaultTTL,
-			LockFactory:       lock,
-			States:            states,
-			Cluster:           &dummy.LocalCluster{},
-		},
-		newMetrics(prometheus.NewRegistry()),
-		getTestLogger().With().Str("component", "index1").Logger(),
+	type clusterMessageBehavior int
+
+	const (
+		noCluster            clusterMessageBehavior = 1
+		synchroniousCluster  clusterMessageBehavior = 2
+		asynchroniousCluster clusterMessageBehavior = 3
 	)
-	if err != nil {
-		t.Error(err)
-	}
 
-	metrics := []map[string]string{
+	tests := []struct {
+		name                   string
+		clusterMessageBehavior clusterMessageBehavior
+	}{
 		{
-			"__name__":    "up",
-			"instance":    "index1",
-			"description": "Metrics created by index1",
+			// This situation is unsupported. It means a cluster of two SquirrelDB run
+			// without being able to communicate. We will still try to don't break everything
+			// but at least caching could be wrong.
+			name:                   "test-without-redis",
+			clusterMessageBehavior: noCluster,
 		},
 		{
-			"__name__":    "up",
-			"instance":    "index2",
-			"description": "Metrics created by index2",
+			name:                   "dummy-cluster",
+			clusterMessageBehavior: synchroniousCluster,
 		},
 		{
-			"__name__":    "up2",
-			"instance":    "index1",
-			"description": "index1, one month later",
-		},
-		{
-			"__name__":    "up2",
-			"instance":    "index2",
-			"description": "index2, two month later",
+			name:                   "async-cluster",
+			clusterMessageBehavior: asynchroniousCluster,
 		},
 	}
-	metricsID := make([]types.MetricID, len(metrics))
 
-	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
-	t1 := t0.Add(24 * 30 * time.Hour)
-	t2 := t1.Add(24 * 30 * time.Hour)
-	t3 := t2.Add(24 * 30 * time.Hour)
-	t4 := t3.Add(24 * 30 * time.Hour)
-	t5 := t4.Add(24 * 30 * time.Hour)
-	t6 := t5.Add(24 * 30 * time.Hour)
-	t7 := t6.Add(24 * 370 * time.Hour)
+	for _, tt := range tests {
+		tt := tt
 
-	tmp, _, err := index1.lookupIDs(
-		context.Background(),
-		toLookupRequests(
-			[]labels.Labels{
-				labels.FromMap(metrics[0]),
-			},
-			t0,
-		),
-		t0,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			store := &mockStore{}
+			lock := &mockLockFactory{}
+			states := &mockState{}
 
-	metricsID[0] = tmp[0]
+			cluster := &dummy.LocalCluster{}
+			wrappedCluster := newMockCluster(cluster)
+			wrappedCluster.AutoProcessWithDelay(100 * time.Millisecond)
 
-	index2, err := initialize(
-		context.Background(),
-		store,
-		Options{
-			DefaultTimeToLive: defaultTTL,
-			LockFactory:       lock,
-			States:            states,
-			Cluster:           &dummy.LocalCluster{},
-		},
-		newMetrics(prometheus.NewRegistry()),
-		getTestLogger().With().Str("component", "index2").Logger(),
-	)
-	if err != nil {
-		t.Error(err)
-	}
+			var (
+				index1Cluster types.Cluster
+				index2Cluster types.Cluster
+			)
 
-	tmp, _, err = index2.lookupIDs(
-		context.Background(),
-		toLookupRequests(
-			[]labels.Labels{
-				labels.FromMap(metrics[1]),
-				labels.FromMap(metrics[0]),
-			},
-			t0,
-		),
-		t0,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	metricsID[1] = tmp[0]
-
-	if tmp[1] != metricsID[0] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[0])
-	}
-
-	tmp, _, err = index1.lookupIDs(
-		context.Background(),
-		toLookupRequests(
-			[]labels.Labels{
-				labels.FromMap(metrics[0]),
-				labels.FromMap(metrics[1]),
-			},
-			t0,
-		),
-		t0,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tmp[0] != metricsID[0] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
-	}
-
-	if tmp[1] != metricsID[1] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
-	}
-
-	tmp, _, err = index1.lookupIDs(
-		context.Background(),
-		toLookupRequests(
-			[]labels.Labels{
-				labels.FromMap(metrics[0]),
-				labels.FromMap(metrics[1]),
-				labels.FromMap(metrics[2]),
-			},
-			t1,
-		),
-		t1,
-	)
-	if err != nil {
-		t.Error(err)
-	}
-
-	{
-		buffer := bytes.NewBuffer(nil)
-		hadIssue, err := index1.Verifier(buffer).
-			WithNow(t0).
-			WithStrictMetricCreation(true).
-			Verify(context.Background())
-		if err != nil {
-			t.Error(err)
-		}
-		if hadIssue {
-			t.Fatalf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
-		}
-	}
-
-	metricsID[2] = tmp[2]
-
-	if tmp[0] != metricsID[0] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
-	}
-
-	if tmp[1] != metricsID[1] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
-	}
-
-	tmp, _, err = index2.lookupIDs(
-		context.Background(),
-		toLookupRequests(
-			[]labels.Labels{
-				labels.FromMap(metrics[3]),
-				labels.FromMap(metrics[2]),
-				labels.FromMap(metrics[1]),
-			},
-			t2,
-		),
-		t2,
-	)
-	if err != nil {
-		t.Error(err)
-	}
-
-	metricsID[3] = tmp[0]
-
-	if tmp[0] != metricsID[3] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[3])
-	}
-
-	if tmp[1] != metricsID[2] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[2])
-	}
-
-	if tmp[2] != metricsID[1] {
-		t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[2], metricsID[1])
-	}
-
-	// Do some concurrency tests
-	labelsList := make([]labels.Labels, 10000)
-	for n := range labelsList {
-		lbls := map[string]string{
-			"__name__": "filler",
-			"id":       strconv.FormatInt(int64(n), 10),
-		}
-		labelsList[n] = labels.FromMap(lbls)
-	}
-
-	batchSize := 100
-	workerCount := 4
-	group, _ := errgroup.WithContext(context.Background())
-
-	for n := 0; n < workerCount; n++ {
-		n := n
-
-		group.Go(func() error {
-			index := index1
-
-			if n%2 == 1 {
-				index = index2
+			switch tt.clusterMessageBehavior {
+			case noCluster:
+				index1Cluster = &dummy.LocalCluster{}
+				index2Cluster = &dummy.LocalCluster{}
+			case synchroniousCluster:
+				index1Cluster = cluster
+				index2Cluster = cluster
+			case asynchroniousCluster:
+				index1Cluster = wrappedCluster
+				index2Cluster = wrappedCluster
 			}
 
-			start := n * len(labelsList) / workerCount
-			end := (n+1)*len(labelsList)/workerCount - 1
+			index1, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           index1Cluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index1").Logger(),
+			)
+			if err != nil {
+				t.Error(err)
+			}
 
-			current := start
-			for current < end {
-				idxEnd := current + batchSize
-				if idxEnd > end {
-					idxEnd = end
-				}
+			metrics := []map[string]string{
+				{
+					"__name__":    "up",
+					"instance":    "index1",
+					"description": "Metrics created by index1",
+				},
+				{
+					"__name__":    "up",
+					"instance":    "index2",
+					"description": "Metrics created by index2",
+				},
+				{
+					"__name__":    "up2",
+					"instance":    "index1",
+					"description": "index1, one month later",
+				},
+				{
+					"__name__":    "up2",
+					"instance":    "index2",
+					"description": "index2, two month later",
+				},
+			}
+			metricsID := make([]types.MetricID, len(metrics))
 
-				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
+			t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
+			t1 := t0.Add(24 * 30 * time.Hour)
+			t2 := t1.Add(24 * 30 * time.Hour)
+			t3 := t2.Add(24 * 30 * time.Hour)
+			t4 := t3.Add(24 * 30 * time.Hour)
+			t5 := t4.Add(24 * 30 * time.Hour)
+			t6 := t5.Add(24 * 30 * time.Hour)
+			t7 := t6.Add(24 * 370 * time.Hour)
+
+			tmp, _, err := index1.lookupIDs(
+				context.Background(),
+				toLookupRequests(
+					[]labels.Labels{
+						labels.FromMap(metrics[0]),
+					},
+					t0,
+				),
+				t0,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			metricsID[0] = tmp[0]
+
+			index2, err := initialize(
+				context.Background(),
+				store,
+				Options{
+					DefaultTimeToLive: defaultTTL,
+					LockFactory:       lock,
+					States:            states,
+					Cluster:           index2Cluster,
+				},
+				newMetrics(prometheus.NewRegistry()),
+				getTestLogger().With().Str("component", "index2").Logger(),
+			)
+			if err != nil {
+				t.Error(err)
+			}
+
+			tmp, _, err = index2.lookupIDs(
+				context.Background(),
+				toLookupRequests(
+					[]labels.Labels{
+						labels.FromMap(metrics[1]),
+						labels.FromMap(metrics[0]),
+					},
+					t0,
+				),
+				t0,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			metricsID[1] = tmp[0]
+
+			if tmp[1] != metricsID[0] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[0])
+			}
+
+			tmp, _, err = index1.lookupIDs(
+				context.Background(),
+				toLookupRequests(
+					[]labels.Labels{
+						labels.FromMap(metrics[0]),
+						labels.FromMap(metrics[1]),
+					},
+					t0,
+				),
+				t0,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tmp[0] != metricsID[0] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
+			}
+
+			if tmp[1] != metricsID[1] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
+			}
+
+			tmp, _, err = index1.lookupIDs(
+				context.Background(),
+				toLookupRequests(
+					[]labels.Labels{
+						labels.FromMap(metrics[0]),
+						labels.FromMap(metrics[1]),
+						labels.FromMap(metrics[2]),
+					},
+					t1,
+				),
+				t1,
+			)
+			if err != nil {
+				t.Error(err)
+			}
+
+			{
+				buffer := bytes.NewBuffer(nil)
+				hadIssue, err := index1.Verifier(buffer).
+					WithNow(t0).
+					WithStrictMetricCreation(true).
+					Verify(context.Background())
 				if err != nil {
-					return err
+					t.Error(err)
 				}
-
-				current = idxEnd
+				if hadIssue {
+					t.Fatalf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
+				}
 			}
 
-			return nil
+			metricsID[2] = tmp[2]
+
+			if tmp[0] != metricsID[0] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[0])
+			}
+
+			if tmp[1] != metricsID[1] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[1])
+			}
+
+			tmp, _, err = index2.lookupIDs(
+				context.Background(),
+				toLookupRequests(
+					[]labels.Labels{
+						labels.FromMap(metrics[3]),
+						labels.FromMap(metrics[2]),
+						labels.FromMap(metrics[1]),
+					},
+					t2,
+				),
+				t2,
+			)
+			if err != nil {
+				t.Error(err)
+			}
+
+			metricsID[3] = tmp[0]
+
+			if tmp[0] != metricsID[3] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[0], metricsID[3])
+			}
+
+			if tmp[1] != metricsID[2] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[1], metricsID[2])
+			}
+
+			if tmp[2] != metricsID[1] {
+				t.Errorf("lookupIDs(metrics[0]) = %d, want %d", tmp[2], metricsID[1])
+			}
+
+			// Do some concurrency tests
+			labelsList := make([]labels.Labels, 10000)
+			for n := range labelsList {
+				lbls := map[string]string{
+					"__name__": "filler",
+					"id":       strconv.FormatInt(int64(n), 10),
+				}
+				labelsList[n] = labels.FromMap(lbls)
+			}
+
+			batchSize := 100
+			workerCount := 4
+			group, _ := errgroup.WithContext(context.Background())
+
+			for n := 0; n < workerCount; n++ {
+				n := n
+
+				group.Go(func() error {
+					index := index1
+
+					if n%2 == 1 {
+						index = index2
+					}
+
+					start := n * len(labelsList) / workerCount
+					end := (n+1)*len(labelsList)/workerCount - 1
+
+					current := start
+					for current < end {
+						idxEnd := current + batchSize
+						if idxEnd > end {
+							idxEnd = end
+						}
+
+						_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
+						if err != nil {
+							return err
+						}
+
+						current = idxEnd
+					}
+
+					return nil
+				})
+			}
+
+			if err := group.Wait(); err != nil {
+				t.Fatal(err)
+			}
+
+			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tmp2, _, err := index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(tmp, tmp2) {
+				t.Errorf("Index don't have the same IDs")
+			}
+
+			if err := executeRunOnce(t5, index1, 1000, t6); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := executeRunOnce(t5, index2, 1000, t6); err != nil {
+				t.Fatal(err)
+			}
+
+			labelsList = []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "expiration_conflict",
+					ttlLabel:   "60",
+				}),
+			}
+
+			labelsList2 := []labels.Labels{
+				labels.FromMap(map[string]string{
+					"__name__": "expiration_conflict2",
+					ttlLabel:   "60",
+				}),
+			}
+
+			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tmp[0] != tmp2[0] {
+				t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
+			}
+
+			if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+
+			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := executeRunOnce(t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+
+			tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tmp[0] == tmp2[0] {
+				t.Errorf("lookupIDs() = %d, want != %d", tmp2[0], tmp[0])
+			}
+
+			buffer := bytes.NewBuffer(nil)
+
+			indexes := []*CassandraIndex{index1, index2}
+
+			for i, idx := range indexes {
+				// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(t6).
+					WithStrictMetricCreation(true).
+					WithStrictExpiration(false).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+
+			if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+
+			for i, idx := range indexes {
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(t6).
+					WithStrictMetricCreation(true).
+					WithStrictExpiration(true).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
+
+			wrappedCluster.ProcessMessage()
+
+			if err := executeRunOnce(t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+
+			for i, idx := range indexes {
+				hadIssue, err := idx.Verifier(buffer).
+					WithNow(t7).
+					WithStrictMetricCreation(true).
+					WithPedanticExpiration(true).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
+
+				if hadIssue {
+					t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
+				}
+			}
 		})
-	}
-
-	if err := group.Wait(); err != nil {
-		t.Fatal(err)
-	}
-
-	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tmp2, _, err := index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !reflect.DeepEqual(tmp, tmp2) {
-		t.Errorf("Index don't have the same IDs")
-	}
-
-	if err := executeRunOnce(t5, index1, 1000, t6); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := executeRunOnce(t5, index2, 1000, t6); err != nil {
-		t.Fatal(err)
-	}
-
-	labelsList = []labels.Labels{
-		labels.FromMap(map[string]string{
-			"__name__": "expiration_conflict",
-			ttlLabel:   "60",
-		}),
-	}
-
-	labelsList2 := []labels.Labels{
-		labels.FromMap(map[string]string{
-			"__name__": "expiration_conflict2",
-			ttlLabel:   "60",
-		}),
-	}
-
-	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tmp[0] != tmp2[0] {
-		t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
-	}
-
-	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-
-	tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := executeRunOnce(t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-
-	tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if tmp[0] == tmp2[0] {
-		t.Errorf("lookupIDs() = %d, want != %d", tmp2[0], tmp[0])
-	}
-
-	buffer := bytes.NewBuffer(nil)
-
-	indexes := []*CassandraIndex{index1, index2}
-
-	for i, idx := range indexes {
-		// applyExpirationUpdateRequests() didn't run on index1 after latest lookupIDs
-		hadIssue, err := idx.Verifier(buffer).
-			WithNow(t6).
-			WithStrictMetricCreation(true).
-			WithStrictExpiration(false).
-			Verify(context.Background())
-		if err != nil {
-			t.Error(err)
-		}
-
-		if hadIssue {
-			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
-		}
-	}
-
-	if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-
-	for i, idx := range indexes {
-		hadIssue, err := idx.Verifier(buffer).
-			WithNow(t6).
-			WithStrictMetricCreation(true).
-			WithStrictExpiration(true).
-			Verify(context.Background())
-		if err != nil {
-			t.Error(err)
-		}
-
-		if hadIssue {
-			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
-		}
-	}
-
-	if err := executeRunOnce(t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-
-	for i, idx := range indexes {
-		hadIssue, err := idx.Verifier(buffer).
-			WithNow(t7).
-			WithStrictMetricCreation(true).
-			WithPedanticExpiration(true).
-			Verify(context.Background())
-		if err != nil {
-			t.Error(err)
-		}
-
-		if hadIssue {
-			t.Errorf("index%d.Verify() had issues: %s", i+1, bufferToStringTruncated(buffer.Bytes()))
-		}
 	}
 }
 
@@ -7479,7 +8131,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 }
 
 // Test_cluster_expiration_and_error will tests multiple SquirrelDB with expiration AND error.
-func Test_cluster_expiration_and_error(t *testing.T) {
+func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 	defaultTTL := 10 * 24 * time.Hour
 	baseTime := time.Date(2019, 9, 1, 0, 0, 0, 0, time.UTC)
 
@@ -7538,80 +8190,129 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 		},
 	}
 
-	for _, run := range runs {
-		run := run
+	for _, withClusterConfigured := range []bool{false, true} {
+		for _, run := range runs {
+			withClusterConfigured := withClusterConfigured
+			run := run
 
-		t.Run(run.name, func(t *testing.T) {
-			expectedMetrics := make(map[string]metricLabelsExpiration)
-			realStore := &mockStore{}
-			lock := &mockLockFactory{}
-			states := &mockState{}
+			fullName := fmt.Sprintf("%s-cluster-%v", run.name, withClusterConfigured)
 
-			rnd := rand.New(rand.NewSource(run.rndSeed))
+			t.Run(fullName, func(t *testing.T) {
+				expectedMetrics := make(map[string]metricLabelsExpiration)
+				realStore := &mockStore{}
+				lock := &mockLockFactory{}
+				states := &mockState{}
 
-			shouldFail1 := newRandomShouldFail(rnd.Int63(), run.err)
-			shouldFail2 := newRandomShouldFail(rnd.Int63(), run.err)
+				cluster := &dummy.LocalCluster{}
+				wrappedCluster := newMockCluster(cluster)
+				wrappedCluster.AutoProcessWithDelay(100 * time.Millisecond)
 
-			index1, err := initialize(
-				context.Background(),
-				newFailingStore(realStore, shouldFail1),
-				Options{
-					DefaultTimeToLive: defaultTTL,
-					LockFactory:       lock,
-					States:            states,
-					Cluster:           &dummy.LocalCluster{},
-				},
-				newMetrics(prometheus.NewRegistry()),
-				getTestLogger().With().Str("component", "index2").Logger(),
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
+				var (
+					index1Cluster types.Cluster
+					index2Cluster types.Cluster
+				)
 
-			index2, err := initialize(
-				context.Background(),
-				newFailingStore(realStore, shouldFail2),
-				Options{
-					DefaultTimeToLive: defaultTTL,
-					LockFactory:       lock,
-					States:            states,
-					Cluster:           &dummy.LocalCluster{},
-				},
-				newMetrics(prometheus.NewRegistry()),
-				getTestLogger().With().Str("component", "index2").Logger(),
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			indexes := []*CassandraIndex{index1, index2}
-
-			var metricToWrite []labels.Labels
-
-			currentTime := baseTime
-			step := 18 * time.Hour
-			for currentTime.Before(baseTime.Add(22 * 24 * time.Hour)) {
-				// Each 18 hours, write some metrics:
-				// We will have both brand new metrics and few reused from previous run.
-				// In total metricsNew + metricsReuse metrics will be wrote (except very first run).
-				// This list is split in 3 part: common, unique to node 1 and unique to node 2.
-				currentTime = currentTime.Add(18 * time.Hour)
-
-				// To speed-up test, do a just after 7 days (one shard time)
-				if currentTime.After(baseTime.Add(postingShardSize)) &&
-					currentTime.Before(baseTime.Add(postingShardSize).Add(step)) {
-					currentTime = currentTime.Add(12 * 24 * time.Hour)
+				if withClusterConfigured {
+					index1Cluster = wrappedCluster
+					index2Cluster = wrappedCluster
+				} else {
+					index1Cluster = &dummy.LocalCluster{}
+					index2Cluster = &dummy.LocalCluster{}
 				}
 
-				metricToWrite, expectedMetrics = clusterDoOneBatch(
-					t,
-					currentTime,
-					rnd,
-					defaultTTL,
-					metricToWrite,
-					expectedMetrics,
-					indexes,
+				rnd := rand.New(rand.NewSource(run.rndSeed))
+
+				shouldFail1 := newRandomShouldFail(rnd.Int63(), run.err)
+				shouldFail2 := newRandomShouldFail(rnd.Int63(), run.err)
+
+				index1, err := initialize(
+					context.Background(),
+					newFailingStore(realStore, shouldFail1),
+					Options{
+						DefaultTimeToLive: defaultTTL,
+						LockFactory:       lock,
+						States:            states,
+						Cluster:           index1Cluster,
+					},
+					newMetrics(prometheus.NewRegistry()),
+					getTestLogger().With().Str("component", "index2").Logger(),
 				)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				index2, err := initialize(
+					context.Background(),
+					newFailingStore(realStore, shouldFail2),
+					Options{
+						DefaultTimeToLive: defaultTTL,
+						LockFactory:       lock,
+						States:            states,
+						Cluster:           index2Cluster,
+					},
+					newMetrics(prometheus.NewRegistry()),
+					getTestLogger().With().Str("component", "index2").Logger(),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				indexes := []*CassandraIndex{index1, index2}
+
+				var metricToWrite []labels.Labels
+
+				currentTime := baseTime
+				step := 18 * time.Hour
+				for currentTime.Before(baseTime.Add(22 * 24 * time.Hour)) {
+					// Each 18 hours, write some metrics:
+					// We will have both brand new metrics and few reused from previous run.
+					// In total metricsNew + metricsReuse metrics will be wrote (except very first run).
+					// This list is split in 3 part: common, unique to node 1 and unique to node 2.
+					currentTime = currentTime.Add(18 * time.Hour)
+
+					// To speed-up test, do a just after 7 days (one shard time)
+					if currentTime.After(baseTime.Add(postingShardSize)) &&
+						currentTime.Before(baseTime.Add(postingShardSize).Add(step)) {
+						currentTime = currentTime.Add(12 * 24 * time.Hour)
+					}
+
+					metricToWrite, expectedMetrics = clusterDoOneBatch(
+						t,
+						currentTime,
+						rnd,
+						defaultTTL,
+						metricToWrite,
+						expectedMetrics,
+						indexes,
+					)
+
+					allExpectedLabels := make([]labels.Labels, 0, len(expectedMetrics))
+					allExpectedExpirations := make([]time.Time, 0, len(expectedMetrics))
+
+					for _, metric := range expectedMetrics {
+						allExpectedLabels = append(allExpectedLabels, metric.labels)
+						allExpectedExpirations = append(allExpectedExpirations, metric.Expiration)
+					}
+
+					err = realStore.verifyStore(
+						t,
+						currentTime,
+						allExpectedLabels,
+						allExpectedExpirations,
+						false, // expiration are likely to not be applied, because RunOnce isn't retried until no failure.
+					)
+					if err != nil {
+						t.Fatalf("at %s: %v", currentTime, err)
+					}
+				}
+
+				if err := clusterCheckSearch(context.Background(), t, currentTime, index1, realStore); err != nil {
+					t.Error(err)
+				}
+
+				if err := clusterCheckSearch(context.Background(), t, currentTime, index2, realStore); err != nil {
+					t.Error(err)
+				}
 
 				allExpectedLabels := make([]labels.Labels, 0, len(expectedMetrics))
 				allExpectedExpirations := make([]time.Time, 0, len(expectedMetrics))
@@ -7629,77 +8330,52 @@ func Test_cluster_expiration_and_error(t *testing.T) {
 					false, // expiration are likely to not be applied, because RunOnce isn't retried until no failure.
 				)
 				if err != nil {
-					t.Fatalf("at %s: %v", currentTime, err)
+					t.Fatal(err)
 				}
-			}
 
-			if err := clusterCheckSearch(context.Background(), t, currentTime, index1, realStore); err != nil {
-				t.Error(err)
-			}
+				group, _ := errgroup.WithContext(context.Background())
 
-			if err := clusterCheckSearch(context.Background(), t, currentTime, index2, realStore); err != nil {
-				t.Error(err)
-			}
+				for _, index := range indexes {
+					index := index
 
-			allExpectedLabels := make([]labels.Labels, 0, len(expectedMetrics))
-			allExpectedExpirations := make([]time.Time, 0, len(expectedMetrics))
+					group.Go(func() error {
+						return executeRunOnce(currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
+					})
+				}
 
-			for _, metric := range expectedMetrics {
-				allExpectedLabels = append(allExpectedLabels, metric.labels)
-				allExpectedExpirations = append(allExpectedExpirations, metric.Expiration)
-			}
+				if err := group.Wait(); err != nil {
+					t.Fatal(err)
+				}
 
-			err = realStore.verifyStore(
-				t,
-				currentTime,
-				allExpectedLabels,
-				allExpectedExpirations,
-				false, // expiration are likely to not be applied, because RunOnce isn't retried until no failure.
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
+				err = realStore.verifyStore(
+					t,
+					currentTime,
+					allExpectedLabels,
+					allExpectedExpirations,
+					true,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			group, _ := errgroup.WithContext(context.Background())
+				wrappedCluster.ProcessMessage()
 
-			for _, index := range indexes {
-				index := index
+				buffer := bytes.NewBuffer(nil)
 
-				group.Go(func() error {
-					return executeRunOnce(currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
-				})
-			}
+				hadError, err := index1.Verifier(buffer).
+					WithNow(currentTime).
+					WithStrictMetricCreation(true).
+					WithStrictExpiration(true).
+					Verify(context.Background())
+				if err != nil {
+					t.Error(err)
+				}
 
-			if err := group.Wait(); err != nil {
-				t.Fatal(err)
-			}
-
-			err = realStore.verifyStore(
-				t,
-				currentTime,
-				allExpectedLabels,
-				allExpectedExpirations,
-				true,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			buffer := bytes.NewBuffer(nil)
-
-			hadError, err := index1.Verifier(buffer).
-				WithNow(currentTime).
-				WithStrictMetricCreation(true).
-				WithStrictExpiration(true).
-				Verify(context.Background())
-			if err != nil {
-				t.Error(err)
-			}
-
-			if hadError {
-				t.Errorf("Verify had error, message=%s", buffer.String())
-			}
-		})
+				if hadError {
+					t.Errorf("Verify had error, message=%s", buffer.String())
+				}
+			})
+		}
 	}
 }
 
