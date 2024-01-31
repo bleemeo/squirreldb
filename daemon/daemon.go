@@ -102,7 +102,7 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, err = s.Index(ctx, false)
+	_, err = s.Index(ctx, false, nil)
 	if err != nil {
 		return err
 	}
@@ -653,8 +653,10 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 	return s.ExistingCluster, nil
 }
 
-// Index return an Index. If started is true the index is started.
-func (s *SquirrelDB) Index(ctx context.Context, manualRunOnce bool) (types.Index, error) {
+// Index return an Index.
+// If manualRunOnce is true, the index should only be used by tests and the test should call InternalRunOnce itself.
+// If fakeTime is not nil, the index should only be used by tests and this allow to simulate longer time range.
+func (s *SquirrelDB) Index(ctx context.Context, manualRunOnce bool, fakeTime func() time.Time) (types.Index, error) {
 	if s.index == nil { //nolint:nestif
 		var wrappedIndex types.Index
 
@@ -689,6 +691,7 @@ func (s *SquirrelDB) Index(ctx context.Context, manualRunOnce bool) (types.Index
 				ReadOnly:              s.Config.Internal.ReadOnly,
 				Logger:                s.Logger.With().Str("component", "index").Logger(),
 				InternalRunOnceCalled: manualRunOnce,
+				InternalNowFunction:   fakeTime,
 			}
 
 			wrappedIndex, err = index.New(
@@ -751,7 +754,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context) (MetricReadWriter, error) {
 				return nil, err
 			}
 
-			index, err := s.Index(ctx, false)
+			index, err := s.Index(ctx, false, nil)
 			if err != nil {
 				return nil, err
 			}

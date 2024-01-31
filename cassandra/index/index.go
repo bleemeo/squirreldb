@@ -114,6 +114,9 @@ type Options struct {
 	// InternalRunOnceCalled is true if this index is used by some testings/benchmarking tools
 	// that will call RunOnce directly.
 	InternalRunOnceCalled bool
+	// InternalNowFunction is the function used to get current time. It default to time.Now().
+	// This is useful when doing test that need to simulate long period of time.
+	InternalNowFunction func() time.Time
 }
 
 type CassandraIndex struct {
@@ -259,6 +262,10 @@ func initialize(
 	expBackoff.MaxElapsedTime = 0
 	expBackoff.Reset()
 
+	if options.InternalNowFunction == nil {
+		options.InternalNowFunction = time.Now
+	}
+
 	index := &CassandraIndex{
 		store:               store,
 		options:             options,
@@ -267,7 +274,8 @@ func initialize(
 		labelsToID:          make(map[uint64][]idData),
 		idsToLabels:         &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
 		postingsCache: &postingsCache{
-			cache: make(map[postingsCacheKey]postingEntry),
+			nowFunc: options.InternalNowFunction,
+			cache:   make(map[postingsCacheKey]postingEntry),
 		},
 		shardExpirationCache:     &shardExpirationCache{},
 		expirationUpdateRequests: make(map[int64]expirationUpdateRequest),
@@ -336,7 +344,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 				continue
 			}
 
-			c.InternalRunOnce(ctx, time.Now())
+			c.InternalRunOnce(ctx, c.options.InternalNowFunction())
 		case <-ctx.Done():
 			c.logger.Trace().Msg("Cassandra index service stopped")
 
@@ -1173,7 +1181,7 @@ func (c *CassandraIndex) LookupIDs(
 	ctx context.Context,
 	requests []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
-	return c.lookupIDs(ctx, requests, time.Now())
+	return c.lookupIDs(ctx, requests, c.options.InternalNowFunction())
 }
 
 func (c *CassandraIndex) lookupIDs(
@@ -1750,7 +1758,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
 
 			// Add the bad ID to next expiration, so it could be cleanup if possible
-			today := time.Now().Truncate(24 * time.Hour)
+			today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 			expReq := expirationUpdateRequests[today.Unix()]
 			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 			expirationUpdateRequests[today.Unix()] = expReq
@@ -1778,7 +1786,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 				c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in ID2Labels or expired!")
 
 				// Add the bad ID to next expiration, so it could be cleanup if possible
-				today := time.Now().Truncate(24 * time.Hour)
+				today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 				expReq := expirationUpdateRequests[today.Unix()]
 				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 				expirationUpdateRequests[today.Unix()] = expReq
@@ -1972,7 +1980,7 @@ func (c *CassandraIndex) updatePostingShards(
 	precense := make(map[int32]postingUpdateRequest)
 	updates := make([]postingUpdateRequest, 0)
 	shardToLabelToIndex := make(map[int32]map[labels.Label]int)
-	now := time.Now()
+	now := c.options.InternalNowFunction()
 	keysToInvalidate := make([]postingsCacheKey, 0)
 
 	c.lookupIDMutex.Lock()
@@ -2338,7 +2346,7 @@ type metricsLabels struct {
 
 func (l *metricsLabels) Next() bool {
 	if l.labelsList == nil && len(l.ids) > 0 {
-		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
+		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, l.c.options.InternalNowFunction())
 		if l.err != nil {
 			return false
 		}
@@ -2609,7 +2617,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 		return nil, errNewMetricLockNotAcquired
 	}
 
-	done, err := c.createMetrics(ctx, time.Now(), requests, true)
+	done, err := c.createMetrics(ctx, c.options.InternalNowFunction(), requests, true)
 
 	c.newMetricGlobalLock.Unlock()
 
@@ -3256,7 +3264,7 @@ func (c *CassandraIndex) idsForMatchers(
 	}
 
 	if checkMatches {
-		result.labelsList, err = c.lookupLabels(ctx, ids, time.Now())
+		result.labelsList, err = c.lookupLabels(ctx, ids, c.options.InternalNowFunction())
 		if err != nil {
 			return nil, err
 		}
