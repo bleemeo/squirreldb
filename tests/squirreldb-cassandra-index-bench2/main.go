@@ -182,8 +182,9 @@ func cmpTime(a, b DurationAndTime) int {
 }
 
 type workerStats struct {
-	workerID     int
-	AllDurations []DurationAndTime
+	workerID         int
+	AllDurations     []DurationAndTime
+	RunOnceDurations []DurationAndTime
 }
 
 func findNextShardChange(t time.Time) time.Time {
@@ -266,7 +267,7 @@ func bench(ctx context.Context, cfg config.Config, clock *fakeClock) error {
 		close(ch)
 	}
 
-	showWorkerStats(resultChan, testStartTime)
+	showWorkersStats(resultChan, testStartTime)
 
 	err := group.Wait()
 
@@ -342,73 +343,78 @@ func sentInsertRequest(
 	return initialTime
 }
 
-func showWorkerStats(resultChan chan workerStats, testStartTime time.Time) {
+func showWorkersStats(resultChan chan workerStats, testStartTime time.Time) {
 	for p := 0; p < *workerProcesses; p++ {
 		stats := <-resultChan
 
-		if *warmupDuration > 0 {
-			// Remove write before secondBatchTime, this will eliminate metrics creation time
-			i := 0
+		showWorkerStats("LookupIDs", stats.workerID, stats.AllDurations, testStartTime)
+		showWorkerStats("RunOnce", stats.workerID, stats.RunOnceDurations, testStartTime)
+	}
+}
 
-			for _, row := range stats.AllDurations {
-				if row.At.Before(testStartTime.Add(*warmupDuration)) {
-					continue
-				}
+func showWorkerStats(action string, workerID int, array []DurationAndTime, testStartTime time.Time) {
+	if *warmupDuration > 0 {
+		// Remove write before secondBatchTime, this will eliminate metrics creation time
+		i := 0
 
-				stats.AllDurations[i] = row
-				i++
+		for _, row := range array {
+			if row.At.Before(testStartTime.Add(*warmupDuration)) {
+				continue
 			}
 
-			stats.AllDurations = stats.AllDurations[:i]
+			array[i] = row
+			i++
 		}
 
-		slices.SortFunc(stats.AllDurations, cmpDuration)
+		array = array[:i]
+	}
 
-		showStatsForDurations(fmt.Sprintf("Workder %d", stats.workerID), stats.AllDurations)
+	slices.SortFunc(array, cmpDuration)
 
-		if len(stats.AllDurations) == 0 {
-			continue
+	showStatsForDurations(fmt.Sprintf("Workder %d %s", workerID, action), array)
+
+	if len(array) == 0 {
+		return
+	}
+
+	// Show stats around shard changes
+	const bucketSizeInSeconds = 600
+
+	startTime := slices.MinFunc(array, cmpTime).At
+	endTime := slices.MaxFunc(array, cmpTime).At
+	nextShardChange := findNextShardChange(startTime)
+	buckets := make(map[int64][]DurationAndTime, 12)
+
+	for nextShardChange.Before(endTime) {
+		// Create buckets around shard changes: 6 before the nextShardChange, 6 after
+		for n := -6; n <= 6; n++ {
+			startTimeUnix := nextShardChange.Add(time.Duration(n) * 10 * time.Minute).Unix()
+			buckets[startTimeUnix-startTimeUnix%bucketSizeInSeconds] = nil
 		}
 
-		// Show stats around shard changes
-		const bucketSizeInSeconds = 600
+		nextShardChange = findNextShardChange(nextShardChange)
+	}
 
-		startTime := slices.MinFunc(stats.AllDurations, cmpTime).At
-		endTime := slices.MaxFunc(stats.AllDurations, cmpTime).At
-		nextShardChange := findNextShardChange(startTime)
-		buckets := make(map[int64][]DurationAndTime, 12)
-
-		for nextShardChange.Before(endTime) {
-			// Create buckets around shard changes: 6 before the nextShardChange, 6 after
-			for n := -6; n <= 6; n++ {
-				startTimeUnix := nextShardChange.Add(time.Duration(n) * 10 * time.Minute).Unix()
-				buckets[startTimeUnix-startTimeUnix%bucketSizeInSeconds] = nil
-			}
-
-			nextShardChange = findNextShardChange(nextShardChange)
+	for _, row := range array {
+		bucketSlot := row.At.Unix() - row.At.Unix()%bucketSizeInSeconds
+		if array, ok := buckets[bucketSlot]; ok {
+			array = append(array, row)
+			buckets[bucketSlot] = array
 		}
+	}
 
-		for _, row := range stats.AllDurations {
-			bucketSlot := row.At.Unix() - row.At.Unix()%bucketSizeInSeconds
-			if array, ok := buckets[bucketSlot]; ok {
-				array = append(array, row)
-				buckets[bucketSlot] = array
-			}
-		}
+	bucketKeys := make([]int64, 0, len(buckets))
 
-		bucketKeys := make([]int64, 0, len(buckets))
+	for k := range buckets {
+		bucketKeys = append(bucketKeys, k)
+	}
 
-		for k := range buckets {
-			bucketKeys = append(bucketKeys, k)
-		}
+	slices.Sort(bucketKeys)
 
-		slices.Sort(bucketKeys)
-
-		for _, slot := range bucketKeys {
-			array := buckets[slot]
-			slotTime := time.Unix(slot, 0)
-			showStatsForDurations(fmt.Sprintf("Workder %d at %s", stats.workerID, slotTime), array)
-		}
+	for _, slot := range bucketKeys {
+		array := buckets[slot]
+		slotTime := time.Unix(slot, 0)
+		showStatsForDurations(fmt.Sprintf("Workder %d %s at %s", workerID, action, slotTime), array)
 	}
 }
 
@@ -579,10 +585,27 @@ func worker(
 
 	localIndex.InternalRunOnce(ctx, clock.Now())
 
+	var wg sync.WaitGroup
+
 	for work := range workChanel {
 		if clock.Now().Sub(previousRunOnce) > backgroundCheckInterval {
-			localIndex.InternalRunOnce(ctx, clock.Now())
-			previousRunOnce = clock.Now()
+			wg.Add(1)
+
+			// The InternalRunOnce is running inside a gorouting has this
+			// is closer to what really happen. RunOnce is executed concurrently
+			// with LookupIDs
+			go func() {
+				defer wg.Done()
+
+				start := time.Now()
+
+				localIndex.InternalRunOnce(ctx, clock.Now())
+				previousRunOnce = clock.Now()
+
+				duration := time.Since(start)
+
+				stats.RunOnceDurations = append(stats.RunOnceDurations, DurationAndTime{Duration: duration, At: clock.Now()})
+			}()
 		}
 
 		start := time.Now()
@@ -596,6 +619,8 @@ func worker(
 		}
 
 		stats.AllDurations = append(stats.AllDurations, DurationAndTime{Duration: duration, At: clock.Now()})
+
+		wg.Wait()
 
 		counter.cond.L.Lock()
 
