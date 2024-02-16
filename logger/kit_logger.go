@@ -11,6 +11,7 @@ type zerologLogger struct {
 	Logger *zerolog.Logger
 }
 
+//nolint: zerologlint,gofmt,gofumpt,goimports
 func (l zerologLogger) Log(kv ...interface{}) error {
 	fields := make(map[string]interface{})
 

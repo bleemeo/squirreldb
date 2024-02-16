@@ -731,6 +731,7 @@ func TestBatch_read(t *testing.T) { //nolint:maintidx
 				writer:      tt.fields.persistentStore,
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
+
 			got, err := b.ReadIter(context.Background(), tt.args.request)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
@@ -883,12 +884,14 @@ func TestBatch_readTemporary(t *testing.T) {
 				writer:      tt.fields.writer,
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
+
 			got, err := b.readTemporary(context.Background(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readTemporary() error = %v, wantErr %v", err, tt.wantErr)
 
 				return
 			}
+
 			if !dataEqual(true, got, tt.want) {
 				t.Errorf("readTemporary() got = %v, want %v", got, tt.want)
 			}
@@ -1962,6 +1965,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 				logger1 := log.With().Str("component", "batch1").Logger()
 				batch1 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1, logger1)
 			}
+
 			if tt.shutdown2 {
 				logger2 := log.With().Str("component", "batch2").Logger()
 				batch2 = New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2, logger2)

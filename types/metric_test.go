@@ -443,6 +443,7 @@ func TestSortPoints(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			sortPoints(result)
+
 			if !reflect.DeepEqual(result, tt.want) {
 				t.Errorf("sortPoints() = %v, want %v", result, tt.want)
 			}

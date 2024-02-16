@@ -24,6 +24,7 @@ func Print(o backoff.Operation, b backoff.BackOff, logger zerolog.Logger, action
 	err := backoff.RetryNotify(o, b, func(err error, duration time.Duration) {
 		if err != nil {
 			tried = true
+
 			logger.Err(err).Msgf("Error during %s", action)
 			logger.Info().Msgf("|__ Retry in %v", duration)
 		}

@@ -175,6 +175,7 @@ func Test_metricsFromTimeSeries(t *testing.T) {
 			if err != nil {
 				t.Errorf("metricsFromTimeSeries() failed: %v", err)
 			}
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("metricsFromTimeSeries() = %v, want %v", got, tt.want)
 			}

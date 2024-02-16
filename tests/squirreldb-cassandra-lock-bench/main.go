@@ -258,6 +258,7 @@ func worker(
 					"Someone took the lock while I held it, lock=%s P=%d, T=%d, job running = %d want 1",
 					subLockName, p, t, running,
 				)
+
 				r.ErrCount++
 			}
 
@@ -272,6 +273,7 @@ func worker(
 					"Someone took the lock while I held it, lock=%s P=%d, T=%d, job running = %d want 0",
 					subLockName, p, t, running,
 				)
+
 				r.ErrCount++
 			}
 
@@ -344,6 +346,7 @@ func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.L
 
 		if err := grp.Wait(); err != nil {
 			log.Error().Err(err).Msg("BlockLock failed, aborting block-lock")
+
 			r.ErrCount++
 
 			break
@@ -385,6 +388,7 @@ func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.L
 
 		if err := grp.Wait(); err != nil {
 			log.Error().Err(err).Msg("BlockLock failed, aborting block-lock")
+
 			r.ErrCount++
 
 			break

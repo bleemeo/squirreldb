@@ -175,6 +175,7 @@ func Test_PointsEncode(t *testing.T) {
 				if err != nil {
 					t.Errorf("decodePoints() failed: %v", err)
 				}
+
 				if !reflect.DeepEqual(got, tt.args.points) {
 					t.Errorf("decodePoints(encodePoints() = %v, want %v", got, tt.args.points)
 				}
@@ -330,7 +331,9 @@ func Benchmark_pointsDecode(b *testing.B) {
 				data2 := make([]byte, len(data))
 
 				var tmp []types.MetricPoint
+
 				b.ResetTimer()
+
 				for n := 0; n < b.N; n++ {
 					if !reuse {
 						tmp = nil
@@ -493,8 +496,10 @@ func Test_EncodeAggregate(t *testing.T) {
 
 				want := make([]types.MetricPoint, len(tt.args.aggregatedPoints))
 				got, err := c.decodeAggregatedPoints(buffer, function, nil)
+
 				for i, p := range tt.args.aggregatedPoints {
 					want[i].Timestamp = p.Timestamp
+
 					switch function {
 					case "min", "min_over_time":
 						want[i].Value = p.Min
@@ -506,9 +511,11 @@ func Test_EncodeAggregate(t *testing.T) {
 						want[i].Value = p.Count
 					}
 				}
+
 				if err != nil {
 					t.Fatalf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") failed: %v", function, err)
 				}
+
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("gorillaDecodeAggregate(gorillaEncodeAggregate(), \"%s\") = %v, want = %v", function, got, want)
 				}

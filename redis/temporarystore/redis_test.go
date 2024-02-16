@@ -102,7 +102,9 @@ func Benchmark_dataFromValues(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			dataBytes, _ := valuesFromData(tt.data, nil, nil)
+
 			b.ResetTimer()
+
 			for n := 0; n < b.N; n++ {
 				_, _ = dataFromValues(MetricIDTest1, dataBytes, nil)
 			}
@@ -112,6 +114,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 			dataSerialized := make([]serializedPoints, 1024)
 
 			b.ResetTimer()
+
 			for n := 0; n < b.N; n++ {
 				_, _ = dataFromValues(MetricIDTest1, dataBytes, dataSerialized)
 			}
@@ -180,12 +183,14 @@ func Test_valuesSerialization(t *testing.T) {
 
 				return
 			}
+
 			got, err := dataFromValues(MetricIDTest1, gotBytes, nil)
 			if err != nil {
 				t.Errorf("dataFromValues() error = %v", err)
 
 				return
 			}
+
 			if !reflect.DeepEqual(got, tt.data) {
 				t.Errorf("dataFromValues(valuesFromData()) = %v, want %v", got, tt.data)
 			}
@@ -202,12 +207,14 @@ func Test_valuesSerialization(t *testing.T) {
 
 					return
 				}
+
 				got, err := dataFromValues(MetricIDTest1, gotBytes, tmp2)
 				if err != nil {
 					t.Errorf("dataFromValues() error = %v", err)
 
 					return
 				}
+
 				if !reflect.DeepEqual(got, tt.data) {
 					t.Errorf("dataFromValues(valuesFromData()) = %v, want %v", got, tt.data)
 				}

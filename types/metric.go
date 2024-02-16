@@ -65,8 +65,8 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 		if points[j].Timestamp == points[i].Timestamp {
 			continue
 		}
-		j++
 
+		j++
 		points[j] = points[i]
 	}
 

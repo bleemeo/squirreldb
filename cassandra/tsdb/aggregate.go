@@ -314,6 +314,7 @@ func (c *CassandraTSDB) aggregateShard(
 
 	{
 		var fromTimeStr string
+
 		retry.Print(func() error {
 			_, err := c.state.Read(ctx, name, &fromTimeStr)
 

@@ -91,6 +91,7 @@ func New(ctx context.Context,
 			return nil, false, fmt.Errorf("create keyspace: %w", err)
 		} else {
 			keyspaceCreated = true
+
 			logger.Debug().Msgf("Keyspace %s created", options.Keyspace)
 		}
 	}
@@ -235,6 +236,7 @@ func (c *Connection) run(ctx context.Context) {
 				time.Sleep(10 * time.Second)
 			} else {
 				reopenConnection = false
+
 				c.logger.Info().Msg("Cassandra connection re-established")
 			}
 		}

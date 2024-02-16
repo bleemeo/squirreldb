@@ -2527,21 +2527,23 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
+
 			if got.Count() != tt.wantLen {
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -2553,21 +2555,23 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
+
 			if got.Count() != tt.wantLen {
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -2584,21 +2588,23 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
+
 			if got.Count() != tt.wantLen {
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -4075,21 +4081,23 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
+
 			if got.Count() != tt.wantLen {
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -4101,7 +4109,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
-			if tt.wantLen == 0 {
+			if tt.wantLen == 0 { //nolint: wsl
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
@@ -4110,13 +4118,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -4128,27 +4136,30 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
+
 			if got.Count() != tt.wantLen {
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
 
 		t.Run(tt.name+" reverse", func(t *testing.T) {
 			matchersReverse := make([]*labels.Matcher, len(tt.matchers))
+
 			for i := range matchersReverse {
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
@@ -4159,6 +4170,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
+
 			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
@@ -4168,13 +4180,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				t.Errorf("idsForMatchers().Count()=%v, want %v", got.Count(), tt.wantLen)
 			}
 
-			gotIds := make([]types.MetricID, 0, len(tt.want))
+			gotIDs := make([]types.MetricID, 0, len(tt.want))
 
 			for got.Next() {
-				gotIds = append(gotIds, got.At().ID)
+				gotIDs = append(gotIDs, got.At().ID)
 			}
 
-			if diff := cmp.Diff(tt.want, gotIds[:len(tt.want)]); diff != "" {
+			if diff := cmp.Diff(tt.want, gotIDs[:len(tt.want)]); diff != "" {
 				t.Errorf("idsForMatchers mismatch: (-want +got): %s", diff)
 			}
 		})
@@ -4930,23 +4942,25 @@ func Test_cache(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for i, idx := range tt.indexes {
 				countBefore := store.queryCount
+
 				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
-				delta := store.queryCount - countBefore
 
+				delta := store.queryCount - countBefore
 				if delta <= 0 {
 					t.Errorf("First lookup on indexes[%d] caused %d query to store, want > 0", i, delta)
 				}
 
 				countBefore = store.queryCount
+
 				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
-				delta = store.queryCount - countBefore
 
+				delta = store.queryCount - countBefore
 				if delta > 0 {
 					t.Errorf("Second lookup on indexes[%d] caused %d query to store, want == 0", i, delta)
 				}
@@ -4954,12 +4968,13 @@ func Test_cache(t *testing.T) {
 
 			for i, idx := range tt.indexes {
 				countBefore := store.queryCount
+
 				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
-				delta := store.queryCount - countBefore
 
+				delta := store.queryCount - countBefore
 				if delta > 0 {
 					t.Errorf("Third lookup on indexes[%d] caused %d query to store, want == 0", i, delta)
 				}
@@ -5185,7 +5200,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			}
 
 			store := &mockStore{
-				HookSelectPostingByNameValueStart: func(ctx context.Context, shard int32, name, value string) context.Context {
+				HookSelectPostingByNameValueStart: func(ctx context.Context, shard int32, _, _ string) context.Context {
 					if shard != -1 {
 						block := getBlockContext(ctx, "blockQuery")
 						if block != nil {
@@ -5195,7 +5210,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 
 					return ctx
 				},
-				HookSelectPostingByNameValueEnd: func(ctx context.Context, shard int32, name, value string) {
+				HookSelectPostingByNameValueEnd: func(ctx context.Context, shard int32, _, _ string) {
 					if shard != -1 {
 						block := getBlockContext(ctx, "blockQuery")
 						if block != nil {
@@ -5376,6 +5391,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			store := &mockStore{}
 			lock := &mockLockFactory{}
 			states := &mockState{}
@@ -5544,6 +5560,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 			{
 				buffer := bytes.NewBuffer(nil)
+
 				hadIssue, err := index1.Verifier(buffer).
 					WithNow(t0).
 					WithStrictMetricCreation(true).
@@ -5551,6 +5568,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				if err != nil {
 					t.Error(err)
 				}
+
 				if hadIssue {
 					t.Fatalf("Verify() had issues: %s", bufferToStringTruncated(buffer.Bytes()))
 				}
@@ -5935,13 +5953,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t0)
 	_, _ = index.cassandraExpire(context.Background(), t0)
 
-	allIds, err := index.AllIDs(context.Background(), t0, t0)
+	allIDs, err := index.AllIDs(context.Background(), t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 4 {
-		t.Errorf("len(allIds) = %d, want 4", len(allIds))
+	if len(allIDs) != 4 {
+		t.Errorf("len(allIds) = %d, want 4", len(allIDs))
 	}
 
 	hadIssue, err = index.Verifier(buffer).
@@ -6006,13 +6024,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t1)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(context.Background(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 4 {
-		t.Errorf("len(allIds) = %d, want 4", len(allIds))
+	if len(allIDs) != 4 {
+		t.Errorf("len(allIds) = %d, want 4", len(allIDs))
 	}
 
 	metrics[0][ttlLabel] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
@@ -6044,18 +6062,18 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t2)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t2)
+	allIDs, err = index.AllIDs(context.Background(), t0, t2)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 3 {
-		t.Errorf("len(allIds) = %d, want 3", len(allIds))
+	if len(allIDs) != 3 {
+		t.Errorf("len(allIds) = %d, want 3", len(allIDs))
 	}
 
-	for _, id := range allIds {
+	for _, id := range allIDs {
 		if id == metricsID[2] {
-			t.Errorf("allIds = %v and contains %d, want not contains this value", allIds, metricsID[2])
+			t.Errorf("allIds = %v and contains %d, want not contains this value", allIDs, metricsID[2])
 		}
 	}
 
@@ -6065,13 +6083,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t3)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t3)
+	allIDs, err = index.AllIDs(context.Background(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 2 {
-		t.Errorf("len(allIds) = %d, want 2", len(allIds))
+	if len(allIDs) != 2 {
+		t.Errorf("len(allIds) = %d, want 2", len(allIDs))
 	}
 
 	labelsList = make([]labels.Labels, expireBatchSize+10)
@@ -6090,13 +6108,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Error(err)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t3)
+	allIDs, err = index.AllIDs(context.Background(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 2+expireBatchSize+10 {
-		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
+	if len(allIDs) != 2+expireBatchSize+10 {
+		t.Errorf("len(allIds) = %d, want %d", len(allIDs), 2+expireBatchSize+10)
 	}
 
 	index.expire(t4)
@@ -6105,13 +6123,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t4)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t4)
+	allIDs, err = index.AllIDs(context.Background(), t0, t4)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 2+expireBatchSize+10 {
-		t.Errorf("len(allIds) = %d, want %d", len(allIds), 2+expireBatchSize+10)
+	if len(allIDs) != 2+expireBatchSize+10 {
+		t.Errorf("len(allIds) = %d, want %d", len(allIDs), 2+expireBatchSize+10)
 	}
 
 	index.expire(t5)
@@ -6120,13 +6138,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t5)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t5)
+	allIDs, err = index.AllIDs(context.Background(), t0, t5)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 2 {
-		t.Errorf("len(allIds) = %d, want 2", len(allIds))
+	if len(allIDs) != 2 {
+		t.Errorf("len(allIds) = %d, want 2", len(allIDs))
 	}
 
 	hadIssue, err = index.Verifier(buffer).
@@ -6148,13 +6166,13 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		_, _ = index.cassandraExpire(context.Background(), t6)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t6)
+	allIDs, err = index.AllIDs(context.Background(), t0, t6)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 0 {
-		t.Errorf("allIds = %v, want []", allIds)
+	if len(allIDs) != 0 {
+		t.Errorf("allIds = %v, want []", allIDs)
 	}
 
 	hadIssue, err = index.Verifier(buffer).
@@ -6240,13 +6258,13 @@ func Test_expiration_offset(t *testing.T) {
 	index.expire(t0)
 	_, _ = index.cassandraExpire(context.Background(), t0)
 
-	allIds, err := index.AllIDs(context.Background(), t0, t0)
+	allIDs, err := index.AllIDs(context.Background(), t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 1 {
-		t.Errorf("len(allIds) = %d, want 1", len(allIds))
+	if len(allIDs) != 1 {
+		t.Errorf("len(allIds) = %d, want 1", len(allIDs))
 	}
 
 	// t1
@@ -6257,26 +6275,26 @@ func Test_expiration_offset(t *testing.T) {
 		_, _ = index.cassandraExpire(context.Background(), t1)
 	}
 
-	allIds, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(context.Background(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 1 {
-		t.Errorf("len(allIds) = %d, want 1", len(allIds))
+	if len(allIDs) != 1 {
+		t.Errorf("len(allIds) = %d, want 1", len(allIDs))
 	}
 
 	// t2
 	index.expire(t2)
 	_, _ = index.cassandraExpire(context.Background(), t2)
 
-	allIds, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(context.Background(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if len(allIds) != 0 {
-		t.Errorf("len(allIds) = %d, want 0", len(allIds))
+	if len(allIDs) != 0 {
+		t.Errorf("len(allIds) = %d, want 0", len(allIDs))
 	}
 }
 
@@ -8263,6 +8281,7 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 
 				currentTime := baseTime
 				step := 18 * time.Hour
+
 				for currentTime.Before(baseTime.Add(22 * 24 * time.Hour)) {
 					// Each 18 hours, write some metrics:
 					// We will have both brand new metrics and few reused from previous run.
@@ -8660,6 +8679,7 @@ func Test_concurrent_access(t *testing.T) {
 						// Block request before changing time.
 						execution.c.L.Lock()
 						execution.blockRequest = true
+
 						for execution.pendingRequest > 0 {
 							execution.c.Wait()
 						}
@@ -8679,6 +8699,7 @@ func Test_concurrent_access(t *testing.T) {
 
 			for n := 0; n < 8; n++ {
 				rndSeed := rnd.Int63()
+
 				group.Go(func() error {
 					return concurrentAccessWriter(ctx, execution, indexes, rndSeed)
 				})
@@ -8686,6 +8707,7 @@ func Test_concurrent_access(t *testing.T) {
 
 			for n := 0; n < 2; n++ {
 				rndSeed := rnd.Int63()
+
 				group.Go(func() error {
 					return concurrentAccessReader(ctx, execution, indexes, rndSeed)
 				})
@@ -8698,17 +8720,17 @@ func Test_concurrent_access(t *testing.T) {
 			tmp, err := indexes[0].expirationLastProcessedDay(context.Background())
 			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
 
-			allIDS, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
+			allIDs, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
 			if err != nil {
 				t.Error(err)
 			}
 
-			labels, err := indexes[0].lookupLabels(context.Background(), allIDS, execution.now.Now())
+			labels, err := indexes[0].lookupLabels(context.Background(), allIDs, execution.now.Now())
 			if err != nil {
 				t.Error(err)
 			}
 
-			for i, id := range allIDS {
+			for i, id := range allIDs {
 				t.Logf("ID = %d is %s", id, labels[i])
 			}
 

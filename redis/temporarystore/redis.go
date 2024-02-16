@@ -352,7 +352,6 @@ func (r *Redis) ReadPointsAndOffset(
 
 		if !errors.Is(err, goredis.Nil) {
 			metrics[i], err = dataFromValues(id, values, tmp)
-
 			if err != nil {
 				return nil, nil, err
 			}
@@ -576,11 +575,10 @@ func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.M
 
 		if !errors.Is(err, goredis.Nil) {
 			results[id], err = time.Parse(time.RFC3339, tmp)
-
 			if err != nil {
 				return nil, fmt.Errorf("parse time: %w", err)
 			}
-		} else {
+		} else { //nolint: wsl
 			// The metric is known but don't have any deadline key ?
 			// This could happen as race-condition on Redis cluster. On
 			// this setup, the update of differrent key are not longer

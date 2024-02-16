@@ -782,6 +782,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 
 		sortedLabels := sortLabels(lbls)
 		sortedLabelsString := sortedLabels.String()
+
 		resp, err := c.store.SelectLabelsList2ID(ctx, []string{sortedLabelsString})
 		if err != nil {
 			return err
@@ -1147,6 +1148,7 @@ func mergeSorted(left, right []string) (result []string) {
 
 			continue
 		}
+
 		i++
 	}
 
@@ -1850,7 +1852,6 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 	var buffer bytes.Buffer
 
 	_, err = allPosting.WriteTo(&buffer)
-
 	if err != nil {
 		return nil, fmt.Errorf("serialize bitmap: %w", err)
 	}
@@ -3260,19 +3261,19 @@ func (c *CassandraIndex) idsForMatchers(
 			return nil, err
 		}
 
-		newIds := make([]types.MetricID, 0, len(ids))
+		newIDs := make([]types.MetricID, 0, len(ids))
 		newLabels := make([]labels.Labels, 0, len(ids))
 
 		for i, id := range ids {
 			lbls := result.labelsList[i]
 
 			if lbls != nil && matcherMatches(matchers, lbls) {
-				newIds = append(newIds, id)
+				newIDs = append(newIDs, id)
 				newLabels = append(newLabels, lbls)
 			}
 		}
 
-		result.ids = newIds
+		result.ids = newIDs
 		result.labelsList = newLabels
 	}
 
@@ -3764,10 +3765,9 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 					end = len(ids)
 				}
 
-				subIds := ids[start:end]
-
+				subIDs := ids[start:end]
 				task := func() error {
-					tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIds)
+					tmp, tmp2, err := c.store.SelectIDS2LabelsAndExpiration(ctx, subIDs)
 					if err != nil {
 						return err
 					}
