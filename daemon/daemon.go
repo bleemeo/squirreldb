@@ -683,15 +683,18 @@ func (s *SquirrelDB) Index(ctx context.Context, manualRunOnce bool, fakeTime fun
 			}
 
 			options := index.Options{
-				DefaultTimeToLive:     s.Config.Cassandra.DefaultTimeToLive,
-				LockFactory:           s.lockFactory,
-				States:                states,
-				SchemaLock:            schemaLock,
-				Cluster:               cluster,
-				ReadOnly:              s.Config.Internal.ReadOnly,
-				Logger:                s.Logger.With().Str("component", "index").Logger(),
-				InternalRunOnceCalled: manualRunOnce,
-				InternalNowFunction:   fakeTime,
+				DefaultTimeToLive:      s.Config.Cassandra.DefaultTimeToLive,
+				PreCreateShardDuration: s.Config.Cassandra.PreCreateShardDuration,
+				PreCreateShardFraction: s.Config.Cassandra.PreCreateShardFraction,
+				TenantLabelName:        s.Config.TenantLabelName,
+				LockFactory:            s.lockFactory,
+				States:                 states,
+				SchemaLock:             schemaLock,
+				Cluster:                cluster,
+				ReadOnly:               s.Config.Internal.ReadOnly,
+				Logger:                 s.Logger.With().Str("component", "index").Logger(),
+				InternalRunOnceCalled:  manualRunOnce,
+				InternalNowFunction:    fakeTime,
 			}
 
 			wrappedIndex, err = index.New(

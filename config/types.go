@@ -82,6 +82,8 @@ type Cassandra struct {
 	Keyspace               string        `yaml:"keyspace"`
 	ReplicationFactor      int           `yaml:"replication_factor"`
 	DefaultTimeToLive      time.Duration `yaml:"default_time_to_live"`
+	PreCreateShardDuration time.Duration `yaml:"pre_create_shard_duration"`
+	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`
 	Username               string        `yaml:"username"`
 	Password               string        `yaml:"password"`

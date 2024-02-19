@@ -12,10 +12,12 @@ func defaultPaths() []string {
 func DefaultConfig() Config {
 	return Config{
 		Cassandra: Cassandra{
-			Addresses:         []string{"127.0.0.1:9042"},
-			Keyspace:          "squirreldb",
-			ReplicationFactor: 1,
-			DefaultTimeToLive: 365 * 24 * time.Hour, // 1 year
+			Addresses:              []string{"127.0.0.1:9042"},
+			Keyspace:               "squirreldb",
+			ReplicationFactor:      1,
+			DefaultTimeToLive:      365 * 24 * time.Hour, // 1 year
+			PreCreateShardDuration: 30 * time.Minute,
+			PreCreateShardFraction: 27,
 			Aggregate: Aggregate{
 				IntendedDuration: time.Minute,
 			},

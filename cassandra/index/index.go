@@ -2,6 +2,7 @@ package index
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/csv"
 	"encoding/gob"
@@ -11,6 +12,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp/syntax"
+	"slices"
 	"sort"
 	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
@@ -95,6 +97,7 @@ var (
 type idData struct {
 	cassandraEntryExpiration time.Time
 	cacheExpirationTime      time.Time
+	mostRecentShard          int32
 	unsortedLabels           labels.Labels
 	id                       types.MetricID
 }
@@ -104,13 +107,16 @@ type lockFactory interface {
 }
 
 type Options struct {
-	LockFactory       lockFactory
-	States            types.State
-	SchemaLock        sync.Locker
-	Cluster           types.Cluster
-	DefaultTimeToLive time.Duration
-	ReadOnly          bool
-	Logger            zerolog.Logger
+	LockFactory            lockFactory
+	States                 types.State
+	SchemaLock             sync.Locker
+	Cluster                types.Cluster
+	DefaultTimeToLive      time.Duration
+	TenantLabelName        string
+	PreCreateShardDuration time.Duration
+	PreCreateShardFraction int
+	ReadOnly               bool
+	Logger                 zerolog.Logger
 	// InternalRunOnceCalled is true if this index is used by some testings/benchmarking tools
 	// that will call RunOnce directly.
 	InternalRunOnceCalled bool
@@ -363,6 +369,8 @@ func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) boo
 	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)
 
+	c.shardPrecreate(ctx, now)
+
 	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
 	// or with an exponential backoff between 1mn and 15mn when errors occurs.
 	if now.Before(c.nextExpirationAt) {
@@ -384,6 +392,116 @@ func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) boo
 	}
 
 	return moreWork
+}
+
+func (c *CassandraIndex) shardPrecreate(ctx context.Context, now time.Time) {
+	var updates []lookupEntry
+
+	nowShard := shardForTime(now.Unix())
+	futureShard := shardForTime(now.Add(c.options.PreCreateShardDuration).Unix())
+
+	if nowShard == futureShard {
+		return
+	}
+
+	totalIDCount := 0
+	for _, idList := range c.labelsToID {
+		totalIDCount += len(idList)
+	}
+
+	numberOfUpdates := int(math.Ceil(float64(totalIDCount) / float64(c.options.PreCreateShardFraction)))
+
+	allLabelsKeys := make([]uint64, 0, len(c.labelsToID))
+	for key := range c.labelsToID {
+		allLabelsKeys = append(allLabelsKeys, key)
+	}
+
+	// sort the label to process to group the similar one together.
+	// The more similar metrics are grouped, the less update will be submitted, because an
+	// update of posting "__name__=disk_used" is one Cassandra update regardless of the number of metric IDs
+	// to add/remove for this posting.
+	// The tenant label is used to group similar metrics (because at least the tenant value is the same),
+	// and it feels a good candidate.
+	// The instance (server name) is the second label, to order with very large tenant.
+	slices.SortFunc(allLabelsKeys, func(x uint64, y uint64) int {
+		idList1 := c.labelsToID[x]
+		idList2 := c.labelsToID[y]
+
+		var (
+			tenantValue1, tenantValue2     string
+			instanceValue1, instanceValue2 string
+		)
+
+		// There is some approximation is sorting, especially only first idData is used, but:
+		// * normally only one idData exist in the list (or their is a conflict in labels Hash())
+		// * anyway this is for an optional optimization, if their is few wrong grouping it won't
+		//   impact significantly the performance.
+		if len(idList1) > 0 {
+			tenantValue1 = idList1[0].unsortedLabels.Get(c.options.TenantLabelName)
+			instanceValue1 = idList1[0].unsortedLabels.Get("instance")
+		}
+
+		if len(idList2) > 0 {
+			tenantValue2 = idList2[0].unsortedLabels.Get(c.options.TenantLabelName)
+			instanceValue2 = idList2[0].unsortedLabels.Get("instance")
+		}
+
+		if tenantValue1 == tenantValue2 {
+			return cmp.Compare(instanceValue1, instanceValue2)
+		}
+
+		return cmp.Compare(tenantValue1, tenantValue2)
+	})
+
+	for _, labelsKey := range allLabelsKeys {
+		idList := c.labelsToID[labelsKey]
+		for _, data := range idList {
+			if data.mostRecentShard < futureShard {
+				if updates == nil {
+					updates = make([]lookupEntry, 0, numberOfUpdates)
+				}
+
+				updates = append(updates, lookupEntry{
+					idData:       data,
+					labelsKey:    labelsKey,
+					wantedShards: []int32{futureShard},
+				})
+
+				if len(updates) >= numberOfUpdates {
+					break
+				}
+			}
+		}
+
+		if len(updates) >= numberOfUpdates {
+			break
+		}
+	}
+
+	c.logger.Debug().Msgf("shard pre-creation will do %d updates of posting", len(updates))
+
+	if len(updates) > 0 {
+		err := c.updatePostingShards(ctx, updates, true)
+		if err != nil {
+			c.logger.Warn().Err(err).Msg("shard pre-creation failed (this is an optimization, failing isn't fatal)")
+
+			return
+		}
+
+		// Update mostRecentShard for submitted updates
+		for _, update := range updates {
+			entry, ok := c.labelsToID[update.idData.unsortedLabels.Hash()]
+			if !ok {
+				continue
+			}
+
+			for idx, row := range entry {
+				if labels.Compare(row.unsortedLabels, update.unsortedLabels) == 0 {
+					entry[idx].mostRecentShard = futureShard
+				}
+			}
+		}
+	}
 }
 
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
@@ -1400,7 +1518,8 @@ func (c *CassandraIndex) lookupIDsFromCache(
 
 		if !found {
 			data = idData{
-				unsortedLabels: req.Labels,
+				unsortedLabels:  req.Labels,
+				mostRecentShard: shards[len(shards)-1],
 			}
 		}
 
@@ -2655,10 +2774,12 @@ func (c *CassandraIndex) InternalForceExpirationTimestamp(ctx context.Context, v
 func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.Time) {
 	c.lookupIDMutex.Lock()
 
+	futureShard := shardForTime(now.Add(c.options.PreCreateShardDuration).Unix())
+
 	allShard := make(map[int32]bool, len(c.idInShardLastAccess))
 
 	for shard, atime := range c.idInShardLastAccess {
-		if now.Sub(atime) > cacheExpirationDelay {
+		if now.Sub(atime) > cacheExpirationDelay && shard != futureShard {
 			delete(c.idInShard, shard)
 			delete(c.idInShardLastAccess, shard)
 		} else {
