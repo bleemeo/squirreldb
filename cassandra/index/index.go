@@ -3120,6 +3120,8 @@ type postingUpdateRequest struct {
 }
 
 func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateRequest) (*roaring.Bitmap, error) {
+	c.metrics.UpdatedPosting.Inc()
+
 	bitmap, err := c.postings(ctx, []int32{job.Shard}, job.Label.Name, job.Label.Value, false)
 	if err != nil {
 		return nil, err

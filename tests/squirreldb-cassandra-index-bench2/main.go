@@ -22,10 +22,10 @@ import (
 	"squirreldb/daemon"
 	"squirreldb/dummy"
 	"squirreldb/types"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/prometheus/model/labels"
@@ -36,7 +36,8 @@ import (
 //nolint:lll,gochecknoglobals
 var (
 	workerProcesses       = flag.Int("bench.worker-processes", 1, "Number of concurrent index (equivalent to process) inserting data")
-	scale                 = flag.Int("bench.scale", 1, "The scale factor. Number of metrics created is multiplied by this factor")
+	scaleAgent            = flag.Int("bench.scale-agent", 1, "The scale factor for agent. Number of agent created per tenant")
+	scaleTenant           = flag.Int("bench.scale-tenant", 1, "The scale factor for tenant. Number of tenant created")
 	fakeClockDuration     = flag.Duration("bench.fake-clock-duration", 140*time.Minute, "Fake duration the test will run. This affect the fake clock not real time")
 	sleepDelay            = flag.Duration("bench.sleep-delay", 1*time.Millisecond, "Time sleeping between each step in fake clock. 0 means as fast as possible")
 	fakeClockStep         = flag.Duration("bench.fake-clock-step", 10*time.Second, "Fake clock step, writes are send every fake step delay")
@@ -261,7 +262,7 @@ func bench(ctx context.Context, cfg config.Config, clock *fakeClock) error {
 		})
 	}
 
-	testStartTime := sentInsertRequest(ctx, clock, counter, channels)
+	testStartTime := sentInsertRequest(ctx, clock, cfg.TenantLabelName, counter, channels)
 
 	for _, ch := range channels {
 		close(ch)
@@ -278,9 +279,18 @@ func bench(ctx context.Context, cfg config.Config, clock *fakeClock) error {
 func sentInsertRequest(
 	ctx context.Context,
 	clock *fakeClock,
+	tenantLabelName string,
 	counter *requestCounter,
 	channels []chan []types.LookupRequest,
 ) time.Time {
+	commonAgentName := []string{
+		"localhost",
+		"webserver01",
+		"webserver02",
+		"database",
+		"backup",
+	}
+
 	previousShardStartAt := findNextShardChange(time.Now().Add(-postingShardSize))
 	initialTime := previousShardStartAt.Add(*initialDelayToThursay)
 	currentTime := initialTime
@@ -293,10 +303,22 @@ func sentInsertRequest(
 	testEndAt := testStartAt.Add(testDuration)
 	lastProgressShow := 0
 
-	serverIDs := make([]string, 0, *scale)
+	serverIDs := make([]nameAndTenant, 0, (*scaleAgent)*(*scaleTenant))
 
-	for n := 0; n < *scale; n++ {
-		serverIDs = append(serverIDs, strconv.FormatInt(int64(n), 10))
+	for tenantN := 0; tenantN < *scaleTenant; tenantN++ {
+		tenantID := uuid.New().String()
+
+		for agentN := 0; agentN < *scaleAgent; agentN++ {
+			var agentName string
+
+			if agentN < len(commonAgentName) {
+				agentName = commonAgentName[agentN]
+			} else {
+				agentName = fmt.Sprintf("agent-%d-of-tenant-%d", agentN, tenantN)
+			}
+
+			serverIDs = append(serverIDs, nameAndTenant{name: agentName, tenant: tenantID})
+		}
 	}
 
 	totalRequests := 0
@@ -314,7 +336,7 @@ func sentInsertRequest(
 			log.Printf("Test time is at %s (%d%%)", clock.Now(), progressionPercent)
 		}
 
-		requests := makeInsertRequests(clock.Now(), serverIDs)
+		requests := makeInsertRequests(clock.Now(), tenantLabelName, serverIDs)
 
 		totalRequests += len(requests)
 
@@ -452,51 +474,65 @@ func showStatsForDurations(prefix string, array []DurationAndTime) {
 	)
 }
 
-// makeInsertRequests produce N set of same metrics, N depend on scale. One set of metrics represent one server
-// (with cpu, disk, memory...).
-func makeInsertRequests(now time.Time, serverIDs []string) [][]types.LookupRequest {
-	results := make([][]types.LookupRequest, 0, len(serverIDs))
+type nameAndTenant struct {
+	name   string
+	tenant string
+}
 
-	for _, serverID := range serverIDs {
+// makeInsertRequests produce N set of same metrics, N depend on scale. One set of metrics represent one server
+// (with cpu, disk, memory...). Each server is associated with one tenant.
+func makeInsertRequests(
+	now time.Time,
+	tenantLabelName string,
+	serverNamesAndTenant []nameAndTenant,
+) [][]types.LookupRequest {
+	results := make([][]types.LookupRequest, 0, len(serverNamesAndTenant))
+
+	for _, serverID := range serverNamesAndTenant {
 		oneSet := []types.LookupRequest{
 			{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "cpu_used",
-					"server_id": serverID,
+					"__name__":      "cpu_used",
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			},
 			{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "mem_used_perc",
-					"server_id": serverID,
+					"__name__":      "mem_used_perc",
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			},
 			{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "mem_total",
-					"server_id": serverID,
+					"__name__":      "mem_total",
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			},
 			{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "swap_used_perc",
-					"server_id": serverID,
+					"__name__":      "swap_used_perc",
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			},
 			{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "system_load1",
-					"server_id": serverID,
+					"__name__":      "system_load1",
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			},
 		}
@@ -506,9 +542,10 @@ func makeInsertRequests(now time.Time, serverIDs []string) [][]types.LookupReque
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "disk_used_perc",
-					"item":      fsPath,
-					"server_id": serverID,
+					"__name__":      "disk_used_perc",
+					"item":          fsPath,
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			})
 		}
@@ -518,9 +555,10 @@ func makeInsertRequests(now time.Time, serverIDs []string) [][]types.LookupReque
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "io_reads",
-					"item":      diskDevice,
-					"server_id": serverID,
+					"__name__":      "io_reads",
+					"item":          diskDevice,
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			})
 		}
@@ -530,9 +568,10 @@ func makeInsertRequests(now time.Time, serverIDs []string) [][]types.LookupReque
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":  "net_recv_bits",
-					"item":      netDevice,
-					"server_id": serverID,
+					"__name__":      "net_recv_bits",
+					"item":          netDevice,
+					"instance":      serverID.name,
+					tenantLabelName: serverID.tenant,
 				}),
 			})
 		}
@@ -588,7 +627,8 @@ func worker(
 	var wg sync.WaitGroup
 
 	for work := range workChanel {
-		if clock.Now().Sub(previousRunOnce) > backgroundCheckInterval {
+		now := clock.Now()
+		if now.Sub(previousRunOnce) >= backgroundCheckInterval {
 			wg.Add(1)
 
 			// The InternalRunOnce is running inside a gorouting has this
@@ -600,10 +640,10 @@ func worker(
 				start := time.Now()
 
 				localIndex.InternalRunOnce(ctx, clock.Now())
-				previousRunOnce = clock.Now()
+
+				previousRunOnce = now
 
 				duration := time.Since(start)
-
 				stats.RunOnceDurations = append(stats.RunOnceDurations, DurationAndTime{Duration: duration, At: clock.Now()})
 			}()
 		}
