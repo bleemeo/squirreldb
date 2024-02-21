@@ -88,12 +88,14 @@ fi
 lock_opt="--worker-processes 2 --worker-threads 25 --work-duration 100ms --worker-delay 10ms"
 lock2_opt="--worker-processes 5 --worker-threads 1 --work-duration 250ms --worker-delay 500ms"
 lock3_opt="--worker-processes 5 --worker-threads 1 --work-duration 250ms --worker-delay 500ms --with-block"
+index_bench2_opt="--bench.scale-agent 10 --bench.scale-tenant 5"
 
 if [ "${WITH_LONG}" = "1" ]; then
     lock_opt="--worker-processes 3 --run-time 90s"
     lock2_opt="${lock2_opt} --run-time 90s"
     lock3_opt="${lock3_opt} --run-time 90s"
     index_bench_opt="--bench.query 500 --bench.shard-end 10 --bench.shard-size 2000 --bench.worker-max-threads 5 --bench.worker-processes 2"
+    index_bench2_opt="${index_bench2_opt} --bench.scale-agent 25 --bench.scale-tenant 10"
     remote_store_opt="--threads 3 --scale 10"
     remote_store2_opt="--test.processes 2 --test.run-duration 1m"
     redis_opt="--test.run-time=1m"
@@ -174,8 +176,20 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     sh -exc "go run $race_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
 
 echo
+echo "== Running squirreldb-cassandra-index-bench2"
+docker run $docker_network --rm -e HOME=/go/pkg \
+    -e SQUIRRELDB_LOG_DISABLE_COLOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -exc "go run $race_opt ./tests/squirreldb-cassandra-index-bench2/ $index_bench2_opt"
+
+echo
 echo "== Running squirreldb-promql-aggregate"
 docker run $docker_network --rm -e HOME=/go/pkg \
+    -e SQUIRRELDB_LOG_DISABLE_COLOR \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \

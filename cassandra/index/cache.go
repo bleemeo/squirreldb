@@ -23,8 +23,9 @@ type labelsLookupCache struct {
 // SquirrelDB and posting that match the created metric are invalidated.
 type postingsCache struct {
 	// cache map shard => label name => label value => postingEntry
-	cache map[postingsCacheKey]postingEntry
-	l     sync.Mutex
+	nowFunc func() time.Time
+	cache   map[postingsCacheKey]postingEntry
+	l       sync.Mutex
 }
 
 type postingsCacheKey struct {
@@ -142,7 +143,7 @@ func (c *labelsLookupCache) get(now time.Time, id types.MetricID) labels.Labels 
 
 // Get return the non-expired cache entry or nil.
 func (c *postingsCache) Get(shard int32, name string, value string) *roaring.Bitmap {
-	return c.get(time.Now(), shard, name, value)
+	return c.get(c.nowFunc(), shard, name, value)
 }
 
 // Invalidate drop entry that are impacted by given labels. Return the cache size.
@@ -159,7 +160,7 @@ func (c *postingsCache) Invalidate(entries []postingsCacheKey) int {
 
 // Set add an entry. Return the cache size.
 func (c *postingsCache) Set(shard int32, name string, value string, bitmap *roaring.Bitmap) int {
-	now := time.Now()
+	now := c.nowFunc()
 
 	return c.set(now, shard, name, value, bitmap.Freeze())
 }

@@ -46,7 +46,7 @@ const maxIDBeforeTruncate = 50
 func (c *CassandraIndex) Verifier(output io.Writer) types.IndexVerifier {
 	return verifier{
 		index:  c,
-		now:    time.Now(),
+		now:    c.options.InternalNowFunction(),
 		output: output,
 	}
 }
@@ -274,7 +274,7 @@ func (ve *verifierExecution) verifyMissingShard(
 		return 0, shards, fmt.Errorf("get postings for existing shards: %w", err)
 	}
 
-	current := time.Now().Add(3 * postingShardSize)
+	current := ve.verifier.index.options.InternalNowFunction().Add(3 * postingShardSize)
 
 	for n := 0; n < 100; n++ {
 		if ctx.Err() != nil {

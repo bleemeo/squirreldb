@@ -2,6 +2,7 @@ package index
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/csv"
 	"encoding/gob"
@@ -11,6 +12,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp/syntax"
+	"slices"
 	"sort"
 	"squirreldb/cassandra/connection"
 	"squirreldb/logger"
@@ -95,6 +97,7 @@ var (
 type idData struct {
 	cassandraEntryExpiration time.Time
 	cacheExpirationTime      time.Time
+	mostRecentShard          int32
 	unsortedLabels           labels.Labels
 	id                       types.MetricID
 }
@@ -104,16 +107,22 @@ type lockFactory interface {
 }
 
 type Options struct {
-	LockFactory       lockFactory
-	States            types.State
-	SchemaLock        sync.Locker
-	Cluster           types.Cluster
-	DefaultTimeToLive time.Duration
-	ReadOnly          bool
-	Logger            zerolog.Logger
+	LockFactory            lockFactory
+	States                 types.State
+	SchemaLock             sync.Locker
+	Cluster                types.Cluster
+	DefaultTimeToLive      time.Duration
+	TenantLabelName        string
+	PreCreateShardDuration time.Duration
+	PreCreateShardFraction int
+	ReadOnly               bool
+	Logger                 zerolog.Logger
 	// InternalRunOnceCalled is true if this index is used by some testings/benchmarking tools
 	// that will call RunOnce directly.
 	InternalRunOnceCalled bool
+	// InternalNowFunction is the function used to get current time. It default to time.Now().
+	// This is useful when doing test that need to simulate long period of time.
+	InternalNowFunction func() time.Time
 }
 
 type CassandraIndex struct {
@@ -259,6 +268,10 @@ func initialize(
 	expBackoff.MaxElapsedTime = 0
 	expBackoff.Reset()
 
+	if options.InternalNowFunction == nil {
+		options.InternalNowFunction = time.Now
+	}
+
 	index := &CassandraIndex{
 		store:               store,
 		options:             options,
@@ -267,7 +280,8 @@ func initialize(
 		labelsToID:          make(map[uint64][]idData),
 		idsToLabels:         &labelsLookupCache{cache: make(map[types.MetricID]labelsEntry)},
 		postingsCache: &postingsCache{
-			cache: make(map[postingsCacheKey]postingEntry),
+			nowFunc: options.InternalNowFunction,
+			cache:   make(map[postingsCacheKey]postingEntry),
 		},
 		shardExpirationCache:     &shardExpirationCache{},
 		expirationUpdateRequests: make(map[int64]expirationUpdateRequest),
@@ -336,7 +350,7 @@ func (c *CassandraIndex) run(ctx context.Context) {
 				continue
 			}
 
-			c.InternalRunOnce(ctx, time.Now())
+			c.InternalRunOnce(ctx, c.options.InternalNowFunction())
 		case <-ctx.Done():
 			c.logger.Trace().Msg("Cassandra index service stopped")
 
@@ -354,6 +368,8 @@ func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) boo
 	c.expire(now)
 	c.applyExpirationUpdateRequests(ctx, now)
 	c.periodicRefreshIDInShard(ctx, now)
+
+	c.shardPrecreate(ctx, now)
 
 	// Expire entries in cassandra every minute when there is more work, every 15mn when all work is done,
 	// or with an exponential backoff between 1mn and 15mn when errors occurs.
@@ -376,6 +392,116 @@ func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) boo
 	}
 
 	return moreWork
+}
+
+func (c *CassandraIndex) shardPrecreate(ctx context.Context, now time.Time) {
+	var updates []lookupEntry
+
+	nowShard := shardForTime(now.Unix())
+	futureShard := shardForTime(now.Add(c.options.PreCreateShardDuration).Unix())
+
+	if nowShard == futureShard {
+		return
+	}
+
+	totalIDCount := 0
+	for _, idList := range c.labelsToID {
+		totalIDCount += len(idList)
+	}
+
+	numberOfUpdates := int(math.Ceil(float64(totalIDCount) / float64(c.options.PreCreateShardFraction)))
+
+	allLabelsKeys := make([]uint64, 0, len(c.labelsToID))
+	for key := range c.labelsToID {
+		allLabelsKeys = append(allLabelsKeys, key)
+	}
+
+	// sort the label to process to group the similar one together.
+	// The more similar metrics are grouped, the less update will be submitted, because an
+	// update of posting "__name__=disk_used" is one Cassandra update regardless of the number of metric IDs
+	// to add/remove for this posting.
+	// The tenant label is used to group similar metrics (because at least the tenant value is the same),
+	// and it feels a good candidate.
+	// The instance (server name) is the second label, to order with very large tenant.
+	slices.SortFunc(allLabelsKeys, func(x uint64, y uint64) int {
+		idList1 := c.labelsToID[x]
+		idList2 := c.labelsToID[y]
+
+		var (
+			tenantValue1, tenantValue2     string
+			instanceValue1, instanceValue2 string
+		)
+
+		// There is some approximation is sorting, especially only first idData is used, but:
+		// * normally only one idData exist in the list (or their is a conflict in labels Hash())
+		// * anyway this is for an optional optimization, if their is few wrong grouping it won't
+		//   impact significantly the performance.
+		if len(idList1) > 0 {
+			tenantValue1 = idList1[0].unsortedLabels.Get(c.options.TenantLabelName)
+			instanceValue1 = idList1[0].unsortedLabels.Get("instance")
+		}
+
+		if len(idList2) > 0 {
+			tenantValue2 = idList2[0].unsortedLabels.Get(c.options.TenantLabelName)
+			instanceValue2 = idList2[0].unsortedLabels.Get("instance")
+		}
+
+		if tenantValue1 == tenantValue2 {
+			return cmp.Compare(instanceValue1, instanceValue2)
+		}
+
+		return cmp.Compare(tenantValue1, tenantValue2)
+	})
+
+	for _, labelsKey := range allLabelsKeys {
+		idList := c.labelsToID[labelsKey]
+		for _, data := range idList {
+			if data.mostRecentShard < futureShard {
+				if updates == nil {
+					updates = make([]lookupEntry, 0, numberOfUpdates)
+				}
+
+				updates = append(updates, lookupEntry{
+					idData:       data,
+					labelsKey:    labelsKey,
+					wantedShards: []int32{futureShard},
+				})
+
+				if len(updates) >= numberOfUpdates {
+					break
+				}
+			}
+		}
+
+		if len(updates) >= numberOfUpdates {
+			break
+		}
+	}
+
+	c.logger.Debug().Msgf("shard pre-creation will do %d updates of posting", len(updates))
+
+	if len(updates) > 0 {
+		err := c.updatePostingShards(ctx, updates, true)
+		if err != nil {
+			c.logger.Warn().Err(err).Msg("shard pre-creation failed (this is an optimization, failing isn't fatal)")
+
+			return
+		}
+
+		// Update mostRecentShard for submitted updates
+		for _, update := range updates {
+			entry, ok := c.labelsToID[update.idData.unsortedLabels.Hash()]
+			if !ok {
+				continue
+			}
+
+			for idx, row := range entry {
+				if labels.Compare(row.unsortedLabels, update.unsortedLabels) == 0 {
+					entry[idx].mostRecentShard = futureShard
+				}
+			}
+		}
+	}
 }
 
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
@@ -1173,7 +1299,7 @@ func (c *CassandraIndex) LookupIDs(
 	ctx context.Context,
 	requests []types.LookupRequest,
 ) ([]types.MetricID, []int64, error) {
-	return c.lookupIDs(ctx, requests, time.Now())
+	return c.lookupIDs(ctx, requests, c.options.InternalNowFunction())
 }
 
 func (c *CassandraIndex) lookupIDs(
@@ -1392,7 +1518,8 @@ func (c *CassandraIndex) lookupIDsFromCache(
 
 		if !found {
 			data = idData{
-				unsortedLabels: req.Labels,
+				unsortedLabels:  req.Labels,
+				mostRecentShard: shards[len(shards)-1],
 			}
 		}
 
@@ -1750,7 +1877,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
 
 			// Add the bad ID to next expiration, so it could be cleanup if possible
-			today := time.Now().Truncate(24 * time.Hour)
+			today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 			expReq := expirationUpdateRequests[today.Unix()]
 			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 			expirationUpdateRequests[today.Unix()] = expReq
@@ -1778,7 +1905,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 				c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in ID2Labels or expired!")
 
 				// Add the bad ID to next expiration, so it could be cleanup if possible
-				today := time.Now().Truncate(24 * time.Hour)
+				today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 				expReq := expirationUpdateRequests[today.Unix()]
 				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 				expirationUpdateRequests[today.Unix()] = expReq
@@ -1972,7 +2099,7 @@ func (c *CassandraIndex) updatePostingShards(
 	precense := make(map[int32]postingUpdateRequest)
 	updates := make([]postingUpdateRequest, 0)
 	shardToLabelToIndex := make(map[int32]map[labels.Label]int)
-	now := time.Now()
+	now := c.options.InternalNowFunction()
 	keysToInvalidate := make([]postingsCacheKey, 0)
 
 	c.lookupIDMutex.Lock()
@@ -2338,7 +2465,7 @@ type metricsLabels struct {
 
 func (l *metricsLabels) Next() bool {
 	if l.labelsList == nil && len(l.ids) > 0 {
-		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, time.Now())
+		l.labelsList, l.err = l.c.lookupLabels(l.ctx, l.ids, l.c.options.InternalNowFunction())
 		if l.err != nil {
 			return false
 		}
@@ -2609,7 +2736,7 @@ func (c *CassandraIndex) InternalCreateMetric(
 		return nil, errNewMetricLockNotAcquired
 	}
 
-	done, err := c.createMetrics(ctx, time.Now(), requests, true)
+	done, err := c.createMetrics(ctx, c.options.InternalNowFunction(), requests, true)
 
 	c.newMetricGlobalLock.Unlock()
 
@@ -2647,10 +2774,12 @@ func (c *CassandraIndex) InternalForceExpirationTimestamp(ctx context.Context, v
 func (c *CassandraIndex) periodicRefreshIDInShard(ctx context.Context, now time.Time) {
 	c.lookupIDMutex.Lock()
 
+	futureShard := shardForTime(now.Add(c.options.PreCreateShardDuration).Unix())
+
 	allShard := make(map[int32]bool, len(c.idInShardLastAccess))
 
 	for shard, atime := range c.idInShardLastAccess {
-		if now.Sub(atime) > cacheExpirationDelay {
+		if now.Sub(atime) > cacheExpirationDelay && shard != futureShard {
 			delete(c.idInShard, shard)
 			delete(c.idInShardLastAccess, shard)
 		} else {
@@ -3112,6 +3241,8 @@ type postingUpdateRequest struct {
 }
 
 func (c *CassandraIndex) postingUpdate(ctx context.Context, job postingUpdateRequest) (*roaring.Bitmap, error) {
+	c.metrics.UpdatedPosting.Inc()
+
 	bitmap, err := c.postings(ctx, []int32{job.Shard}, job.Label.Name, job.Label.Value, false)
 	if err != nil {
 		return nil, err
@@ -3256,7 +3387,7 @@ func (c *CassandraIndex) idsForMatchers(
 	}
 
 	if checkMatches {
-		result.labelsList, err = c.lookupLabels(ctx, ids, time.Now())
+		result.labelsList, err = c.lookupLabels(ctx, ids, c.options.InternalNowFunction())
 		if err != nil {
 			return nil, err
 		}

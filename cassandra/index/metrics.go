@@ -8,6 +8,7 @@ import (
 type metrics struct {
 	CreateMetricSeconds     prometheus.Summary
 	UpdatePostingSeconds    prometheus.Summary
+	UpdatedPosting          prometheus.Counter
 	LookupLabelsSeconds     prometheus.Summary
 	LookupIDRequestSeconds  prometheus.Summary
 	LookupIDNew             prometheus.Counter
@@ -40,6 +41,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Subsystem: "index",
 			Name:      "update_postings_seconds",
 			Help:      "Total postings updates time in seconds (including time to took lock)",
+		}),
+		UpdatedPosting: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Namespace: "squirreldb",
+			Subsystem: "index",
+			Name:      "updated_postings_total",
+			Help:      "Total number of posting updated",
 		}),
 		LookupLabelsSeconds: promauto.With(reg).NewSummary(prometheus.SummaryOpts{
 			Namespace: "squirreldb",
