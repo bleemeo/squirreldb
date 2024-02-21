@@ -8734,7 +8734,9 @@ func Test_concurrent_access(t *testing.T) {
 				t.Logf("ID = %d is %s", id, labels[i])
 			}
 
-			indexes[0].InternalRunOnce(ctx, execution.now.Now())
+			for _, idx := range indexes {
+				idx.InternalRunOnce(ctx, execution.now.Now())
+			}
 
 			for _, idx := range indexes {
 				buffer := bytes.NewBuffer(nil)
