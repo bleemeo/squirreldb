@@ -415,11 +415,11 @@ func readPromQLWorker(
 
 		matrix, ok := result.(model.Matrix)
 		if !ok {
-			return count, fmt.Errorf("unexpected type it's not a Matrix")
+			return count, fmt.Errorf("unexpected type %T, want a Matrix", result)
 		}
 
 		opts := []cmp.Option{
-			// Convert model.SampleValue to float64 (their actual type) for EquateApprox to works.
+			// Convert model.SampleValue to float64 (their actual type) for EquateApprox to work.
 			cmpopts.AcyclicTransformer("toFloat", func(s model.SampleValue) float64 { return float64(s) }),
 			cmpopts.EquateApprox(0.001, 0),
 		}

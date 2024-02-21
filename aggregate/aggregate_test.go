@@ -627,11 +627,14 @@ func Benchmark_aggregateData(b *testing.B) {
 			data := types.MetricData{
 				Points: make([]types.MetricPoint, tt.Size),
 			}
+
 			for i := range data.Points {
 				data.Points[i].Timestamp = (startTS + int64(tt.PointStep*i)) * 1000
 				data.Points[i].Value = float64(i)
 			}
+
 			b.ResetTimer()
+
 			for n := 0; n < b.N; n++ {
 				_ = Aggregate(data, tt.Resolution)
 			}

@@ -668,6 +668,7 @@ func seriesSize(t *testing.T, workingSeries storage.Series) (int, error) {
 
 	for it.Next() != chunkenc.ValNone {
 		it.At()
+
 		count++
 	}
 
@@ -876,6 +877,7 @@ func Benchmark_cachingReader(b *testing.B) {
 					}
 				}
 			}
+
 			cachedTotalPoints += reader.cachedPointsCount
 
 			b.ReportMetric(cachedTotalPoints/float64(b.N), "cache-pts/op")
@@ -1388,6 +1390,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			)
 
 			reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+
 			querierIntf, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
 				t.Fatal(err)

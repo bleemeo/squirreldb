@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -157,16 +158,14 @@ func run(ctx context.Context) error {
 		}
 
 		indexVerifier, ok := idx.(types.VerifiableIndex)
-
 		if !ok {
-			return fmt.Errorf("can not verify, index isn't a CassandraIndex")
+			return errors.New("can not verify, index isn't a CassandraIndex")
 		}
 
 		_, err = indexVerifier.Verifier(os.Stderr).
 			WithStrictExpiration(true).
 			WithStrictMetricCreation(true).
 			Verify(ctx)
-
 		if err != nil {
 			return err
 		}

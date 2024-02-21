@@ -102,7 +102,7 @@ func NewPrometheus(
 	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
 	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
 
-	scrapePoolRetrieverFunc := func(ctx context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
+	scrapePoolRetrieverFunc := func(_ context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
 	alertmanagerRetrieverFunc := func(context.Context) v1.AlertmanagerRetriever { return mockAlertmanagerRetriever{} }
 	rulesRetrieverFunc := func(context.Context) v1.RulesRetriever { return mockRulesRetriever{} }
@@ -266,6 +266,7 @@ func (a *API) init() {
 			enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
 			if enableDebug {
 				humainURL := r.URL.Path
+
 				if r.URL.RawQuery != "" {
 					v, _ := url.QueryUnescape(r.URL.RawQuery)
 					humainURL += "?" + v

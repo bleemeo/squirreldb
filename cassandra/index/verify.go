@@ -32,9 +32,9 @@ type verifierExecution struct {
 	bulkDeleter *deleter
 	// allPosting is the content of the special posting globalAllPostingLabel
 	allPosting *roaring.Bitmap
-	// allGoodIds will contains all MetricIDs which have correct id <-> labels entry in
+	// allGoodIDs will contains all MetricIDs which have correct id <-> labels entry in
 	// tables labels2id and id2labels.
-	allGoodIds *roaring.Bitmap
+	allGoodIDs *roaring.Bitmap
 	// expectedExpiration contains the expected value for index_expiration table (based on id2labels table)
 	expectedExpiration map[int64]*roaring.Bitmap
 	// expectedUnknowDate contains the metric ID which should expire but we ignore when.
@@ -166,7 +166,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 
 	hadIssue = hadIssue || issueCount > 0
 
-	ve.allGoodIds = roaring.NewBTreeBitmap()
+	ve.allGoodIDs = roaring.NewBTreeBitmap()
 
 	ve.allPosting, err = ve.index.postings(
 		ctx,
@@ -188,10 +188,10 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 	count := 0
 	it := ve.allPosting.Iterator()
 
-	pendingIds := make([]types.MetricID, 0, 10000)
+	pendingIDs := make([]types.MetricID, 0, 10000)
 
 	for ctx.Err() == nil {
-		pendingIds = pendingIds[:0]
+		pendingIDs = pendingIDs[:0]
 
 		for ctx.Err() == nil {
 			id, eof := it.Next()
@@ -203,19 +203,19 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 
 			count++
 
-			pendingIds = append(pendingIds, metricID)
+			pendingIDs = append(pendingIDs, metricID)
 
-			if len(pendingIds) > verifyBulkSize {
+			if len(pendingIDs) > verifyBulkSize {
 				break
 			}
 		}
 
-		if len(pendingIds) == 0 {
+		if len(pendingIDs) == 0 {
 			break
 		}
 
-		if len(pendingIds) > 0 {
-			bulkHadIssue, err := ve.verifyBulk(ctx, pendingIds)
+		if len(pendingIDs) > 0 {
+			bulkHadIssue, err := ve.verifyBulk(ctx, pendingIDs)
 			if err != nil {
 				return hadIssue, err
 			}
@@ -224,7 +224,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 		}
 	}
 
-	fmt.Fprintf(ve.output, "Index contains %d metrics and %d ok\n", count, ve.allGoodIds.Count())
+	fmt.Fprintf(ve.output, "Index contains %d metrics and %d ok\n", count, ve.allGoodIDs.Count())
 
 	if respf, ok := ve.output.(http.Flusher); ok {
 		respf.Flush()
@@ -346,7 +346,6 @@ func (ve *verifierExecution) verifyMissingShard(
 		var buffer bytes.Buffer
 
 		_, err = shards.WriteTo(&buffer)
-
 		if err != nil {
 			return errorCount, shards, fmt.Errorf("serialize bitmap: %w", err)
 		}
@@ -557,7 +556,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			continue
 		}
 
-		_, err = ve.allGoodIds.AddN(uint64(id))
+		_, err = ve.allGoodIDs.AddN(uint64(id))
 		if err != nil {
 			return hadIssue, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -684,10 +683,10 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 	labelNames := make(map[string]interface{})
 	it = localAll.Iterator()
 
-	pendingIds := make([]types.MetricID, 0, 10000)
+	pendingIDs := make([]types.MetricID, 0, 10000)
 
 	for ctx.Err() == nil {
-		pendingIds = pendingIds[:0]
+		pendingIDs = pendingIDs[:0]
 
 		for ctx.Err() == nil {
 			id, eof := it.Next()
@@ -695,17 +694,17 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				break
 			}
 
-			pendingIds = append(pendingIds, types.MetricID(id))
-			if len(pendingIds) > 1000 {
+			pendingIDs = append(pendingIDs, types.MetricID(id))
+			if len(pendingIDs) > 1000 {
 				break
 			}
 		}
 
-		if len(pendingIds) == 0 {
+		if len(pendingIDs) == 0 {
 			break
 		}
 
-		tmp, _, err := ve.index.selectIDS2LabelsAndExpiration(ctx, pendingIds)
+		tmp, _, err := ve.index.selectIDS2LabelsAndExpiration(ctx, pendingIDs)
 		if err != nil {
 			return true, fmt.Errorf("get labels: %w", err)
 		}
@@ -853,6 +852,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 
 				tmp2 := wanted.Difference(tmp)
 				it := tmp2.Iterator()
+
 				for {
 					id, eof := it.Next()
 					if eof {
@@ -887,6 +887,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 
 				tmp2 = tmp.Difference(wanted)
 				it = tmp2.Iterator()
+
 				for {
 					id, eof := it.Next()
 					if eof {
@@ -1053,13 +1054,13 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 	endDay = endDay.Add(24 * time.Hour * 7)
 
 	{
-		tmp := ve.allGoodIds.Difference(idExpectedInFuture)
+		tmp := ve.allGoodIDs.Difference(idExpectedInFuture)
 		if tmp.Any() {
 			hadIssue = true
 
 			fmt.Fprintf(
 				ve.output,
-				"allGoodIds contains %d IDs for which we don't have an expiration expected. This seems a bug in verifier\n",
+				"allGoodIDs contains %d IDs for which we don't have an expiration expected. This seems a bug in verifier\n",
 				tmp.Count(),
 			)
 		}

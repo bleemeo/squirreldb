@@ -603,6 +603,7 @@ func (b *Batch) flush(
 			delete(b.states, id)
 		} else if _, isOwner := b.states[ids[i]]; isOwner {
 			newDeadlines[id] = flushTimestamp(id, now, b.batchSize)
+
 			if shutdown {
 				transfertOwnership = append(transfertOwnership, id)
 			}
@@ -947,6 +948,7 @@ func (b *Batch) write(
 				// This will catch case where the current owner is dead, but give him
 				// the first threshold to act.
 				metricToFlush[metrics[i].ID] = nil
+
 				b.metrics.NonOwnerWrite.Inc()
 			}
 		}
@@ -971,8 +973,8 @@ func (b *Batch) write(
 		}
 
 		b.mutex.Unlock()
-		_, err = b.memoryStore.GetSetFlushDeadline(ctx, deadlines)
 
+		_, err = b.memoryStore.GetSetFlushDeadline(ctx, deadlines)
 		if err != nil {
 			return fmt.Errorf("fail to update flush deadline: %w", err)
 		}

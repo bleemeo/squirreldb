@@ -862,7 +862,6 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.LabelPro
 				ReadOnly:   s.Config.Internal.ReadOnly,
 				Logger:     s.Logger.With().Str("component", "mutable-labels").Logger(),
 			})
-
 			if err != nil {
 				return nil, err
 			}
@@ -917,6 +916,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 			mem := temporarystore.New(s.MetricRegistry, s.Logger.With().Str("component", "temporary_store").Logger())
 			s.temporaryStore = mem
 			readiness <- nil
+
 			mem.Run(ctx)
 		}
 	default:

@@ -245,7 +245,6 @@ func (c *CassandraTSDB) readAggregateData(
 
 	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= aggregatePartitionSize.Milliseconds() {
 		tmp, err = c.readAggregatePartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp, function)
-
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "aggregated").Observe(time.Since(start).Seconds())
 			c.metrics.RequestsPoints.WithLabelValues("read", "aggregated").Add(float64(len(buffer.Points)))
@@ -350,7 +349,6 @@ func (c *CassandraTSDB) readRawData(
 
 	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= rawPartitionSize.Milliseconds() {
 		tmp, err = c.readRawPartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp)
-
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
 			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points) - initialPointCount))
@@ -408,7 +406,6 @@ func (c *CassandraTSDB) readRawPartitionData(
 		queryDuration += time.Since(start)
 
 		tmp, err = c.decodePoints(values, tmp)
-
 		if err != nil {
 			c.metrics.CassandraQueriesSeconds.WithLabelValues("read", "raw").Observe(queryDuration.Seconds())
 

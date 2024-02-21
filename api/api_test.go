@@ -929,6 +929,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						frac = 0.001
 						marg = 0
 					)
+
 					relMarg := frac * math.Min(math.Abs(float64(x)), math.Abs(float64(y)))
 
 					return math.Abs(float64(x-y)) <= math.Max(marg, relMarg)

@@ -128,12 +128,14 @@ func Test_filteringIndex_Search(t *testing.T) {
 				index:   tt.fields.index,
 				matcher: tt.fields.matcher,
 			}
+
 			got, err := idx.Search(context.Background(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.Search() error = %v, wantErr %v", err, tt.wantErr)
 
 				return
 			}
+
 			if !dummy.MetricsSetEqual(got, tt.want) {
 				t.Errorf("filteringIndex.Search() = %v, want %v", got, tt.want)
 			}
@@ -257,12 +259,14 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				index:   tt.fields.index,
 				matcher: tt.fields.matcher,
 			}
+
 			got, err := idx.LabelValues(context.Background(), now, now, tt.args.name, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelValues() error = %v, wantErr %v", err, tt.wantErr)
 
 				return
 			}
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("filteringIndex.LabelValues() = %v, want %v", got, tt.want)
 			}
@@ -366,12 +370,14 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 				index:   tt.fields.index,
 				matcher: tt.fields.matcher,
 			}
+
 			got, err := idx.LabelNames(context.Background(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelNames() error = %v, wantErr %v", err, tt.wantErr)
 
 				return
 			}
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("filteringIndex.LabelNames() = %v, want %v", got, tt.want)
 			}

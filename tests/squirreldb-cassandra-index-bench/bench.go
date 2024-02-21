@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -186,8 +187,8 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 	}
 
 	start := time.Now()
-	ids, err = idx.AllIDs(ctx, now, now)
 
+	ids, err = idx.AllIDs(ctx, now, now)
 	if err != nil {
 		return fmt.Errorf("AllIDs() failed: %w", err)
 	}
@@ -308,7 +309,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 	if *runExpiration { //nolint:nestif
 		indexExpirerer, ok := idx.(types.IndexInternalExpirerer)
 		if !ok {
-			return fmt.Errorf("can not run expiration on index which doesn't implement IndexInternalExpirerer")
+			return errors.New("can not run expiration on index which doesn't implement IndexInternalExpirerer")
 		}
 
 		beforePurge := len(ids)
@@ -321,7 +322,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 
 		indexRunner, ok := idx.(types.IndexRunner)
 		if !ok {
-			return fmt.Errorf("can not run index which doesn't implement IndexRunner")
+			return errors.New("can not run index which doesn't implement IndexRunner")
 		}
 
 		start = time.Now()
