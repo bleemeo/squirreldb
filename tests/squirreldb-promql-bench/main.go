@@ -138,7 +138,7 @@ func testQueryParallel(
 	if duration > 0 {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(context.Background(), duration)
+		ctx, cancel = context.WithTimeout(ctx, duration)
 		defer cancel()
 	}
 
