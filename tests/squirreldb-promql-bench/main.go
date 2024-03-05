@@ -5,6 +5,8 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -73,6 +75,7 @@ func testQuery(
 	q string,
 	rangeDuration time.Duration,
 	rangeStep time.Duration,
+	queryDelay time.Duration,
 	allowEmpty bool,
 ) {
 	nbQueries := 0
@@ -104,6 +107,13 @@ func testQuery(
 		}
 
 		nbQueries++
+
+		if queryDelay > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(queryDelay):
+			}
+		}
 	}
 
 	c <- nbQueries
@@ -117,16 +127,24 @@ func testQueryParallel(
 	duration time.Duration,
 	queryRange time.Duration,
 	stepRange time.Duration,
+	queryDelay time.Duration,
 	allowEmpty bool,
 ) {
 	log.Printf("Executing query %v with %v goroutines during %v\n", query, parallelQueries, duration)
 
-	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer cancel()
+
+	if duration > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, duration)
+		defer cancel()
+	}
 
 	resultsChan := make(chan int)
 	for i := 0; i < parallelQueries; i++ {
-		go testQuery(ctx, api, resultsChan, query, queryRange, stepRange, allowEmpty)
+		go testQuery(ctx, api, resultsChan, query, queryRange, stepRange, queryDelay, allowEmpty)
 	}
 
 	nbQueries := 0
@@ -141,9 +159,10 @@ func main() {
 	urlAPI := flag.String("url", "http://localhost:9201", "SquirrelDB url")
 	query := flag.String("query", "node_load5", "Query to benchmark")
 	parallelQueries := flag.Int("parallel", 10, "Number of concurrent queries")
-	runDuration := flag.Duration("run-time", 10*time.Second, "Duration of the benchmark")
+	runDuration := flag.Duration("run-time", 10*time.Second, "Duration of the benchmark. 0 for no limit")
 	queryRange := flag.Duration("query-range", time.Hour, "Query range duraton. Only used if query-step is non-zero")
 	queryStep := flag.Duration("query-step", 0, "Query step. If zero, query is used and not query_range")
+	queryDelay := flag.Duration("query-delay", 0, "Delay between two query. 0 to go as fast as possible")
 	allowEmpty := flag.Bool(
 		"allow-empty-response",
 		false,
@@ -153,5 +172,5 @@ func main() {
 	flag.Parse()
 
 	API := initAPI(*urlAPI, *tenant)
-	testQueryParallel(API, *query, *parallelQueries, *runDuration, *queryRange, *queryStep, *allowEmpty)
+	testQueryParallel(API, *query, *parallelQueries, *runDuration, *queryRange, *queryStep, *queryDelay, *allowEmpty)
 }

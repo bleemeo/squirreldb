@@ -33,6 +33,7 @@ while [ ! -z "$1" ]; do
         echo "  nostop: Do not stop Cassandra & Redis at the end"
         echo "   shell: Open a shell instead of running tests. It will start Redis & Cassandra."
         echo "          It also forward the port 9200 to a SquirrelDB running inside this shell"
+        echo "          The shell container will be named \"squirreldb-test-shell\""
         echo "scylladb: Use ScyllaDB instead of Cassandra"
 
         exit 1
@@ -116,6 +117,7 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e GORACE \
     -e SQUIRRELDB_TELEMETRY_ENABLED=false -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --name squirreldb-test-shell \
     --entrypoint '' \
     goreleaser/goreleaser:${GORELEASER_VERSION} bash || true
 else

@@ -395,14 +395,49 @@ func (c *CassandraIndex) InternalRunOnce(ctx context.Context, now time.Time) boo
 }
 
 func (c *CassandraIndex) shardPrecreate(ctx context.Context, now time.Time) {
-	var updates []lookupEntry
-
 	nowShard := shardForTime(now.Unix())
 	futureShard := shardForTime(now.Add(c.options.PreCreateShardDuration).Unix())
 
 	if nowShard == futureShard {
 		return
 	}
+
+	updates := c.shardPrecreateGetBatch(futureShard)
+
+	c.logger.Debug().Msgf("shard pre-creation will do %d updates of posting", len(updates))
+
+	if len(updates) > 0 {
+		err := c.updatePostingShards(ctx, updates, true)
+		if err != nil {
+			c.logger.Warn().Err(err).Msg("shard pre-creation failed (this is an optimization, failing isn't fatal)")
+
+			return
+		}
+
+		// Update mostRecentShard for submitted updates
+		c.lookupIDMutex.Lock()
+		defer c.lookupIDMutex.Unlock()
+
+		for _, update := range updates {
+			entry, ok := c.labelsToID[update.idData.unsortedLabels.Hash()]
+			if !ok {
+				continue
+			}
+
+			for idx, row := range entry {
+				if labels.Compare(row.unsortedLabels, update.unsortedLabels) == 0 {
+					entry[idx].mostRecentShard = futureShard
+				}
+			}
+		}
+	}
+}
+
+func (c *CassandraIndex) shardPrecreateGetBatch(futureShard int32) []lookupEntry {
+	var updates []lookupEntry
+
+	c.lookupIDMutex.Lock()
+	defer c.lookupIDMutex.Unlock()
 
 	totalIDCount := 0
 	for _, idList := range c.labelsToID {
@@ -478,30 +513,7 @@ func (c *CassandraIndex) shardPrecreate(ctx context.Context, now time.Time) {
 		}
 	}
 
-	c.logger.Debug().Msgf("shard pre-creation will do %d updates of posting", len(updates))
-
-	if len(updates) > 0 {
-		err := c.updatePostingShards(ctx, updates, true)
-		if err != nil {
-			c.logger.Warn().Err(err).Msg("shard pre-creation failed (this is an optimization, failing isn't fatal)")
-
-			return
-		}
-
-		// Update mostRecentShard for submitted updates
-		for _, update := range updates {
-			entry, ok := c.labelsToID[update.idData.unsortedLabels.Hash()]
-			if !ok {
-				continue
-			}
-
-			for idx, row := range entry {
-				if labels.Compare(row.unsortedLabels, update.unsortedLabels) == 0 {
-					entry[idx].mostRecentShard = futureShard
-				}
-			}
-		}
-	}
+	return updates
 }
 
 func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
