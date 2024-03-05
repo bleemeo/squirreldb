@@ -271,6 +271,22 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 			"__name__": "io_writes",
 			"item":     "/dev/sdb",
 		},
+		{
+			"__name__": "net_bits_recv",
+			"item":     "eth0",
+		},
+		{
+			"__name__": "net_bits_recv",
+			"item":     "enp1s0",
+		},
+		{
+			"__name__": "net_bits_recv",
+			"item":     "eno1",
+		},
+		{
+			"__name__": "net_bits_recv",
+			"item":     "vio0",
+		},
 	}
 
 	for idx := range result {
@@ -295,6 +311,11 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 
 				row = append(row, prompb.Label{Name: k, Value: v})
 			}
+
+			if len(commonList[idx%len(commonList)]) == 1 {
+				// only name, create a item
+				row = append(row, prompb.Label{Name: "item_made", Value: strconv.FormatInt(int64(idx), 10)})
+			}
 		// on the next one, name still don't change but items is randomized
 		case idx < 3*len(commonList):
 			for k, v := range commonList[idx%len(commonList)] {
@@ -303,6 +324,11 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 				}
 
 				row = append(row, prompb.Label{Name: k, Value: v})
+			}
+
+			if len(commonList[idx%len(commonList)]) == 1 {
+				// only name, create a item
+				row = append(row, prompb.Label{Name: "item_made", Value: strconv.FormatInt(rnd.Int63(), 10)})
 			}
 		// finally both name & item is randomized
 		default:
