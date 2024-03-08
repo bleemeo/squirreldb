@@ -91,16 +91,24 @@ func run(deadlineCtx context.Context) error {
 		})
 	}
 
-	ctx := context.Background()
+	group, ctx := errgroup.WithContext(context.Background())
 
 	if *runDuration > 0 {
 		var cancel context.CancelFunc
 
 		deadlineCtx, cancel = context.WithTimeout(deadlineCtx, *runDuration)
 		defer cancel()
+
+		go func() {
+			// If the errgroup context is stopped, stop the deadlineCtx.
+			// deadlineCtx is used for work generation.
+			// ctx (errgroup context) is used for writers.
+			// We use two context, because work generation need to be stopped before writers
+			<-ctx.Done()
+			cancel()
+		}()
 	}
 
-	group, ctx := errgroup.WithContext(ctx)
 	workChannel := make(chan prompb.WriteRequest, 10)
 
 	for _, writer := range writers {
