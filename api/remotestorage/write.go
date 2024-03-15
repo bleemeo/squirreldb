@@ -195,3 +195,7 @@ func (w *writeMetrics) AppendHistogram(
 ) (storage.SeriesRef, error) {
 	return 0, ErrNotImplemented
 }
+
+func (w *writeMetrics) AppendCTZeroSample(storage.SeriesRef, labels.Labels, int64, int64) (storage.SeriesRef, error) {
+	return 0, ErrNotImplemented
+}

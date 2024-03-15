@@ -137,14 +137,14 @@ func (s *seriesSample) AtT() int64 {
 // AtHistogram returns the current timestamp/value pair if the value is
 // a histogram with integer counts.
 // Not implemented.
-func (s *seriesSample) AtHistogram() (int64, *histogram.Histogram) {
+func (s *seriesSample) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
 	return 0, nil
 }
 
 // AtFloatHistogram returns the current timestamp/value pair if the
 // value is a histogram with floating-point counts.
 // Not implemented.
-func (s *seriesSample) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+func (s *seriesSample) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return 0, nil
 }
 

@@ -82,3 +82,9 @@ func (appenderReadOnly) UpdateMetadata(
 
 	return 0, ErrIsReadOnly
 }
+
+func (o appenderReadOnly) AppendCTZeroSample(
+	_ storage.SeriesRef, _ labels.Labels, _, _ int64,
+) (storage.SeriesRef, error) {
+	return 0, ErrIsReadOnly
+}

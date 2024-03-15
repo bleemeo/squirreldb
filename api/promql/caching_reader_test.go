@@ -1671,7 +1671,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 
 				countAfter := countingReader.PointsRead()
 
-				pointRead := int(math.Round((countAfter - countBefore)))
+				pointRead := int(math.Round(countAfter - countBefore))
 				if pointRead != req.pointsRead {
 					t.Errorf("req %s: points read = %d, want %d", req.name, pointRead, req.pointsRead)
 				}
