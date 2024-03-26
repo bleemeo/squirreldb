@@ -20,7 +20,7 @@ type cachingReader struct {
 }
 
 // NewCachingReader returns a new *cachingReader,
-// but under the MetricReaderWithCache interface to be used externally.
+// but under the CachingReader interface to be used externally.
 func NewCachingReader() types.CachingReader {
 	return new(cachingReader)
 }
