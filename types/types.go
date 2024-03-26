@@ -145,6 +145,17 @@ func WrapContext(ctx context.Context, r *http.Request) context.Context {
 	return context.WithValue(ctx, RequestContextKey{}, r)
 }
 
+type CachingReaderKey struct{}
+
+type CachingReader interface {
+	MetricReader
+	PointsCached() float64
+}
+
+func WrapCachingReader(ctx context.Context, cachingReader CachingReader) context.Context {
+	return context.WithValue(ctx, CachingReaderKey{}, cachingReader)
+}
+
 // HTTP headers available to dynamically change settings on PromQL and remote read.
 const (
 	// Add one matcher to limit the evaluated series.

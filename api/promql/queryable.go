@@ -10,6 +10,7 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,6 +24,7 @@ var (
 	errMissingRequest      = errors.New("HTTP request not found in context")
 	errMissingTenantHeader = errors.New("the tenant header is missing")
 	errInvalidMatcher      = errors.New("invalid matcher")
+	errNoCachingReader     = errors.New("no cachingReader provided in request context")
 )
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
@@ -46,6 +48,7 @@ type querier struct {
 	maxt          int64
 	metrics       *metrics
 	rtrIndex      reducedTimeRangeIndex
+	l             sync.Mutex
 	cachingReader *cachingReader
 	// We must store the two following counters here
 	// to keep incrementing them across each Select(),
@@ -100,15 +103,16 @@ func NewStore(
 // the HTTP headers. Available headers are: HeaderForcedMatcher, HeaderMaxEvaluatedSeries,
 // HeaderMaxEvaluatedPoints, HeaderForcePreAggregated and HeaderForceRaw. See their declaration
 // for documentation.
-func (s Store) newQuerierFromHeaders(mint, maxt int64) querier {
-	return querier{
-		store:          s,
-		logger:         s.Logger,
-		mint:           mint,
-		maxt:           maxt,
-		metrics:        s.metrics,
-		rtrIndex:       reducedTimeRangeIndex{index: s.Index},
-		cachingReader:  &cachingReader{reader: s.Reader},
+func (s Store) newQuerierFromHeaders(mint, maxt int64) *querier {
+	return &querier{
+		store:    s,
+		logger:   s.Logger,
+		mint:     mint,
+		maxt:     maxt,
+		metrics:  s.metrics,
+		rtrIndex: reducedTimeRangeIndex{index: s.Index},
+		// The cachingReader will be set when receiving the request (querier.Select()),
+		// to ensure only one is allocated per request.
 		returnedSeries: new(uint32),
 		returnedPoints: new(uint64),
 	}
@@ -124,7 +128,7 @@ func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
 	return chunkquerier{s.newQuerierFromHeaders(mint, maxt)}, nil
 }
 
-func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
+func (q *querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
 	var index types.Index = q.rtrIndex
 
 	value := r.Header.Get(types.HeaderForcedMatcher)
@@ -209,9 +213,9 @@ func (q querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSerie
 // Select returns a set of series that matches the given label matchers.
 // Caller can specify if it requires returned series to be sorted.
 // Prefer not requiring sorting for better performance.
-// It allows passing hints that can help in optimising select,
+// It allows passing hints that can help in optimizing select,
 // but it's up to implementation how this is used if used at all.
-func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet { //nolint: lll
+func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet { //nolint: lll
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
@@ -219,6 +223,24 @@ func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.Sel
 	if !ok {
 		return &seriesIter{err: errMissingRequest}
 	}
+
+	q.l.Lock()
+	if q.cachingReader == nil {
+		cachingReader, ok := ctx.Value(types.CachingReaderKey{}).(*cachingReader)
+		if !ok {
+			q.l.Unlock()
+
+			return &seriesIter{err: errNoCachingReader}
+		}
+
+		q.cachingReader = cachingReader
+
+		q.cachingReader.l.Lock()
+		q.cachingReader.reader = q.store.Reader
+		q.cachingReader.l.Unlock()
+	}
+
+	q.l.Unlock()
 
 	tenant, maxEvaluatedSeries, limitIndex, maxEvaluatedPoints, reader, enableDebug, enableVerboseDebug, err := q.parseRequest(r) //nolint: lll
 	if err != nil {
@@ -364,7 +386,7 @@ func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.Sel
 
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
-func (q querier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
+func (q *querier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
@@ -384,7 +406,7 @@ func (q querier) LabelValues(ctx context.Context, name string, matchers ...*labe
 }
 
 // LabelNames returns all the unique label names present in the block in sorted order.
-func (q querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
+func (q *querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
@@ -404,12 +426,12 @@ func (q querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([
 }
 
 // Close releases the resources of the Querier.
-func (q querier) Close() error {
+func (q *querier) Close() error {
 	return nil
 }
 
 type chunkquerier struct {
-	querier
+	*querier
 }
 
 func (q chunkquerier) Select(

@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// cachingReader kept the last MetricData returned in cache and re-use it if that query exactly match the request.
+// cachingReader keeps the last MetricData returned in cache and re-uses it if that query exactly matches the request.
 type cachingReader struct {
 	reader types.MetricReader
 
@@ -17,6 +17,12 @@ type cachingReader struct {
 	cachedResult      types.MetricData
 	cachedCurrentNext int
 	cachedMaxNext     int
+}
+
+// NewCachingReader returns a new *cachingReader,
+// but under the MetricReaderWithCache interface to be used externally.
+func NewCachingReader() types.CachingReader {
+	return new(cachingReader)
 }
 
 func (rdr *cachingReader) PointsCached() float64 {

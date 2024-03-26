@@ -1405,7 +1405,8 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 
 				switch action.action {
 				case actionCallSelect:
-					result := querierIntf.Select(reqCtx, true, action.selectHints, action.selectMatcher...)
+					ctxOpen := types.WrapCachingReader(reqCtx, NewCachingReader())
+					result := querierIntf.Select(ctxOpen, true, action.selectHints, action.selectMatcher...)
 					openSelect[action.selectIdx] = result
 
 					// Open another Querier, because cache is never shared between two Querier (it is only between Select()
@@ -1417,7 +1418,9 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 
 					closes = append(closes, validator.Close)
 
-					validatorSelect[action.selectIdx] = validator.Select(reqCtx, true, action.selectHints, action.selectMatcher...)
+					// Creating another cachingReader to use a different cache from the above Select()
+					ctxVal := types.WrapCachingReader(reqCtx, NewCachingReader())
+					validatorSelect[action.selectIdx] = validator.Select(ctxVal, true, action.selectHints, action.selectMatcher...)
 				case actionClose:
 					err := querierIntf.Close()
 					if err != nil {
@@ -1631,7 +1634,8 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				}*/
 				countBefore := countingReader.PointsRead()
 
-				reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+				ctx := types.WrapCachingReader(context.Background(), NewCachingReader())
+				reqCtx := types.WrapContext(ctx, httptest.NewRequest(http.MethodGet, "/", nil))
 
 				if req.isInstant { //nolint:nestif
 					query, err := engine.NewInstantQuery(reqCtx, store, nil, req.query, req.start)
