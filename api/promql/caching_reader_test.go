@@ -1390,14 +1390,16 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			)
 
 			reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+			cachingCtx := WrapWithQuerierData(reqCtx, NewPerRequestQuerierData(store))
+			// Creating another cachingReader to use a different cache from the other which has a counting reader
+			validatorCtx := WrapWithQuerierData(reqCtx, NewPerRequestQuerierData(unCountedStore))
 
-			querierIntf, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
+			querier, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			openSelect := make(map[int]storage.SeriesSet)
-			closes := make([]func() error, 0)
 			validatorSelect := make(map[int]storage.SeriesSet)
 
 			for _, action := range tt.actions {
@@ -1405,32 +1407,13 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 
 				switch action.action {
 				case actionCallSelect:
-					ctxOpen := types.WrapCachingReader(reqCtx, NewCachingReader())
-					result := querierIntf.Select(ctxOpen, true, action.selectHints, action.selectMatcher...)
+					result := querier.Select(cachingCtx, true, action.selectHints, action.selectMatcher...)
 					openSelect[action.selectIdx] = result
-
-					// Open another Querier, because cache is never shared between two Querier (it is only between Select()
-					// in the same querier) we use this other Querier as validator.
-					validator, err := unCountedStore.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
-					if err != nil {
-						t.Fatal(err)
-					}
-
-					closes = append(closes, validator.Close)
-
-					// Creating another cachingReader to use a different cache from the above Select()
-					ctxVal := types.WrapCachingReader(reqCtx, NewCachingReader())
-					validatorSelect[action.selectIdx] = validator.Select(ctxVal, true, action.selectHints, action.selectMatcher...)
+					validatorSelect[action.selectIdx] = querier.Select(validatorCtx, true, action.selectHints, action.selectMatcher...) //nolint:lll
 				case actionClose:
-					err := querierIntf.Close()
+					err := querier.Close()
 					if err != nil {
 						t.Errorf("%s: %v", action.description, err)
-					}
-
-					for _, f := range closes {
-						if err := f(); err != nil {
-							t.Errorf("%s: %v", action.description, err)
-						}
 					}
 				case actionCallNextOnSerieSet:
 					seriesSet := openSelect[action.selectIdx]
@@ -1516,7 +1499,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			err = querierIntf.Close()
+			err = querier.Close()
 			if err != nil {
 				t.Error(err)
 			}
@@ -1634,7 +1617,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				}*/
 				countBefore := countingReader.PointsRead()
 
-				ctx := types.WrapCachingReader(context.Background(), NewCachingReader())
+				ctx := WrapWithQuerierData(context.Background(), NewPerRequestQuerierData(store))
 				reqCtx := types.WrapContext(ctx, httptest.NewRequest(http.MethodGet, "/", nil))
 
 				if req.isInstant { //nolint:nestif

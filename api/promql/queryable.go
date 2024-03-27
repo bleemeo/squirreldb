@@ -10,7 +10,6 @@ import (
 	"squirreldb/types"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,7 +23,7 @@ var (
 	errMissingRequest      = errors.New("HTTP request not found in context")
 	errMissingTenantHeader = errors.New("the tenant header is missing")
 	errInvalidMatcher      = errors.New("invalid matcher")
-	errNoCachingReader     = errors.New("no cachingReader provided in request context")
+	errNoPerRequestData    = errors.New("no per-request data provided in request context")
 )
 
 // Store implement Prometheus.Queryable and read from SquirrelDB Store.
@@ -41,14 +40,8 @@ type Store struct {
 	metrics *metrics
 }
 
-type querier struct {
+type PerRequest struct {
 	store         Store
-	logger        zerolog.Logger
-	mint          int64
-	maxt          int64
-	metrics       *metrics
-	rtrIndex      reducedTimeRangeIndex
-	l             sync.Mutex
 	cachingReader *cachingReader
 	// We must store the two following counters here
 	// to keep incrementing them across each Select(),
@@ -57,6 +50,40 @@ type querier struct {
 	// are only given when calling Select().
 	returnedSeries *uint32
 	returnedPoints *uint64
+}
+
+func (pr PerRequest) Ptr() string {
+	return fmt.Sprintf("%p", pr.cachingReader)
+}
+
+type PerRequestDataContextKey struct{}
+
+func WrapWithQuerierData(ctx context.Context, perRequestQuerierData PerRequest) context.Context {
+	return context.WithValue(ctx, PerRequestDataContextKey{}, perRequestQuerierData)
+}
+
+// NewPerRequestQuerierData returns the querier data that should be created once per request.
+// The given store must be a promql.Store.
+func NewPerRequestQuerierData(store storage.SampleAndChunkQueryable) PerRequest {
+	s, ok := store.(Store)
+	if !ok {
+		panic(fmt.Sprintf("Unexpected store: want promql.Store, got %T", store))
+	}
+
+	return PerRequest{
+		store:          s,
+		cachingReader:  &cachingReader{reader: s.Reader},
+		returnedSeries: new(uint32),
+		returnedPoints: new(uint64),
+	}
+}
+
+type querier struct {
+	mint     int64
+	maxt     int64
+	logger   zerolog.Logger
+	metrics  *metrics
+	rtrIndex reducedTimeRangeIndex
 }
 
 type MetricReaderWithStats interface {
@@ -103,33 +130,38 @@ func NewStore(
 // the HTTP headers. Available headers are: HeaderForcedMatcher, HeaderMaxEvaluatedSeries,
 // HeaderMaxEvaluatedPoints, HeaderForcePreAggregated and HeaderForceRaw. See their declaration
 // for documentation.
-func (s Store) newQuerierFromHeaders(mint, maxt int64) *querier {
+func (s Store) newQuerierWithTimeRange(mint, maxt int64) *querier {
 	return &querier{
-		store:    s,
-		logger:   s.Logger,
 		mint:     mint,
 		maxt:     maxt,
+		logger:   s.Logger,
 		metrics:  s.metrics,
 		rtrIndex: reducedTimeRangeIndex{index: s.Index},
-		// The cachingReader will be set when receiving the request (querier.Select()),
-		// to ensure only one is allocated per request.
-		returnedSeries: new(uint32),
-		returnedPoints: new(uint64),
 	}
 }
 
 // Querier returns a storage.Querier to read from SquirrelDB store.
 func (s Store) Querier(mint, maxt int64) (storage.Querier, error) {
-	return s.newQuerierFromHeaders(mint, maxt), nil
+	return s.newQuerierWithTimeRange(mint, maxt), nil
 }
 
 // ChunkQuerier returns a storage.ChunkQuerier to read from SquirrelDB store.
 func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
-	return chunkquerier{s.newQuerierFromHeaders(mint, maxt)}, nil
+	return chunkquerier{s.newQuerierWithTimeRange(mint, maxt)}, nil
 }
 
-func (q *querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
+func (q *querier) parseRequestContext(ctx context.Context) (tenant string, maxEvaluatedSeries uint32, limitIndex *limitingIndex, maxEvaluatedPoints uint64, reader *limitingReader, enableDebug bool, enableVerboseDebug bool, err error) { //nolint: lll
 	var index types.Index = q.rtrIndex
+
+	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
+	if !ok {
+		return "", 0, nil, 0, nil, false, false, errMissingRequest
+	}
+
+	perRequestData, ok := ctx.Value(PerRequestDataContextKey{}).(PerRequest)
+	if !ok {
+		return "", 0, nil, 0, nil, false, false, errNoPerRequestData
+	}
 
 	value := r.Header.Get(types.HeaderForcedMatcher)
 	if value != "" {
@@ -156,15 +188,15 @@ func (q *querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeri
 			index: index,
 			matcher: labels.MustNewMatcher(
 				labels.MatchEqual,
-				q.store.TenantLabelName,
+				perRequestData.store.TenantLabelName,
 				tenant,
 			),
 		}
-	} else if q.store.RequireTenantHeader {
+	} else if perRequestData.store.RequireTenantHeader {
 		return "", 0, nil, 0, nil, false, false, errMissingTenantHeader
 	}
 
-	maxEvaluatedSeries = q.store.DefaultMaxEvaluatedSeries
+	maxEvaluatedSeries = perRequestData.store.DefaultMaxEvaluatedSeries
 
 	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
 	if maxEvaluatedSeriesText != "" {
@@ -179,10 +211,10 @@ func (q *querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeri
 	limitIndex = &limitingIndex{
 		index:          index,
 		maxTotalSeries: maxEvaluatedSeries,
-		returnedSeries: q.returnedSeries,
+		returnedSeries: perRequestData.returnedSeries,
 	}
 
-	maxEvaluatedPoints = q.store.DefaultMaxEvaluatedPoints
+	maxEvaluatedPoints = perRequestData.store.DefaultMaxEvaluatedPoints
 
 	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
 	if maxEvaluatedPointsText != "" {
@@ -195,9 +227,9 @@ func (q *querier) parseRequest(r *http.Request) (tenant string, maxEvaluatedSeri
 	}
 
 	reader = &limitingReader{
-		reader:         q.cachingReader,
+		reader:         perRequestData.cachingReader,
 		maxTotalPoints: maxEvaluatedPoints,
-		returnedPoints: q.returnedPoints,
+		returnedPoints: perRequestData.returnedPoints,
 	}
 
 	enableDebug = r.Header.Get(types.HeaderQueryDebug) != ""
@@ -224,31 +256,13 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		return &seriesIter{err: errMissingRequest}
 	}
 
-	q.l.Lock()
-	if q.cachingReader == nil {
-		cachingReader, ok := ctx.Value(types.CachingReaderKey{}).(*cachingReader)
-		if !ok {
-			q.l.Unlock()
-
-			return &seriesIter{err: errNoCachingReader}
-		}
-
-		q.cachingReader = cachingReader
-
-		q.cachingReader.l.Lock()
-		q.cachingReader.reader = q.store.Reader
-		q.cachingReader.l.Unlock()
-	}
-
-	q.l.Unlock()
-
-	tenant, maxEvaluatedSeries, limitIndex, maxEvaluatedPoints, reader, enableDebug, enableVerboseDebug, err := q.parseRequest(r) //nolint: lll
+	tenant, maxEvaluatedSeries, limitIndex, maxEvaluatedPoints, reader, enableDebug, enableVerboseDebug, err := q.parseRequestContext(ctx) //nolint: lll
 	if err != nil {
 		return &seriesIter{err: err}
 	}
 
 	if enableDebug {
-		q.store.Logger.Info().Msgf(
+		q.logger.Info().Msgf(
 			"Querier started. mint=%s maxt=%s. tenant=%s maxPoints=%d maxSeries=%d",
 			minT.Format(time.RFC3339),
 			maxT.Format(time.RFC3339),
@@ -390,12 +404,7 @@ func (q *querier) LabelValues(ctx context.Context, name string, matchers ...*lab
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
-	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
-	if !ok {
-		return nil, nil, errMissingRequest
-	}
-
-	_, _, limitIndex, _, _, _, _, err := q.parseRequest(r) //nolint: dogsled
+	_, _, limitIndex, _, _, _, _, err := q.parseRequestContext(ctx) //nolint: dogsled
 	if err != nil {
 		return nil, nil, err
 	}
@@ -410,12 +419,7 @@ func (q *querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) (
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
-	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
-	if !ok {
-		return nil, nil, errMissingRequest
-	}
-
-	_, _, limitIndex, _, _, _, _, err := q.parseRequest(r) //nolint: dogsled
+	_, _, limitIndex, _, _, _, _, err := q.parseRequestContext(ctx) //nolint: dogsled
 	if err != nil {
 		return nil, nil, err
 	}

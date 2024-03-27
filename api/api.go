@@ -255,7 +255,7 @@ func (a *API) init() {
 			// We must create the cachingReader at this stage
 			// so that only one is allocated per request,
 			// and thus be able to benefit from its cache.
-			ctx = types.WrapCachingReader(ctx, promql.NewCachingReader())
+			ctx = promql.WrapWithQuerierData(ctx, promql.NewPerRequestQuerierData(queryable))
 			r = r.WithContext(types.WrapContext(ctx, r))
 
 			// Prometheus always returns a status 500 when write fails, but if

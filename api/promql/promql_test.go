@@ -504,7 +504,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				t.Fatal(err)
 			}
 
-			ctx := types.WrapCachingReader(context.Background(), NewCachingReader())
+			ctx := WrapWithQuerierData(context.Background(), NewPerRequestQuerierData(queryable))
 			ctx = types.WrapContext(ctx, r)
 
 			for i, query := range tt.searches {
@@ -565,7 +565,7 @@ func TestPromQL_InvalidForcedMatcher(t *testing.T) {
 	r := httptest.NewRequest("", "/", nil)
 	r.Header.Add(types.HeaderForcedMatcher, "invalid")
 
-	ctx := types.WrapCachingReader(context.Background(), NewCachingReader())
+	ctx := WrapWithQuerierData(context.Background(), NewPerRequestQuerierData(queryable))
 	ctx = types.WrapContext(ctx, r)
 
 	seriesSet := querier.Select(ctx, false, nil)

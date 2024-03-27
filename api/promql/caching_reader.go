@@ -19,12 +19,6 @@ type cachingReader struct {
 	cachedMaxNext     int
 }
 
-// NewCachingReader returns a new *cachingReader,
-// but under the CachingReader interface to be used externally.
-func NewCachingReader() types.CachingReader {
-	return new(cachingReader)
-}
-
 func (rdr *cachingReader) PointsCached() float64 {
 	rdr.l.Lock()
 	defer rdr.l.Unlock()

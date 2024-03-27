@@ -272,16 +272,20 @@ func Test_querier_Select(t *testing.T) {
 				Reader: tt.fields.reader,
 			}
 			q := querier{
+				mint:     tt.fields.mint,
+				maxt:     tt.fields.maxt,
+				rtrIndex: reducedTimeRangeIndex{index: s.Index},
+			}
+			perRequestData := PerRequest{
 				store:          s,
-				mint:           tt.fields.mint,
-				maxt:           tt.fields.maxt,
-				rtrIndex:       reducedTimeRangeIndex{index: s.Index},
 				cachingReader:  &cachingReader{reader: s.Reader},
 				returnedSeries: new(uint32),
 				returnedPoints: new(uint64),
 			}
 
-			got := q.Select(reqCtx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
+			ctx := WrapWithQuerierData(reqCtx, perRequestData)
+
+			got := q.Select(ctx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(t, got, tt.want) {
 				return
 			}
