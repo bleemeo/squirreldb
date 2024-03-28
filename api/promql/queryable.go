@@ -52,10 +52,6 @@ type PerRequest struct {
 	returnedPoints *uint64
 }
 
-func (pr PerRequest) Ptr() string {
-	return fmt.Sprintf("%p", pr.cachingReader)
-}
-
 type PerRequestDataContextKey struct{}
 
 func WrapWithQuerierData(ctx context.Context, perRequestQuerierData PerRequest) context.Context {
