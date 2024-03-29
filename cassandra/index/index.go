@@ -306,12 +306,12 @@ func initialize(
 }
 
 // Start starts all Cassandra Index services.
-func (c *CassandraIndex) Start(_ context.Context) error {
+func (c *CassandraIndex) Start(ctx context.Context) error {
 	if c.cancel != nil {
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
 	c.wg.Add(1)

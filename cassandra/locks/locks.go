@@ -135,7 +135,7 @@ func (c CassandraLocks) CreateLock(name string, timeToLive time.Duration) types.
 }
 
 // tryLock try to acquire the Lock and return true if acquire.
-func (l *Lock) tryLock(ctx context.Context) bool {
+func (l *Lock) tryLock(ctx context.Context) bool { //nolint:contextcheck
 	if l.acquired {
 		panic("impossible case: tryLock should never be called when lock is acquired")
 	}

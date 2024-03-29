@@ -255,7 +255,7 @@ func (a *API) init() {
 			// so that only one is allocated per request,
 			// and thus be able to benefit from its cache.
 			ctx := queryable.ContextFromRequest(r)
-			r = r.WithContext(ctx)
+			r = r.WithContext(ctx) //nolint:contextcheck
 
 			// Prometheus always returns a status 500 when write fails, but if
 			// the labels are invalid we want to return a status 400, so we use the

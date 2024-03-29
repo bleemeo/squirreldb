@@ -264,7 +264,7 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		return &seriesIter{err: errMissingRequest}
 	}
 
-	perRequestQuerier, err := q.getPerRequest(ctx) //nolint: lll
+	perRequestQuerier, err := q.getPerRequest(ctx)
 	if err != nil {
 		return &seriesIter{err: err}
 	}

@@ -91,7 +91,7 @@ func run(deadlineCtx context.Context) error {
 		})
 	}
 
-	group, ctx := errgroup.WithContext(context.Background())
+	group, ctx := errgroup.WithContext(deadlineCtx)
 
 	if *runDuration > 0 {
 		var cancel context.CancelFunc
