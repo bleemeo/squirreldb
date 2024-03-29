@@ -70,7 +70,7 @@ func main() {
 	}
 }
 
-func run(deadlineCtx context.Context) error {
+func run(deadlineCtx context.Context) error { //nolint: contextcheck
 	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 
 	producer := NewProducer(ProducerOption{
@@ -91,7 +91,7 @@ func run(deadlineCtx context.Context) error {
 		})
 	}
 
-	group, ctx := errgroup.WithContext(deadlineCtx)
+	group, ctx := errgroup.WithContext(context.Background())
 
 	if *runDuration > 0 {
 		var cancel context.CancelFunc
