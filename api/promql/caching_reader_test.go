@@ -1396,10 +1396,6 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 				t.Fatal("Failed to parse request:", err)
 			}
 
-			// Creating another cachingReader to use a different cache from the other which has a counting reader.
-			// We ignore the error since the request was known to be valid a few lines ago.
-			validatorCtx, _ := unCountedStore.ContextFromRequest(req)
-
 			querier, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
 				t.Fatal(err)
@@ -1415,6 +1411,10 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 				case actionCallSelect:
 					result := querier.Select(cachingCtx, true, action.selectHints, action.selectMatcher...)
 					openSelect[action.selectIdx] = result
+
+					// Creating another context to use a different cache each time.
+					// We ignore the error since the request was known to be valid a few lines ago.
+					validatorCtx, _ := unCountedStore.ContextFromRequest(req)
 					validatorSelect[action.selectIdx] = querier.Select(validatorCtx, true, action.selectHints, action.selectMatcher...) //nolint:lll
 				case actionClose:
 					err := querier.Close()
