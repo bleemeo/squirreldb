@@ -263,7 +263,7 @@ func Test_querier_Select(t *testing.T) {
 		},
 	}
 
-	reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -271,19 +271,9 @@ func Test_querier_Select(t *testing.T) {
 				Index:  tt.fields.index,
 				Reader: tt.fields.reader,
 			}
-			q := querier{
-				mint:     tt.fields.mint,
-				maxt:     tt.fields.maxt,
-				rtrIndex: reducedTimeRangeIndex{index: s.Index},
-			}
-			perRequestData := PerRequest{
-				store:          s,
-				cachingReader:  &cachingReader{reader: s.Reader},
-				returnedSeries: new(uint32),
-				returnedPoints: new(uint64),
-			}
 
-			ctx := WrapWithQuerierData(reqCtx, perRequestData)
+			q := s.newQuerier(tt.fields.mint, tt.fields.maxt)
+			ctx := s.ContextFromRequest(req)
 
 			got := q.Select(ctx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(t, got, tt.want) {

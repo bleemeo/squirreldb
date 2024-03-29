@@ -1389,10 +1389,11 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 				prometheus.NewRegistry(),
 			)
 
-			reqCtx := types.WrapContext(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
-			cachingCtx := WrapWithQuerierData(reqCtx, NewPerRequestQuerierData(store))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+			cachingCtx := store.ContextFromRequest(req)
 			// Creating another cachingReader to use a different cache from the other which has a counting reader
-			validatorCtx := WrapWithQuerierData(reqCtx, NewPerRequestQuerierData(unCountedStore))
+			validatorCtx := unCountedStore.ContextFromRequest(req)
 
 			querier, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
@@ -1617,8 +1618,8 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				}*/
 				countBefore := countingReader.PointsRead()
 
-				ctx := WrapWithQuerierData(context.Background(), NewPerRequestQuerierData(store))
-				reqCtx := types.WrapContext(ctx, httptest.NewRequest(http.MethodGet, "/", nil))
+				testReq := httptest.NewRequest(http.MethodGet, "/", nil)
+				reqCtx := store.ContextFromRequest(testReq)
 
 				if req.isInstant { //nolint:nestif
 					query, err := engine.NewInstantQuery(reqCtx, store, nil, req.query, req.start)
