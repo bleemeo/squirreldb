@@ -1391,9 +1391,14 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-			cachingCtx := store.ContextFromRequest(req)
-			// Creating another cachingReader to use a different cache from the other which has a counting reader
-			validatorCtx := unCountedStore.ContextFromRequest(req)
+			cachingCtx, err := store.ContextFromRequest(req)
+			if err != nil {
+				t.Fatal("Failed to parse request:", err)
+			}
+
+			// Creating another cachingReader to use a different cache from the other which has a counting reader.
+			// We ignore the error since the request was known to be valid a few lines ago.
+			validatorCtx, _ := unCountedStore.ContextFromRequest(req)
 
 			querier, err := store.Querier(tt.minTime.UnixMilli(), tt.maxTime.UnixMilli())
 			if err != nil {
@@ -1619,7 +1624,11 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				countBefore := countingReader.PointsRead()
 
 				testReq := httptest.NewRequest(http.MethodGet, "/", nil)
-				reqCtx := store.ContextFromRequest(testReq)
+
+				reqCtx, err := store.ContextFromRequest(testReq)
+				if err != nil {
+					t.Fatal("Failed to parse request:", err)
+				}
 
 				if req.isInstant { //nolint:nestif
 					query, err := engine.NewInstantQuery(reqCtx, store, nil, req.query, req.start)

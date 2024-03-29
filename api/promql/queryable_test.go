@@ -271,9 +271,12 @@ func Test_querier_Select(t *testing.T) {
 				Index:  tt.fields.index,
 				Reader: tt.fields.reader,
 			}
-
 			q := s.newQuerier(tt.fields.mint, tt.fields.maxt)
-			ctx := s.ContextFromRequest(req)
+
+			ctx, err := s.ContextFromRequest(req)
+			if err != nil {
+				t.Fatal("Failed to parse request:", err)
+			}
 
 			got := q.Select(ctx, tt.args.sortSeries, tt.args.hints, tt.args.matchers...)
 			if !seriesLabelsEquals(t, got, tt.want) {

@@ -254,8 +254,15 @@ func (a *API) init() {
 			// We must create the cachingReader at this stage
 			// so that only one is allocated per request,
 			// and thus be able to benefit from its cache.
-			ctx := queryable.ContextFromRequest(r)
-			r = r.WithContext(ctx) //nolint:contextcheck
+			ctx, err := queryable.ContextFromRequest(r)
+			if err != nil {
+				rw.WriteHeader(http.StatusUnprocessableEntity)
+				fmt.Fprintf(rw, "Error while processing request: %v", err)
+
+				return
+			}
+
+			r = r.WithContext(ctx) //nolint: contextcheck
 
 			// Prometheus always returns a status 500 when write fails, but if
 			// the labels are invalid we want to return a status 400, so we use the

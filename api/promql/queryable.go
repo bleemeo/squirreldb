@@ -48,23 +48,6 @@ type querier struct {
 }
 
 type perRequest struct {
-	store         Store
-	rtrIndex      reducedTimeRangeIndex
-	cachingReader *cachingReader
-	// We must store the two following counters here
-	// to keep incrementing them across each Select(),
-	// and not having them reinitialized every time,
-	// because the limits they're compared to
-	// are only given when calling Select().
-	returnedSeries *uint32
-	returnedPoints *uint64
-}
-
-type perRequestDataContextKey struct{}
-
-type perRequestQuerier struct {
-	perRequestData perRequest
-
 	tenant             string
 	maxEvaluatedSeries uint32
 	limitIndex         *limitingIndex
@@ -73,6 +56,8 @@ type perRequestQuerier struct {
 	enableDebug        bool
 	enableVerboseDebug bool
 }
+
+type perRequestContextKey struct{}
 
 type MetricReaderWithStats interface {
 	types.MetricReader
@@ -116,17 +101,106 @@ func NewStore(
 
 // ContextFromRequest wraps the given request into its context,
 // and includes the perRequest data needed for caching, etc...
-func (s Store) ContextFromRequest(r *http.Request) context.Context {
+func (s Store) ContextFromRequest(r *http.Request) (context.Context, error) {
+	perRequestData, err := s.makePerRequestData(r)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := r.Context()
-	perRequestData := perRequest{
-		store:          s,
-		rtrIndex:       reducedTimeRangeIndex{index: s.Index},
-		cachingReader:  &cachingReader{reader: s.Reader},
+
+	return types.WrapContext(context.WithValue(ctx, perRequestContextKey{}, perRequestData), r), nil
+}
+
+func (s Store) makePerRequestData(r *http.Request) (perRequest, error) {
+	index := types.Index(reducedTimeRangeIndex{index: s.Index})
+
+	value := r.Header.Get(types.HeaderForcedMatcher)
+	if value != "" {
+		part := strings.SplitN(value, "=", 2)
+		if len(part) != 2 {
+			return perRequest{}, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
+		}
+
+		index = filteringIndex{
+			index: index,
+			matcher: labels.MustNewMatcher(
+				labels.MatchEqual,
+				part[0],
+				part[1],
+			),
+		}
+	}
+
+	// The tenant header makes queries match only metrics from this tenant.
+	tenant := r.Header.Get(types.HeaderTenant)
+	if tenant != "" {
+		index = filteringIndex{
+			index: index,
+			matcher: labels.MustNewMatcher(
+				labels.MatchEqual,
+				s.TenantLabelName,
+				tenant,
+			),
+		}
+	} else if s.RequireTenantHeader {
+		return perRequest{}, errMissingTenantHeader
+	}
+
+	maxEvaluatedSeries := s.DefaultMaxEvaluatedSeries
+
+	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
+	if maxEvaluatedSeriesText != "" {
+		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
+		if err != nil {
+			return perRequest{}, err
+		}
+
+		maxEvaluatedSeries = uint32(tmp)
+	}
+
+	limitIndex := &limitingIndex{
+		index:          index,
+		maxTotalSeries: maxEvaluatedSeries,
 		returnedSeries: new(uint32),
+	}
+
+	maxEvaluatedPoints := s.DefaultMaxEvaluatedPoints
+
+	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
+	if maxEvaluatedPointsText != "" {
+		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
+		if err != nil {
+			return perRequest{}, err
+		}
+
+		maxEvaluatedPoints = tmp
+	}
+
+	reader := &limitingReader{
+		reader:         &cachingReader{reader: s.Reader},
+		maxTotalPoints: maxEvaluatedPoints,
 		returnedPoints: new(uint64),
 	}
 
-	return types.WrapContext(context.WithValue(ctx, perRequestDataContextKey{}, perRequestData), r)
+	enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
+	enableVerboseDebug := r.Header.Get(types.HeaderQueryVerboseDebug) != ""
+
+	if enableVerboseDebug {
+		enableDebug = true
+	}
+
+	perRequestQuerier := perRequest{
+		tenant:             tenant,
+		maxEvaluatedSeries: maxEvaluatedSeries,
+		limitIndex:         limitIndex,
+		maxEvaluatedPoints: maxEvaluatedPoints,
+		reader:             reader,
+		enableDebug:        enableDebug,
+		enableVerboseDebug: enableVerboseDebug,
+	}
+
+	return perRequestQuerier, nil
 }
 
 func (s Store) newQuerier(mint, maxt int64) *querier {
@@ -148,108 +222,6 @@ func (s Store) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
 	return chunkquerier{s.newQuerier(mint, maxt)}, nil
 }
 
-func (q *querier) getPerRequest(ctx context.Context) (perRequestQuerier, error) {
-	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
-	if !ok {
-		return perRequestQuerier{}, errMissingRequest
-	}
-
-	perRequestData, ok := ctx.Value(perRequestDataContextKey{}).(perRequest)
-	if !ok {
-		return perRequestQuerier{}, errNoPerRequestData
-	}
-
-	index := types.Index(perRequestData.rtrIndex)
-
-	value := r.Header.Get(types.HeaderForcedMatcher)
-	if value != "" {
-		part := strings.SplitN(value, "=", 2)
-		if len(part) != 2 {
-			return perRequestQuerier{}, fmt.Errorf("%w: \"%s\", require labelName=labelValue", errInvalidMatcher, value)
-		}
-
-		index = filteringIndex{
-			index: index,
-			matcher: labels.MustNewMatcher(
-				labels.MatchEqual,
-				part[0],
-				part[1],
-			),
-		}
-	}
-
-	// The tenant header makes queries match only metrics from this tenant.
-	tenant := r.Header.Get(types.HeaderTenant)
-	if tenant != "" {
-		index = filteringIndex{
-			index: index,
-			matcher: labels.MustNewMatcher(
-				labels.MatchEqual,
-				perRequestData.store.TenantLabelName,
-				tenant,
-			),
-		}
-	} else if perRequestData.store.RequireTenantHeader {
-		return perRequestQuerier{}, errMissingTenantHeader
-	}
-
-	maxEvaluatedSeries := perRequestData.store.DefaultMaxEvaluatedSeries
-
-	maxEvaluatedSeriesText := r.Header.Get(types.HeaderMaxEvaluatedSeries)
-	if maxEvaluatedSeriesText != "" {
-		tmp, err := strconv.ParseUint(maxEvaluatedSeriesText, 10, 32)
-		if err != nil {
-			return perRequestQuerier{}, err
-		}
-
-		maxEvaluatedSeries = uint32(tmp)
-	}
-
-	limitIndex := &limitingIndex{
-		index:          index,
-		maxTotalSeries: maxEvaluatedSeries,
-		returnedSeries: perRequestData.returnedSeries,
-	}
-
-	maxEvaluatedPoints := perRequestData.store.DefaultMaxEvaluatedPoints
-
-	maxEvaluatedPointsText := r.Header.Get(types.HeaderMaxEvaluatedPoints)
-	if maxEvaluatedPointsText != "" {
-		tmp, err := strconv.ParseUint(maxEvaluatedPointsText, 10, 64)
-		if err != nil {
-			return perRequestQuerier{}, err
-		}
-
-		maxEvaluatedPoints = tmp
-	}
-
-	reader := &limitingReader{
-		reader:         perRequestData.cachingReader,
-		maxTotalPoints: maxEvaluatedPoints,
-		returnedPoints: perRequestData.returnedPoints,
-	}
-
-	enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
-	enableVerboseDebug := r.Header.Get(types.HeaderQueryVerboseDebug) != ""
-
-	if enableVerboseDebug {
-		enableDebug = true
-	}
-
-	perRequestQuerier := perRequestQuerier{
-		perRequestData:     perRequestData,
-		tenant:             tenant,
-		maxEvaluatedSeries: maxEvaluatedSeries,
-		limitIndex:         limitIndex,
-		maxEvaluatedPoints: maxEvaluatedPoints,
-		reader:             reader,
-		enableDebug:        enableDebug,
-		enableVerboseDebug: enableVerboseDebug,
-	}
-
-	return perRequestQuerier, nil
-}
-
 // Select returns a set of series that matches the given label matchers.
 // Caller can specify if it requires returned series to be sorted.
 // Prefer not requiring sorting for better performance.
@@ -264,19 +236,19 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		return &seriesIter{err: errMissingRequest}
 	}
 
-	perRequestQuerier, err := q.getPerRequest(ctx)
+	perRequestData, err := getPerRequestData(ctx)
 	if err != nil {
 		return &seriesIter{err: err}
 	}
 
-	if perRequestQuerier.enableDebug {
+	if perRequestData.enableDebug {
 		q.logger.Info().Msgf(
 			"Querier started. mint=%s maxt=%s. tenant=%s maxPoints=%d maxSeries=%d",
 			minT.Format(time.RFC3339),
 			maxT.Format(time.RFC3339),
-			perRequestQuerier.tenant,
-			perRequestQuerier.maxEvaluatedPoints,
-			perRequestQuerier.maxEvaluatedSeries,
+			perRequestData.tenant,
+			perRequestData.maxEvaluatedPoints,
+			perRequestData.maxEvaluatedSeries,
 		)
 	}
 
@@ -305,7 +277,7 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		}
 	}
 
-	if perRequestQuerier.enableDebug {
+	if perRequestData.enableDebug {
 		hintsStr := "no hints"
 		if hints != nil {
 			hintsStr = fmt.Sprintf(
@@ -325,7 +297,7 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		)
 	}
 
-	metrics, err := perRequestQuerier.limitIndex.Search(ctx, minT, maxT, matchers)
+	metrics, err := perRequestData.limitIndex.Search(ctx, minT, maxT, matchers)
 	if err != nil {
 		return &seriesIter{err: err}
 	}
@@ -373,8 +345,8 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		ToTimestamp:        maxT.UnixMilli(),
 		ForcePreAggregated: forcePreAggregated,
 		ForceRaw:           forceRaw,
-		EnableDebug:        perRequestQuerier.enableDebug,
-		EnableVerboseDebug: perRequestQuerier.enableVerboseDebug,
+		EnableDebug:        perRequestData.enableDebug,
+		EnableVerboseDebug: perRequestData.enableVerboseDebug,
 	}
 
 	if hints != nil {
@@ -385,9 +357,9 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		req.StepMs = hints.Step
 	}
 
-	result, err := perRequestQuerier.reader.ReadIter(ctx, req)
+	result, err := perRequestData.reader.ReadIter(ctx, req)
 
-	if perRequestQuerier.enableDebug {
+	if perRequestData.enableDebug {
 		q.logger.Info().Msgf(
 			"Select(...) returned %d metricID. request = {ForcePreAggregated=%v, ForceRaw=%v, Function=%v, StepMs=%d}",
 			len(req.IDs),
@@ -400,7 +372,7 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 
 	return &seriesIter{
 		list:      result,
-		index:     perRequestQuerier.limitIndex,
+		index:     perRequestData.limitIndex,
 		id2Labels: id2Labels,
 		err:       err,
 	}
@@ -412,12 +384,12 @@ func (q *querier) LabelValues(ctx context.Context, name string, matchers ...*lab
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
-	perRequestQuerier, err := q.getPerRequest(ctx)
+	perRequestData, err := getPerRequestData(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	res, err := perRequestQuerier.limitIndex.LabelValues(ctx, minT, maxT, name, matchers)
+	res, err := perRequestData.limitIndex.LabelValues(ctx, minT, maxT, name, matchers)
 
 	return res, nil, err
 }
@@ -427,12 +399,12 @@ func (q *querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) (
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
-	perRequestQuerier, err := q.getPerRequest(ctx)
+	perRequestData, err := getPerRequestData(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	res, err := perRequestQuerier.limitIndex.LabelNames(ctx, minT, maxT, matchers)
+	res, err := perRequestData.limitIndex.LabelNames(ctx, minT, maxT, matchers)
 
 	return res, nil, err
 }
@@ -455,4 +427,13 @@ func (q chunkquerier) Select(
 	sset := q.querier.Select(ctx, sortSeries, hints, matchers...)
 
 	return storage.NewSeriesSetToChunkSet(sset)
+}
+
+func getPerRequestData(ctx context.Context) (perRequest, error) {
+	perRequestData, ok := ctx.Value(perRequestContextKey{}).(perRequest)
+	if !ok {
+		return perRequest{}, errNoPerRequestData
+	}
+
+	return perRequestData, nil
 }
