@@ -1693,9 +1693,6 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 			)
 
 			for _, req := range tests {
-				/*if useThanos || req.name != "count_over_time with filter, cachable" {
-					continue
-				}*/
 				countBefore := countingReader.PointsRead()
 
 				testReq := httptest.NewRequest(http.MethodGet, "/", nil)
