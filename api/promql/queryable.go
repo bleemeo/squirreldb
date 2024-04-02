@@ -20,7 +20,6 @@ import (
 )
 
 var (
-	errMissingRequest      = errors.New("HTTP request not found in context")
 	errMissingTenantHeader = errors.New("the tenant header is missing")
 	errInvalidMatcher      = errors.New("invalid matcher")
 	errNoPerRequestData    = errors.New("no per-request data provided in request context")
@@ -55,6 +54,8 @@ type perRequest struct {
 	reader             *limitingReader
 	enableDebug        bool
 	enableVerboseDebug bool
+	forcePreAggregated bool
+	forceRaw           bool
 }
 
 type perRequestContextKey struct{}
@@ -108,7 +109,7 @@ func (s Store) ContextFromRequest(r *http.Request) (context.Context, error) {
 	}
 
 	ctx := r.Context()
-
+	// We still include the request in the context, because the remotestorage appender needs some headers.
 	return types.WrapContext(context.WithValue(ctx, perRequestContextKey{}, perRequestData), r), nil
 }
 
@@ -190,6 +191,31 @@ func (s Store) makePerRequestData(r *http.Request) (perRequest, error) {
 		enableDebug = true
 	}
 
+	var forcePreAggregated, forceRaw bool
+
+	value = r.Header.Get(types.HeaderForcePreAggregated)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return perRequest{}, err
+		}
+
+		forcePreAggregated = tmp
+	}
+
+	value = r.Header.Get(types.HeaderForceRaw)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return perRequest{}, err
+		}
+
+		forceRaw = tmp
+		if forceRaw {
+			forcePreAggregated = false
+		}
+	}
+
 	perRequestQuerier := perRequest{
 		tenant:             tenant,
 		maxEvaluatedSeries: maxEvaluatedSeries,
@@ -198,6 +224,8 @@ func (s Store) makePerRequestData(r *http.Request) (perRequest, error) {
 		reader:             reader,
 		enableDebug:        enableDebug,
 		enableVerboseDebug: enableVerboseDebug,
+		forcePreAggregated: forcePreAggregated,
+		forceRaw:           forceRaw,
 	}
 
 	return perRequestQuerier, nil
@@ -231,11 +259,6 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
-	r, ok := ctx.Value(types.RequestContextKey{}).(*http.Request)
-	if !ok {
-		return &seriesIter{err: errMissingRequest}
-	}
-
 	perRequestData, err := getPerRequestData(ctx)
 	if err != nil {
 		return &seriesIter{err: err}
@@ -250,31 +273,6 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 			perRequestData.maxEvaluatedPoints,
 			perRequestData.maxEvaluatedSeries,
 		)
-	}
-
-	var forcePreAggregated, forceRaw bool
-
-	value := r.Header.Get(types.HeaderForcePreAggregated)
-	if value != "" {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			return &seriesIter{err: err}
-		}
-
-		forcePreAggregated = tmp
-	}
-
-	value = r.Header.Get(types.HeaderForceRaw)
-	if value != "" {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			return &seriesIter{err: err}
-		}
-
-		forceRaw = tmp
-		if forceRaw {
-			forcePreAggregated = false
-		}
 	}
 
 	if perRequestData.enableDebug {
@@ -343,8 +341,8 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 		IDs:                ids,
 		FromTimestamp:      minT.UnixMilli(),
 		ToTimestamp:        maxT.UnixMilli(),
-		ForcePreAggregated: forcePreAggregated,
-		ForceRaw:           forceRaw,
+		ForcePreAggregated: perRequestData.forcePreAggregated,
+		ForceRaw:           perRequestData.forceRaw,
 		EnableDebug:        perRequestData.enableDebug,
 		EnableVerboseDebug: perRequestData.enableVerboseDebug,
 	}

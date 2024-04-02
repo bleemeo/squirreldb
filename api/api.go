@@ -100,7 +100,7 @@ func NewPrometheus(
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
 	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
-	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
+	queryEngine = promql.WrapEngine(queryEngine, apiLogger)
 
 	scrapePoolRetrieverFunc := func(_ context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
