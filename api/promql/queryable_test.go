@@ -17,9 +17,11 @@ import (
 )
 
 const (
-	metricID1 = 42
-	metricID2 = 5323
-	metricID3 = 858
+	metricID1  = 42
+	metricID2  = 5323
+	metricID3  = 858
+	metricID4  = 123
+	metricID4b = 456
 )
 
 //nolint:gochecknoglobals

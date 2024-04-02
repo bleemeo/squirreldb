@@ -25,7 +25,9 @@ import (
 // * myname{item="1"}: 4 points every 10 seconds between 2023-05-10T12:00:00Z to 2023-05-10T12:00:30Z
 // * myname{item="2"}: 4 points every 10 seconds between 2023-05-10T12:00:20Z to 2023-05-10T12:00:50Z
 // * myname{item="3"}: 4 points every 1  hour    between 2023-05-10T11:00:10Z to 2023-05-10T13:00:10Z
-// Metrics use respectively the ID, metricID1, metricID2, metricID3.
+// * myname2{item="4"}: 4 points every 10 seconds between 2023-05-10T12:00:20Z to 2023-05-10T12:00:50Z
+// Metrics use respectively the ID, metricID1, metricID2, metricID3, metricID4 & metricID4b.
+// metricID4b don't have points.
 func createTSDB() (*dummy.Index, *dummy.MemoryTSDB) {
 	metric1 := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
@@ -48,8 +50,23 @@ func createTSDB() (*dummy.Index, *dummy.MemoryTSDB) {
 		}),
 		ID: metricID3,
 	}
+	metric4 := types.MetricLabel{
+		Labels: labels.FromMap(map[string]string{
+			"__name__": "myname2",
+			"item":     "4",
+		}),
+		ID: metricID4,
+	}
+	metric4b := types.MetricLabel{
+		Labels: labels.FromMap(map[string]string{
+			"__name__":   "myname2",
+			"item":       "4",
+			"extraLabel": "b",
+		}),
+		ID: metricID4b,
+	}
 
-	index := dummy.NewIndex([]types.MetricLabel{metric1, metric2, metric3})
+	index := dummy.NewIndex([]types.MetricLabel{metric1, metric2, metric3, metric4, metric4b})
 	tsdb := &dummy.MemoryTSDB{
 		Data: map[types.MetricID]types.MetricData{
 			metricID1: {
@@ -110,6 +127,28 @@ func createTSDB() (*dummy.Index, *dummy.MemoryTSDB) {
 					{
 						Timestamp: time.Date(2023, 5, 10, 13, 0, 10, 0, time.UTC).UnixMilli(),
 						Value:     30,
+					},
+				},
+				TimeToLive: 86400,
+			},
+			metricID4: {
+				ID: metricID4,
+				Points: []types.MetricPoint{
+					{
+						Timestamp: time.Date(2023, 5, 10, 12, 0, 20, 0, time.UTC).UnixMilli(),
+						Value:     10,
+					},
+					{
+						Timestamp: time.Date(2023, 5, 10, 12, 0, 30, 0, time.UTC).UnixMilli(),
+						Value:     20,
+					},
+					{
+						Timestamp: time.Date(2023, 5, 10, 12, 0, 40, 0, time.UTC).UnixMilli(),
+						Value:     30,
+					},
+					{
+						Timestamp: time.Date(2023, 5, 10, 12, 0, 50, 0, time.UTC).UnixMilli(),
+						Value:     40,
 					},
 				},
 				TimeToLive: 86400,
@@ -1535,6 +1574,42 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 			pointsRead: 2, // PromQL engine have 5 minutes look-back
 		},
 		{
+			name:       "range1",
+			isInstant:  false,
+			query:      `avg_over_time(myname{item="2"}[60s])`,
+			start:      time.Date(2023, 5, 10, 12, 0, 0, 0, time.UTC),
+			end:        time.Date(2023, 5, 10, 13, 0, 0, 0, time.UTC),
+			step:       10 * time.Second,
+			pointsRead: 4,
+		},
+		{
+			name:       "range1b",
+			isInstant:  false,
+			query:      `myname{item="2"}`,
+			start:      time.Date(2023, 5, 10, 12, 0, 0, 0, time.UTC),
+			end:        time.Date(2023, 5, 10, 13, 0, 0, 0, time.UTC),
+			step:       10 * time.Second,
+			pointsRead: 4,
+		},
+		{
+			name:       "range2",
+			isInstant:  false,
+			query:      `myname2{item="4"}`,
+			start:      time.Date(2023, 5, 10, 12, 0, 0, 0, time.UTC),
+			end:        time.Date(2023, 5, 10, 13, 0, 0, 0, time.UTC),
+			step:       10 * time.Second,
+			pointsRead: 4,
+		},
+		{
+			name:       "range2b",
+			isInstant:  false,
+			query:      `myname2{item="4"}`,
+			start:      time.Date(2023, 5, 10, 12, 0, 0, 0, time.UTC),
+			end:        time.Date(2023, 5, 10, 13, 0, 0, 0, time.UTC),
+			step:       10 * time.Second,
+			pointsRead: 4,
+		},
+		{
 			name:       "no-cache-between-promql",
 			isInstant:  true,
 			query:      `myname{item="1"}`,
@@ -1671,6 +1746,33 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				pointRead := int(math.Round(countAfter - countBefore))
 				if pointRead != req.pointsRead {
 					t.Errorf("req %s: points read = %d, want %d", req.name, pointRead, req.pointsRead)
+				}
+
+				// Make sure __name__ isn't remove from Labels inside the index. We had a case where the labels.Labels
+				// was mutated.
+				// time.Time{} is used, because dummy index ignore min/max time.
+				metrics, err := index.Search(context.Background(), time.Time{}, time.Time{}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				countMetrics := 0
+				for metrics.Next() {
+					countMetrics++
+
+					metric := metrics.At()
+
+					if metric.Labels.Get("__name__") == "" {
+						t.Errorf("Metric ID %d had empty name. Labels=%v", metric.ID, metric.Labels)
+					}
+				}
+
+				if err := metrics.Err(); err != nil {
+					t.Errorf("metrics.Err() = %v", err)
+				}
+
+				if countMetrics != 5 { // 5 match the number of metrics in createTSDB
+					t.Errorf("countMetrics = %d, want 5", countMetrics)
 				}
 			}
 		})
