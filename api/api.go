@@ -256,8 +256,7 @@ func (a *API) init() {
 			// and thus be able to benefit from its cache.
 			ctx, err := queryable.ContextFromRequest(r)
 			if err != nil {
-				rw.WriteHeader(http.StatusUnprocessableEntity)
-				fmt.Fprintf(rw, "Error while processing request: %v", err)
+				a.respondError(rw, http.StatusUnprocessableEntity, err)
 
 				return
 			}
@@ -1023,6 +1022,27 @@ func (a *API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Re
 	}
 
 	fmt.Fprint(w, "ok")
+}
+
+// respondError mimics the Prometheus v1.API behavior for returning an error to the client.
+func (a *API) respondError(w http.ResponseWriter, status int, err error) {
+	b, err := json.Marshal(&v1.Response{
+		Status: "error",
+		Error:  err.Error(),
+	})
+	if err != nil {
+		a.Logger.Err(err).Msg("error marshaling json response")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	if _, err := w.Write(b); err != nil {
+		a.Logger.Err(err).Msg("error writing response")
+	}
 }
 
 // interceptor implements the http.ResponseWriter interface,
