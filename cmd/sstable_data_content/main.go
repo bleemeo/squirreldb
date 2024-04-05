@@ -105,7 +105,7 @@ type sstableDumpRow struct {
 }
 
 type sstableDumpRowCluster struct {
-	OffsetMS   int
+	offsetMS   int
 	insertTime string // it's an UUID
 }
 
@@ -130,7 +130,7 @@ func (f *sstableDumpRowCluster) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("second element of sstableDumpRowCluster must be an string, had %T (%v)", work[1], work[1])
 	}
 
-	f.OffsetMS = int(offset)
+	f.offsetMS = int(offset)
 	f.insertTime = insertTime
 
 	return nil

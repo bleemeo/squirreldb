@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// cachingReader kept the last MetricData returned in cache and re-use it if that query exactly match the request.
+// cachingReader keeps the last MetricData returned in cache and re-uses it if that query exactly matches the request.
 type cachingReader struct {
 	reader types.MetricReader
 

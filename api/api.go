@@ -100,7 +100,7 @@ func NewPrometheus(
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
 	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
-	queryEngine = wrapperEngine{QueryEngine: queryEngine, logger: apiLogger}
+	queryEngine = promql.WrapEngine(queryEngine, apiLogger)
 
 	scrapePoolRetrieverFunc := func(_ context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
 	targetRetrieverFunc := func(context.Context) v1.TargetRetriever { return mockTargetRetriever{} }
@@ -251,8 +251,17 @@ func (a *API) init() {
 				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
 			}()
 
-			ctx := r.Context()
-			r = r.WithContext(types.WrapContext(ctx, r))
+			// We must create the cachingReader at this stage
+			// so that only one is allocated per request,
+			// and thus be able to benefit from its cache.
+			ctx, err := queryable.ContextFromRequest(r)
+			if err != nil {
+				a.respondError(rw, http.StatusUnprocessableEntity, err)
+
+				return
+			}
+
+			r = r.WithContext(ctx) //nolint: contextcheck
 
 			// Prometheus always returns a status 500 when write fails, but if
 			// the labels are invalid we want to return a status 400, so we use the
@@ -1013,6 +1022,27 @@ func (a *API) mutableLabelNamesDeleteHandler(w http.ResponseWriter, req *http.Re
 	}
 
 	fmt.Fprint(w, "ok")
+}
+
+// respondError mimics the Prometheus v1.API behavior for returning an error to the client.
+func (a *API) respondError(w http.ResponseWriter, status int, err error) {
+	b, err := json.Marshal(&v1.Response{
+		Status: "error",
+		Error:  err.Error(),
+	})
+	if err != nil {
+		a.Logger.Err(err).Msg("error marshaling json response")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	if _, err := w.Write(b); err != nil {
+		a.Logger.Err(err).Msg("error writing response")
+	}
 }
 
 // interceptor implements the http.ResponseWriter interface,

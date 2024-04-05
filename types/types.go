@@ -10,9 +10,9 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-// OldTask is a background worked that will be running until ctx is cancelled.
+// OldTask is a background worker that will be running until ctx is canceled.
 // If readiness is not nil, when ready the task send one nil.
-// If an error occur, the task will send the error on the channel and return.
+// If an error occurs, the task will send the error on the channel and return.
 // You are not allowed to re-call Run() if an error is returned.
 type OldTask interface {
 	Run(ctx context.Context, readiness chan error)
@@ -137,7 +137,7 @@ type State interface {
 	Write(ctx context.Context, name string, value interface{}) error
 }
 
-// RequestContextKey is used as a key in a context to a HTTP request.
+// RequestContextKey is used as a key in a context to an HTTP request.
 type RequestContextKey struct{}
 
 // WrapContext adds a request to the context.

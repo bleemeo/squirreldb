@@ -70,7 +70,7 @@ func main() {
 	}
 }
 
-func run(deadlineCtx context.Context) error {
+func run(deadlineCtx context.Context) error { //nolint: contextcheck
 	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 
 	producer := NewProducer(ProducerOption{

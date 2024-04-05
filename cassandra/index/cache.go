@@ -107,7 +107,7 @@ func (c *labelsLookupCache) Set(
 	}
 
 	c.cache[id] = labelsEntry{
-		value:           value,
+		value:           value.Copy(),
 		cassandraExpire: cassandraExpiration,
 	}
 
@@ -138,7 +138,7 @@ func (c *labelsLookupCache) get(now time.Time, id types.MetricID) labels.Labels 
 		return nil
 	}
 
-	return entry.value
+	return entry.value.Copy()
 }
 
 // Get return the non-expired cache entry or nil.

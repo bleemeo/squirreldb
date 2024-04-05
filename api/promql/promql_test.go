@@ -504,7 +504,10 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				t.Fatal(err)
 			}
 
-			ctx := types.WrapContext(context.Background(), r)
+			ctx, err := queryable.ContextFromRequest(r)
+			if err != nil {
+				t.Fatal("Failed to parse request:", err)
+			}
 
 			for i, query := range tt.searches {
 				got := queryier.Select(ctx, false, nil, query.matchers...)
@@ -556,18 +559,15 @@ func TestPromQL_InvalidForcedMatcher(t *testing.T) {
 		Reader: reader,
 	}
 
-	querier, err := queryable.Querier(0, 0)
-	if err != nil {
-		t.Fatalf("can't create querier: %v", err)
-	}
-
 	r := httptest.NewRequest("", "/", nil)
 	r.Header.Add(types.HeaderForcedMatcher, "invalid")
 
-	ctx := types.WrapContext(context.Background(), r)
+	_, err := queryable.ContextFromRequest(r)
+	if err == nil {
+		t.Fatal("Expected the request to be invalid (errInvalidMatcher)")
+	}
 
-	seriesSet := querier.Select(ctx, false, nil)
-	if !errors.Is(seriesSet.Err(), errInvalidMatcher) {
-		t.Fatalf("expected errInvalidMatcher, got %v", seriesSet.Err())
+	if !errors.Is(err, errInvalidMatcher) {
+		t.Fatalf("Unexpected error: want %v, got %v", errInvalidMatcher, err)
 	}
 }

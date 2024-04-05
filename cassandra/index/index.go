@@ -306,7 +306,7 @@ func initialize(
 }
 
 // Start starts all Cassandra Index services.
-func (c *CassandraIndex) Start(_ context.Context) error {
+func (c *CassandraIndex) Start(_ context.Context) error { //nolint: contextcheck
 	if c.cancel != nil {
 		return nil
 	}

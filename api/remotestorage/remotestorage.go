@@ -219,3 +219,7 @@ func (a errAppender) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.M
 func (a errAppender) Commit() error { return a.err }
 
 func (a errAppender) Rollback() error { return a.err }
+
+func (a errAppender) AppendCTZeroSample(storage.SeriesRef, labels.Labels, int64, int64) (storage.SeriesRef, error) {
+	return 0, a.err
+}

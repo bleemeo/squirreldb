@@ -582,7 +582,7 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 		waitChan[i] = make(chan interface{})
 
-		go func() {
+		go func() { //nolint:contextcheck
 			defer logger.ProcessPanic()
 
 			task.Task.Run(ctxs[i], subReadiness)
@@ -930,7 +930,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 	}
 }
 
-func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
+func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) { //nolint: contextcheck
 	switch s.Config.Internal.Store {
 	case backendBatcher:
 		var wg sync.WaitGroup

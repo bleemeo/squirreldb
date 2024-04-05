@@ -115,7 +115,7 @@ func New(
 }
 
 // Start starts all Cassandra Index services.
-func (c *CassandraTSDB) Start(_ context.Context) error {
+func (c *CassandraTSDB) Start(_ context.Context) error { //nolint: contextcheck
 	if c.cancel != nil {
 		return nil
 	}
