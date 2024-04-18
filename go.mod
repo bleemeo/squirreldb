@@ -1,4 +1,4 @@
-module squirreldb
+module github.com/bleemeo/squirreldb
 
 go 1.21
 
