@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bleemeo/squirreldb/cassandra/connection"
-	"github.com/bleemeo/squirreldb/logger"
-	"github.com/bleemeo/squirreldb/types"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"

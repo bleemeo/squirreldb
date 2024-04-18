@@ -2,9 +2,10 @@ package promql
 
 import (
 	"context"
+	"sync"
+
 	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/types"
-	"sync"
 )
 
 // cachingReader keeps the last MetricData returned in cache and re-uses it if that query exactly matches the request.

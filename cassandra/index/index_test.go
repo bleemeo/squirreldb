@@ -11,13 +11,14 @@ import (
 	"os"
 	"reflect"
 	"sort"
-	"github.com/bleemeo/squirreldb/dummy"
-	"github.com/bleemeo/squirreldb/types"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"

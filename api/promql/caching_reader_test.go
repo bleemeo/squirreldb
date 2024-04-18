@@ -6,11 +6,12 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"testing"
+	"time"
+
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus"

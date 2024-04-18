@@ -7,9 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"github.com/bleemeo/squirreldb/config"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/config"
 
 	goredis "github.com/redis/go-redis/v9"
 )

@@ -36,10 +36,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"github.com/bleemeo/squirreldb/logger"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/rs/zerolog/log"

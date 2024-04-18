@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/cassandra/connection"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
-	"sync"
-	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"

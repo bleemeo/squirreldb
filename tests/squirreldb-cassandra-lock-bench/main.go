@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"github.com/bleemeo/squirreldb/daemon"
-	"github.com/bleemeo/squirreldb/types"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"

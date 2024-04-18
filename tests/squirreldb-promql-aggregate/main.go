@@ -8,8 +8,9 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"github.com/bleemeo/squirreldb/daemon"
 	"time"
+
+	"github.com/bleemeo/squirreldb/daemon"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/api"

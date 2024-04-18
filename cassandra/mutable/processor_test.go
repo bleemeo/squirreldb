@@ -4,10 +4,11 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"testing"
+
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
-	"testing"
 
 	"github.com/prometheus/prometheus/model/labels"
 )

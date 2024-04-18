@@ -6,13 +6,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/compare"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/redis/client"
 	"github.com/bleemeo/squirreldb/types"
-	"strconv"
-	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/logger"

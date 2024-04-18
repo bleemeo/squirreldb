@@ -3,8 +3,9 @@ package promql
 import (
 	"context"
 	"errors"
-	"github.com/bleemeo/squirreldb/types"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 )

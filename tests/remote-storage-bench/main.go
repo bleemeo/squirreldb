@@ -23,11 +23,12 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-	"strconv"
-	"time"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"

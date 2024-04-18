@@ -2,6 +2,7 @@ package promql
 
 import (
 	"fmt"
+
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/histogram"

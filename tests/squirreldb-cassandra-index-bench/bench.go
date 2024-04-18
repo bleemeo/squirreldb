@@ -7,14 +7,15 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/cassandra/index"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/types"
-	"strconv"
-	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"

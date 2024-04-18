@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"github.com/bleemeo/squirreldb/dummy"
-	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"

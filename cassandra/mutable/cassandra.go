@@ -3,6 +3,7 @@ package mutable
 import (
 	"context"
 	"fmt"
+
 	"github.com/bleemeo/squirreldb/cassandra/connection"
 
 	"github.com/gocql/gocql"

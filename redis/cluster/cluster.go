@@ -8,11 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/redis/client"
-	"sync"
-	"time"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"

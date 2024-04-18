@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"github.com/bleemeo/squirreldb/api/remotestorage"
-	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/api/remotestorage"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 )

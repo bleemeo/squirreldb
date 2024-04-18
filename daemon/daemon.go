@@ -8,6 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
+	"syscall"
+	"time"
+
 	"github.com/bleemeo/squirreldb/api"
 	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/cassandra/connection"
@@ -25,9 +29,6 @@ import (
 	redisTemporarystore "github.com/bleemeo/squirreldb/redis/temporarystore"
 	"github.com/bleemeo/squirreldb/telemetry"
 	"github.com/bleemeo/squirreldb/types"
-	"sync"
-	"syscall"
-	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"

@@ -3,8 +3,9 @@ package temporarystore
 import (
 	"bytes"
 	"reflect"
-	"github.com/bleemeo/squirreldb/types"
 	"testing"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 const (

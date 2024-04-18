@@ -4,11 +4,12 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"testing"
+	"time"
+
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/dummy/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
-	"testing"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"

@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/aggregate"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
-	"strconv"
-	"sync"
-	"time"
 )
 
 const (

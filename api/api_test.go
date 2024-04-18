@@ -11,13 +11,14 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"testing"
+	"time"
+
 	"github.com/bleemeo/squirreldb/api/remotestorage"
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-	"testing"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"

@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/bleemeo/squirreldb/aggregate"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
-	"sync"
-	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"

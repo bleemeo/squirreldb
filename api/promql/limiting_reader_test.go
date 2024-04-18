@@ -2,8 +2,9 @@ package promql
 
 import (
 	"context"
-	"github.com/bleemeo/squirreldb/types"
 	"testing"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 func Test_limitingReader_ReadIter(t *testing.T) {

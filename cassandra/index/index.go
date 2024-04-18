@@ -14,13 +14,14 @@ import (
 	"regexp/syntax"
 	"slices"
 	"sort"
-	"github.com/bleemeo/squirreldb/cassandra/connection"
-	"github.com/bleemeo/squirreldb/logger"
-	"github.com/bleemeo/squirreldb/types"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/gocql/gocql"

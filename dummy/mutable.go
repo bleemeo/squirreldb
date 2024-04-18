@@ -3,6 +3,7 @@ package dummy
 import (
 	"context"
 	"errors"
+
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
 )
 

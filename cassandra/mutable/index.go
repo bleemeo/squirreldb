@@ -5,8 +5,9 @@ import (
 	"errors"
 	"io"
 	"sort"
-	"github.com/bleemeo/squirreldb/types"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"

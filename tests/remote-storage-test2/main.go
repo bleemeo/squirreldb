@@ -8,11 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"github.com/bleemeo/squirreldb/daemon"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/daemon"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"

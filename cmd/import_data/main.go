@@ -30,9 +30,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"github.com/bleemeo/squirreldb/logger"
 	"strconv"
 	"time"
+
+	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"

@@ -8,9 +8,10 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
+	"time"
+
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/types"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"

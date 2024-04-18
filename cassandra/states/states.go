@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/bleemeo/squirreldb/cassandra/connection"
 	"strconv"
 	"sync"
+
+	"github.com/bleemeo/squirreldb/cassandra/connection"
 
 	"github.com/gocql/gocql"
 	"github.com/rs/zerolog"

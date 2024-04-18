@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"

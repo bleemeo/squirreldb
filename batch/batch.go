@@ -25,10 +25,11 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"github.com/bleemeo/squirreldb/retry"
-	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/retry"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"

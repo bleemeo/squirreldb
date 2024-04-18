@@ -3,9 +3,10 @@ package index
 import (
 	"context"
 	"math/rand"
-	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
