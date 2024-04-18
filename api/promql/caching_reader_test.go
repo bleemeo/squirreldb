@@ -6,9 +6,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"squirreldb/dummy"
-	"squirreldb/logger"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

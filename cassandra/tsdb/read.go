@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"squirreldb/aggregate"
-	"squirreldb/compare"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/aggregate"
+	"github.com/bleemeo/squirreldb/compare"
+	"github.com/bleemeo/squirreldb/types"
 	"time"
 
 	"github.com/gocql/gocql"

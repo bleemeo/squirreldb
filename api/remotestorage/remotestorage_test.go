@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"squirreldb/api/remotestorage"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/api/remotestorage"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

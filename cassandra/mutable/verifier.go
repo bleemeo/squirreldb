@@ -2,7 +2,7 @@ package mutable
 
 import (
 	"context"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"time"
 )
 

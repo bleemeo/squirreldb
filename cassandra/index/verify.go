@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"strconv"
 	"strings"
 	"time"

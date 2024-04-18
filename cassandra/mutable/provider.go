@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"

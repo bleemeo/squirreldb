@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"squirreldb/config"
+	"github.com/bleemeo/squirreldb/config"
 	"sync"
 	"time"
 

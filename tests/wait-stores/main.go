@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/daemon"
 	"time"
 
 	"github.com/rs/zerolog/log"

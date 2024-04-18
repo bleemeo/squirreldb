@@ -3,8 +3,8 @@ package promql
 import (
 	"context"
 	"errors"
-	"squirreldb/dummy"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 	"sync/atomic"
 	"time"
 

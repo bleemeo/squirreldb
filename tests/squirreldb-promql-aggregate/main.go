@@ -8,7 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/daemon"
 	"time"
 
 	"github.com/golang/snappy"

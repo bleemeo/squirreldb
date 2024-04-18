@@ -2,7 +2,7 @@ package promql
 
 import (
 	"context"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 )
 

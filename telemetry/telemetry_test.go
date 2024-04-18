@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/dummy"
 	"testing"
 
 	"github.com/rs/zerolog/log"

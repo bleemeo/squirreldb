@@ -2,7 +2,7 @@ package aggregate
 
 import (
 	"math"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/value"
 )

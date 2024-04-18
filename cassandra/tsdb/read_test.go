@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

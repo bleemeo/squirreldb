@@ -25,9 +25,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"squirreldb/facts"
-	"squirreldb/logger"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/facts"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 	"time"
 
 	"github.com/google/uuid"

@@ -25,8 +25,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"squirreldb/retry"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/retry"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
 

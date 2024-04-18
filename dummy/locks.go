@@ -3,7 +3,7 @@ package dummy
 import (
 	"context"
 	"math/rand"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
 )

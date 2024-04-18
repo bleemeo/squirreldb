@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"squirreldb/config"
+	"github.com/bleemeo/squirreldb/config"
 	"strconv"
 	"strings"
 	"sync"

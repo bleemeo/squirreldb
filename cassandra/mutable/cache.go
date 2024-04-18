@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
 

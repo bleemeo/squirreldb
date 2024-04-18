@@ -3,7 +3,7 @@ package index
 import (
 	"context"
 	"errors"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 
 	"github.com/gocql/gocql"

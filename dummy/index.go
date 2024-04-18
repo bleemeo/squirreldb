@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"strings"
 	"sync"
 	"time"

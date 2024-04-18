@@ -2,10 +2,10 @@ package mutable_test
 
 import (
 	"context"
-	"squirreldb/cassandra/mutable"
-	"squirreldb/dummy"
-	"squirreldb/logger"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

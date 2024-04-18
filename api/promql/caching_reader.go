@@ -2,8 +2,8 @@ package promql
 
 import (
 	"context"
-	"squirreldb/cassandra/tsdb"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/cassandra/tsdb"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 )
 

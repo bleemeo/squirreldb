@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/exemplar"

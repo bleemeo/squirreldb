@@ -4,9 +4,9 @@ import (
 	"context"
 	"reflect"
 	"sort"
-	"squirreldb/dummy"
-	"squirreldb/dummy/temporarystore"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/dummy/temporarystore"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

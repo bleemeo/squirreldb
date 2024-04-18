@@ -3,8 +3,8 @@ package temporarystore
 import (
 	"context"
 	"fmt"
-	"squirreldb/compare"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/compare"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
 

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/daemon"
 	"strconv"
 	"strings"
 	"sync"

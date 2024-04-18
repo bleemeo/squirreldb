@@ -3,7 +3,7 @@ package aggregate
 import (
 	"math"
 	"reflect"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

@@ -30,7 +30,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"squirreldb/logger"
+	"github.com/bleemeo/squirreldb/logger"
 	"strconv"
 	"time"
 

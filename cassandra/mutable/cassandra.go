@@ -3,7 +3,7 @@ package mutable
 import (
 	"context"
 	"fmt"
-	"squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/cassandra/connection"
 
 	"github.com/gocql/gocql"
 	"github.com/rs/zerolog"

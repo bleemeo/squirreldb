@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"squirreldb/dummy"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 

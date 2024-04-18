@@ -36,7 +36,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"squirreldb/logger"
+	"github.com/bleemeo/squirreldb/logger"
 	"strconv"
 	"strings"
 	"time"

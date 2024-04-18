@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"squirreldb/cassandra/mutable"
-	"squirreldb/dummy"
-	"squirreldb/logger"
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/logger"
 	"testing"
 	"time"
 

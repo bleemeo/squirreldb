@@ -2,8 +2,8 @@ package tsdb
 
 import (
 	"reflect"
-	"squirreldb/aggregate"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/aggregate"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"testing"
 	"time"

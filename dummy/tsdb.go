@@ -3,7 +3,7 @@ package dummy
 import (
 	"context"
 	"sort"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 )
 

@@ -3,7 +3,7 @@ package temporarystore
 import (
 	"bytes"
 	"reflect"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 )
 

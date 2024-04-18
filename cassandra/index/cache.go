@@ -1,7 +1,7 @@
 package index
 
 import (
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"sync"
 	"time"
 

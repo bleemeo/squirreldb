@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/cassandra/connection"
 	"strconv"
 	"sync"
 

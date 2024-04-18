@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"squirreldb/config"
-	"squirreldb/logger"
-	"squirreldb/redis/client"
+	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/redis/client"
 	"sync"
 	"time"
 

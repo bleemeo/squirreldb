@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/daemon"
 	"strings"
 	"time"
 

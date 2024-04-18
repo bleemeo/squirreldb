@@ -2,7 +2,7 @@ package dummy
 
 import (
 	"context"
-	"squirreldb/types"
+	"github.com/bleemeo/squirreldb/types"
 	"testing"
 	"time"
 
