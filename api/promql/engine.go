@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
 	"github.com/thanos-io/promql-engine/engine"
 )
@@ -17,7 +18,7 @@ func NewEngine(
 	queryLogger zerolog.Logger,
 	useThanosPromQLEngine bool,
 	metricRegistry prometheus.Registerer,
-) promql.QueryEngine {
+) v1.QueryEngine {
 	engineOpts := promql.EngineOpts{
 		Logger:               logger.NewKitLogger(&queryLogger),
 		Reg:                  metricRegistry,
@@ -30,7 +31,7 @@ func NewEngine(
 		EnablePerStepStats:   false,
 	}
 
-	var queryEngine promql.QueryEngine
+	var queryEngine v1.QueryEngine
 
 	if useThanosPromQLEngine {
 		queryLogger.Info().Msg("Using Thanos PromQL engine")
@@ -47,12 +48,12 @@ func NewEngine(
 	return queryEngine
 }
 
-func WrapEngine(engine promql.QueryEngine, logger zerolog.Logger) WrapperEngine {
+func WrapEngine(engine v1.QueryEngine, logger zerolog.Logger) WrapperEngine {
 	return WrapperEngine{engine, logger}
 }
 
 type WrapperEngine struct {
-	promql.QueryEngine
+	v1.QueryEngine
 	logger zerolog.Logger
 }
 

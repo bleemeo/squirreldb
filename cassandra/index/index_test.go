@@ -8556,8 +8556,8 @@ type concurentAccessTestExecution struct {
 	c              *sync.Cond
 }
 
-// Test_concurrent_access will test that concurrent access works. With race-detector enable it might
-// find data-race.
+// Test_concurrent_access will test that concurrent access works.
+// With the race-detector enabled, it might find data-races.
 func Test_concurrent_access(t *testing.T) {
 	defaultTTL := 10 * 24 * time.Hour
 
