@@ -8195,7 +8195,6 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 
 	for _, withClusterConfigured := range []bool{false, true} {
 		for _, run := range runs {
-			withClusterConfigured := withClusterConfigured
 			fullName := fmt.Sprintf("%s-cluster-%v", run.name, withClusterConfigured)
 
 			t.Run(fullName, func(t *testing.T) {
