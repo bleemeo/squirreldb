@@ -1728,7 +1728,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	index3 := mockIndexFromMetrics(now, now, metrics3)
 
 	for x := 1; x < 101; x++ {
-		for y := 0; y < 100; y++ {
+		for y := range 100 {
 			id := types.MetricID(x*100 + y)
 			metrics2[id] = map[string]string{
 				"__name__":   fmt.Sprintf("generated_%03d", x),
@@ -2760,10 +2760,10 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	requests := make([]types.LookupRequest, 0)
 
-	for x := 0; x < 100; x++ {
+	for x := range 100 {
 		var start, end time.Time
 
-		for y := 0; y < 100; y++ {
+		for y := range 100 {
 			switch x % 5 {
 			case 0:
 				start = t0
@@ -4549,7 +4549,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 	// Create 12 random bitmap, each with 1e6 metrics and 10, 100 and 1000 random hole
 	rnd := rand.New(rand.NewSource(42))
 
-	for n := 0; n < 12; n++ {
+	for n := range 12 {
 		var holdCount int
 
 		// When using short, only add one random bitmap
@@ -4611,7 +4611,6 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 			t.Skip()
 		}
 
-		tt := tt
 		buffer := bytes.NewBuffer(nil)
 
 		_, err := tt.bitmap.WriteTo(buffer)
@@ -4627,8 +4626,6 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 		}
 
 		for i, saveEvery := range saveEveryList {
-			saveEvery := saveEvery
-
 			allPosting := tt.bitmap
 			if i > 0 {
 				// unless first test, reload bitmap from bytes
@@ -4665,7 +4662,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 					iterCount = tt.maxIter
 				}
 
-				for n := 0; n < iterCount; n++ {
+				for n := range iterCount {
 					newID := findFreeID(allPosting)
 
 					if newID == 0 {
@@ -5182,8 +5179,6 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -5387,8 +5382,6 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -5628,9 +5621,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			workerCount := 4
 			group, _ := errgroup.WithContext(context.Background())
 
-			for n := 0; n < workerCount; n++ {
-				n := n
-
+			for n := range workerCount {
 				group.Go(func() error {
 					index := index1
 
@@ -5908,7 +5899,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	}
 
 	// Check in store that correct write happened
-	for n := 0; n < len(metrics); n++ {
+	for n := range len(metrics) {
 		labels := labelsMapToList(metrics[n], true)
 		id := metricsID[n]
 
@@ -6094,7 +6085,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	labelsList = make([]labels.Labels, expireBatchSize+10)
 
-	for n := 0; n < expireBatchSize+10; n++ {
+	for n := range expireBatchSize + 10 {
 		labels := map[string]string{
 			"__name__": "filler",
 			"id":       strconv.FormatInt(int64(n), 10),
@@ -6988,8 +6979,6 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -7637,8 +7626,6 @@ func TestSimplifyRegex(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
-
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -7709,7 +7696,7 @@ func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTi
 	// * periodicRefreshIDInShard: error for this one will be ignored
 	// * applyExpirationUpdateRequests: we can check index.expirationUpdateRequests to check for completion
 	// * cassandraExpire: we can check expirationLastProcessedDay to check for completion
-	for runCount := 0; runCount < maxRunCount; runCount++ {
+	for runCount := range maxRunCount {
 		// If we are close to maxRunCount or maxTime, enable skipping errors
 		if runCount > maxRunCount*3/4 && !shouldSkipError(ctx) {
 			ctx = contextSkipError(ctx)
@@ -8023,8 +8010,6 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, run := range runs {
-		run := run
-
 		t.Run(run.name, func(t *testing.T) {
 			verifyResults := make([]*bytes.Buffer, 0, len(batches))
 			verifyHadErrors := make([]bool, len(batches))
@@ -8070,7 +8055,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				shouldFail.SetRate(run.failRateBefore, run.failRateAfter)
 
-				for i := 0; i < defaultRetryCount; i++ {
+				for i := range defaultRetryCount {
 					ctx := context.Background()
 					if i == defaultRetryCount-1 {
 						ctx = contextSkipError(ctx)
@@ -8211,8 +8196,6 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 	for _, withClusterConfigured := range []bool{false, true} {
 		for _, run := range runs {
 			withClusterConfigured := withClusterConfigured
-			run := run
-
 			fullName := fmt.Sprintf("%s-cluster-%v", run.name, withClusterConfigured)
 
 			t.Run(fullName, func(t *testing.T) {
@@ -8355,8 +8338,6 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 				group, _ := errgroup.WithContext(context.Background())
 
 				for _, index := range indexes {
-					index := index
-
 					group.Go(func() error {
 						return executeRunOnce(currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
 					})
@@ -8433,7 +8414,7 @@ func clusterDoOneBatch(t *testing.T,
 		}
 	}
 
-	for n := 0; n < metricsNew; n++ {
+	for n := range metricsNew {
 		lbls := map[string]string{
 			"__name__": "filler",
 			"id":       strconv.FormatInt(int64(n), 10),
@@ -8461,9 +8442,6 @@ func clusterDoOneBatch(t *testing.T,
 	group, ctx := errgroup.WithContext(context.Background())
 
 	for workerID, index := range indexes {
-		workerID := workerID
-		index := index
-
 		group.Go(func() error {
 			fullList := append([]labels.Labels{}, commonMetrics...)
 
@@ -8484,7 +8462,7 @@ func clusterDoOneBatch(t *testing.T,
 
 			var err error
 
-			for i := 0; i < retryCount; i++ {
+			for i := range retryCount {
 				if i == retryCount-1 {
 					ctx = contextSkipError(ctx)
 				}
@@ -8584,8 +8562,6 @@ func Test_concurrent_access(t *testing.T) {
 	defaultTTL := 10 * 24 * time.Hour
 
 	for _, withCluster := range []bool{false, true} {
-		withCluster := withCluster
-
 		name := "without-cluster"
 		if withCluster {
 			name = "with-cluster"
@@ -8697,7 +8673,7 @@ func Test_concurrent_access(t *testing.T) {
 
 			rnd := rand.New(rand.NewSource(123456789))
 
-			for n := 0; n < 8; n++ {
+			for range 8 {
 				rndSeed := rnd.Int63()
 
 				group.Go(func() error {
@@ -8705,7 +8681,7 @@ func Test_concurrent_access(t *testing.T) {
 				})
 			}
 
-			for n := 0; n < 2; n++ {
+			for range 2 {
 				rndSeed := rnd.Int63()
 
 				group.Go(func() error {
@@ -8755,7 +8731,7 @@ func Test_concurrent_access(t *testing.T) {
 				}
 			}
 
-			for i := 0; i < 400*2; i++ {
+			for range 400 * 2 {
 				execution.now.Add(12 * time.Hour)
 				indexes[0].InternalRunOnce(ctx, execution.now.Now())
 			}

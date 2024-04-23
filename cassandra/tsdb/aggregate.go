@@ -119,7 +119,7 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 
 	step := len(metrics) / concurrentWriterCount
 
-	for i := 0; i < concurrentWriterCount; i++ {
+	for i := range concurrentWriterCount {
 		startIndex := i * step
 		endIndex := (i + 1) * step
 
@@ -179,7 +179,7 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 	wg.Add(threadCount)
 
-	for n := 0; n < threadCount; n++ {
+	for range threadCount {
 		go func() {
 			defer logger.ProcessPanic()
 			defer wg.Done()
@@ -190,7 +190,6 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 				var rangePointsCount int
 
 				rangeStart := time.Now()
-				currentFrom := currentFrom
 				currentTo := currentFrom.Add(aggregateSize)
 
 				retry.Print(func() error {

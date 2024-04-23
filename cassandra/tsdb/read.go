@@ -520,7 +520,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 		streamNumber = 2
 	}
 
-	for i := 0; i < streamNumber; i++ {
+	for i := range streamNumber {
 		length, err := binary.ReadUvarint(reader)
 		if err != nil {
 			return nil, fmt.Errorf("read length for stream %d: %w", i, err)

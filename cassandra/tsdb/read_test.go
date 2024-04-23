@@ -428,8 +428,7 @@ func Test_mergePointsRandom(t *testing.T) {
 		dstLen = 45
 	)
 
-	for testNumber := 0; testNumber < 15; testNumber++ {
-		testNumber := testNumber
+	for testNumber := range 15 {
 		t.Run(fmt.Sprintf("test-%d", testNumber), func(t *testing.T) {
 			rnd := rand.New(rand.NewSource(int64(testNumber)))
 
@@ -438,14 +437,14 @@ func Test_mergePointsRandom(t *testing.T) {
 			src := make([]types.MetricPoint, 0, 15)
 			dst := make([]types.MetricPoint, 0, 45)
 
-			for i := 0; i < srcLen; i++ {
+			for range srcLen {
 				src = append(src, types.MetricPoint{
 					Timestamp: rnd.Int63n(3600),
 					Value:     12.34,
 				})
 			}
 
-			for i := 0; i < dstLen; i++ {
+			for range dstLen {
 				dst = append(dst, types.MetricPoint{
 					Timestamp: rnd.Int63n(3600),
 					Value:     12.34,
@@ -518,7 +517,7 @@ func benchmarkMergePoints(b *testing.B, nSrc, nDst, srcTsOffset, dstTsOffset int
 	src := make([]types.MetricPoint, 0, nSrc)
 	dst := make([]types.MetricPoint, 0, nDst)
 
-	for i := 0; i < nSrc; i++ {
+	for i := range nSrc {
 		// src is sorted ascending order by timestamp.
 		src = append(src, types.MetricPoint{
 			Timestamp: int64(srcTsOffset + i),
@@ -526,7 +525,7 @@ func benchmarkMergePoints(b *testing.B, nSrc, nDst, srcTsOffset, dstTsOffset int
 		})
 	}
 
-	for i := 0; i < nDst; i++ {
+	for i := range nDst {
 		// dst is sorted in descending order by timestamp.
 		dst = append(dst, types.MetricPoint{
 			Timestamp: int64(dstTsOffset + nDst - i),

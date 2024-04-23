@@ -276,7 +276,7 @@ func (ve *verifierExecution) verifyMissingShard(
 
 	current := ve.verifier.index.options.InternalNowFunction().Add(3 * postingShardSize)
 
-	for n := 0; n < 100; n++ {
+	for range 100 {
 		if ctx.Err() != nil {
 			return 0, shards, ctx.Err()
 		}
@@ -982,7 +982,6 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 			concurrentInsert,
 			func(ctx context.Context, work chan<- func() error) error {
 				for _, req := range updates {
-					req := req
 					task := func() error {
 						_, err := ve.index.postingUpdate(ctx, req)
 

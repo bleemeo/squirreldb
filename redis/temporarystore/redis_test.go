@@ -200,7 +200,7 @@ func Test_valuesSerialization(t *testing.T) {
 			tmp := r.getSerializedPoints()
 			tmp2 := r.getSerializedPoints()
 
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				gotBytes, err := valuesFromData(tt.data, buffer, tmp)
 				if err != nil {
 					t.Errorf("valuesFromData() error = %v", err)

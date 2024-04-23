@@ -1290,12 +1290,12 @@ func mergeSorted(left, right []string) (result []string) {
 		i++
 	}
 
-	for j := 0; j < len(left); j++ {
+	for j := range len(left) {
 		result[i] = left[j]
 		i++
 	}
 
-	for j := 0; j < len(right); j++ {
+	for j := range len(right) {
 		result[i] = right[j]
 		i++
 	}
@@ -2005,8 +2005,6 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
-				entry := entry
-
 				if _, ok := existingIDToPendingIndex[entry.id]; ok {
 					// This ID already exist. Don't re-insert it.
 					continue
@@ -2038,8 +2036,6 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, entry := range pending {
-				entry := entry
-
 				if _, ok := existingIDToPendingIndex[entry.id]; ok {
 					// This ID already exist. Don't re-insert it.
 					continue
@@ -2246,7 +2242,6 @@ func (c *CassandraIndex) refreshPostingIDInShard(ctx context.Context, shards map
 		concurrentPostingRead,
 		func(ctx context.Context, work chan<- func() error) error {
 			for shard := range shards {
-				shard := shard
 				task := func() error {
 					tmp, err := c.postings(ctx, []int32{shard}, allPostingLabel, allPostingLabel, false)
 					if err != nil {
@@ -2312,7 +2307,6 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range maybePresent {
-				req := req
 				task := func() error {
 					_, err := c.postingUpdate(ctx, req)
 
@@ -2341,7 +2335,6 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range updates {
-				req := req
 				task := func() error {
 					_, err := c.postingUpdate(ctx, req)
 
@@ -2370,7 +2363,6 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range precense {
-				req := req
 				task := func() error {
 					bitmap, err := c.postingUpdate(ctx, req)
 					if err == nil {
@@ -3071,7 +3063,6 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range expireUpdates {
-				req := req
 				task := func() error {
 					return c.expirationUpdate(ctx, "cassandraCheckExpire", req)
 				}
@@ -3216,8 +3207,6 @@ func (c *CassandraIndex) concurrentTasks(
 	startCount := 0
 
 	for task := range work {
-		task := task
-
 		group.Go(func() error {
 			if err := task(); err != nil {
 				return err

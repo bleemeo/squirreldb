@@ -42,7 +42,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 
 	group, ctx := errgroup.WithContext(ctx)
 
-	for n := 0; n < *threads; n++ {
+	for range *threads {
 		group.Go(func() error {
 			count, err := readWorker(ctx, workChannel, readURL, tenant)
 
@@ -225,7 +225,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 		},
 	}
 
-	for n := 0; n < *scale; n++ {
+	for n := range *scale {
 		samples := makeSample(
 			now.Add(-time.Minute),
 			10*time.Second,

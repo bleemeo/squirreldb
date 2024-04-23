@@ -21,7 +21,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 
 	group, ctx := errgroup.WithContext(ctx)
 
-	for n := 0; n < *threads; n++ {
+	for range *threads {
 		group.Go(func() error {
 			err := writeWorker(ctx, workChannel, writeURL, tenant)
 
@@ -106,7 +106,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 		},
 	}
 
-	for n := 0; n < *scale; n++ {
+	for n := range *scale {
 		samples := makeSample(
 			now.Add(-time.Minute),
 			10*time.Second,
@@ -128,7 +128,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			},
 		}
 
-		for i := 0; i < 6; i++ {
+		for i := range 6 {
 			workChannel <- prompb.WriteRequest{
 				Timeseries: []prompb.TimeSeries{
 					{

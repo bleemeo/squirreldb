@@ -41,7 +41,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 
 	group, ctx := errgroup.WithContext(ctx)
 
-	for n := 0; n < *threads; n++ {
+	for range *threads {
 		group.Go(func() error {
 			count, err := readPromQLWorker(ctx, workChannel, promQLURL, tenant)
 
@@ -236,7 +236,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 		},
 	}
 
-	for n := 0; n < *scale; n++ {
+	for n := range *scale {
 		samples := makeSampleModel(
 			now.Add(-time.Minute),
 			10*time.Second,
@@ -276,7 +276,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			},
 		}
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			metricName := fmt.Sprintf(`filler{nowStr="%s",batch="yes",scale="%d"}`, *nowStr, n)
 			workChannel <- readPromQLRequest{
 				name: fmt.Sprintf("filler-batch-full-%d-cache", n),

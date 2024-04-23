@@ -23,7 +23,7 @@ func TestAppenderInvalidRequest(t *testing.T) {
 	app := remotestorage.New(nil, nil, maxConcurrentWrite, "", mockMutableLAbel{}, true, prometheus.NewRegistry())
 
 	// Send some requests with a missing tenant header.
-	for i := 0; i < 2*maxConcurrentWrite; i++ {
+	for range 2 * maxConcurrentWrite {
 		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", nil)
 		subCtx := types.WrapContext(ctx, request)
 
@@ -36,7 +36,7 @@ func TestAppenderInvalidRequest(t *testing.T) {
 	}
 
 	// Send some requests with an invalid TTL header.
-	for i := 0; i < 2*maxConcurrentWrite; i++ {
+	for range 2 * maxConcurrentWrite {
 		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", nil)
 		request.Header.Set(types.HeaderTenant, "my_tenant")
 		request.Header.Set(types.HeaderTimeToLive, "invalid_ttl")

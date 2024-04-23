@@ -112,8 +112,6 @@ func run(deadlineCtx context.Context) error { //nolint: contextcheck
 	workChannel := make(chan prompb.WriteRequest, 10)
 
 	for _, writer := range writers {
-		writer := writer
-
 		group.Go(func() error {
 			return writer.Run(ctx, workChannel)
 		})

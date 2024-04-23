@@ -97,8 +97,6 @@ func TestReplaceMutableLabels(t *testing.T) {
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
-		test := test
-
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -152,8 +150,6 @@ func TestAddMutableLabels(t *testing.T) {
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
-		test := test
-
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -202,8 +198,6 @@ func TestMergeRegex(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
-
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 

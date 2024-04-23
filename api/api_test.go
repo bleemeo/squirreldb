@@ -343,8 +343,6 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range cases {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -449,8 +447,6 @@ func TestWriteHandler(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
-
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -869,8 +865,6 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		if tt.name != "aggregate_time_actual_bug" && false {
 			continue
 		}

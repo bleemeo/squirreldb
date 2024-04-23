@@ -143,12 +143,12 @@ func testQueryParallel(
 	}
 
 	resultsChan := make(chan int)
-	for i := 0; i < parallelQueries; i++ {
+	for range parallelQueries {
 		go testQuery(ctx, api, resultsChan, query, queryRange, stepRange, queryDelay, allowEmpty)
 	}
 
 	nbQueries := 0
-	for i := 0; i < parallelQueries; i++ {
+	for range parallelQueries {
 		nbQueries += <-resultsChan
 	}
 
