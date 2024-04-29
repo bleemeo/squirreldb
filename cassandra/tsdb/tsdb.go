@@ -195,6 +195,7 @@ func dataTableCreate(ctx context.Context, connection *connection.Connection, def
 			'unchecked_tombstone_compaction': true,
 			'tombstone_compaction_interval': 604800
 		}
+		AND gc_grace_seconds = 86400
 		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE`),
 	).Consistency(gocql.All).WithContext(ctx)
 
@@ -230,6 +231,7 @@ func aggregateDataTableCreate(ctx context.Context,
 			'unchecked_tombstone_compaction': true,
 			'tombstone_compaction_interval': 8467200
 		}
+		AND gc_grace_seconds = 86400
 		AND DEFAULT_TIME_TO_LIVE = $DEFAULT_TIME_TO_LIVE`),
 	).Consistency(gocql.All).WithContext(ctx)
 
