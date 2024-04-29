@@ -3,8 +3,9 @@ package dummy
 import (
 	"context"
 	"sort"
-	"squirreldb/types"
 	"sync"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 // DiscardTSDB will write metrics to /dev/null.

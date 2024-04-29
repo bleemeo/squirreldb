@@ -3,8 +3,9 @@ package index
 import (
 	"context"
 	"errors"
-	"squirreldb/types"
 	"sync"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/pilosa/pilosa/v2/roaring"

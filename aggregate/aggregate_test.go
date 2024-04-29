@@ -3,9 +3,10 @@ package aggregate
 import (
 	"math"
 	"reflect"
-	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"

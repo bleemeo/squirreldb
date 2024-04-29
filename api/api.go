@@ -11,16 +11,17 @@ import (
 	_ "net/http/pprof" //nolint:gosec,gci
 	"net/url"
 	"runtime"
-	"squirreldb/api/promql"
-	"squirreldb/api/remotestorage"
-	"squirreldb/cassandra/mutable"
-	"squirreldb/logger"
-	"squirreldb/types"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bleemeo/squirreldb/api/promql"
+	"github.com/bleemeo/squirreldb/api/remotestorage"
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/grafana/regexp"
 	"github.com/prometheus/client_golang/prometheus"

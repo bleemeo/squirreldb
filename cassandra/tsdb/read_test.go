@@ -5,9 +5,10 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
-	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/go-cmp/cmp"
 )

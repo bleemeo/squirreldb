@@ -5,11 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"squirreldb/cassandra/mutable"
-	"squirreldb/dummy"
-	"squirreldb/logger"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"

@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"squirreldb/aggregate"
-	"squirreldb/compare"
-	"squirreldb/types"
 	"time"
+
+	"github.com/bleemeo/squirreldb/aggregate"
+	"github.com/bleemeo/squirreldb/compare"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"

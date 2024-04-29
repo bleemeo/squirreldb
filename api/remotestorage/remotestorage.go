@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"squirreldb/cassandra/tsdb"
-	"squirreldb/types"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/cassandra/tsdb"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/exemplar"

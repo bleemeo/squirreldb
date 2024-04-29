@@ -19,7 +19,6 @@ package facts
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows/registry"

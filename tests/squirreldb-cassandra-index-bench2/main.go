@@ -18,12 +18,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"squirreldb/config"
-	"squirreldb/daemon"
-	"squirreldb/dummy"
-	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"

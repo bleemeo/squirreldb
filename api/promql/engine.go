@@ -3,8 +3,9 @@ package promql
 import (
 	"context"
 	"fmt"
-	"squirreldb/logger"
 	"time"
+
+	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/promql"

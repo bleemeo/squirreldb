@@ -3,9 +3,10 @@ package dummy
 import (
 	"context"
 	"math/rand"
-	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 // Locks is a non-distributed lock factory. It should only be used for single-node.

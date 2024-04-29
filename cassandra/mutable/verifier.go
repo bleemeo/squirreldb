@@ -2,8 +2,9 @@ package mutable
 
 import (
 	"context"
-	"squirreldb/types"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 type notImplementedVerifier struct{}

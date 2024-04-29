@@ -25,10 +25,11 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"squirreldb/facts"
-	"squirreldb/logger"
-	"squirreldb/types"
 	"time"
+
+	"github.com/bleemeo/squirreldb/facts"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"

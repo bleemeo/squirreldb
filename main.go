@@ -3,9 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
-	"squirreldb/config"
-	"squirreldb/daemon"
-	"squirreldb/logger"
+
+	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/logger"
 
 	zlogsentry "github.com/archdx/zerolog-sentry"
 	"github.com/rs/zerolog"

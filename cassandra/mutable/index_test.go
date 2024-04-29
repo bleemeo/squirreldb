@@ -2,12 +2,13 @@ package mutable_test
 
 import (
 	"context"
-	"squirreldb/cassandra/mutable"
-	"squirreldb/dummy"
-	"squirreldb/logger"
-	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 )

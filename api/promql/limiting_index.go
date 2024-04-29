@@ -3,10 +3,11 @@ package promql
 import (
 	"context"
 	"errors"
-	"squirreldb/dummy"
-	"squirreldb/types"
 	"sync/atomic"
 	"time"
+
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 )

@@ -6,9 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"squirreldb/daemon"
 	"strings"
 	"time"
+
+	"github.com/bleemeo/squirreldb/daemon"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"

@@ -2,9 +2,10 @@ package dummy
 
 import (
 	"context"
-	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/go-cmp/cmp"
 )

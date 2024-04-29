@@ -3,10 +3,11 @@ package temporarystore
 import (
 	"context"
 	"fmt"
-	"squirreldb/compare"
-	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/compare"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"

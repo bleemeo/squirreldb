@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"squirreldb/types"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/labels"
 )

@@ -3,9 +3,10 @@ package temporarystore
 import (
 	"context"
 	"reflect"
-	"squirreldb/types"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"

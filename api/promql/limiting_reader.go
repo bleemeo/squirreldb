@@ -3,8 +3,9 @@ package promql
 import (
 	"context"
 	"errors"
-	"squirreldb/types"
 	"sync/atomic"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 type limitingReader struct {

@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"squirreldb/dummy"
-	"squirreldb/types"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"

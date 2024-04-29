@@ -2,11 +2,12 @@ package tsdb
 
 import (
 	"reflect"
-	"squirreldb/aggregate"
-	"squirreldb/types"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/aggregate"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )

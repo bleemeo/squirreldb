@@ -3,7 +3,8 @@ package dummy
 import (
 	"context"
 	"errors"
-	"squirreldb/cassandra/mutable"
+
+	"github.com/bleemeo/squirreldb/cassandra/mutable"
 )
 
 // mutableLabelStore is a label provider which gets its labels from hardcoded values.

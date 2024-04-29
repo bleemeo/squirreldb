@@ -1,9 +1,10 @@
 package index
 
 import (
-	"squirreldb/types"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/pilosa/pilosa/v2/roaring"
 	"github.com/prometheus/prometheus/model/labels"

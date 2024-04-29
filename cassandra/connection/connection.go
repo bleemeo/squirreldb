@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"squirreldb/config"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/config"
 
 	"github.com/gocql/gocql"
 	"github.com/rs/zerolog"
