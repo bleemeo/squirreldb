@@ -209,7 +209,7 @@ func (s *Store) GetTransfert(_ context.Context, count int) (map[types.MetricID]t
 		endIndex = len(s.transfertMetrics)
 	}
 
-	for i := 0; i < endIndex; i++ {
+	for i := range endIndex {
 		id := s.transfertMetrics[i]
 		results[id] = s.metricsStore[id].flushDeadline
 	}

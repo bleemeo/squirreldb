@@ -219,8 +219,7 @@ func bench(ctx context.Context, cfg config.Config, clock *fakeClock) error {
 
 	cluster := &dummy.LocalCluster{}
 
-	for p := 0; p < *workerProcesses; p++ {
-		p := p
+	for p := range *workerProcesses {
 		squirreldb := &daemon.SquirrelDB{
 			Config: cfg,
 			MetricRegistry: prometheus.WrapRegistererWith(
@@ -305,10 +304,10 @@ func sentInsertRequest(
 
 	serverIDs := make([]nameAndTenant, 0, (*scaleAgent)*(*scaleTenant))
 
-	for tenantN := 0; tenantN < *scaleTenant; tenantN++ {
+	for tenantN := range *scaleTenant {
 		tenantID := uuid.New().String()
 
-		for agentN := 0; agentN < *scaleAgent; agentN++ {
+		for agentN := range *scaleAgent {
 			var agentName string
 
 			if agentN < len(commonAgentName) {
@@ -366,7 +365,7 @@ func sentInsertRequest(
 }
 
 func showWorkersStats(resultChan chan workerStats, testStartTime time.Time) {
-	for p := 0; p < *workerProcesses; p++ {
+	for range *workerProcesses {
 		stats := <-resultChan
 
 		showWorkerStats("LookupIDs", stats.workerID, stats.AllDurations, testStartTime)
@@ -586,8 +585,6 @@ func mergeChannels(ctx context.Context, target chan []types.LookupRequest, sourc
 	var wg sync.WaitGroup
 
 	for _, ch := range sources {
-		ch := ch
-
 		wg.Add(1)
 
 		go func() {

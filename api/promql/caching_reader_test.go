@@ -635,8 +635,6 @@ func Test_cachingReader_ReadIter(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -858,8 +856,6 @@ func Benchmark_cachingReader(b *testing.B) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		b.Run(tt.name, func(b *testing.B) {
 			_, realStore := createTSDB()
 
@@ -1399,8 +1395,6 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1661,8 +1655,6 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 	}
 
 	for _, useThanos := range []bool{false, true} {
-		useThanos := useThanos
-
 		name := "default"
 		if useThanos {
 			name = "thanos"

@@ -73,7 +73,7 @@ func run(ctx context.Context) error {
 		readURLs = nil
 		writeURLs = nil
 
-		for n := 0; n < *processes; n++ {
+		for n := range *processes {
 			squirreldb := &daemon.SquirrelDB{
 				Config: cfg,
 				MetricRegistry: prometheus.WrapRegistererWith(
@@ -120,13 +120,13 @@ func run(ctx context.Context) error {
 	writeChan := make(chan prompb.WriteRequest)
 	group, ctx := errgroup.WithContext(ctx)
 
-	for n := 0; n < *readThreads; n++ {
+	for range *readThreads {
 		group.Go(func() error {
 			return sim.readWorker(ctx, readChan)
 		})
 	}
 
-	for n := 0; n < *writeThreads; n++ {
+	for range *writeThreads {
 		group.Go(func() error {
 			return sim.writeWorker(ctx, writeChan)
 		})
@@ -237,7 +237,7 @@ func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteReque
 		s.l.Lock()
 
 		if len(s.activeAgent) == 0 {
-			for n := 0; n < *writeScale; n++ {
+			for range *writeScale {
 				counter++
 				s.activeAgent = append(
 					s.activeAgent,

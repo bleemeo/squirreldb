@@ -138,8 +138,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			}()
 		}
 
-		for p := 0; p < *workerProcesses; p++ {
-			p := p
+		for p := range *workerProcesses {
 			squirreldb := &daemon.SquirrelDB{
 				Config: cfg,
 				MetricRegistry: prometheus.WrapRegistererWith(
@@ -363,7 +362,7 @@ func sentInsertRequest(
 	pendingRequest := 0
 	maxRSS := 0
 
-	for n := 0; n < shardCount; n++ {
+	for n := range shardCount {
 		if *shardSize == 0 {
 			break
 		}
@@ -457,13 +456,11 @@ func loadBalancer(input chan []types.LookupRequest, outputs []chan []types.Looku
 // worker is more or less equivalent to on SquirrelDB process.
 func worker(ctx context.Context, localIndex types.Index, workChanel chan []types.LookupRequest, result chan int) {
 	token := make(chan bool, *workerThreads)
-	for n := 0; n < *workerThreads; n++ {
+	for range *workerThreads {
 		token <- true
 	}
 
 	for work := range workChanel {
-		work := work
-
 		<-token
 
 		go func() {
@@ -477,7 +474,7 @@ func worker(ctx context.Context, localIndex types.Index, workChanel chan []types
 		}()
 	}
 
-	for n := 0; n < *workerThreads; n++ {
+	for range *workerThreads {
 		<-token
 	}
 }
@@ -500,7 +497,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	// metrics is yesterday
 	negativeTTL := -int64((24*time.Hour + index.InternalMaxTTLUpdateDelay()).Seconds())
 
-	for n := 0; n < *shardSize; n++ {
+	for n := range *shardSize {
 		userID := strconv.FormatInt(rnd.Int63n(100000), 10)
 		labelsMap := map[string]string{
 			"__name__":                               names[rnd.Intn(len(names))],
@@ -518,7 +515,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 			addN = rnd.Intn(20)
 		}
 
-		for i := 0; i < addN; i++ {
+		for i := range addN {
 			labelsMap[fmt.Sprintf("label%02d", i)] = strconv.FormatInt(rnd.Int63n(20), 10)
 		}
 
@@ -555,7 +552,7 @@ func runQuery(
 	count := 0
 
 	var n int
-	for n = 0; n < *queryCount; n++ {
+	for n = range *queryCount { //nolint:wsl
 		if time.Since(start) > *queryMaxTime {
 			break
 		}

@@ -150,8 +150,6 @@ func Test_PointsEncode(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
@@ -168,7 +166,7 @@ func Test_PointsEncode(t *testing.T) {
 			}
 
 			// Run test at least twice... tsz MUTATE data on *READ* !! :(
-			for n := 0; n < 2; n++ {
+			for range 2 {
 				buffer := buffer
 
 				got, err := c.decodePoints(buffer, nil)
@@ -469,8 +467,6 @@ func Test_EncodeAggregate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
@@ -608,8 +604,6 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		b.Run(tt.name, func(b *testing.B) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{

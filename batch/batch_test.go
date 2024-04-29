@@ -1985,7 +1985,7 @@ func Test_randomDuration(t *testing.T) {
 	min := 40 * time.Millisecond
 	max := 60 * time.Millisecond
 
-	for n := 0; n < 100; n++ {
+	for range 100 {
 		got := randomDuration(target)
 		if got < min {
 			t.Errorf("randomDuration() = %v, want >= %v", got, min)

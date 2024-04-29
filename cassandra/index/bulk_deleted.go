@@ -107,7 +107,6 @@ func (d *deleter) Delete(ctx context.Context) error {
 		concurrentDelete,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, sortedLabelsString := range d.deleteLabels {
-				sortedLabelsString := sortedLabelsString
 				task := func() error {
 					err := d.c.store.DeleteLabels2ID(ctx, sortedLabelsString)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
@@ -268,7 +267,6 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range d.PresenceUpdates {
-				req := req
 				task := func() error {
 					bitmap, err := d.c.postingUpdate(ctx, req)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
@@ -304,7 +302,6 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range d.PostingUpdates {
-				req := req
 				task := func() error {
 					_, err := d.c.postingUpdate(ctx, req)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {
@@ -336,7 +333,6 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 		concurrentInsert,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, req := range d.MaybePresenceUpdates {
-				req := req
 				task := func() error {
 					it, err := d.c.postingUpdate(ctx, req)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) && !errors.Is(err, errBitmapEmpty) {

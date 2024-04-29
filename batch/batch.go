@@ -526,14 +526,13 @@ func (b *Batch) flush(
 
 	metricsToWrite := make([]types.MetricData, 0, len(metrics))
 
-	for i, data := range metrics {
-		readPointsCount += len(data.Points)
-		storeData := data
+	for i, storeData := range metrics {
+		readPointsCount += len(storeData.Points)
 		offset := offsets[i]
 
 		if offset > len(storeData.Points) {
 			msg := "Batch.flush(): unexpected offset == %d is too big for metric ID %d (only %d points)"
-			b.logger.Warn().Msgf(msg, offset, data.ID, len(data.Points))
+			b.logger.Warn().Msgf(msg, offset, storeData.ID, len(storeData.Points))
 			offset = len(storeData.Points)
 		}
 

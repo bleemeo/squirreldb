@@ -46,7 +46,7 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 		rawPointsCount += len(data.Points)
 	}
 
-	for i := 0; i < concurrentWriterCount; i++ {
+	for i := range concurrentWriterCount {
 		startIndex := i * step
 		endIndex := (i + 1) * step
 

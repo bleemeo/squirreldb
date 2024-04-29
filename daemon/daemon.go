@@ -574,8 +574,6 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	waitChan := make([]chan interface{}, len(tasks))
 
 	for i, task := range tasks {
-		task := task
-		i := i
 		subReadiness := make(chan error)
 
 		ctxs[i], cancels[i] = context.WithCancel(context.Background())

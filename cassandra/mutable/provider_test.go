@@ -86,7 +86,7 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 }
 
 func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableLabels {
-	var users []string
+	users := make([]string, 0, nbUsers)
 
 	names := map[string]string{
 		"group": "instance",
@@ -95,7 +95,7 @@ func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableL
 
 	associatedNames := make(map[string]map[string]string)
 
-	for i := 0; i < nbUsers; i++ {
+	for range nbUsers {
 		user := uuid.New().String()
 		users = append(users, user)
 
@@ -113,11 +113,11 @@ func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableL
 
 			values := make(map[string][]string)
 
-			for j := 0; j < nbLabelsPerUser; j++ {
+			for j := range nbLabelsPerUser {
 				mutableValue := fmt.Sprintf("%s-%d", name, j)
 
 				var nonMutableValues []string
-				for k := 0; k < nbValuesPerLabel; k++ {
+				for range nbValuesPerLabel {
 					nonMutableValues = append(nonMutableValues, randomString(20))
 				}
 

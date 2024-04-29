@@ -112,10 +112,9 @@ func run(ctx context.Context) error {
 			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
 			lock := lockFactory.CreateLock(subLockName, *lockTTL)
 
-			for t := 0; t < *workerThreads; t++ {
+			for t := range *workerThreads {
 				workerSeed := rnd.Int63()
 				p := p
-				t := t
 				n := n
 
 				wg.Add(1)
@@ -329,8 +328,7 @@ func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.L
 
 		var grp errgroup.Group
 
-		for n := 0; n < *count; n++ {
-			n := n
+		for n := range *count {
 			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
 
 			grp.Go(func() error {
@@ -357,7 +355,7 @@ func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.L
 		deadline := time.Now().Add(blockDuration)
 
 		for ctx.Err() == nil && time.Now().Before(deadline) {
-			for n := 0; n < *count; n++ {
+			for n := range *count {
 				running := atomic.LoadInt32(&jobRunning[n])
 				if running > 0 {
 					log.Error().Int("n", n).Msgf("job are running while lock is blocked ! jobRunning=%d", running)
@@ -371,8 +369,7 @@ func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.L
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		for n := 0; n < *count; n++ {
-			n := n
+		for n := range *count {
 			subLockName := fmt.Sprintf("%s-%d", *lockName, n)
 
 			grp.Go(func() error {

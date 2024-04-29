@@ -233,7 +233,7 @@ func makeSamples(
 ) []prompb.Sample {
 	samples := make([]prompb.Sample, 0, count*len(values))
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		for j, value := range values {
 			samples = append(samples, prompb.Sample{
 				Value:     float64(value),

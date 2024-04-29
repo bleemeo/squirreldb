@@ -99,7 +99,7 @@ func MakePointsForTest(size int) []MetricPoint {
 // MakePointsForTestOffset is like MakePointsForTest but include a timestamp offset.
 func MakePointsForTestOffset(size int, offsetMillisecond int64) []MetricPoint {
 	result := make([]MetricPoint, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		result[i].Timestamp = int64(1568706164+i*10)*1000 + offsetMillisecond
 		result[i].Value = float64(i)
 	}
@@ -122,9 +122,10 @@ func MakeMetricDataForTest(countMetric int, countPoints int, offsetMillisecond i
 // AddDuplicateForTest add duplicate points to a list of MetricPoint for testing.
 func AddDuplicateForTest(input []MetricPoint, numberDuplicate int, rnd *rand.Rand) []MetricPoint {
 	duplicates := make([]int, numberDuplicate)
-	for i := 0; i < numberDuplicate; i++ {
+	for i := range numberDuplicate {
 		duplicates[i] = rnd.Intn(len(input))
 	}
+
 	sort.Ints(duplicates)
 
 	result := make([]MetricPoint, len(input)+numberDuplicate)
@@ -132,7 +133,7 @@ func AddDuplicateForTest(input []MetricPoint, numberDuplicate int, rnd *rand.Ran
 	inputIndex := 0
 	duplicatesIndex := 0
 
-	for i := 0; i < len(input)+numberDuplicate; i++ {
+	for i := range len(input) + numberDuplicate {
 		result[i] = input[inputIndex]
 
 		if duplicatesIndex < len(duplicates) && inputIndex == duplicates[duplicatesIndex] {

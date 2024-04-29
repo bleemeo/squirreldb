@@ -88,9 +88,6 @@ func run(ctx context.Context) error {
 	for i, cl := range clients {
 		wg.Add(1)
 
-		cl := cl
-		i := i
-
 		go func() {
 			defer wg.Done()
 
@@ -227,9 +224,7 @@ func (b *BenchClient) Init() error {
 func (b *BenchClient) Run(ctx context.Context, deadline time.Time, processID int) {
 	group, ctx := errgroup.WithContext(ctx)
 
-	for n := 0; n < *workerThreads; n++ {
-		n := n
-
+	for n := range *workerThreads {
 		group.Go(func() error {
 			return b.thread(ctx, deadline, processID, n)
 		})
