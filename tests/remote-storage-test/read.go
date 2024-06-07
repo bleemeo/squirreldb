@@ -375,7 +375,7 @@ func readWorker(
 		request.Header.Set("X-Prometheus-Remote-Read-Version", "2.0.0")
 
 		if tenant != "" {
-			request.Header.Set("X-SquirrelDB-Tenant", tenant)
+			request.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
 		}
 
 		response, newErr := http.DefaultClient.Do(request)

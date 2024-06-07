@@ -250,22 +250,45 @@ func unwrapErrors(errs prometheus.MultiError) prometheus.MultiError {
 	unwrapped := make(prometheus.MultiError, 0, len(errs))
 
 	for _, err := range errs {
-		var (
-			mapErr  *mapstructure.Error
-			yamlErr *yaml.TypeError
-		)
-
-		switch {
-		case errors.As(err, &mapErr):
-			unwrapped = append(unwrapped, mapErr.WrappedErrors()...)
-		case errors.As(err, &yamlErr):
-			for _, wrappedErr := range yamlErr.Errors {
-				unwrapped.Append(errors.New(wrappedErr)) //nolint:goerr113
+		for _, subErr := range unwrapRecurse(err) {
+			var yamlErr *yaml.TypeError
+			if errors.As(subErr, &yamlErr) {
+				for _, wrappedErr := range yamlErr.Errors {
+					unwrapped.Append(errors.New(wrappedErr)) //nolint:goerr113
+				}
+			} else {
+				unwrapped.Append(subErr)
 			}
-		default:
-			unwrapped.Append(err)
 		}
 	}
 
 	return unwrapped
+}
+
+func unwrapRecurse(err error) []error {
+	wrapError, isWrapErr := err.(interface{ Unwrap() error })
+	if isWrapErr {
+		unwrappedErr := wrapError.Unwrap()
+		_, unwrap := unwrappedErr.(interface{ Unwrap() error })
+		_, multiUnwrap := unwrappedErr.(interface{ Unwrap() []error })
+		// If err is just an fmt.wrapError without more depth, return it as-is.
+		if unwrap || multiUnwrap {
+			return unwrapRecurse(unwrappedErr)
+		}
+
+		return []error{err}
+	}
+
+	joinError, isJoinErr := err.(interface{ Unwrap() []error })
+	if isJoinErr {
+		var subErrs []error
+
+		for _, subErr := range joinError.Unwrap() {
+			subErrs = append(subErrs, unwrapRecurse(subErr)...)
+		}
+
+		return subErrs
+	}
+
+	return []error{err}
 }

@@ -20,7 +20,7 @@ type headerClient struct {
 }
 
 func (hc headerClient) Do(ctx context.Context, req *http.Request) (*http.Response, []byte, error) {
-	req.Header.Set("X-SquirrelDB-Tenant", hc.SquirrelDBTenantHeader)
+	req.Header.Set("X-SquirrelDB-Tenant", hc.SquirrelDBTenantHeader) //nolint:canonicalheader
 
 	return hc.Client.Do(ctx, req)
 }
