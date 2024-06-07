@@ -8,7 +8,7 @@ linters:
     # Base linters disabled for all projects.
     - funlen
     - gomnd  # Too picky. For example it says that 1000 (used in number of ms in one second) is a magic number.
-    - exhaustivestruct # This linter is meant to be used only for special cases. It is not recommended to use it for all files in a project.
+    - mnd # Same as above.
     - exhaustruct # Same as above.
     - gci # Conflicts with gofumpt.
     - varnamelen # I think there is too many false-positive.
@@ -16,23 +16,15 @@ linters:
     - nonamedreturns # Warn for every named return, not useful.
     - interfacebloat # Warn when an interface has too many methods, not useful.
     # Disable deprecated and replaced linter.
-    - maligned
-    - golint
-    - interfacer
-    - scopelint
-    - ifshort
-    - deadcode
-    - structcheck
-    - varcheck
-    - nosnakecase
+    - execinquery
     # We use maintidx to lint function complexity.
     - gocyclo
     - cyclop
     - gocognit
 
     # Project specific disable.
-    - wrapcheck # too many error. Partially done and should be completed
-    - goerr113 # Require to refactor how we return error. But would be useful
+    - wrapcheck # too many errors. Partially done and should be completed
+    - err113 # Requires to refactor how we return error. But would be useful
     # Requires to review all our tests. Should be done
     - paralleltest
     - tparallel
