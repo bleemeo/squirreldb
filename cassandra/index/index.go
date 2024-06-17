@@ -2444,7 +2444,7 @@ func (c *CassandraIndex) Search(
 	}()
 
 	if len(matchers) == 0 {
-		return nil, nil
+		return nil, nil //nolint: nilnil
 	}
 
 	result, err := c.idsForMatchers(ctx, shards, matchers, 3)

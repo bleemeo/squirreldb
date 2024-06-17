@@ -9,6 +9,8 @@ import (
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
@@ -106,16 +108,12 @@ func TestReplaceMutableLabels(t *testing.T) {
 				t.Errorf("Failed to process labels: %v", err)
 			}
 
-			/* One day this will be useful, when Prometheus have changed their API again ...
 			allowUnexp := cmp.AllowUnexported(labels.Matcher{}, labels.FastRegexMatcher{})
 			ignoreFields := cmpopts.IgnoreFields(labels.FastRegexMatcher{}, "matchString") // functions are not comparable
 			ignoreIfaces := cmpopts.IgnoreInterfaces(struct{ labels.StringMatcher }{})
 
 			if diff := cmp.Diff(test.wantMatchers, gotMatchers, allowUnexp, ignoreFields, ignoreIfaces); diff != "" {
 				t.Errorf("ReplaceMutableLabels() = %v, want %v\n%s", gotMatchers, test.wantMatchers, diff)
-			}*/
-			if !reflect.DeepEqual(test.wantMatchers, gotMatchers) {
-				t.Errorf("ReplaceMutableLabels() = %v, want %v", gotMatchers, test.wantMatchers)
 			}
 		})
 	}
