@@ -73,10 +73,7 @@ func run(ctx context.Context) error {
 			cluster: cluster,
 		}
 
-		err = clients[i].Init()
-		if err != nil {
-			return err
-		}
+		clients[i].Init()
 	}
 
 	var wg sync.WaitGroup
@@ -199,7 +196,7 @@ func (b *BenchClient) Close() {
 	_ = b.cluster.Close()
 }
 
-func (b *BenchClient) Init() error {
+func (b *BenchClient) Init() {
 	b.topic1 = make(map[string]bool)
 	b.topic2 = make(map[string]bool)
 
@@ -218,8 +215,6 @@ func (b *BenchClient) Init() error {
 		b.msgTopic2++
 		b.topic2[string(payload)] = true
 	})
-
-	return nil
 }
 
 func (b *BenchClient) Run(ctx context.Context, deadline time.Time, processID int) {
