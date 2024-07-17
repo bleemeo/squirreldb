@@ -33,12 +33,12 @@ redis:
 
 ## Quickstart
 
-This quickstart will start a SquirrelDB in HA (with Cassandra cluster and Redis) using docker-compose.
+This quickstart will start a SquirrelDB in HA (with Cassandra cluster and Redis) using docker compose.
 Obvisouly this is only for testing since all components will run on the same machine.
 
 Due to some component not liking to change their IP address, they are fixed and use
 subnet 172.28.0.0/16. If this conflict with one of your existing network, update
-the docker-compose file to change this subnet.
+the docker compose file to change this subnet.
 
 Like the single-node quickstart, this will also start a Prometheus + Grafana and one node_exporter to
 have some data in SquirrelDB.
@@ -46,7 +46,7 @@ have some data in SquirrelDB.
 Start the stack:
 
 ```
-docker-compose up -d
+docker compose up -d
 ```
 
 Then as for single SquirrelDB, go to http://localhost:3000 (default credentials are admin/admin) and:
@@ -63,20 +63,20 @@ Example of test:
 ```
 # Recreate Prometheus, losing its local store of metrics. This ensure that metric points
 # are read from SquirrelDB
-docker-compose up -d --force-recreate --renew-anon-volumes prometheus
+docker compose up -d --force-recreate --renew-anon-volumes prometheus
 
 # Kill one Cassandra then restart it
-docker-compose stop -t0 cassandra1
-docker-compose start cassandra1
+docker compose stop -t0 cassandra1
+docker compose start cassandra1
 
 # Stop and recreate one SquirrelDB
-docker-compose rm --force --stop -v squirreldb2
-docker-compose up -d squirreldb2
+docker compose rm --force --stop -v squirreldb2
+docker compose up -d squirreldb2
 
-docker-compose stop -t0 redis4
-docker-compose up -d redis4
-docker-compose stop -t0 redis2
-docker-compose up -d redis2
+docker compose stop -t0 redis4
+docker compose up -d redis4
+docker compose stop -t0 redis2
+docker compose up -d redis2
 ```
 
 For Cassandra, if you remove and recreate a Cassandra (e.g. lose data and not just stop/start):

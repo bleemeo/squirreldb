@@ -53,7 +53,7 @@ if [ "${WITH_CLUSTER}" = "1" ]; then
 
     echo
     echo "== Starting cluster component using examples/squirreldb_ha/"
-    (cd examples/squirreldb_ha/; docker-compose up -d cassandra1 cassandra2 cassandra3 redis1 redis2 redis3 redis4 redis5 redis6 redis_init)
+    (cd examples/squirreldb_ha/; docker compose up -d cassandra1 cassandra2 cassandra3 redis1 redis2 redis3 redis4 redis5 redis6 redis_init)
     docker_network="--network squirreldb_ha_default"
     export SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     export SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
@@ -241,7 +241,7 @@ if [ ! "${WITH_NOSTOP}" = "1" ]; then
     if [ "${WITH_CLUSTER}" = "1" ]; then
         echo
         echo "== Stopping cluster component using examples/squirreldb_ha/"
-        (cd examples/squirreldb_ha/; docker-compose down -v)
+        (cd examples/squirreldb_ha/; docker compose down -v)
     else
         echo
         echo "== Stopping Cassandra & Redis"

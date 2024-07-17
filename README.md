@@ -34,7 +34,7 @@ Check out [examples/squirreldb-ha](./examples/squirreldb_ha/) for a highly avail
 You can run SquirrelDB easily with Cassandra, Prometheus, Grafana and Node Exporter using the provided docker-compose:
 
 ```sh
-docker-compose up -d
+docker compose up -d
 ```
 
 Then go to the Grafana dashboard at http://localhost:3000/d/83ceCuenk/, and log in with the user "admin" 

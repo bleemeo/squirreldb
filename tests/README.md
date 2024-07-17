@@ -164,7 +164,7 @@ To execute the go run with a Cassandra cluster, the easiest way is:
 
 * Start a Cassandra & redis cluster using example/squirreldb_ha:
 ```
-(cd examples/squirreldb_ha; docker-compose up -d cassandra{1,2,3} redis{1,2,3,4,5,6} redis_init)
+(cd examples/squirreldb_ha; docker compose up -d cassandra{1,2,3} redis{1,2,3,4,5,6} redis_init)
 ```
 
 * Configure program to use those Cassandra & Redis and use replication 3:
@@ -181,4 +181,4 @@ go run ./tests/remote-storage-test
 ```
 
 Note: the replication factor is only used at initial creation. To change its value, you need
-to destroy (docker-compose down -v) and re-create the Cassandra cluster.
+to destroy (docker compose down -v) and re-create the Cassandra cluster.
