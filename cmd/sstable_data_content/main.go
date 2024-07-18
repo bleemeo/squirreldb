@@ -26,13 +26,19 @@
 // Then from inside the container:
 // ls -l md-288820-big-Data.db
 // /opt/cassandra/tools/bin/sstabledump -l md-288820-big-Data.db | /tmp/sstable_data_content
+//
+// To export as CSV, from outside the container:
+// docker exec sstabletools sh -c '/opt/cassandra/tools/bin/sstabledump -l md-288820-big-Data.db | \
+// 		/tmp/sstable_data_content -csv' | gzip > POSSIBLY_BIG.csv.gz
 
 package main
 
 import (
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -48,8 +54,12 @@ import (
 
 func main() {
 	log.Logger = logger.NewTestLogger(false)
+	writeCSV := flag.Bool("csv", false, "output CSV with all values to stdout")
+	skipHeader := flag.Bool("no-header", false, "don't print CSV header")
 
-	err := run()
+	flag.Parse()
+
+	err := run(*writeCSV, !*skipHeader)
 	if err != nil {
 		log.Err(err).Msg("Failed to import data")
 	}
@@ -154,7 +164,7 @@ type sstableDumpRowCellDeletionInfo struct {
 	LocalDeleteTime string `json:"local_delete_time"`
 }
 
-func run() error {
+func run(writeCSV bool, writeHeader bool) error {
 	decoder := json.NewDecoder(os.Stdin)
 
 	var line sstableDumpLine
@@ -165,6 +175,22 @@ func run() error {
 	tombstonesCount := 0
 	pointsPoint := 0
 	uniqueMetric := make(map[int64]bool)
+
+	var writer *csv.Writer
+
+	if writeCSV {
+		writer = csv.NewWriter(os.Stdout)
+
+		if writeHeader {
+			if err := writer.Write([]string{
+				"metricID",
+				"timestamp",
+				"value",
+			}); err != nil {
+				return err
+			}
+		}
+	}
 
 	var (
 		minTS time.Time
@@ -234,6 +260,18 @@ func run() error {
 					}
 
 					pointsPoint++
+
+					if writer != nil {
+						ts, value := it.At()
+
+						if err := writer.Write([]string{
+							strconv.FormatInt(line.Partition.Key.MetricID, 10),
+							fmt.Sprintf("%.3f", float64(ts)/1000.),
+							fmt.Sprint(value),
+						}); err != nil {
+							return err
+						}
+					}
 				}
 
 				if err := xorChunkPool.Put(chunk); err != nil {
@@ -256,9 +294,15 @@ func run() error {
 		fmt.Sprintf("minTS=%s, maxTS=%s, delta=%v", minTS, maxTS, humainTime(maxTS.Sub(minTS))),
 	}
 
-	// We want to allow fmt.Printf
-	//nolint: forbidigo
-	fmt.Println(strings.Join(lines, "\n"))
+	fmt.Fprintln(os.Stderr, strings.Join(lines, "\n"))
+
+	if writer != nil {
+		writer.Flush()
+
+		if err := writer.Error(); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
