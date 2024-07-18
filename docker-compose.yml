@@ -13,7 +13,7 @@ services:
     labels:
       # Glouton is the monitoring agent made by Bleemeo.
       # On real setup of SquirrelDB, you probably want to monitor this component, but
-      # this docker-compose is a quick-start used to test and evaluate SquirrelDB, so
+      # this docker compose is a quick-start used to test and evaluate SquirrelDB, so
       # monitoring is disabled to avoid false notifications.
       glouton.enable: "false"
     volumes:

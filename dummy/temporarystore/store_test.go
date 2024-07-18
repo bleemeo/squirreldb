@@ -1195,9 +1195,8 @@ func TestStore_markToExpire(t *testing.T) {
 				metricsStore: tt.state,
 				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
-			if err := s.markToExpire(tt.args.ids, tt.args.ttl, tt.args.now); err != nil {
-				t.Errorf("Store.markToExpire() error = %v", err)
-			}
+
+			s.markToExpire(tt.args.ids, tt.args.ttl, tt.args.now)
 
 			if !reflect.DeepEqual(s.metricsStore, tt.wantState) {
 				t.Errorf("Store.markToExpire() metrics = %v, want %v", s.metricsStore, tt.wantState)
@@ -1441,14 +1440,11 @@ func TestStore_GetAllKnownMetrics(t *testing.T) {
 		t.Errorf("GetAllKnownMetrics() = %v, want %v", got, want)
 	}
 
-	err = store.markToExpire(
+	store.markToExpire(
 		[]types.MetricID{MetricIDTest1},
 		time.Minute,
 		time.Unix(10, 0),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	want = map[types.MetricID]time.Time{}
 

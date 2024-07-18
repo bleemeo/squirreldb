@@ -152,10 +152,12 @@ func (s *Store) MarkToExpire(_ context.Context, ids []types.MetricID, ttl time.D
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.markToExpire(ids, ttl, time.Now())
+	s.markToExpire(ids, ttl, time.Now())
+
+	return nil
 }
 
-func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.Time) error {
+func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.Time) {
 	for _, id := range ids {
 		if entry, found := s.metricsStore[id]; found {
 			entry.expirationTime = now.Add(ttl)
@@ -164,8 +166,6 @@ func (s *Store) markToExpire(ids []types.MetricID, ttl time.Duration, now time.T
 
 		delete(s.knownMetrics, id)
 	}
-
-	return nil
 }
 
 // GetSetFlushDeadline implement batch.TemporaryStore interface.
