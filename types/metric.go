@@ -63,6 +63,9 @@ func DeduplicatePoints(points []MetricPoint) []MetricPoint {
 
 	for i := 1; i < len(points); i++ {
 		if points[j].Timestamp == points[i].Timestamp {
+			// overwrite with most recent point
+			points[j] = points[i]
+
 			continue
 		}
 
@@ -81,11 +84,11 @@ func sortPoints(points []MetricPoint) {
 		return
 	}
 
-	sort.Slice(points, func(i, j int) bool {
+	sort.SliceStable(points, func(i, j int) bool {
 		// If timestamp are equal, ensure NaN value are after because we kept
 		// the first value in DeduplicatePoints
 		return points[i].Timestamp < points[j].Timestamp ||
-			(points[i].Timestamp == points[j].Timestamp && math.IsNaN(points[j].Value))
+			(points[i].Timestamp == points[j].Timestamp && math.IsNaN(points[i].Value))
 	})
 }
 
