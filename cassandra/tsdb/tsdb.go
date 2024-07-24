@@ -237,3 +237,13 @@ func aggregateDataTableCreate(ctx context.Context,
 
 	return query.Exec()
 }
+
+// InternalDecodePoints is an internal function to decode points.
+// You should not rely on this function and it might change without warning. Used for squirreldb_debig_tools.
+func InternalDecodePoints(buffer []byte) ([]types.MetricPoint, error) {
+	c := &CassandraTSDB{
+		xorChunkPool: chunkenc.NewPool(),
+	}
+
+	return c.decodePoints(buffer, nil)
+}
