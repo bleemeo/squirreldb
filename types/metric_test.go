@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/prometheus/model/value"
 )
 
-func TestDeduplicatePoints(t *testing.T) {
+func TestDeduplicatePoints(t *testing.T) { //nolint:maintidx
 	type args struct {
 		points []MetricPoint
 	}
@@ -296,6 +296,144 @@ func TestDeduplicatePoints(t *testing.T) {
 				{
 					Timestamp: 40000,
 					Value:     40,
+				},
+			},
+		},
+		{
+			name: "duplicated_preferred_latest_point",
+			args: args{
+				points: []MetricPoint{
+					{
+						Timestamp: 10000,
+						Value:     1,
+					},
+					{
+						Timestamp: 30000,
+						Value:     1,
+					},
+					{
+						Timestamp: 10000,
+						Value:     2,
+					},
+					{
+						Timestamp: 20000,
+						Value:     2,
+					},
+					{
+						Timestamp: 40000,
+						Value:     2,
+					},
+					{
+						Timestamp: 50000,
+						Value:     2,
+					},
+					{
+						Timestamp: 30000,
+						Value:     3,
+					},
+					{
+						Timestamp: 30000,
+						Value:     4,
+					},
+					{
+						Timestamp: 40000,
+						Value:     4,
+					},
+					{
+						Timestamp: 20000,
+						Value:     5,
+					},
+				},
+			},
+			want: []MetricPoint{
+				{
+					Timestamp: 10000,
+					Value:     2,
+				},
+				{
+					Timestamp: 20000,
+					Value:     5,
+				},
+				{
+					Timestamp: 30000,
+					Value:     4,
+				},
+				{
+					Timestamp: 40000,
+					Value:     4,
+				},
+				{
+					Timestamp: 50000,
+					Value:     2,
+				},
+			},
+		},
+		{
+			name: "duplicated_preferred_latest_point2",
+			args: args{
+				points: []MetricPoint{
+					{
+						Timestamp: 10000,
+						Value:     1,
+					},
+					{
+						Timestamp: 20000,
+						Value:     2,
+					},
+					{
+						Timestamp: 30000,
+						Value:     3,
+					},
+					{
+						Timestamp: 40000,
+						Value:     4,
+					},
+					{
+						Timestamp: 20000,
+						Value:     5,
+					},
+					{
+						Timestamp: 30000,
+						Value:     6,
+					},
+					{
+						Timestamp: 40000,
+						Value:     7,
+					},
+					{
+						Timestamp: 50000,
+						Value:     8,
+					},
+					{
+						Timestamp: 40000,
+						Value:     9,
+					},
+					{
+						Timestamp: 50000,
+						Value:     10,
+					},
+				},
+			},
+			want: []MetricPoint{
+				{
+					Timestamp: 10000,
+					Value:     1,
+				},
+				{
+					Timestamp: 20000,
+					Value:     5,
+				},
+				{
+					Timestamp: 30000,
+					Value:     6,
+				},
+				{
+					Timestamp: 40000,
+					Value:     9,
+				},
+				{
+					Timestamp: 50000,
+					Value:     10,
 				},
 			},
 		},
