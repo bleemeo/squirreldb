@@ -79,5 +79,6 @@ func DefaultConfig() Config {
 			UseThanosPromQLEngine: false,
 			DisablePreAggregation: false,
 		},
+		MaxRequestBodySize: 64, // MiB
 	}
 }

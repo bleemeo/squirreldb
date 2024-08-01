@@ -16,6 +16,8 @@ type Config struct {
 	Sentry              Sentry        `yaml:"sentry"`
 	Internal            Internal      `yaml:"internal"`
 	Telemetry           Telemetry     `yaml:"telemetry"`
+	// MaxRequestBodySize defines the maximum size of incoming requests body in MiB.
+	MaxRequestBodySize int64 `yaml:"max_request_body_size"`
 }
 
 type Internal struct {

@@ -58,11 +58,13 @@ type API struct {
 	FlushCallback               func() error
 	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
 	MaxConcurrentRemoteRequests int
-	PromQLMaxEvaluatedPoints    uint64
-	MetricRegistry              prometheus.Registerer
-	PromQLMaxEvaluatedSeries    uint32
-	TenantLabelName             string
-	MutableLabelDetector        remotestorage.MutableLabelDetector
+	// MaxRequestBodySizeBytes defines the maximum size of incoming requests body.
+	MaxRequestBodySizeBytes  int64
+	PromQLMaxEvaluatedPoints uint64
+	MetricRegistry           prometheus.Registerer
+	PromQLMaxEvaluatedSeries uint32
+	TenantLabelName          string
+	MutableLabelDetector     remotestorage.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
 	RequireTenantHeader   bool
@@ -239,6 +241,8 @@ func (a *API) init() {
 		operation := strings.Trim(handlerName, "/")
 
 		h := func(rw http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(rw, r.Body, a.MaxRequestBodySizeBytes)
+
 			a.l.Lock()
 
 			if a.defaultDebugRequest {
