@@ -36,6 +36,7 @@ var (
 	errNoOutputFileProvided   = errors.New("no output file provided")
 	errNoStartTimeProvided    = errors.New("no start time provided")
 	errNoEndTimeProvided      = errors.New("no end time provided")
+	errStartAfterEnd          = errors.New("start time can't be after end time")
 	errNoLabelPairsProvided   = errors.New("no label pairs provided")
 	errInvalidLabelPairFormat = errors.New("invalid format")
 )
@@ -61,8 +62,8 @@ func parseOptions(args []string) (options, error) {
 	flags.SortFlags = false
 	flags.Usage = func() {
 		log.Info().Msgf("Usage:")
-		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> --start=<time> --end=<time> --labels=<k=v pairs> [--write-url=<url>]")     //nolint:lll
-		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --start=<time> --end=<time> --labels=<k=v pairs> [--read-url=<url>]") //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--labels=<k=v pairs>] [--write-url=<url>]") //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --start=<time> --end=<time> --labels=<k=v pairs> [--read-url=<url>]")   //nolint:lll
 		fmt.Fprintln(os.Stderr, flags.FlagUsages())
 	}
 
@@ -118,6 +119,10 @@ func parseOptions(args []string) (options, error) {
 			return options{}, errNoOutputFileProvided
 		}
 
+		if !strings.Contains(labelPairs, "=") {
+			return options{}, errNoLabelPairsProvided
+		}
+
 		opts.operation = opExport
 	default:
 		return options{}, fmt.Errorf("%w: %s", errInvalidOperation, flags.Arg(0))
@@ -128,36 +133,46 @@ func parseOptions(args []string) (options, error) {
 	}
 
 	if start == "" {
-		return options{}, errNoStartTimeProvided
-	}
-
-	opts.start, err = time.Parse(time.RFC3339, start)
-	if err != nil {
-		return options{}, fmt.Errorf("parsing start time: %w", err)
+		if opts.operation == opImport {
+			opts.start = time.Unix(0, 0)
+		} else { // opExport
+			return options{}, errNoStartTimeProvided
+		}
+	} else {
+		opts.start, err = time.Parse(time.RFC3339, start)
+		if err != nil {
+			return options{}, fmt.Errorf("parsing start time: %w", err)
+		}
 	}
 
 	if end == "" {
-		return options{}, errNoEndTimeProvided
+		if opts.operation == opImport {
+			opts.end = time.Unix(0, 0)
+		} else { // opExport
+			return options{}, errNoEndTimeProvided
+		}
+	} else {
+		opts.end, err = time.Parse(time.RFC3339, end)
+		if err != nil {
+			return options{}, fmt.Errorf("parsing end time: %w", err)
+		}
 	}
 
-	opts.end, err = time.Parse(time.RFC3339, end)
-	if err != nil {
-		return options{}, fmt.Errorf("parsing end time: %w", err)
-	}
-
-	if !strings.Contains(labelPairs, "=") {
-		return options{}, errNoLabelPairsProvided
+	if !opts.end.IsZero() && opts.start.After(opts.end) {
+		return options{}, errStartAfterEnd
 	}
 
 	opts.labelPairs = make(map[string]string)
 
-	for _, pair := range strings.Split(labelPairs, ",") {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
-			return options{}, fmt.Errorf("parsing label pair %q: %w", pair, errInvalidLabelPairFormat)
-		}
+	if labelPairs != "" {
+		for _, pair := range strings.Split(labelPairs, ",") {
+			kv := strings.SplitN(pair, "=", 2)
+			if len(kv) != 2 {
+				return options{}, fmt.Errorf("parsing label pair %q: %w", pair, errInvalidLabelPairFormat)
+			}
 
-		opts.labelPairs[kv[0]] = kv[1]
+			opts.labelPairs[kv[0]] = kv[1]
+		}
 	}
 
 	return opts, nil

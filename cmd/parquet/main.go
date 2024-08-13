@@ -16,7 +16,10 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/bleemeo/squirreldb/logger"
 
@@ -29,6 +32,10 @@ const (
 	opImport operationType = "import"
 	opExport operationType = "export"
 )
+
+const parallelWorkers = 8
+
+var errNoSeriesFound = errors.New("no series found")
 
 func main() {
 	log.Logger = logger.NewTestLogger(false)
@@ -50,11 +57,14 @@ func main() {
 	}
 }
 
-// nolint: unparam,lll,nolintlint
-func importData(opts options) error {
-	log.Info().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).Msg("Import options")
+// formatTimeRange acts like time.Duration.String(), but also display days.
+func formatTimeRange(start, end time.Time) string {
+	d := end.Sub(start)
 
-	// TODO
+	days := d / (24 * time.Hour)
+	if days > 0 {
+		return fmt.Sprintf("%dd%s", days, d%(days*24*time.Hour)) //nolint: durationcheck
+	}
 
-	return nil
+	return d.Round(time.Second).String()
 }

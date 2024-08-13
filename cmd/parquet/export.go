@@ -17,7 +17,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -42,17 +41,16 @@ import (
 	"google.golang.org/protobuf/protoadapt"
 )
 
-const parallelWorkers = 1
-
-var errNoSeriesFound = errors.New("no series found")
-
 func exportData(opts options) error {
-	log.Info().Str("tenant", opts.tenantHeader).Stringer("read-url", opts.readURL).Str("output-file", opts.outputFile).Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).Msg("Export options") //nolint:lll
+	log.Debug().Str("tenant", opts.tenantHeader).Stringer("read-url", opts.readURL).Str("output-file", opts.outputFile).
+		Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).Msg("Export options")
 
 	var m1, m2 runtime.MemStats
 
-	runtime.GC()
+	runtime.GC() // TODO: remove
 	runtime.ReadMemStats(&m1)
+
+	tRead := time.Now()
 
 	series, err := fetchSeries(opts)
 	if err != nil {
@@ -63,7 +61,7 @@ func exportData(opts options) error {
 		return errNoSeriesFound
 	}
 
-	t0 := time.Now()
+	tWrite := time.Now()
 
 	err = writeToParquet(opts.outputFile, series)
 	if err != nil {
@@ -74,15 +72,18 @@ func exportData(opts options) error {
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Wrote %d serie(s) across %s to parquet in %s",
+		"Exported %d serie(s) across a time range of %s to parquet in %s (fetch: %s, write: %s)",
 		len(series),
 		formatTimeRange(opts.start, opts.end),
-		time.Since(t0).String(),
+		time.Since(tRead).Round(100*time.Millisecond).String(),
+		tWrite.Sub(tRead).Round(time.Millisecond).String(),
+		time.Since(tWrite).Round(time.Millisecond).String(),
 	)
 
 	return nil
 }
 
+// fetchSeries retrieves the metric series matching the given options from a SquirrelDB.
 func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 	query := &prompb.Query{
 		StartTimestampMs: opts.start.UnixMilli(),
@@ -105,7 +106,7 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 
 	serializedRequest, err := readRequest.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("serialize request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	compressedBody := snappy.Encode(nil, serializedRequest)
@@ -116,6 +117,7 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
+	req.Header.Set("Content-Encoding", "snappy")
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
 	req.Header.Set("X-SquirrelDB-Max-Evaluated-Points", "0") //nolint:canonicalheader
@@ -156,6 +158,8 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 	return results[0].GetTimeseries(), nil
 }
 
+// writeToParquet dumps the given metric series to the specified output.
+// (outputFile="-" means stdout).
 func writeToParquet(outputFile string, series []*prompb.TimeSeries) error {
 	fw, err := makeParquetFile(outputFile)
 	if err != nil {
@@ -216,6 +220,7 @@ func writeTimeSeries(pw *writer.ParquetWriter, series []*prompb.TimeSeries) erro
 	for _, ts := range tss {
 		tsDay := ts / dayMs
 		if tsDay != currentDay {
+			// Flushing at the end of each day, to create one row-group per day.
 			err := pw.Flush(true)
 			if err != nil {
 				return fmt.Errorf("flushing writer: %w", err)
@@ -246,6 +251,18 @@ func writeTimeSeries(pw *writer.ParquetWriter, series []*prompb.TimeSeries) erro
 		}
 	}
 
+	varNameToLabels := make([]*parquet.KeyValue, len(metricColNames))
+
+	for col, name := range metricColNames {
+		labels := labelsToText(series[col].GetLabels())
+		varNameToLabels[col] = &parquet.KeyValue{
+			Key:   name,
+			Value: &labels,
+		}
+	}
+
+	pw.Footer.KeyValueMetadata = varNameToLabels
+
 	return nil
 }
 
@@ -257,9 +274,10 @@ func makeParquetFile(file string) (source.ParquetFile, error) {
 	return local.NewLocalFileWriter(file)
 }
 
+// generateParquetSchema drafts schema elements according to the given metric series.
 func generateParquetSchema(series []*prompb.TimeSeries) []*parquet.SchemaElement {
-	totalColumns := int32(1 + len(series))
-	elems := make([]*parquet.SchemaElement, 1+totalColumns)
+	totalColumns := int32(1 + len(series))                  // +1 for the timestamps column
+	elems := make([]*parquet.SchemaElement, 1+totalColumns) // +1 for the schema root
 	elems[0] = &parquet.SchemaElement{
 		Name:           "root",
 		NumChildren:    &totalColumns,
@@ -269,15 +287,17 @@ func generateParquetSchema(series []*prompb.TimeSeries) []*parquet.SchemaElement
 		Name:           "timestamp",
 		Type:           parquet.TypePtr(parquet.Type_INT64),
 		RepetitionType: parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED),
+		ConvertedType:  parquet.ConvertedTypePtr(parquet.ConvertedType_TIMESTAMP_MILLIS),
 	}
 
 	for i, col := range series {
 		elem := parquet.NewSchemaElement()
 		elem.Name = labelsToText(col.GetLabels())
 		elem.Type = parquet.TypePtr(parquet.Type_DOUBLE)
+		// Values for all timestamps are required; metrics that don't have one will get a NaN instead.
 		elem.RepetitionType = parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED)
 
-		elems[2+i] = elem
+		elems[2+i] = elem // +2 for schema root & timestamps col
 	}
 
 	return elems
@@ -307,15 +327,4 @@ func labelsToText(labels []prompb.Label) string {
 	}
 
 	return strings.Join(strLabels, ",")
-}
-
-func formatTimeRange(start, end time.Time) string {
-	d := end.Sub(start)
-
-	days := d / (24 * time.Hour)
-	if days > 0 {
-		return fmt.Sprintf("%dd%s", days, d%(days*24*time.Hour)) //nolint: durationcheck
-	}
-
-	return d.String()
 }
