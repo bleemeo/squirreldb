@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
@@ -56,7 +57,7 @@ type API struct {
 	Writer                      types.MetricWriter
 	MutableLabelWriter          MutableLabelInterface
 	FlushCallback               func() error
-	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time) error
+	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time, matchers []*labels.Matcher) error
 	MaxConcurrentRemoteRequests int
 	PromQLMaxEvaluatedPoints    uint64
 	MetricRegistry              prometheus.Registerer
@@ -837,6 +838,7 @@ func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, _ *http.Request) {
 func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	fromRaw := req.URL.Query().Get("from")
 	toRaw := req.URL.Query().Get("to")
+	labelsRaw := req.URL.Query().Get("labels")
 	threadRaw := req.URL.Query().Get("thread")
 	ctx := req.Context()
 
@@ -852,6 +854,24 @@ func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
+	}
+
+	var matchers []*labels.Matcher
+
+	if labelsRaw != "" {
+		labelPairs := strings.Split(labelsRaw, ",")
+		matchers = make([]*labels.Matcher, len(labelPairs))
+
+		for i, labelPair := range labelPairs {
+			kv := strings.SplitN(labelPair, "=", 2)
+			if len(kv) != 2 {
+				http.Error(w, fmt.Sprintf("Invalid label pair %q", labelPair), http.StatusBadRequest)
+
+				return
+			}
+
+			matchers[i] = labels.MustNewMatcher(labels.MatchEqual, kv[0], kv[1]) // Can't fail with labels.MatchEqual
+		}
 	}
 
 	thread := 1
@@ -881,7 +901,7 @@ func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if a.PreAggregateCallback != nil {
-		err := a.PreAggregateCallback(ctx, thread, from, to)
+		err := a.PreAggregateCallback(ctx, thread, from, to, matchers)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
 

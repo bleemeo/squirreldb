@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/xitongsys/parquet-go/parquet"
 )
@@ -32,8 +34,9 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		input          []*parquet.KeyValue
-		expectedOutput map[string][]prompb.Label
+		input            []*parquet.KeyValue
+		expectedLabels   map[string][]prompb.Label
+		expectedMatchers map[string][]*labels.Matcher
 	}{
 		{
 			input: []*parquet.KeyValue{
@@ -42,9 +45,18 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 					Value: ptr(`label="value"`),
 				},
 			},
-			expectedOutput: map[string][]prompb.Label{
+			expectedLabels: map[string][]prompb.Label{
 				"parquet_key": {
 					{
+						Name:  "label",
+						Value: "value",
+					},
+				},
+			},
+			expectedMatchers: map[string][]*labels.Matcher{
+				"parquet_key": {
+					&labels.Matcher{
+						Type:  labels.MatchEqual,
 						Name:  "label",
 						Value: "value",
 					},
@@ -62,7 +74,7 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 					Value: ptr(`__name__="container_cpu_used",item="redis"`),
 				},
 			},
-			expectedOutput: map[string][]prompb.Label{
+			expectedLabels: map[string][]prompb.Label{
 				"PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34": {
 					{
 						Name:  "__name__",
@@ -84,6 +96,32 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 					},
 				},
 			},
+			expectedMatchers: map[string][]*labels.Matcher{
+				"PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34": {
+					&labels.Matcher{
+						Type:  labels.MatchEqual,
+						Name:  "__name__",
+						Value: "container_cpu_used",
+					},
+					&labels.Matcher{
+						Type:  labels.MatchEqual,
+						Name:  "item",
+						Value: "cassandra",
+					},
+				},
+				"PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34": {
+					&labels.Matcher{
+						Type:  labels.MatchEqual,
+						Name:  "__name__",
+						Value: "container_cpu_used",
+					},
+					&labels.Matcher{
+						Type:  labels.MatchEqual,
+						Name:  "item",
+						Value: "redis",
+					},
+				},
+			},
 		},
 	}
 
@@ -91,9 +129,13 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			t.Parallel()
 
-			output, _ := getLabelsFromMetadata(tc.input) // TODO: verify blacklist
-			if diff := cmp.Diff(tc.expectedOutput, output); diff != "" {
-				t.Fatalf("Unexpected result:\n%s", diff)
+			lbls, matchers := getLabelsFromMetadata(tc.input)
+			if diff := cmp.Diff(tc.expectedLabels, lbls); diff != "" {
+				t.Errorf("Unexpected labels:\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tc.expectedMatchers, matchers, cmpopts.IgnoreFields(labels.Matcher{}, "re")); diff != "" {
+				t.Errorf("Unexpected matchers:\n%s", diff)
 			}
 		})
 	}
@@ -101,9 +143,10 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 
 func TestDecodeRow(t *testing.T) {
 	cases := []struct {
-		row            any
-		expectedTS     int64
-		expectedValues map[string]float64
+		row                any
+		blacklistedColumns map[string]bool
+		expectedTS         int64
+		expectedValues     map[string]float64
 	}{
 		{
 			row: struct {
@@ -134,19 +177,36 @@ func TestDecodeRow(t *testing.T) {
 				"PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34":     12.72315815942222,
 			},
 		},
+		{
+			row: struct {
+				timestamp      int64
+				colOne, colTwo float64
+			}{
+				timestamp: 1723563670000,
+				colOne:    1.1,
+				colTwo:    2.2,
+			},
+			blacklistedColumns: map[string]bool{
+				"colOne": true,
+			},
+			expectedTS: 1723563670000,
+			expectedValues: map[string]float64{
+				"colTwo": 2.2,
+			},
+		},
 	}
 
 	for i, tc := range cases {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			t.Parallel()
 
-			ts, values := decodeRow(tc.row, map[string]bool{}) // TODO: provide a blacklist
+			ts, values := decodeRow(tc.row, tc.blacklistedColumns)
 			if ts != tc.expectedTS {
 				t.Errorf("Expected ts %d, got %d", tc.expectedTS, ts)
 			}
 
 			if diff := cmp.Diff(tc.expectedValues, values); diff != "" {
-				t.Errorf("Unexpected result:\n%s", diff)
+				t.Errorf("Unexpected values:\n%s", diff)
 			}
 		})
 	}

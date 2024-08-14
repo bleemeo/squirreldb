@@ -45,6 +45,7 @@ type options struct {
 	operation             operationType
 	tenantHeader          string
 	writeURL, readURL     *url.URL
+	preAggregURL          *url.URL
 	inputFile, outputFile string
 	start, end            time.Time
 	labelPairs            map[string]string
@@ -54,6 +55,7 @@ func parseOptions(args []string) (options, error) {
 	var (
 		opts              options
 		writeURL, readURL string
+		preAggregURL      string // TODO: use another endpoint than http://localhost:9201/debug/preaggregate ?
 		start, end        string
 		labelPairs        string
 	)
@@ -62,14 +64,15 @@ func parseOptions(args []string) (options, error) {
 	flags.SortFlags = false
 	flags.Usage = func() {
 		log.Info().Msgf("Usage:")
-		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--labels=<k=v pairs>] [--write-url=<url>]") //nolint:lll
-		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --start=<time> --end=<time> --labels=<k=v pairs> [--read-url=<url>]")   //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--labels=<k=v pairs>] [--write-url=<url>] [--pre-aggreg-url=<url>]") //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --start=<time> --end=<time> --labels=<k=v pairs> [--read-url=<url>]")                            //nolint:lll
 		fmt.Fprintln(os.Stderr, flags.FlagUsages())
 	}
 
 	flags.StringVar(&opts.tenantHeader, "tenant", "", "SquirrelDB tenant header")
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
+	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (will only be triggered if specified)") //nolint:lll
 	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
 	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file (can be '-' for stdout)")
 	flags.StringVar(&start, "start", "", "Start time")
@@ -98,6 +101,13 @@ func parseOptions(args []string) (options, error) {
 
 		if !opts.writeURL.IsAbs() {
 			return options{}, fmt.Errorf("write URL %w", errIsNotAbsolute)
+		}
+
+		if preAggregURL != "" {
+			opts.preAggregURL, err = url.Parse(preAggregURL)
+			if err != nil {
+				return options{}, fmt.Errorf("invalid pre-aggregation URL: %w", err)
+			}
 		}
 
 		if opts.inputFile == "" {

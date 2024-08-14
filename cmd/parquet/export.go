@@ -75,7 +75,7 @@ func exportData(opts options) error {
 		"Exported %d serie(s) across a time range of %s to parquet in %s (fetch: %s, write: %s)",
 		len(series),
 		formatTimeRange(opts.start, opts.end),
-		time.Since(tRead).Round(100*time.Millisecond).String(),
+		time.Since(tRead).Round(time.Millisecond).String(),
 		tWrite.Sub(tRead).Round(time.Millisecond).String(),
 		time.Since(tWrite).Round(time.Millisecond).String(),
 	)

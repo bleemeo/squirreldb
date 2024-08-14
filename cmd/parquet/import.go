@@ -23,8 +23,10 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"reflect"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/golang/snappy"
@@ -44,7 +46,8 @@ var errCantSeekTimestamp = errors.New("can't seek timestamp")
 
 func importData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).
-		Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).Msg("Import options")
+		Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).
+		Any("pre-aggreg-url", opts.preAggregURL).Msg("Import options")
 
 	var m1, m2 runtime.MemStats
 
@@ -53,7 +56,7 @@ func importData(opts options) error {
 
 	tRead := time.Now()
 
-	series, firstTS, lastTS, err := readSeries(opts)
+	series, firstTS, lastTS, importedSeries, err := readSeries(opts)
 	if err != nil {
 		return fmt.Errorf("reading series: %w", err)
 	}
@@ -69,16 +72,30 @@ func importData(opts options) error {
 		return fmt.Errorf("remotly writing series: %w", err)
 	}
 
+	var aggregStr string
+
+	if opts.preAggregURL != nil {
+		tAggreg := time.Now()
+
+		err = triggerPreAggregation(opts.preAggregURL.String(), opts.tenantHeader, firstTS, lastTS, importedSeries)
+		if err != nil {
+			return fmt.Errorf("triggering pre-aggregation: %w", err)
+		}
+
+		aggregStr = ", aggreg: " + time.Since(tAggreg).Round(time.Millisecond).String()
+	}
+
 	runtime.ReadMemStats(&m2) // TODO: remove
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Imported %d serie(s) across a time range of %s from parquet in %s (read: %s, write: %s)",
+		"Imported %d serie(s) across a time range of %s from parquet in %s (read: %s, write: %s%s)",
 		len(series),
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
-		time.Since(tRead).Round(100*time.Millisecond).String(),
+		time.Since(tRead).Round(time.Millisecond).String(),
 		tWrite.Sub(tRead).Round(time.Millisecond).String(),
 		time.Since(tWrite).Round(time.Millisecond).String(),
+		aggregStr,
 	)
 
 	return nil
@@ -86,10 +103,15 @@ func importData(opts options) error {
 
 // readSeries loads the metric series from the specified parquet file.
 // It returns the series, the first and last timestamps seen, or any error.
-func readSeries(opts options) (series []prompb.TimeSeries, firstTS, lastTS int64, err error) {
+func readSeries(opts options) (
+	series []prompb.TimeSeries,
+	firstTS, lastTS int64,
+	importedSeries []map[string]string,
+	err error,
+) {
 	fr, err := local.NewLocalFileReader(opts.inputFile)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("open input file: %w", err)
+		return nil, 0, 0, nil, fmt.Errorf("open input file: %w", err)
 	}
 
 	defer func() {
@@ -101,20 +123,20 @@ func readSeries(opts options) (series []prompb.TimeSeries, firstTS, lastTS int64
 
 	pr, err := reader.NewParquetReader(fr, nil, parallelWorkers)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
+		return nil, 0, 0, nil, fmt.Errorf("can't initialize parquet reader: %w", err)
 	}
 
 	defer pr.ReadStop()
 
 	labelsPerColName, matchersPerColName := getLabelsFromMetadata(pr.Footer.KeyValueMetadata)
-	blacklistedColumns := makeLabelsBlacklist(matchersPerColName, opts.labelPairs)
+	blacklistedColumns, importedSeries := filterLabels(matchersPerColName, opts.labelPairs)
 	seriesByLabels := make(map[string]prompb.TimeSeries, len(labelsPerColName))
 
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
 	if startTS != 0 {
 		err = seekToTimestamp(pr, startTS)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 	}
 
@@ -122,7 +144,7 @@ READ:
 	for {
 		rows, err := pr.ReadByNumber(readBatchSize)
 		if err != nil {
-			return nil, 0, 0, fmt.Errorf("can't read rows: %w", err)
+			return nil, 0, 0, nil, fmt.Errorf("can't read rows: %w", err)
 		}
 
 		if len(rows) == 0 {
@@ -157,7 +179,7 @@ READ:
 		}
 	}
 
-	return maps.Values(seriesByLabels), firstTS, lastTS, nil
+	return maps.Values(seriesByLabels), firstTS, lastTS, importedSeries, nil
 }
 
 // remoteWriteSeries sends the given metric series to the specified SquirrelDB.
@@ -195,6 +217,50 @@ func remoteWriteSeries(series []prompb.TimeSeries, opts options) error {
 		content, _ := io.ReadAll(resp.Body)
 
 		return fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, content)
+	}
+
+	return nil
+}
+
+// triggerPreAggregation will send a pre-aggregation request to SquirrelDB for each given series.
+func triggerPreAggregation(preAggregURL, tenant string, from, to int64, importedSeries []map[string]string) error {
+	for _, importedLabels := range importedSeries {
+		preAggURL, _ := url.Parse(preAggregURL)
+		q := preAggURL.Query()
+
+		q.Set("from", time.UnixMilli(from).Format("2006-01-02"))
+		q.Set("to", time.UnixMilli(to).Format("2006-01-02"))
+
+		lbls := make([]string, 0, len(importedLabels))
+
+		for label, value := range importedLabels {
+			lbls = append(lbls, label+"="+value)
+		}
+
+		q.Set("labels", strings.Join(lbls, ","))
+
+		preAggURL.RawQuery = q.Encode()
+
+		req, err := http.NewRequest(http.MethodGet, preAggURL.String(), nil) //nolint: noctx
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+
+		req.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("send request: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			content, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+
+			return fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, content)
+		}
+
+		_ = resp.Body.Close()
 	}
 
 	return nil
@@ -249,27 +315,36 @@ func getLabelsFromMetadata(keyValues []*parquet.KeyValue) (map[string][]prompb.L
 	return prompbLabels, labelsMatchers
 }
 
-func makeLabelsBlacklist(matchersPerColName map[string][]*labels.Matcher, labels map[string]string) map[string]bool {
-	if len(labels) == 0 {
-		return map[string]bool{}
-	}
-
-	blacklist := make(map[string]bool)
+// filterLabels generates two collections:
+// - blacklistedColumns: a map of parquet columns that don't match the given labels
+// - importedSeries: a list of label pairs representing all the metric series that will be imported.
+func filterLabels(
+	matchersPerColName map[string][]*labels.Matcher,
+	labels map[string]string,
+) (blacklistedColumns map[string]bool, importedSeries []map[string]string) {
+	blacklistedColumns = make(map[string]bool)
+	importedSeries = make([]map[string]string, 0, len(matchersPerColName))
 
 COLUMNS:
 	for col, matchers := range matchersPerColName {
+		importedLabels := make(map[string]string)
+
 		for _, matcher := range matchers {
 			if value, found := labels[matcher.Name]; found {
 				if !matcher.Matches(value) {
-					blacklist[col] = true
+					blacklistedColumns[col] = true
 
 					continue COLUMNS
 				}
 			}
+
+			importedLabels[matcher.Name] = matcher.Value
 		}
+
+		importedSeries = append(importedSeries, importedLabels)
 	}
 
-	return blacklist
+	return blacklistedColumns, importedSeries
 }
 
 // decodeRow extract the timestamp and metric values from the given struct.
