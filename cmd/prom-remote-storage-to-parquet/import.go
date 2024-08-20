@@ -46,8 +46,8 @@ var errCantSeekTimestamp = errors.New("can't seek timestamp")
 
 func importData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).
-		Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).
-		Any("pre-aggreg-url", opts.preAggregURL).Msg("Import options")
+		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).
+		Any("pre-aggreg-url", opts.preAggregURL.String()).Msg("Import options")
 
 	var m1, m2 runtime.MemStats
 
@@ -69,7 +69,7 @@ func importData(opts options) error {
 
 	err = remoteWriteSeries(series, opts)
 	if err != nil {
-		return fmt.Errorf("remotly writing series: %w", err)
+		return fmt.Errorf("remotely writing series: %w", err)
 	}
 
 	var aggregStr string
@@ -101,7 +101,7 @@ func importData(opts options) error {
 	return nil
 }
 
-// readSeries loads the metric series from the specified prom-remote-storage-to-parquet file.
+// readSeries loads the metric series from the specified parquet file.
 // It returns the series, the first and last timestamps seen, or any error.
 func readSeries(opts options) (
 	series []prompb.TimeSeries,
@@ -129,7 +129,7 @@ func readSeries(opts options) (
 	defer pr.ReadStop()
 
 	labelsPerColName, matchersPerColName := getLabelsFromMetadata(pr.Footer.KeyValueMetadata)
-	blacklistedColumns, importedSeries := filterLabels(matchersPerColName, opts.labelPairs)
+	blacklistedColumns, importedSeries := filterLabels(matchersPerColName, opts.labelMatchers)
 	seriesByLabels := make(map[string]prompb.TimeSeries, len(labelsPerColName))
 
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
@@ -204,7 +204,10 @@ func remoteWriteSeries(series []prompb.TimeSeries, opts options) error {
 	req.Header.Set("Content-Encoding", "snappy")
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("X-Prometheus-Remote-Write-Version", "2.0.0")
-	req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
+
+	if opts.tenantHeader != "" {
+		req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -246,7 +249,9 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 			return fmt.Errorf("create request: %w", err)
 		}
 
-		req.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
+		if tenant != "" {
+			req.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
+		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -267,7 +272,7 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 }
 
 // seekToTimestamp positions the reader cursor to the day containing the specified timestamp,
-// or returns an error if the timestamp couldn't be found in the prom-remote-storage-to-parquet file.
+// or returns an error if the timestamp couldn't be found in the parquet file.
 func seekToTimestamp(pr *reader.ParquetReader, targetTimestamp int64) error {
 	var rowsToSkip int64
 
@@ -292,7 +297,7 @@ func seekToTimestamp(pr *reader.ParquetReader, targetTimestamp int64) error {
 
 func getLabelsFromMetadata(keyValues []*parquet.KeyValue) (map[string][]prompb.Label, map[string][]*labels.Matcher) {
 	prompbLabels := make(map[string][]prompb.Label, len(keyValues))
-	labelsMatchers := make(map[string][]*labels.Matcher)
+	matchersPerColName := make(map[string][]*labels.Matcher)
 
 	for _, kv := range keyValues {
 		matchers, err := parser.ParseMetricSelector("{" + *kv.Value + "}")
@@ -309,39 +314,43 @@ func getLabelsFromMetadata(keyValues []*parquet.KeyValue) (map[string][]prompb.L
 		}
 
 		prompbLabels[kv.Key] = prompbLbls
-		labelsMatchers[kv.Key] = matchers
+		matchersPerColName[kv.Key] = matchers
 	}
 
-	return prompbLabels, labelsMatchers
+	return prompbLabels, matchersPerColName
 }
 
 // filterLabels generates two collections:
-// - blacklistedColumns: a map of prom-remote-storage-to-parquet columns that don't match the given labels
+// - blacklistedColumns: a map of parquet columns that don't match the given labels
 // - importedSeries: a list of label pairs representing all the metric series that will be imported.
 func filterLabels(
-	matchersPerColName map[string][]*labels.Matcher,
-	labels map[string]string,
+	metricPerColName map[string][]*labels.Matcher,
+	labelsMatchers []*labels.Matcher,
 ) (blacklistedColumns map[string]bool, importedSeries []map[string]string) {
 	blacklistedColumns = make(map[string]bool)
-	importedSeries = make([]map[string]string, 0, len(matchersPerColName))
+	importedSeries = make([]map[string]string, 0, len(metricPerColName))
 
 COLUMNS:
-	for col, matchers := range matchersPerColName {
-		importedLabels := make(map[string]string)
+	for col, metricMatchers := range metricPerColName {
+		for _, givenMatcher := range labelsMatchers {
+			for _, metricMatcher := range metricMatchers {
+				if givenMatcher.Name == metricMatcher.Name {
+					if !givenMatcher.Matches(metricMatcher.Value) {
+						blacklistedColumns[col] = true
 
-		for _, matcher := range matchers {
-			if value, found := labels[matcher.Name]; found {
-				if !matcher.Matches(value) {
-					blacklistedColumns[col] = true
-
-					continue COLUMNS
+						continue COLUMNS
+					}
 				}
 			}
-
-			importedLabels[matcher.Name] = matcher.Value
 		}
 
-		importedSeries = append(importedSeries, importedLabels)
+		labelsMap := make(map[string]string, len(metricMatchers))
+
+		for _, label := range metricMatchers {
+			labelsMap[label.Name] = label.Value
+		}
+
+		importedSeries = append(importedSeries, labelsMap)
 	}
 
 	return blacklistedColumns, importedSeries

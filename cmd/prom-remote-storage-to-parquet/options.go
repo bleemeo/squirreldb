@@ -23,22 +23,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 )
 
 var (
-	errInvalidPosArgs         = errors.New("expected exactly one positional argument <import | export>")
-	errInvalidOperation       = errors.New("invalid operation")
-	errNoTenantHeaderProvided = errors.New("no tenant header provided")
-	errIsNotAbsolute          = errors.New("is not absolute")
-	errNoInputFileProvided    = errors.New("no input file provided")
-	errNoOutputFileProvided   = errors.New("no output file provided")
-	errNoStartTimeProvided    = errors.New("no start time provided")
-	errNoEndTimeProvided      = errors.New("no end time provided")
-	errStartAfterEnd          = errors.New("start time can't be after end time")
-	errNoLabelPairsProvided   = errors.New("no label pairs provided")
-	errInvalidLabelPairFormat = errors.New("invalid format")
+	errInvalidPosArgs        = errors.New("expected exactly one positional argument <import | export>")
+	errInvalidOperation      = errors.New("invalid operation")
+	errIsNotAbsolute         = errors.New("is not absolute")
+	errNoInputFileProvided   = errors.New("no input file provided")
+	errNoOutputFileProvided  = errors.New("no output file provided")
+	errNoStartTimeProvided   = errors.New("no start time provided")
+	errNoEndTimeProvided     = errors.New("no end time provided")
+	errStartAfterEnd         = errors.New("start time can't be after end time")
+	errInvalidMetricSelector = errors.New("invalid metric selector")
 )
 
 type options struct {
@@ -48,36 +48,38 @@ type options struct {
 	preAggregURL          *url.URL
 	inputFile, outputFile string
 	start, end            time.Time
-	labelPairs            map[string]string
+	labelMatchers         []*labels.Matcher
 }
 
 func parseOptions(args []string) (options, error) {
 	var (
 		opts              options
 		writeURL, readURL string
-		preAggregURL      string // TODO: use another endpoint than http://localhost:9201/debug/preaggregate ?
+		preAggregURL      string
 		start, end        string
-		labelPairs        string
+		metricSelector    string
 	)
 
 	flags := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 	flags.SortFlags = false
 	flags.Usage = func() {
 		log.Info().Msgf("Usage:")
-		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--labels=<k=v pairs>] [--write-url=<url>] [--pre-aggreg-url=<url>]") //nolint:lll
-		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --start=<time> --end=<time> --labels=<k=v pairs> [--read-url=<url>]")                            //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--metric-selector=<k=v pairs>] [--write-url=<url>] [--tenant=<tenant>] [--pre-aggreg-url=<url>]") //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --metric-selector=<promql selector> [--start=<time>] [--end=<time>] [--read-url=<url>] [--tenant=<tenant>]")                  //nolint:lll
 		fmt.Fprintln(os.Stderr, flags.FlagUsages())
 	}
+
+	now := time.Now().Truncate(time.Second)
 
 	flags.StringVar(&opts.tenantHeader, "tenant", "", "SquirrelDB tenant header")
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
-	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (will only be triggered if specified)") //nolint:lll
+	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll
 	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
 	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file (can be '-' for stdout)")
-	flags.StringVar(&start, "start", "", "Start time")
-	flags.StringVar(&end, "end", "", "End time")
-	flags.StringVar(&labelPairs, "labels", "", "Label pairs (k1=v1,k2=v2,...)")
+	flags.StringVar(&start, "start", now.Add(-24*time.Hour).Format(time.RFC3339), "Start time")
+	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time")
+	flags.StringVar(&metricSelector, "metric-selector", "", "PromQL metric selector")
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -103,10 +105,14 @@ func parseOptions(args []string) (options, error) {
 			return options{}, fmt.Errorf("write URL %w", errIsNotAbsolute)
 		}
 
-		if preAggregURL != "" {
-			opts.preAggregURL, err = url.Parse(preAggregURL)
-			if err != nil {
-				return options{}, fmt.Errorf("invalid pre-aggregation URL: %w", err)
+		if preAggregURL != "skip" {
+			if preAggregURL == "" {
+				opts.preAggregURL = opts.writeURL.ResolveReference(&url.URL{Path: "/debug/preaggregate"})
+			} else {
+				opts.preAggregURL, err = url.Parse(preAggregURL)
+				if err != nil {
+					return options{}, fmt.Errorf("invalid pre-aggregation URL: %w", err)
+				}
 			}
 		}
 
@@ -129,17 +135,13 @@ func parseOptions(args []string) (options, error) {
 			return options{}, errNoOutputFileProvided
 		}
 
-		if !strings.Contains(labelPairs, "=") {
-			return options{}, errNoLabelPairsProvided
+		if metricSelector == "" {
+			return options{}, errInvalidMetricSelector
 		}
 
 		opts.operation = opExport
 	default:
 		return options{}, fmt.Errorf("%w: %s", errInvalidOperation, flags.Arg(0))
-	}
-
-	if opts.tenantHeader == "" {
-		return options{}, errNoTenantHeaderProvided
 	}
 
 	if start == "" {
@@ -172,16 +174,10 @@ func parseOptions(args []string) (options, error) {
 		return options{}, errStartAfterEnd
 	}
 
-	opts.labelPairs = make(map[string]string)
-
-	if labelPairs != "" {
-		for _, pair := range strings.Split(labelPairs, ",") {
-			kv := strings.SplitN(pair, "=", 2)
-			if len(kv) != 2 {
-				return options{}, fmt.Errorf("parsing label pair %q: %w", pair, errInvalidLabelPairFormat)
-			}
-
-			opts.labelPairs[kv[0]] = kv[1]
+	if metricSelector != "" {
+		opts.labelMatchers, err = parser.ParseMetricSelector(metricSelector)
+		if err != nil {
+			return options{}, fmt.Errorf("%w: %w", errInvalidMetricSelector, err)
 		}
 	}
 

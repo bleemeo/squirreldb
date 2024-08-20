@@ -43,7 +43,7 @@ import (
 
 func exportData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("read-url", opts.readURL).Str("output-file", opts.outputFile).
-		Time("start", opts.start).Time("end", opts.end).Any("labels", opts.labelPairs).Msg("Export options")
+		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).Msg("Export options")
 
 	var m1, m2 runtime.MemStats
 
@@ -88,14 +88,14 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 	query := &prompb.Query{
 		StartTimestampMs: opts.start.UnixMilli(),
 		EndTimestampMs:   opts.end.UnixMilli(),
-		Matchers:         make([]*prompb.LabelMatcher, 0, len(opts.labelPairs)),
+		Matchers:         make([]*prompb.LabelMatcher, 0, len(opts.labelMatchers)),
 	}
 
-	for name, value := range opts.labelPairs {
+	for _, matcher := range opts.labelMatchers {
 		query.Matchers = append(query.Matchers, &prompb.LabelMatcher{
-			Type:  prompb.LabelMatcher_EQ,
-			Name:  name,
-			Value: value,
+			Type:  prompb.LabelMatcher_Type(matcher.Type),
+			Name:  matcher.Name,
+			Value: matcher.Value,
 		})
 	}
 
@@ -119,8 +119,11 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 
 	req.Header.Set("Content-Encoding", "snappy")
 	req.Header.Set("Content-Type", "application/x-protobuf")
-	req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
 	req.Header.Set("X-SquirrelDB-Max-Evaluated-Points", "0") //nolint:canonicalheader
+
+	if opts.tenantHeader != "" {
+		req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
