@@ -101,7 +101,7 @@ func importData(opts options) error {
 	return nil
 }
 
-// readSeries loads the metric series from the specified parquet file.
+// readSeries loads the metric series from the specified prom-remote-storage-to-parquet file.
 // It returns the series, the first and last timestamps seen, or any error.
 func readSeries(opts options) (
 	series []prompb.TimeSeries,
@@ -267,7 +267,7 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 }
 
 // seekToTimestamp positions the reader cursor to the day containing the specified timestamp,
-// or returns an error if the timestamp couldn't be found in the parquet file.
+// or returns an error if the timestamp couldn't be found in the prom-remote-storage-to-parquet file.
 func seekToTimestamp(pr *reader.ParquetReader, targetTimestamp int64) error {
 	var rowsToSkip int64
 
@@ -316,7 +316,7 @@ func getLabelsFromMetadata(keyValues []*parquet.KeyValue) (map[string][]prompb.L
 }
 
 // filterLabels generates two collections:
-// - blacklistedColumns: a map of parquet columns that don't match the given labels
+// - blacklistedColumns: a map of prom-remote-storage-to-parquet columns that don't match the given labels
 // - importedSeries: a list of label pairs representing all the metric series that will be imported.
 func filterLabels(
 	matchersPerColName map[string][]*labels.Matcher,
