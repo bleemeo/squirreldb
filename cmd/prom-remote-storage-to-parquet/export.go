@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bleemeo/squirreldb/types"
+
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
@@ -122,7 +124,7 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 	req.Header.Set("X-SquirrelDB-Max-Evaluated-Points", "0") //nolint:canonicalheader
 
 	if opts.tenantHeader != "" {
-		req.Header.Set("X-SquirrelDB-Tenant", opts.tenantHeader) //nolint:canonicalheader
+		req.Header.Set(types.HeaderTenant, opts.tenantHeader)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -216,22 +218,7 @@ func writeTimeSeries(pw *writer.ParquetWriter, series []*prompb.TimeSeries) erro
 
 	slices.Sort(tss)
 
-	const dayMs = 86_400_000 // 24h in ms
-
-	currentDay := tss[0] / dayMs
-
 	for _, ts := range tss {
-		tsDay := ts / dayMs
-		if tsDay != currentDay {
-			// Flushing at the end of each day, to create one row-group per day.
-			err := pw.Flush(true)
-			if err != nil {
-				return fmt.Errorf("flushing writer: %w", err)
-			}
-
-			currentDay = tsDay
-		}
-
 		row := make(map[string]any, 1+len(series))
 		row["Timestamp"] = ts
 
