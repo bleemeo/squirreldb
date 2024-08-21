@@ -34,7 +34,7 @@ const (
 	opExport operationType = "export"
 )
 
-// const
+// const.
 var parallelWorkers = int64(runtime.NumCPU()) //nolint:gochecknoglobals
 
 var errNoSeriesFound = errors.New("no series found")
@@ -59,14 +59,16 @@ func main() {
 	}
 }
 
-// formatTimeRange acts like time.Duration.String(), but also display days.
+// formatTimeRange returns the difference between the two given dates
+// like time.Duration.String() rounded to seconds,
+// but if the diff is more than 24h, it also displays the days.
 func formatTimeRange(start, end time.Time) string {
-	d := end.Sub(start)
+	d := end.Sub(start).Round(time.Second)
 
 	days := d / (24 * time.Hour)
 	if days > 0 {
 		return fmt.Sprintf("%dd%s", days, d%(days*24*time.Hour)) //nolint: durationcheck
 	}
 
-	return d.Round(time.Second).String()
+	return d.String()
 }

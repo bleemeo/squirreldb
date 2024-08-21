@@ -17,10 +17,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"slices"
@@ -43,6 +45,8 @@ import (
 	"google.golang.org/protobuf/protoadapt"
 )
 
+const seriesFetchBatchSizeDays = 7
+
 func exportData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("read-url", opts.readURL).Str("output-file", opts.outputFile).
 		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).Msg("Export options")
@@ -52,20 +56,20 @@ func exportData(opts options) error {
 	runtime.GC() // TODO: remove
 	runtime.ReadMemStats(&m1)
 
-	tRead := time.Now()
+	tFind := time.Now()
 
-	series, err := fetchSeries(opts)
+	seriesLabels, err := findSeries(opts)
 	if err != nil {
-		return fmt.Errorf("fetch series: %w", err)
+		return fmt.Errorf("find series: %w", err)
 	}
 
-	if len(series) == 0 {
+	if len(seriesLabels) == 0 {
 		return errNoSeriesFound
 	}
 
 	tWrite := time.Now()
 
-	err = writeToParquet(opts.outputFile, series)
+	err = exportSeries(opts, seriesLabels)
 	if err != nil {
 		return fmt.Errorf("write to parquet file: %w", err)
 	}
@@ -74,22 +78,136 @@ func exportData(opts options) error {
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Exported %d serie(s) across a time range of %s to parquet in %s (fetch: %s, write: %s)",
-		len(series),
+		"Exported %d serie(s) across a time range of %s to parquet in %s (find: %s, write: %s)",
+		len(seriesLabels),
 		formatTimeRange(opts.start, opts.end),
-		time.Since(tRead).Round(time.Millisecond).String(),
-		tWrite.Sub(tRead).Round(time.Millisecond).String(),
+		time.Since(tFind).Round(time.Millisecond).String(),
+		tWrite.Sub(tFind).Round(time.Millisecond).String(),
 		time.Since(tWrite).Round(time.Millisecond).String(),
 	)
 
 	return nil
 }
 
-// fetchSeries retrieves the metric series matching the given options from a SquirrelDB.
-func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
+func findSeries(opts options) ([]map[string]string, error) {
+	seriesURL, err := opts.readURL.Parse("/api/v1/series")
+	if err != nil {
+		return nil, err
+	}
+
+	params := url.Values{
+		"match[]": {opts.metricSelector},
+		"start":   {opts.start.Format(time.RFC3339)},
+		"end":     {opts.end.Format(time.RFC3339)},
+	}
+
+	req, err := http.NewRequest(http.MethodPost, seriesURL.String(), strings.NewReader(params.Encode())) //nolint: noctx
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	if opts.tenantHeader != "" {
+		req.Header.Set(types.HeaderTenant, opts.tenantHeader)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+
+		return nil, fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, body)
+	}
+
+	var foundSeries struct {
+		Data []map[string]string `json:"data"`
+	}
+
+	return foundSeries.Data, json.NewDecoder(resp.Body).Decode(&foundSeries)
+}
+
+func exportSeries(opts options, seriesLabels []map[string]string) error {
+	const batchSizeMs = seriesFetchBatchSizeDays * 24 * 60 * 60 * 1000
+
+	fw, err := makeParquetFile(opts.outputFile)
+	if err != nil {
+		return fmt.Errorf("can't initialize parquet file: %w", err)
+	}
+
+	defer func() {
+		err := fw.Close()
+		if err != nil {
+			log.Err(err).Msg("Failed to close parquet file")
+		}
+	}()
+
+	schema, colNames := generateParquetSchema(seriesLabels)
+
+	pw, err := writer.NewParquetWriter(fw, schema, parallelWorkers)
+	if err != nil {
+		return fmt.Errorf("can't initialize parquet writer: %w", err)
+	}
+
+	defer func() {
+		err := pw.WriteStop()
+		if err != nil {
+			log.Err(err).Msg("Failed to close parquet writer")
+		}
+	}()
+
+	/*for i := range pw.SchemaHandler.Infos {
+		pw.SchemaHandler.Infos[i].Encoding = parquet.Encoding_PLAIN
+	}*/
+
+	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
+	for batchStartTS := startTS; batchStartTS < endTS; batchStartTS += batchSizeMs {
+		batchEndTS := min(batchStartTS+batchSizeMs, endTS)
+
+		tStart, tEnd := time.UnixMilli(batchStartTS), time.UnixMilli(batchEndTS)
+		log.Debug().Msgf("Fetching series from %s to %s (%s)", tStart, tEnd, formatTimeRange(tStart, tEnd))
+
+		series, err := fetchSeries(opts, batchStartTS, batchEndTS)
+		if err != nil {
+			return fmt.Errorf("fetch series [%s -> %s]: %w", time.UnixMilli(batchStartTS), time.UnixMilli(batchEndTS), err)
+		}
+
+		if len(series) == 0 {
+			continue
+		}
+
+		err = writeTimeSeries(pw, colNames, series)
+		if err != nil {
+			return fmt.Errorf("write series: %w", err)
+		}
+	}
+
+	// TODO: re-add metadata
+	/*varNameToLabels := make([]*parquet.KeyValue, len(colNames))
+
+	for col, name := range metricColNames {
+		labels := labelsTextFromSlice(series[col].GetLabels())
+		varNameToLabels[col] = &parquet.KeyValue{
+			Key:   name,
+			Value: &labels,
+		}
+	}
+
+	pw.Footer.KeyValueMetadata = varNameToLabels*/
+
+	return nil
+}
+
+// fetchSeries retrieves the metric series matching the given options within the given time range from a SquirrelDB.
+func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSeries, error) {
 	query := &prompb.Query{
-		StartTimestampMs: opts.start.UnixMilli(),
-		EndTimestampMs:   opts.end.UnixMilli(),
+		StartTimestampMs: batchStartTS,
+		EndTimestampMs:   batchEndTS,
 		Matchers:         make([]*prompb.LabelMatcher, 0, len(opts.labelMatchers)),
 	}
 
@@ -163,51 +281,18 @@ func fetchSeries(opts options) ([]*prompb.TimeSeries, error) {
 	return results[0].GetTimeseries(), nil
 }
 
-// writeToParquet dumps the given metric series to the specified output.
-// (outputFile="-" means stdout).
-func writeToParquet(outputFile string, series []*prompb.TimeSeries) error {
-	fw, err := makeParquetFile(outputFile)
-	if err != nil {
-		return fmt.Errorf("can't initialize parquet file: %w", err)
-	}
-
-	defer func() {
-		err := fw.Close()
-		if err != nil {
-			log.Err(err).Msg("Failed to close parquet file")
-		}
-	}()
-
-	schema := generateParquetSchema(series)
-
-	pw, err := writer.NewParquetWriter(fw, schema, parallelWorkers)
-	if err != nil {
-		return fmt.Errorf("can't initialize parquet writer: %w", err)
-	}
-
-	defer func() {
-		err := pw.WriteStop()
-		if err != nil {
-			log.Err(err).Msg("Failed to close parquet writer")
-		}
-	}()
-
-	err = writeTimeSeries(pw, series)
-	if err != nil {
-		return fmt.Errorf("writing timeseries to parquet: %w", err)
-	}
-
-	return nil
-}
-
-func writeTimeSeries(pw *writer.ParquetWriter, series []*prompb.TimeSeries) error {
-	timestamps := make(map[int64]struct{})
-	indexBySeries := make(map[int]int)
+func writeTimeSeries(pw *writer.ParquetWriter, colNames map[string]struct{}, series []*prompb.TimeSeries) error {
+	timestamps := make(map[int64]struct{}, len(series[0].Samples)) // using the length of the first series as an order of size
+	indexBySeries := make(map[int]int, len(series))
 	metricColNames := make([]string, len(series))
+	seriesNotRepresented := maps.Clone(colNames)
 
 	for si, s := range series {
 		indexBySeries[si] = 0
-		metricColNames[si] = common.StringToVariableName(labelsToText(s.GetLabels()))
+		colName := common.StringToVariableName(labelsTextFromSlice(s.GetLabels()))
+		metricColNames[si] = colName
+		// This metric series appears in this batch, so it won't need to have its value (NaN) put by hand.
+		delete(seriesNotRepresented, colName)
 
 		for _, sample := range s.Samples {
 			timestamps[sample.Timestamp] = struct{}{}
@@ -222,36 +307,34 @@ func writeTimeSeries(pw *writer.ParquetWriter, series []*prompb.TimeSeries) erro
 		row := make(map[string]any, 1+len(series))
 		row["Timestamp"] = ts
 
-	SERIES:
 		for si, s := range series {
-			for i, sample := range s.Samples[indexBySeries[si]:] {
-				if sample.Timestamp == ts {
-					row[metricColNames[si]] = sample.Value
-					indexBySeries[si] = i + 1
+			seriesIdx := indexBySeries[si]
+			colName := metricColNames[si]
 
-					continue SERIES
-				}
+			if seriesIdx >= len(s.Samples) {
+				row[colName] = math.NaN()
+
+				continue
 			}
 
-			row[metricColNames[si]] = math.NaN()
+			if sample := s.Samples[seriesIdx]; sample.Timestamp == ts {
+				row[colName] = sample.Value
+				indexBySeries[si]++
+			} else {
+				row[colName] = math.NaN()
+			}
+		}
+
+		// For metric series that are absent from this batch,
+		// we need to manually give them a value for each timestamp.
+		for metric := range seriesNotRepresented {
+			row[metric] = math.NaN()
 		}
 
 		if err := pw.Write(row); err != nil {
 			return fmt.Errorf("writing row at ts=%d: %w", ts, err)
 		}
 	}
-
-	varNameToLabels := make([]*parquet.KeyValue, len(metricColNames))
-
-	for col, name := range metricColNames {
-		labels := labelsToText(series[col].GetLabels())
-		varNameToLabels[col] = &parquet.KeyValue{
-			Key:   name,
-			Value: &labels,
-		}
-	}
-
-	pw.Footer.KeyValueMetadata = varNameToLabels
 
 	return nil
 }
@@ -265,8 +348,8 @@ func makeParquetFile(file string) (source.ParquetFile, error) {
 }
 
 // generateParquetSchema drafts schema elements according to the given metric series.
-func generateParquetSchema(series []*prompb.TimeSeries) []*parquet.SchemaElement {
-	totalColumns := int32(1 + len(series))                  // +1 for the timestamps column
+func generateParquetSchema(seriesLabels []map[string]string) ([]*parquet.SchemaElement, map[string]struct{}) {
+	totalColumns := int32(1 + len(seriesLabels))            // +1 for the timestamps column
 	elems := make([]*parquet.SchemaElement, 1+totalColumns) // +1 for the schema root
 	elems[0] = &parquet.SchemaElement{
 		Name:           "root",
@@ -280,20 +363,23 @@ func generateParquetSchema(series []*prompb.TimeSeries) []*parquet.SchemaElement
 		ConvertedType:  parquet.ConvertedTypePtr(parquet.ConvertedType_TIMESTAMP_MILLIS),
 	}
 
-	for i, col := range series {
+	colNames := make(map[string]struct{}, totalColumns-1) // -1 for the timestamps column
+
+	for i, labels := range seriesLabels {
 		elem := parquet.NewSchemaElement()
-		elem.Name = labelsToText(col.GetLabels())
+		elem.Name = labelsTextFromMap(labels)
 		elem.Type = parquet.TypePtr(parquet.Type_DOUBLE)
 		// Values for all timestamps are required; metrics that don't have one will get a NaN instead.
 		elem.RepetitionType = parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED)
 
 		elems[2+i] = elem // +2 for schema root & timestamps col
+		colNames[common.StringToVariableName(elem.Name)] = struct{}{}
 	}
 
-	return elems
+	return elems, colNames
 }
 
-func labelsToText(labels []prompb.Label) string {
+func labelsTextFromSlice(labels []prompb.Label) string {
 	if len(labels) == 0 {
 		return ""
 	}
@@ -313,6 +399,31 @@ func labelsToText(labels []prompb.Label) string {
 		}
 
 		str := pair.GetName() + "=\"" + quoteReplacer.Replace(pair.GetValue()) + "\""
+		strLabels = append(strLabels, str)
+	}
+
+	return strings.Join(strLabels, ",")
+}
+
+func labelsTextFromMap(labels map[string]string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+
+	keys := maps.Keys(labels)
+
+	slices.Sort(keys)
+
+	quoteReplacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	strLabels := make([]string, 0, len(labels))
+
+	for _, key := range keys {
+		value := labels[key]
+		if value == "" {
+			continue
+		}
+
+		str := key + "=\"" + quoteReplacer.Replace(value) + "\""
 		strLabels = append(strLabels, str)
 	}
 

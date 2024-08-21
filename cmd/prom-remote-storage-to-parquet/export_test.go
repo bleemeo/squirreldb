@@ -61,7 +61,7 @@ func TestLabelsToText(t *testing.T) {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			t.Parallel()
 
-			output := labelsToText(tc.input)
+			output := labelsTextFromSlice(tc.input)
 			if output != tc.expectedOutput {
 				t.Fatalf("expected: %s, got: %s", tc.expectedOutput, output)
 			}

@@ -48,6 +48,7 @@ type options struct {
 	preAggregURL          *url.URL
 	inputFile, outputFile string
 	start, end            time.Time
+	metricSelector        string
 	labelMatchers         []*labels.Matcher
 }
 
@@ -57,7 +58,6 @@ func parseOptions(args []string) (options, error) {
 		writeURL, readURL string
 		preAggregURL      string
 		start, end        string
-		metricSelector    string
 	)
 
 	flags := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
@@ -79,7 +79,7 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file (can be '-' for stdout)")
 	flags.StringVar(&start, "start", now.Add(-24*time.Hour).Format(time.RFC3339), "Start time")
 	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time")
-	flags.StringVar(&metricSelector, "metric-selector", "", "PromQL metric selector")
+	flags.StringVar(&opts.metricSelector, "metric-selector", "", "PromQL metric selector")
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -135,7 +135,7 @@ func parseOptions(args []string) (options, error) {
 			return options{}, errNoOutputFileProvided
 		}
 
-		if metricSelector == "" {
+		if opts.metricSelector == "" {
 			return options{}, errInvalidMetricSelector
 		}
 
@@ -174,8 +174,8 @@ func parseOptions(args []string) (options, error) {
 		return options{}, errStartAfterEnd
 	}
 
-	if metricSelector != "" {
-		opts.labelMatchers, err = parser.ParseMetricSelector(metricSelector)
+	if opts.metricSelector != "" {
+		opts.labelMatchers, err = parser.ParseMetricSelector(opts.metricSelector)
 		if err != nil {
 			return options{}, fmt.Errorf("%w: %w", errInvalidMetricSelector, err)
 		}

@@ -57,19 +57,20 @@ func importData(opts options) error {
 
 	t0 := time.Now()
 
-	importedSeries, firstTS, lastTS, err := importSeries(opts)
+	importedSeries, firstTS, lastTS, timePerSeries, err := importSeries(opts)
 	if err != nil {
-		return fmt.Errorf("reading series: %w", err)
+		return fmt.Errorf("importing series: %w", err)
 	}
 
 	runtime.ReadMemStats(&m2) // TODO: remove
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Imported %d serie(s) across a time range of %s from parquet in %s",
+		"Imported %d serie(s) across a time range of %s from parquet in %s (~%s per series)",
 		importedSeries,
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
 		time.Since(t0).Round(time.Millisecond).String(),
+		timePerSeries.Round(time.Millisecond).String(),
 	)
 
 	return nil
@@ -78,10 +79,10 @@ func importData(opts options) error {
 // importSeries loads each metric series from the specified parquet file,
 // and imports it to SquirrelDB.
 // It returns the first and last timestamps seen, or any error.
-func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err error) {
+func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, timePerSeries time.Duration, err error) {
 	fr, err := local.NewLocalFileReader(opts.inputFile)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("open input file: %w", err)
+		return 0, 0, 0, 0, fmt.Errorf("open input file: %w", err)
 	}
 
 	defer func() {
@@ -93,10 +94,12 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 
 	pr, err := reader.NewParquetReader(fr, nil, parallelWorkers)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
+		return 0, 0, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
 	}
 
 	defer pr.ReadStop()
+
+	t0 := time.Now()
 
 	labelsPerColName, matchersPerColName := getLabelsFromMetadata(pr.Footer.KeyValueMetadata)
 	deniedColumns, importedSeriesPerColName := filterLabels(matchersPerColName, opts.labelMatchers)
@@ -104,17 +107,17 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 
 	wantedTS, startIdx, endIdx, err := readAllTimestamps(pr, startTS, endTS)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	if len(wantedTS) == 0 {
-		return 0, 0, 0, errNoSeriesFound
+		return 0, 0, 0, 0, errNoSeriesFound
 	}
 
 	if startIdx > 0 {
 		err = pr.SkipRows(startIdx)
 		if err != nil {
-			return 0, 0, 0, fmt.Errorf("%w: %w", errCantSeekTimestamp, err)
+			return 0, 0, 0, 0, fmt.Errorf("%w: %w", errCantSeekTimestamp, err)
 		}
 	}
 
@@ -130,7 +133,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 
 		samples, err := readSeriesSamples(pr, wantedTS, colIdx, colNameWithoutPrefix, endIdx)
 		if err != nil {
-			return 0, 0, 0, err
+			return 0, 0, 0, 0, err
 		}
 
 		if len(samples) == 0 {
@@ -146,7 +149,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 
 		err = remoteWriteSeries(timeSeries, opts)
 		if err != nil {
-			return 0, 0, 0, fmt.Errorf("remotely writing series from column n°%d: %w", colIdx, err)
+			return 0, 0, 0, 0, fmt.Errorf("remotely writing series from column n°%d: %w", colIdx, err)
 		}
 
 		seriesFirstTS := samples[0].Timestamp
@@ -156,7 +159,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 		if opts.preAggregURL != nil {
 			err = triggerPreAggregation(opts.preAggregURL.String(), opts.tenantHeader, seriesFirstTS, seriesLastTS, seriesLabels)
 			if err != nil {
-				return 0, 0, 0, fmt.Errorf("triggering pre-aggregation: %w", err)
+				return 0, 0, 0, 0, fmt.Errorf("triggering pre-aggregation: %w", err)
 			}
 		}
 
@@ -171,7 +174,13 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, err 
 		}
 	}
 
-	return importedSeries, firstTS, lastTS, nil
+	if importedSeries == 0 {
+		return 0, 0, 0, 0, errNoSeriesFound
+	}
+
+	timePerSeries = time.Since(t0) / time.Duration(importedSeries)
+
+	return importedSeries, firstTS, lastTS, timePerSeries, nil
 }
 
 // readSeriesSamples loads one metric series from the given parquet reader,
