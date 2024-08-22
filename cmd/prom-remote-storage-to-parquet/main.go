@@ -67,7 +67,12 @@ func formatTimeRange(start, end time.Time) string {
 
 	days := d / (24 * time.Hour)
 	if days > 0 {
-		return fmt.Sprintf("%dd%s", days, d%(days*24*time.Hour)) //nolint: durationcheck
+		remaining := d % (24 * time.Hour)
+		if remaining == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+
+		return fmt.Sprintf("%dd%s", days, remaining)
 	}
 
 	return d.String()
