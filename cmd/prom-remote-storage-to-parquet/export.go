@@ -26,6 +26,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,8 @@ func findSeries(opts options) ([]map[string]string, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(types.HeaderMaxEvaluatedSeries, strconv.FormatUint(uint64(opts.squirrelDBMaxEvalSeries), 10))
+	req.Header.Set(types.HeaderMaxEvaluatedPoints, strconv.FormatUint(opts.squirrelDBMaxEvalPoints, 10))
 
 	if opts.tenantHeader != "" {
 		req.Header.Set(types.HeaderTenant, opts.tenantHeader)
@@ -260,7 +263,8 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	req.Header.Set("Content-Encoding", "snappy")
 	req.Header.Set("Content-Type", "application/x-protobuf")
-	req.Header.Set("X-SquirrelDB-Max-Evaluated-Points", "0") //nolint:canonicalheader
+	req.Header.Set(types.HeaderMaxEvaluatedSeries, strconv.FormatUint(uint64(opts.squirrelDBMaxEvalSeries), 10))
+	req.Header.Set(types.HeaderMaxEvaluatedPoints, strconv.FormatUint(opts.squirrelDBMaxEvalPoints, 10))
 
 	if opts.tenantHeader != "" {
 		req.Header.Set(types.HeaderTenant, opts.tenantHeader)

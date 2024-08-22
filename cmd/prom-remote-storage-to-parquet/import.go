@@ -202,23 +202,23 @@ ROWS:
 		}
 
 		for j, v := range values {
-			idx := int64(i + j)
-			if idx > endIdx {
+			rowIdx := int64(i + j)
+			if rowIdx > endIdx {
 				break ROWS
 			}
 
-			value, ok := v.(float64)
+			val, ok := v.(float64)
 			if !ok {
-				return nil, fmt.Errorf("bad data type %T for column %q index %d", v, colName, idx)
+				return nil, fmt.Errorf("bad data type %T for column %q row %d", v, colName, rowIdx)
 			}
 
-			if math.IsNaN(value) {
+			if math.IsNaN(val) {
 				continue
 			}
 
 			sample := prompb.Sample{
-				Value:     value,
-				Timestamp: wantedTS[idx],
+				Value:     val,
+				Timestamp: wantedTS[rowIdx],
 			}
 
 			samples = append(samples, sample)
@@ -295,7 +295,7 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 	}
 
 	if tenant != "" {
-		req.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
+		req.Header.Set(types.HeaderTenant, tenant)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

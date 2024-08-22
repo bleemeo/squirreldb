@@ -42,14 +42,16 @@ var (
 )
 
 type options struct {
-	operation             operationType
-	tenantHeader          string
-	writeURL, readURL     *url.URL
-	preAggregURL          *url.URL
-	inputFile, outputFile string
-	start, end            time.Time
-	metricSelector        string
-	labelMatchers         []*labels.Matcher
+	operation               operationType
+	tenantHeader            string
+	squirrelDBMaxEvalSeries uint32
+	squirrelDBMaxEvalPoints uint64
+	writeURL, readURL       *url.URL
+	preAggregURL            *url.URL
+	inputFile, outputFile   string
+	start, end              time.Time
+	metricSelector          string
+	labelMatchers           []*labels.Matcher
 }
 
 func parseOptions(args []string) (options, error) {
@@ -64,14 +66,16 @@ func parseOptions(args []string) (options, error) {
 	flags.SortFlags = false
 	flags.Usage = func() {
 		log.Info().Msgf("Usage:")
-		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--metric-selector=<k=v pairs>] [--write-url=<url>] [--tenant=<tenant>] [--pre-aggreg-url=<url>]") //nolint:lll
-		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --metric-selector=<promql selector> [--start=<time>] [--end=<time>] [--read-url=<url>] [--tenant=<tenant>]")                  //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--metric-selector=<k=v pairs>] [--write-url=<url>] [--tenant=<tenant>] [--pre-aggreg-url=<url>]")                                                                        //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --metric-selector=<promql selector> [--start=<time>] [--end=<time>] [--read-url=<url>] [--tenant=<tenant>] [--squirreldb-max-evaluated-series=<count>] [--squirreldb-max-evaluated-points=<count>]") //nolint:lll
 		fmt.Fprintln(os.Stderr, flags.FlagUsages())
 	}
 
 	now := time.Now().Truncate(time.Second)
 
 	flags.StringVar(&opts.tenantHeader, "tenant", "", "SquirrelDB tenant header")
+	flags.Uint32Var(&opts.squirrelDBMaxEvalSeries, "squirreldb-max-evaluated-series", 10_000, "Max evaluated series on SquirrelDB (0=unlimited)")    //nolint:lll
+	flags.Uint64Var(&opts.squirrelDBMaxEvalPoints, "squirreldb-max-evaluated-points", 2_000_000, "Max evaluated points on SquirrelDB (0=unlimited)") //nolint:lll
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
 	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll
