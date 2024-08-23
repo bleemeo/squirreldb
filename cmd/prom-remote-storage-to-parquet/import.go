@@ -23,7 +23,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"reflect"
 	"runtime"
 	"strings"
 	"time"
@@ -37,7 +36,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/xitongsys/parquet-go-source/local"
 	"github.com/xitongsys/parquet-go/common"
-	"github.com/xitongsys/parquet-go/parquet"
 	"github.com/xitongsys/parquet-go/reader"
 )
 
@@ -101,7 +99,11 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 	t0 := time.Now()
 
-	labelsPerColName, matchersPerColName := getLabelsFromMetadata(pr.Footer.KeyValueMetadata)
+	labelsPerColName, matchersPerColName, err := getLabelsFromSchema(pr.SchemaHandler.Infos)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("can't parse series labels: %w", err)
+	}
+
 	deniedColumns, importedSeriesPerColName := filterLabels(matchersPerColName, opts.labelMatchers)
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
 
@@ -121,6 +123,8 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 		}
 	}
 
+	totalColumns := len(pr.SchemaHandler.ValueColumns) - len(deniedColumns) - 1
+
 	for colIdx, colName := range pr.SchemaHandler.ValueColumns {
 		if colIdx == 0 {
 			continue // skip timestamps column
@@ -130,6 +134,8 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 		if deniedColumns[colNameWithoutPrefix] {
 			continue
 		}
+
+		log.Debug().Msgf("Importing column %d/%d", colIdx, totalColumns)
 
 		samples, err := readSeriesSamples(pr, wantedTS, colIdx, colNameWithoutPrefix, endIdx)
 		if err != nil {
@@ -183,6 +189,37 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 	return importedSeries, firstTS, lastTS, timePerSeries, nil
 }
 
+func getLabelsFromSchema(infos []*common.Tag) (
+	labelsPerColName map[string][]prompb.Label,
+	matchersPerColName map[string][]*labels.Matcher,
+	err error,
+) {
+	seriesCount := len(infos) - 2 // -2 for schema root & timestamps col
+	labelsPerColName = make(map[string][]prompb.Label, seriesCount)
+	matchersPerColName = make(map[string][]*labels.Matcher, seriesCount)
+
+	for i, info := range infos[2:] {
+		colName := info.InName
+		labelsText := info.ExName
+
+		matchers, err := parser.ParseMetricSelector("{" + labelsText + "}")
+		if err != nil {
+			return nil, nil, fmt.Errorf("series column n°%d: %w", i+1, err)
+		}
+
+		prompbLabels := make([]prompb.Label, 0, len(matchers))
+
+		for _, label := range matchers {
+			prompbLabels = append(prompbLabels, prompb.Label{Name: label.Name, Value: label.Value})
+		}
+
+		labelsPerColName[colName] = prompbLabels
+		matchersPerColName[colName] = matchers
+	}
+
+	return labelsPerColName, matchersPerColName, nil
+}
+
 // readSeriesSamples loads one metric series from the given parquet reader,
 // and returns it as a slice of prompb.Sample.
 func readSeriesSamples(
@@ -205,6 +242,10 @@ ROWS:
 			rowIdx := int64(i + j)
 			if rowIdx > endIdx {
 				break ROWS
+			}
+
+			if v == nil {
+				continue
 			}
 
 			val, ok := v.(float64)
@@ -322,16 +363,21 @@ func readAllTimestamps(
 	firstRowIdx, lastRowIdx int64,
 	err error,
 ) {
-	allTS = make([]int64, pr.GetNumRows())
+	totalRows := pr.GetNumRows()
+	allTS = make([]int64, totalRows)
+	firstRowIdx = -1
 
 ROWS:
 	for i := int64(0); i < pr.GetNumRows(); i += readBatchSize {
-		values, _, _, err := pr.ReadColumnByIndex(0, readBatchSize) // 0 is the first column
+		values, _, _, err := pr.ReadColumnByIndex(0, min(readBatchSize, totalRows-i)) // 0 is the first column
 		if err != nil {
 			return nil, 0, 0, err
 		}
 
-		// TODO: check last value to fast skip the whole slice ?
+		// If the last timestamp of this batch is less than the start ts, skip the whole batch.
+		if lastVal, ok := values[len(values)-1].(int64); ok && lastVal < startTS {
+			continue
+		}
 
 		for j, e := range values {
 			tsIdx := i + int64(j)
@@ -343,7 +389,7 @@ ROWS:
 
 			if ts < startTS {
 				continue
-			} else if firstRowIdx == 0 {
+			} else if firstRowIdx < 0 {
 				firstRowIdx = tsIdx
 			}
 
@@ -357,31 +403,6 @@ ROWS:
 	}
 
 	return allTS[firstRowIdx : lastRowIdx+1], firstRowIdx, lastRowIdx, nil
-}
-
-func getLabelsFromMetadata(keyValues []*parquet.KeyValue) (map[string][]prompb.Label, map[string][]*labels.Matcher) {
-	prompbLabelsPerCol := make(map[string][]prompb.Label, len(keyValues))
-	matchersPerColName := make(map[string][]*labels.Matcher)
-
-	for _, kv := range keyValues {
-		matchers, err := parser.ParseMetricSelector("{" + *kv.Value + "}")
-		if err != nil {
-			log.Err(err).Msgf("Failed to decode labels %#v", *kv.Value)
-
-			return nil, nil
-		}
-
-		prompbLabels := make([]prompb.Label, 0, len(matchers))
-
-		for _, label := range matchers {
-			prompbLabels = append(prompbLabels, prompb.Label{Name: label.Name, Value: label.Value})
-		}
-
-		prompbLabelsPerCol[kv.Key] = prompbLabels
-		matchersPerColName[kv.Key] = matchers
-	}
-
-	return prompbLabelsPerCol, matchersPerColName
 }
 
 // filterLabels generates two collections:
@@ -418,35 +439,4 @@ COLUMNS:
 	}
 
 	return deniedColumns, importedSeriesPerColName
-}
-
-// decodeRow extract the timestamp and metric values from the given struct.
-func decodeRow(row any, deniedColumns map[string]bool) (ts int64, values map[string]float64) {
-	rowRef := reflect.ValueOf(row)
-	rowType := rowRef.Type()
-
-	values = make(map[string]float64, rowRef.NumField()-1) // -1 for timestamp, which has its own variable
-
-	for i := range rowRef.NumField() {
-		switch f := rowRef.Field(i); f.Kind() { //nolint:exhaustive
-		case reflect.Int64:
-			ts = f.Int()
-		case reflect.Float64:
-			colName := rowType.Field(i).Name
-			if deniedColumns[colName] {
-				continue
-			}
-
-			value := f.Float()
-			if math.IsNaN(value) {
-				continue
-			}
-
-			values[colName] = value
-		default:
-			log.Warn().Msgf("Unexpected type %s in column %q", f.Kind(), rowType.Field(i).Name)
-		}
-	}
-
-	return ts, values
 }

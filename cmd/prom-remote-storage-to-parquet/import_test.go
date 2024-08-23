@@ -23,26 +23,22 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
-	"github.com/xitongsys/parquet-go/parquet"
+	"github.com/xitongsys/parquet-go/common"
 )
-
-func ptr[T any](v T) *T {
-	return &v
-}
 
 func TestGetLabelsFromMetadata(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		input            []*parquet.KeyValue
+		input            []*common.Tag
 		expectedLabels   map[string][]prompb.Label
 		expectedMatchers map[string][]*labels.Matcher
 	}{
 		{
-			input: []*parquet.KeyValue{
+			input: []*common.Tag{
 				{
-					Key:   "parquet_key",
-					Value: ptr(`label="value"`),
+					InName: "parquet_key",
+					ExName: `label="value"`,
 				},
 			},
 			expectedLabels: map[string][]prompb.Label{
@@ -64,14 +60,14 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 			},
 		},
 		{
-			input: []*parquet.KeyValue{
+			input: []*common.Tag{
 				{
-					Key:   "PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34",
-					Value: ptr(`__name__="container_cpu_used",item="cassandra"`),
+					InName: "PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34",
+					ExName: `__name__="container_cpu_used",item="cassandra"`,
 				},
 				{
-					Key:   "PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34",
-					Value: ptr(`__name__="container_cpu_used",item="redis"`),
+					InName: "PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34",
+					ExName: `__name__="container_cpu_used",item="redis"`,
 				},
 			},
 			expectedLabels: map[string][]prompb.Label{
@@ -129,84 +125,20 @@ func TestGetLabelsFromMetadata(t *testing.T) {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			t.Parallel()
 
-			lbls, matchers := getLabelsFromMetadata(tc.input)
+			// These two (empty) tags represent the root and the timestamp columns.
+			infos := append([]*common.Tag{{}, {}}, tc.input...)
+
+			lbls, matchers, err := getLabelsFromSchema(infos)
+			if err != nil {
+				t.Fatal("Unexpected error:", err)
+			}
+
 			if diff := cmp.Diff(tc.expectedLabels, lbls); diff != "" {
 				t.Errorf("Unexpected labels:\n%s", diff)
 			}
 
 			if diff := cmp.Diff(tc.expectedMatchers, matchers, cmpopts.IgnoreFields(labels.Matcher{}, "re")); diff != "" {
 				t.Errorf("Unexpected matchers:\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestDecodeRow(t *testing.T) {
-	cases := []struct {
-		row                any
-		blacklistedColumns map[string]bool
-		expectedTS         int64
-		expectedValues     map[string]float64
-	}{
-		{
-			row: struct {
-				timestamp  int64
-				m1, m2, m3 float64
-			}{
-				1,
-				2, 4, 6,
-			},
-			expectedTS: int64(1),
-			expectedValues: map[string]float64{
-				"m1": 2, "m2": 4, "m3": 6,
-			},
-		},
-		{
-			row: struct {
-				timestamp                                                          int64
-				PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34 float64 //nolint: revive,stylecheck
-				PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34     float64 //nolint: revive,stylecheck
-			}{
-				1723464000000,
-				26.465028355393066,
-				12.72315815942222,
-			},
-			expectedTS: 1723464000000,
-			expectedValues: map[string]float64{
-				"PARGO_PREFIX___name__6134container_cpu_used3444item6134cassandra34": 26.465028355393066,
-				"PARGO_PREFIX___name__6134container_cpu_used3444item6134redis34":     12.72315815942222,
-			},
-		},
-		{
-			row: struct {
-				timestamp      int64
-				colOne, colTwo float64
-			}{
-				timestamp: 1723563670000,
-				colOne:    1.1,
-				colTwo:    2.2,
-			},
-			blacklistedColumns: map[string]bool{
-				"colOne": true,
-			},
-			expectedTS: 1723563670000,
-			expectedValues: map[string]float64{
-				"colTwo": 2.2,
-			},
-		},
-	}
-
-	for i, tc := range cases {
-		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
-			t.Parallel()
-
-			ts, values := decodeRow(tc.row, tc.blacklistedColumns)
-			if ts != tc.expectedTS {
-				t.Errorf("Expected ts %d, got %d", tc.expectedTS, ts)
-			}
-
-			if diff := cmp.Diff(tc.expectedValues, values); diff != "" {
-				t.Errorf("Unexpected values:\n%s", diff)
 			}
 		})
 	}

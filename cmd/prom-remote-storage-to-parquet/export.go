@@ -164,7 +164,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		}
 	}()
 
-	sch, model, labelsTextByColName, err := generateSchemaModel(seriesLabels)
+	sch, model, err := generateSchemaModel(seriesLabels)
 	if err != nil {
 		return 0, 0, batchTimings{}, fmt.Errorf("generating schema: %w", err)
 	}
@@ -202,7 +202,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			continue
 		}
 
-		rowsCount, pointsCount, err := writeTimeSeries(pw, labelsTextByColName, series, model, &timings)
+		rowsCount, pointsCount, err := writeTimeSeries(pw, series, model, &timings)
 		if err != nil {
 			return 0, 0, batchTimings{}, fmt.Errorf("write series: %w", err)
 		}
@@ -210,17 +210,6 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		totalRows += int64(rowsCount)
 		totalPoints += int64(pointsCount)
 	}
-
-	varNameToLabels := make([]*parquet.KeyValue, 0, len(labelsTextByColName))
-
-	for colName, labelsText := range labelsTextByColName {
-		varNameToLabels = append(varNameToLabels, &parquet.KeyValue{
-			Key:   colName,
-			Value: &labelsText,
-		})
-	}
-
-	pw.Footer.KeyValueMetadata = varNameToLabels
 
 	return totalRows, totalPoints, timings, nil
 }
@@ -306,7 +295,6 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 func writeTimeSeries(
 	pw *writer.ParquetWriter,
-	colNames map[string]string,
 	series []*prompb.TimeSeries,
 	model any,
 	timings *batchTimings,
@@ -314,7 +302,6 @@ func writeTimeSeries(
 	timestamps := make(map[int64]struct{}, len(series[0].Samples)) //nolint: lll // using the length of the first series as an order of size
 	indexBySeries := make(map[int]int, len(series))
 	metricColNames := make([]string, len(series))
-	seriesNotRepresented := maps.Clone(colNames)
 
 	tMerge := time.Now()
 
@@ -322,8 +309,6 @@ func writeTimeSeries(
 		indexBySeries[si] = 0
 		colName := common.StringToVariableName(labelsTextFromSlice(s.GetLabels()))
 		metricColNames[si] = colName
-		// This metric series appears in this batch, so it won't need to have its value (NaN) put by hand.
-		delete(seriesNotRepresented, colName)
 
 		for _, sample := range s.Samples {
 			timestamps[sample.Timestamp] = struct{}{}
@@ -396,11 +381,10 @@ func makeParquetFile(file string) (source.ParquetFile, error) {
 func generateSchemaModel(seriesLabels []map[string]string) (
 	sch []*parquet.SchemaElement,
 	model any,
-	labelsTextByColName map[string]string,
 	err error,
 ) {
 	cols := make([]reflect.StructField, 1+len(seriesLabels))
-	labelsTextByColName = make(map[string]string, len(seriesLabels))
+	labelsTextByColName := make(map[string]string, len(seriesLabels))
 	labelsTexts := make([]string, len(seriesLabels))
 
 	cols[0] = reflect.StructField{
@@ -430,7 +414,7 @@ func generateSchemaModel(seriesLabels []map[string]string) (
 
 	sh, err := schema.NewSchemaHandlerFromStruct(model)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating schema handler: %w", err)
+		return nil, nil, fmt.Errorf("creating schema handler: %w", err)
 	}
 
 	// Overriding each series parquet name with its labelsText name
@@ -443,7 +427,7 @@ func generateSchemaModel(seriesLabels []map[string]string) (
 		elems[i].Name = labelsTextByColName[e.Name]
 	}
 
-	return elems, model, labelsTextByColName, nil
+	return elems, model, nil
 }
 
 func labelsTextFromSlice(labels []prompb.Label) string {
