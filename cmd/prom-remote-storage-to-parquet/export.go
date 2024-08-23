@@ -20,10 +20,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -39,6 +39,7 @@ import (
 	"github.com/xitongsys/parquet-go-source/writerfile"
 	"github.com/xitongsys/parquet-go/common"
 	"github.com/xitongsys/parquet-go/parquet"
+	"github.com/xitongsys/parquet-go/schema"
 	"github.com/xitongsys/parquet-go/source"
 	"github.com/xitongsys/parquet-go/writer"
 	"golang.org/x/exp/maps"
@@ -163,9 +164,12 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		}
 	}()
 
-	schema, colNames := generateParquetSchema(seriesLabels)
+	sch, model, labelsTextByColName, err := generateSchemaModel(seriesLabels)
+	if err != nil {
+		return 0, 0, batchTimings{}, fmt.Errorf("generating schema: %w", err)
+	}
 
-	pw, err := writer.NewParquetWriter(fw, schema, parallelWorkers)
+	pw, err := writer.NewParquetWriter(fw, sch, parallelWorkers)
 	if err != nil {
 		return 0, 0, batchTimings{}, fmt.Errorf("can't initialize parquet writer: %w", err)
 	}
@@ -176,10 +180,6 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			log.Err(err).Msg("Failed to close parquet writer")
 		}
 	}()
-
-	/*for i := range pw.SchemaHandler.Infos {
-		pw.SchemaHandler.Infos[i].Encoding = parquet.Encoding_PLAIN
-	}*/
 
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
 	for batchStartTS := startTS; batchStartTS < endTS; batchStartTS += batchSizeMs {
@@ -202,7 +202,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			continue
 		}
 
-		rowsCount, pointsCount, err := writeTimeSeries(pw, colNames, series, &timings)
+		rowsCount, pointsCount, err := writeTimeSeries(pw, labelsTextByColName, series, model, &timings)
 		if err != nil {
 			return 0, 0, batchTimings{}, fmt.Errorf("write series: %w", err)
 		}
@@ -211,18 +211,16 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		totalPoints += int64(pointsCount)
 	}
 
-	// TODO: re-add metadata
-	/*varNameToLabels := make([]*parquet.KeyValue, len(colNames))
+	varNameToLabels := make([]*parquet.KeyValue, 0, len(labelsTextByColName))
 
-	for col, name := range metricColNames {
-		labels := labelsTextFromSlice(series[col].GetLabels())
-		varNameToLabels[col] = &parquet.KeyValue{
-			Key:   name,
-			Value: &labels,
-		}
+	for colName, labelsText := range labelsTextByColName {
+		varNameToLabels = append(varNameToLabels, &parquet.KeyValue{
+			Key:   colName,
+			Value: &labelsText,
+		})
 	}
 
-	pw.Footer.KeyValueMetadata = varNameToLabels*/
+	pw.Footer.KeyValueMetadata = varNameToLabels
 
 	return totalRows, totalPoints, timings, nil
 }
@@ -308,8 +306,9 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 func writeTimeSeries(
 	pw *writer.ParquetWriter,
-	colNames map[string]struct{},
+	colNames map[string]string,
 	series []*prompb.TimeSeries,
+	model any,
 	timings *batchTimings,
 ) (rows, points int, err error) {
 	timestamps := make(map[int64]struct{}, len(series[0].Samples)) //nolint: lll // using the length of the first series as an order of size
@@ -340,41 +339,36 @@ func writeTimeSeries(
 	for _, ts := range tss {
 		tMerge = time.Now()
 
-		row := make(map[string]any, 1+len(series)) // +1 for timestamp
-		row["Timestamp"] = ts
+		modelRef := reflect.ValueOf(model).Elem()
+
+		modelRef.FieldByName("Timestamp").SetInt(ts)
 
 		for si, s := range series {
 			seriesIdx := indexBySeries[si]
 			colName := metricColNames[si]
+			field := modelRef.FieldByName(colName)
 
-			if seriesIdx >= len(s.Samples) {
-				row[colName] = math.NaN()
+			var val *float64
 
-				continue
+			if seriesIdx < len(s.Samples) {
+				if sample := s.Samples[seriesIdx]; sample.Timestamp == ts {
+					val = &sample.Value
+					indexBySeries[si]++
+					points++
+				}
 			}
 
-			if sample := s.Samples[seriesIdx]; sample.Timestamp == ts {
-				row[colName] = sample.Value
-				indexBySeries[si]++
-				points++
-			} else {
-				row[colName] = math.NaN()
-			}
-		}
-
-		// For metric series that are absent from this batch,
-		// we need to manually give them a value for each timestamp.
-		for metric := range seriesNotRepresented {
-			row[metric] = /*(*float64)(nil)*/ math.NaN()
+			field.Set(reflect.ValueOf(val))
 		}
 
 		timings.merge += time.Since(tMerge)
-
 		tWrite := time.Now()
 
-		if err := pw.Write(row); err != nil {
+		if err := pw.Write(model); err != nil {
 			return 0, 0, fmt.Errorf("writing row at ts=%d: %w", ts, err)
 		}
+
+		modelRef.SetZero() // reinitialize model
 
 		timings.write += time.Since(tWrite)
 	}
@@ -399,38 +393,57 @@ func makeParquetFile(file string) (source.ParquetFile, error) {
 	return local.NewLocalFileWriter(file)
 }
 
-// generateParquetSchema drafts schema elements according to the given metric series.
-// It also returns a map with the keys representing all the metric series columns.
-func generateParquetSchema(seriesLabels []map[string]string) ([]*parquet.SchemaElement, map[string]struct{}) {
-	// TODO: generate a struct instead of a schema (*float64 & encodings)
-	totalColumns := int32(1 + len(seriesLabels))            // +1 for the timestamps column
-	elems := make([]*parquet.SchemaElement, 1+totalColumns) // +1 for the schema root
-	elems[0] = &parquet.SchemaElement{
-		Name:           "root",
-		NumChildren:    &totalColumns,
-		RepetitionType: parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED),
-	}
-	elems[1] = &parquet.SchemaElement{
-		Name:           "timestamp",
-		Type:           parquet.TypePtr(parquet.Type_INT64),
-		RepetitionType: parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED),
-		ConvertedType:  parquet.ConvertedTypePtr(parquet.ConvertedType_TIMESTAMP_MILLIS),
+func generateSchemaModel(seriesLabels []map[string]string) (
+	sch []*parquet.SchemaElement,
+	model any,
+	labelsTextByColName map[string]string,
+	err error,
+) {
+	cols := make([]reflect.StructField, 1+len(seriesLabels))
+	labelsTextByColName = make(map[string]string, len(seriesLabels))
+	labelsTexts := make([]string, len(seriesLabels))
+
+	cols[0] = reflect.StructField{
+		Name: "Timestamp",
+		Type: reflect.TypeOf(int64(0)),
+		Tag:  `parquet:"name=timestamp, type=INT64, convertedtype=TIMESTAMP_MILLIS"`,
 	}
 
-	colNames := make(map[string]struct{}, totalColumns-1) // -1 for the timestamps column
+	var floatPtr *float64 // using a pointer to a float64 allows storing null values
 
 	for i, labels := range seriesLabels {
-		elem := parquet.NewSchemaElement()
-		elem.Name = labelsTextFromMap(labels)
-		elem.Type = parquet.TypePtr(parquet.Type_DOUBLE)
-		// Values for all timestamps are required; metrics that don't have one will get a NaN instead.
-		elem.RepetitionType = parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED)
+		labelsText := labelsTextFromMap(labels)
+		colName := common.StringToVariableName(labelsText)
 
-		elems[2+i] = elem // +2 for schema root & timestamps col
-		colNames[common.StringToVariableName(elem.Name)] = struct{}{}
+		cols[1+i] = reflect.StructField{
+			Name: colName,
+			Type: reflect.TypeOf(floatPtr),
+			// We can't set the real column name (labelsText) here, because parquet tags don't support quotes.
+			Tag: reflect.StructTag(fmt.Sprintf(`parquet:"name=%d, type=DOUBLE"`, i)), // So for now, we set a dummy one.
+		}
+		labelsTextByColName[colName] = labelsText
+		labelsTexts[i] = labelsText
 	}
 
-	return elems, colNames
+	typ := reflect.StructOf(cols)
+	model = reflect.New(typ).Elem().Addr().Interface()
+
+	sh, err := schema.NewSchemaHandlerFromStruct(model)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating schema handler: %w", err)
+	}
+
+	// Overriding each series parquet name with its labelsText name
+	elems := sh.SchemaElements
+	for i, e := range elems {
+		if i < 2 {
+			continue
+		}
+
+		elems[i].Name = labelsTextByColName[e.Name]
+	}
+
+	return elems, model, labelsTextByColName, nil
 }
 
 func labelsTextFromSlice(labels []prompb.Label) string {
