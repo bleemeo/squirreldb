@@ -26,11 +26,12 @@ func TestLabelsToText(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		input          []prompb.Label
+		inputSlice     []prompb.Label
+		inputMap       map[string]string
 		expectedOutput string
 	}{
 		{
-			input: []prompb.Label{
+			inputSlice: []prompb.Label{
 				{
 					Name:  "__name__",
 					Value: "cpu_used",
@@ -40,10 +41,14 @@ func TestLabelsToText(t *testing.T) {
 					Value: "cpu-7",
 				},
 			},
+			inputMap: map[string]string{
+				"__name__": "cpu_used",
+				"item":     "cpu-7",
+			},
 			expectedOutput: `__name__="cpu_used",item="cpu-7"`,
 		},
 		{
-			input: []prompb.Label{
+			inputSlice: []prompb.Label{
 				{
 					Name:  "__name__",
 					Value: "ops",
@@ -53,6 +58,10 @@ func TestLabelsToText(t *testing.T) {
 					Value: `srv-"g"`,
 				},
 			},
+			inputMap: map[string]string{
+				"__name__": "ops",
+				"instance": `srv-"g"`,
+			},
 			expectedOutput: `__name__="ops",instance="srv-\"g\""`,
 		},
 	}
@@ -61,9 +70,14 @@ func TestLabelsToText(t *testing.T) {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			t.Parallel()
 
-			output := labelsTextFromSlice(tc.input)
+			output := labelsTextFromSlice(tc.inputSlice)
 			if output != tc.expectedOutput {
-				t.Fatalf("expected: %s, got: %s", tc.expectedOutput, output)
+				t.Errorf("[from slice] expected: %s, got: %s", tc.expectedOutput, output)
+			}
+
+			output = labelsTextFromMap(tc.inputMap)
+			if output != tc.expectedOutput {
+				t.Errorf("[from map] expected: %s, got: %s", tc.expectedOutput, output)
 			}
 		})
 	}

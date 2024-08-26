@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -32,22 +31,23 @@ import (
 
 	"github.com/bleemeo/squirreldb/types"
 
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/compress"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/schema"
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/zstd"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
-	"github.com/xitongsys/parquet-go-source/local"
-	"github.com/xitongsys/parquet-go-source/writerfile"
-	"github.com/xitongsys/parquet-go/common"
-	"github.com/xitongsys/parquet-go/parquet"
-	"github.com/xitongsys/parquet-go/schema"
-	"github.com/xitongsys/parquet-go/source"
-	"github.com/xitongsys/parquet-go/writer"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 )
 
-const seriesFetchBatchSizeDays = 1
+const (
+	seriesFetchBatchSizeDays = 1
+	zstdCompressionLevel     = zstd.SpeedBestCompression
+)
 
 type batchTimings struct {
 	fetch, merge, write time.Duration
@@ -66,7 +66,7 @@ func exportData(opts options) error {
 
 	seriesLabels, err := findSeries(opts)
 	if err != nil {
-		return fmt.Errorf("find series: %w", err)
+		return fmt.Errorf("finding series: %w", err)
 	}
 
 	if len(seriesLabels) == 0 {
@@ -79,7 +79,7 @@ func exportData(opts options) error {
 
 	totalRows, totalPoints, timings, err := exportSeries(opts, seriesLabels)
 	if err != nil {
-		return fmt.Errorf("write to parquet file: %w", err)
+		return fmt.Errorf("exporting: %w", err)
 	}
 
 	runtime.ReadMemStats(&m2) // TODO: remove
@@ -114,7 +114,7 @@ func findSeries(opts options) ([]map[string]string, error) {
 
 	req, err := http.NewRequest(http.MethodPost, seriesURL.String(), strings.NewReader(params.Encode())) //nolint: noctx
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -127,7 +127,7 @@ func findSeries(opts options) ([]map[string]string, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("sending request: %w", err)
 	}
 
 	defer resp.Body.Close()
@@ -152,32 +152,15 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 ) {
 	const batchSizeMs = seriesFetchBatchSizeDays * 24 * 60 * 60 * 1000
 
-	fw, err := makeParquetFile(opts.outputFile)
+	seriesNames, pw, err := makeParquetWriter(opts.outputFile, seriesLabels)
 	if err != nil {
-		return 0, 0, batchTimings{}, fmt.Errorf("can't initialize parquet file: %w", err)
+		return 0, 0, batchTimings{}, err
 	}
 
 	defer func() {
-		err := fw.Close()
-		if err != nil {
-			log.Err(err).Msg("Failed to close parquet file")
-		}
-	}()
-
-	sch, model, err := generateSchemaModel(seriesLabels)
-	if err != nil {
-		return 0, 0, batchTimings{}, fmt.Errorf("generating schema: %w", err)
-	}
-
-	pw, err := writer.NewParquetWriter(fw, sch, parallelWorkers)
-	if err != nil {
-		return 0, 0, batchTimings{}, fmt.Errorf("can't initialize parquet writer: %w", err)
-	}
-
-	defer func() {
-		err := pw.WriteStop()
-		if err != nil {
-			log.Err(err).Msg("Failed to close parquet writer")
+		closeErr := pw.Close()
+		if closeErr != nil && err == nil { // so as not to override the (probably) responsible error
+			err = fmt.Errorf("closing writer: %w", closeErr)
 		}
 	}()
 
@@ -193,7 +176,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		series, err := fetchSeries(opts, batchStartTS, batchEndTS)
 		if err != nil {
 			return 0, 0, batchTimings{},
-				fmt.Errorf("fetch series [%s -> %s]: %w", time.UnixMilli(batchStartTS), time.UnixMilli(batchEndTS), err)
+				fmt.Errorf("fetching series [%s -> %s]: %w", time.UnixMilli(batchStartTS), time.UnixMilli(batchEndTS), err)
 		}
 
 		timings.fetch += time.Since(tFetch)
@@ -202,9 +185,16 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			continue
 		}
 
-		rowsCount, pointsCount, err := writeTimeSeries(pw, series, model, &timings)
+		samplesBySeriesName := make(map[string][]prompb.Sample, len(series))
+
+		for _, s := range series {
+			labelsText := labelsTextFromSlice(s.Labels)
+			samplesBySeriesName[labelsText] = s.Samples
+		}
+
+		rowsCount, pointsCount, err := writeTimeSeriesApache(seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
 		if err != nil {
-			return 0, 0, batchTimings{}, fmt.Errorf("write series: %w", err)
+			return 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
 		}
 
 		totalRows += int64(rowsCount)
@@ -212,6 +202,63 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 	}
 
 	return totalRows, totalPoints, timings, nil
+}
+
+func makeParquetWriter(outputFile string, seriesLabels []map[string]string) (
+	allSeries []string,
+	pw *file.Writer,
+	err error,
+) {
+	allSeries = make([]string, len(seriesLabels))
+
+	fields := make(schema.FieldList, 1+len(seriesLabels))
+	fields[0] = schema.MustPrimitive(schema.NewPrimitiveNodeLogical(
+		"timestamp",
+		parquet.Repetitions.Required,
+		schema.NewTimestampLogicalType(true, schema.TimeUnitMillis),
+		parquet.Types.Int64,
+		0,
+		0,
+	))
+
+	for s, labels := range seriesLabels {
+		col := 1 + s // +1 for timestamps col
+		labelsText := labelsTextFromMap(labels)
+		allSeries[s] = labelsText
+
+		fields[col], err = schema.NewPrimitiveNodeLogical(
+			labelsText,
+			parquet.Repetitions.Optional,
+			nil,
+			parquet.Types.Double,
+			1, // what is this ?
+			int32(col),
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("making column %s of schema: %w", labelsText, err)
+		}
+	}
+
+	schemaDef, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("making parquet schema: %w", err)
+	}
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// f will be automatically closed when closing the parquet writer.
+
+	pw = file.NewParquetWriter(f, schemaDef, file.WithWriterProps(
+		// parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy)), // Snappy has no compression level
+		parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd), parquet.WithCompressionLevel(int(zstdCompressionLevel)),
+		),
+	))
+
+	return allSeries, pw, nil
 }
 
 // fetchSeries retrieves the metric series matching the given options within the given time range from a SquirrelDB.
@@ -237,7 +284,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	serializedRequest, err := readRequest.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
 	compressedBody := snappy.Encode(nil, serializedRequest)
@@ -245,7 +292,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	req, err := http.NewRequest(http.MethodPost, opts.readURL.String(), bodyReader) //nolint: noctx
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	req.Header.Set("Content-Encoding", "snappy")
@@ -259,7 +306,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("sending request: %w", err)
 	}
 
 	defer resp.Body.Close()
@@ -272,17 +319,17 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
+		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
 	uncompressedBody, err := snappy.Decode(nil, body)
 	if err != nil {
-		return nil, fmt.Errorf("decompress response: %w", err)
+		return nil, fmt.Errorf("decompressing response: %w", err)
 	}
 
 	readResponse := new(prompb.ReadResponse)
 	if err = proto.Unmarshal(uncompressedBody, protoadapt.MessageV2Of(readResponse)); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, fmt.Errorf("unmarshaling response: %w", err)
 	}
 
 	results := readResponse.GetResults()
@@ -293,24 +340,17 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 	return results[0].GetTimeseries(), nil
 }
 
-func writeTimeSeries(
-	pw *writer.ParquetWriter,
-	series []*prompb.TimeSeries,
-	model any,
+func writeTimeSeriesApache(
+	allSeries []string,
+	rgw file.SerialRowGroupWriter,
+	seriesByName map[string][]prompb.Sample,
 	timings *batchTimings,
-) (rows, points int, err error) {
-	timestamps := make(map[int64]struct{}, len(series[0].Samples)) //nolint: lll // using the length of the first series as an order of size
-	indexBySeries := make(map[int]int, len(series))
-	metricColNames := make([]string, len(series))
-
+) (rowsCount, pointsCount int, err error) {
 	tMerge := time.Now()
+	timestamps := make(map[int64]struct{})
 
-	for si, s := range series {
-		indexBySeries[si] = 0
-		colName := common.StringToVariableName(labelsTextFromSlice(s.GetLabels()))
-		metricColNames[si] = colName
-
-		for _, sample := range s.Samples {
+	for _, samples := range seriesByName {
+		for _, sample := range samples {
 			timestamps[sample.Timestamp] = struct{}{}
 		}
 	}
@@ -321,113 +361,83 @@ func writeTimeSeries(
 
 	timings.merge += time.Since(tMerge)
 
-	for _, ts := range tss {
-		tMerge = time.Now()
-
-		modelRef := reflect.ValueOf(model).Elem()
-
-		modelRef.FieldByName("Timestamp").SetInt(ts)
-
-		for si, s := range series {
-			seriesIdx := indexBySeries[si]
-			colName := metricColNames[si]
-			field := modelRef.FieldByName(colName)
-
-			var val *float64
-
-			if seriesIdx < len(s.Samples) {
-				if sample := s.Samples[seriesIdx]; sample.Timestamp == ts {
-					val = &sample.Value
-					indexBySeries[si]++
-					points++
-				}
-			}
-
-			field.Set(reflect.ValueOf(val))
-		}
-
-		timings.merge += time.Since(tMerge)
-		tWrite := time.Now()
-
-		if err := pw.Write(model); err != nil {
-			return 0, 0, fmt.Errorf("writing row at ts=%d: %w", ts, err)
-		}
-
-		modelRef.SetZero() // reinitialize model
-
-		timings.write += time.Since(tWrite)
-	}
-
 	tWrite := time.Now()
 
-	err = pw.Flush(true)
+	// Writing the timestamps
+	timestampWriter, err := rgw.NextColumn()
 	if err != nil {
-		return 0, 0, fmt.Errorf("flushing writer: %w", err)
+		return 0, 0, fmt.Errorf("getting timestamps column writer: %w", err)
+	}
+
+	_, err = timestampWriter.(*file.Int64ColumnChunkWriter).WriteBatch(tss, nil, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("writing timestamp: %w", err)
+	}
+
+	err = timestampWriter.Close()
+	if err != nil {
+		return 0, 0, fmt.Errorf("closing timestamp writer: %w", err)
 	}
 
 	timings.write += time.Since(tWrite)
 
-	return len(tss), points, nil
-}
+	// Writing each series
+	for _, seriesName := range allSeries {
+		values := make([]float64, len(tss))
+		defLevels := make([]int16, len(tss))
 
-func makeParquetFile(file string) (source.ParquetFile, error) {
-	if file == "-" {
-		return writerfile.NewWriterFile(os.Stdout), nil
-	}
+		// All columns must be defined; series absent from this batch will be filled with null (definition level = 0).
+		if series, found := seriesByName[seriesName]; found {
+			tMerge = time.Now()
+			currentSampleIdx := 0
 
-	return local.NewLocalFileWriter(file)
-}
+			for t, ts := range tss {
+				sample := series[currentSampleIdx]
+				if sample.Timestamp == ts {
+					values[t] = sample.Value
+					defLevels[t] = 1 // 1 = defined
+					pointsCount++
 
-func generateSchemaModel(seriesLabels []map[string]string) (
-	sch []*parquet.SchemaElement,
-	model any,
-	err error,
-) {
-	cols := make([]reflect.StructField, 1+len(seriesLabels))
-	labelsTextByColName := make(map[string]string, len(seriesLabels))
-	labelsTexts := make([]string, len(seriesLabels))
+					currentSampleIdx++
+					if currentSampleIdx >= len(series) {
+						break
+					}
+				}
+			}
 
-	cols[0] = reflect.StructField{
-		Name: "Timestamp",
-		Type: reflect.TypeOf(int64(0)),
-		Tag:  `parquet:"name=timestamp, type=INT64, convertedtype=TIMESTAMP_MILLIS"`,
-	}
-
-	var floatPtr *float64 // using a pointer to a float64 allows storing null values
-
-	for i, labels := range seriesLabels {
-		labelsText := labelsTextFromMap(labels)
-		colName := common.StringToVariableName(labelsText)
-
-		cols[1+i] = reflect.StructField{
-			Name: colName,
-			Type: reflect.TypeOf(floatPtr),
-			// We can't set the real column name (labelsText) here, because parquet tags don't support quotes.
-			Tag: reflect.StructTag(fmt.Sprintf(`parquet:"name=%d, type=DOUBLE"`, i)), // So for now, we set a dummy one.
+			timings.merge += time.Since(tMerge)
 		}
-		labelsTextByColName[colName] = labelsText
-		labelsTexts[i] = labelsText
+
+		tWrite = time.Now()
+
+		valueWriter, err := rgw.NextColumn()
+		if err != nil {
+			return 0, 0, fmt.Errorf("getting next column writer: %w", err)
+		}
+
+		_, err = valueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
+		if err != nil {
+			return 0, 0, fmt.Errorf("writing values: %w", err)
+		}
+
+		err = valueWriter.Close()
+		if err != nil {
+			return 0, 0, fmt.Errorf("closing values writer: %w", err)
+		}
+
+		timings.write += time.Since(tWrite)
 	}
 
-	typ := reflect.StructOf(cols)
-	model = reflect.New(typ).Elem().Addr().Interface()
+	tWrite = time.Now()
 
-	sh, err := schema.NewSchemaHandlerFromStruct(model)
+	err = rgw.Close()
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating schema handler: %w", err)
+		return 0, 0, fmt.Errorf("closing row group writer: %w", err)
 	}
 
-	// Overriding each series parquet name with its labelsText name
-	elems := sh.SchemaElements
-	for i, e := range elems {
-		if i < 2 {
-			continue
-		}
+	timings.write += time.Since(tWrite)
 
-		elems[i].Name = labelsTextByColName[e.Name]
-	}
-
-	return elems, model, nil
+	return len(tss), pointsCount, nil
 }
 
 func labelsTextFromSlice(labels []prompb.Label) string {
