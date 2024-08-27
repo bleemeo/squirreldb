@@ -42,6 +42,11 @@ const (
 	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
+var allowedProtoMsgs = []config.RemoteWriteProtoMsg{ //nolint:gochecknoglobals
+	config.RemoteWriteProtoMsgV1,
+	config.RemoteWriteProtoMsgV2,
+}
+
 var (
 	regexErrInvalidMatcher      = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrInvalidMatcher))
 	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrMissingTenantHeader))
@@ -160,6 +165,7 @@ func NewPrometheus(
 		metricRegistry,
 		nil,
 		rwEnabled,
+		allowedProtoMsgs,
 		otlpEnabled,
 	)
 
@@ -1055,6 +1061,11 @@ type interceptor struct {
 
 func (i *interceptor) WriteHeader(rc int) {
 	i.status = rc
+
+	if rc == http.StatusNoContent {
+		// Write it now, because the Write() method won't be called.
+		i.OrigWriter.WriteHeader(rc)
+	}
 }
 
 func (i *interceptor) Write(b []byte) (int, error) {
