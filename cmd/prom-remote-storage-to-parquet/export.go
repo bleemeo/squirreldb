@@ -77,7 +77,7 @@ func exportData(opts options) error {
 
 	tExport := time.Now()
 
-	totalRows, totalPoints, timings, err := exportSeries(opts, seriesLabels)
+	totalSeries, totalRows, totalPoints, timings, err := exportSeries(opts, seriesLabels)
 	if err != nil {
 		return fmt.Errorf("exporting: %w", err)
 	}
@@ -87,7 +87,7 @@ func exportData(opts options) error {
 
 	log.Info().Msgf(
 		"Exported %d serie(s) totaling %d row(s) and %d point(s) across a time range of %s to parquet in %s (find: %s, export: %s (fetch: %s, merge: %s, write: %s))", //nolint:lll
-		len(seriesLabels), totalRows, totalPoints,
+		totalSeries, totalRows, totalPoints,
 		formatTimeRange(opts.start, opts.end),
 		time.Since(tFind).Round(time.Millisecond).String(),
 		tExport.Sub(tFind).Round(time.Millisecond).String(),
@@ -146,6 +146,7 @@ func findSeries(opts options) ([]map[string]string, error) {
 }
 
 func exportSeries(opts options, seriesLabels []map[string]string) (
+	totalSeries int,
 	totalRows, totalPoints int64,
 	timings batchTimings,
 	err error,
@@ -154,7 +155,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 
 	seriesNames, pw, err := makeParquetWriter(opts.outputFile, seriesLabels)
 	if err != nil {
-		return 0, 0, batchTimings{}, err
+		return 0, 0, 0, batchTimings{}, err
 	}
 
 	defer func() {
@@ -163,6 +164,8 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			err = fmt.Errorf("closing writer: %w", closeErr)
 		}
 	}()
+
+	actualSeries := make(map[string]struct{}, len(seriesNames))
 
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
 	for batchStartTS := startTS; batchStartTS < endTS; batchStartTS += batchSizeMs {
@@ -175,7 +178,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 
 		series, err := fetchSeries(opts, batchStartTS, batchEndTS)
 		if err != nil {
-			return 0, 0, batchTimings{},
+			return 0, 0, 0, batchTimings{},
 				fmt.Errorf("fetching series [%s -> %s]: %w", time.UnixMilli(batchStartTS), time.UnixMilli(batchEndTS), err)
 		}
 
@@ -190,18 +193,19 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		for _, s := range series {
 			labelsText := labelsTextFromSlice(s.Labels)
 			samplesBySeriesName[labelsText] = s.Samples
+			actualSeries[labelsText] = struct{}{}
 		}
 
-		rowsCount, pointsCount, err := writeTimeSeriesApache(seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
+		rowsCount, pointsCount, err := writeTimeSeries(seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
 		if err != nil {
-			return 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
+			return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
 		}
 
 		totalRows += int64(rowsCount)
 		totalPoints += int64(pointsCount)
 	}
 
-	return totalRows, totalPoints, timings, nil
+	return len(actualSeries), totalRows, totalPoints, timings, nil
 }
 
 func makeParquetWriter(outputFile string, seriesLabels []map[string]string) (
@@ -340,7 +344,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 	return results[0].GetTimeseries(), nil
 }
 
-func writeTimeSeriesApache(
+func writeTimeSeries(
 	allSeries []string,
 	rgw file.SerialRowGroupWriter,
 	seriesByName map[string][]prompb.Sample,
