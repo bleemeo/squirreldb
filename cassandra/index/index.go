@@ -528,7 +528,7 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 		deleteIDsMap := make(map[types.MetricID]bool, len(deleteIDs))
 
 		for _, id := range deleteIDs {
-			deleteIDsMap[types.MetricID(id)] = true
+			deleteIDsMap[types.MetricID(id)] = true //nolint:gosec
 		}
 
 		for key, idsData := range c.labelsToID {
@@ -563,7 +563,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 		concurrentPostingRead,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, shard := range shards {
-				shard := int32(shard)
+				shard := int32(shard) //nolint:gosec
 				task := func() error {
 					tmp, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 					if err != nil {
@@ -741,7 +741,7 @@ func (c *CassandraIndex) dumpPostings(ctx context.Context, w *csv.Writer, postin
 
 		n := 0
 		for id, eof := iter.Next(); !eof && n < expireBatchSize; id, eof = iter.Next() {
-			pendingIDs[n] = types.MetricID(id)
+			pendingIDs[n] = types.MetricID(id) //nolint:gosec
 			n++
 		}
 
@@ -823,18 +823,28 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 			break
 		}
 
-		postingShard, err := c.postings(ctx, []int32{int32(shard)}, allPostingLabel, allPostingLabel, false)
+		postingShard, err := c.postings(ctx,
+			[]int32{int32(shard)}, //nolint:gosec
+			allPostingLabel,
+			allPostingLabel,
+			false,
+		)
 		if err != nil {
 			return err
 		}
 
-		maybepostingShard, err := c.postings(ctx, []int32{int32(shard)}, maybePostingLabel, maybePostingLabel, false)
+		maybepostingShard, err := c.postings(ctx,
+			[]int32{int32(shard)}, //nolint:gosec
+			maybePostingLabel,
+			maybePostingLabel,
+			false,
+		)
 		if err != nil {
 			return err
 		}
 
 		labelNamesCount := 0
-		iter := c.store.SelectPostingByName(ctx, int32(shard), postinglabelName)
+		iter := c.store.SelectPostingByName(ctx, int32(shard), postinglabelName) //nolint:gosec
 
 		for iter.HasNext() {
 			labelNamesCount++
@@ -842,7 +852,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 
 		iter.Close()
 
-		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard))
+		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard)) //nolint:gosec
 
 		// Some shard expiration metrics may not exist if the shard were created before the
 		// expiration was introduced. In this case the expiration will be shown at 0001-01-01 00:00:00.
@@ -853,7 +863,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has %d metrics (and %d in maybePosting), %d label names and expires at %s\n",
-			timeForShard(int32(shard)).Format(shardDateFormat),
+			timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
 			shard,
 			postingShard.Count(),
 			maybepostingShard.Count(),
@@ -941,12 +951,22 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			break
 		}
 
-		postingShard, err := c.postings(ctx, []int32{int32(shard)}, allPostingLabel, allPostingLabel, false)
+		postingShard, err := c.postings(ctx,
+			[]int32{int32(shard)}, //nolint:gosec
+			allPostingLabel,
+			allPostingLabel,
+			false,
+		)
 		if err != nil {
 			return err
 		}
 
-		maybepostingShard, err := c.postings(ctx, []int32{int32(shard)}, maybePostingLabel, maybePostingLabel, false)
+		maybepostingShard, err := c.postings(ctx,
+			[]int32{int32(shard)}, //nolint:gosec
+			maybePostingLabel,
+			maybePostingLabel,
+			false,
+		)
 		if err != nil {
 			return err
 		}
@@ -957,7 +977,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has the metric in posting=%v, maybePosting=%v\n",
-			timeForShard(int32(shard)).Format(shardDateFormat),
+			timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
 			shard,
 			inPosting,
 			inMaybe,
@@ -967,7 +987,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			missingPostings := make([]string, 0)
 
 			for _, l := range lbls {
-				posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false)
+				posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false) //nolint:gosec
 				if err != nil {
 					return err
 				}
@@ -981,11 +1001,15 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 				fmt.Fprintf(
 					w,
 					"Shard %s: the following postings are missing: %s\n",
-					timeForShard(int32(shard)).Format(shardDateFormat),
+					timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
 					strings.Join(missingPostings, ", "),
 				)
 			} else {
-				fmt.Fprintf(w, "Shard %s: all postings are present\n", timeForShard(int32(shard)).Format(shardDateFormat))
+				fmt.Fprintf(
+					w,
+					"Shard %s: all postings are present\n",
+					timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+				)
 			}
 		}
 	}
@@ -1759,18 +1783,18 @@ func findFreeID(bitmap *roaring.Bitmap) uint64 {
 		return 1
 	}
 
-	max := bitmap.Max()
+	bitmapMax := bitmap.Max()
 
-	if max == card {
-		return max + 1
+	if bitmapMax == card {
+		return bitmapMax + 1
 	}
 
-	if bitmap.Contains(0) && max+1 == card {
-		return max + 1
+	if bitmap.Contains(0) && bitmapMax+1 == card {
+		return bitmapMax + 1
 	}
 
 	lowIdx := uint64(1)
-	highIdx := max + 1
+	highIdx := bitmapMax + 1
 
 	for highIdx-lowIdx > 32768 {
 		pivot := lowIdx + (highIdx-lowIdx)/2
@@ -1792,8 +1816,8 @@ func findFreeID(bitmap *roaring.Bitmap) uint64 {
 	// becaus Flip produce a broken NewBitmap which is known to have bugs (on update only it seems)
 	// So we will double-check that the result is indeed unused to catch possible bugs
 	if len(results) == 0 || bitmap.Contains(results[0]) {
-		if max < math.MaxUint64 {
-			return max + 1
+		if bitmapMax < math.MaxUint64 {
+			return bitmapMax + 1
 		}
 
 		return 0
@@ -1946,7 +1970,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
 		default:
-			newID = types.MetricID(findFreeID(allPosting))
+			newID = types.MetricID(findFreeID(allPosting)) //nolint:gosec
 		}
 
 		if newID == 0 {
@@ -2974,7 +2998,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 	metricIDs := make([]types.MetricID, len(ids))
 	for i, intID := range ids {
-		metricIDs[i] = types.MetricID(intID)
+		metricIDs[i] = types.MetricID(intID) //nolint:gosec
 	}
 
 	idToLabels, expires, err := c.selectIDS2LabelsAndExpiration(ctx, metricIDs)
@@ -3754,7 +3778,7 @@ func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day tim
 func shardForTime(ts int64) int32 {
 	shardSize := int32(postingShardSize.Hours())
 
-	return (int32(ts/3600) / shardSize) * shardSize
+	return (int32(ts/3600) / shardSize) * shardSize //nolint:gosec
 }
 
 // timeForShard return the time for given shard ID.
@@ -3785,12 +3809,12 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 			return nil, err
 		}
 
-		if min, ok := existingShards.Min(); ok && startShard < int32(min) {
-			startShard = int32(min)
+		if minShard, ok := existingShards.Min(); ok && startShard < int32(minShard) { //nolint:gosec
+			startShard = int32(minShard) //nolint:gosec
 		}
 
-		if max := existingShards.Max(); endShard > int32(max) {
-			endShard = int32(max)
+		if maxShard := existingShards.Max(); endShard > int32(maxShard) { //nolint:gosec
+			endShard = int32(maxShard) //nolint:gosec
 		}
 	}
 
@@ -3957,7 +3981,7 @@ func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 	results := make([]types.MetricID, len(resultInts))
 
 	for i, v := range resultInts {
-		results[i] = types.MetricID(v)
+		results[i] = types.MetricID(v) //nolint:gosec
 	}
 
 	return results

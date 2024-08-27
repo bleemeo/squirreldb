@@ -4643,11 +4643,11 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 			t.Run(fmt.Sprintf("%s-%d-%d", tt.name, i, saveEvery), func(t *testing.T) {
 				t.Parallel()
 
-				max := allPosting.Max()
+				maxPosting := allPosting.Max()
 				count := allPosting.Count()
 
-				if max-count != uint64(tt.numberHole) && tt.numberHole != -1 {
-					t.Errorf("Had %d hole, want %d", max-count, tt.numberHole)
+				if maxPosting-count != uint64(tt.numberHole) && tt.numberHole != -1 {
+					t.Errorf("Had %d hole, want %d", maxPosting-count, tt.numberHole)
 				}
 
 				iterCount := 1000
@@ -4674,7 +4674,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 						t.Errorf("loop %d: newID = %d, want %d", n, newID, tt.wants[n])
 					}
 
-					if n < tt.numberHole && newID == max+1 {
+					if n < tt.numberHole && newID == maxPosting+1 {
 						t.Errorf("on loop %d, had to use workaround but allPosting should have free hole", n)
 					}
 
@@ -7700,7 +7700,7 @@ func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTi
 	for runCount := range maxRunCount {
 		// If we are close to maxRunCount or maxTime, enable skipping errors
 		if runCount > maxRunCount*3/4 && !shouldSkipError(ctx) {
-			ctx = contextSkipError(ctx)
+			ctx = contextSkipError(ctx) //nolint: fatcontext
 		}
 
 		if maxTime.Sub(currentNow) < 300*time.Minute && !shouldSkipError(ctx) {
@@ -8464,7 +8464,7 @@ func clusterDoOneBatch(t *testing.T,
 
 			for i := range retryCount {
 				if i == retryCount-1 {
-					ctx = contextSkipError(ctx)
+					ctx = contextSkipError(ctx) //nolint: fatcontext
 				}
 
 				_, _, err = index.lookupIDs(ctx, toLookupRequests(fullList, currentTime), currentTime)

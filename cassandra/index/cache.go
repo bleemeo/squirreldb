@@ -121,7 +121,7 @@ func (c *labelsLookupCache) Drop(ids []uint64) int {
 	defer c.l.Unlock()
 
 	for _, id := range ids {
-		delete(c.cache, types.MetricID(id))
+		delete(c.cache, types.MetricID(id)) //nolint:gosec
 	}
 
 	return len(c.cache)

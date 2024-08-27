@@ -144,7 +144,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 	allDeleteIDs := roaring.NewBitmap(d.deleteIDs...)
 
 	for _, shard := range shards.Slice() {
-		shard := int32(shard)
+		shard := int32(shard) //nolint:gosec
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
@@ -202,7 +202,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 		concurrentDelete,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, id := range d.deleteIDs {
-				id := types.MetricID(id)
+				id := types.MetricID(id) //nolint:gosec
 				task := func() error {
 					err := d.c.store.DeleteID2Labels(ctx, id)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) {

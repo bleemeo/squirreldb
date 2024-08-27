@@ -141,7 +141,7 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 			ttls[i] = int64(defaultTimeToLive.Seconds())
 		}
 
-		ids[i] = types.MetricID(req.Labels.Hash())
+		ids[i] = types.MetricID(req.Labels.Hash()) //nolint:gosec
 	}
 
 	if !idx.StoreMetricIDInMemory {
