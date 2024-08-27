@@ -77,7 +77,6 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-openapi/validate v0.24.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
-	github.com/google/btree v1.1.2 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -148,4 +147,4 @@ require (
 // Fix cloud.google.com/go/compute/metadata: ambiguous import: found package cloud.google.com/go/compute/metadata in multiple modules:
 // cloud.google.com/go v0.65.0
 // cloud.google.com/go/compute v1.7.0
-replace cloud.google.com/go => cloud.google.com/go v0.112.0
+replace cloud.google.com/go => cloud.google.com/go v0.115.1
