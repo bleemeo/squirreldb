@@ -133,9 +133,7 @@ func findSeries(opts options) ([]map[string]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return nil, fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, body)
+		return nil, fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	var foundSeries struct {
@@ -316,9 +314,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return nil, fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -364,7 +360,6 @@ func writeTimeSeries(
 	slices.Sort(tss)
 
 	timings.merge += time.Since(tMerge)
-
 	tWrite := time.Now()
 
 	// Writing the timestamps
@@ -400,7 +395,6 @@ func writeTimeSeries(
 				if sample.Timestamp == ts {
 					values[t] = sample.Value
 					defLevels[t] = 1 // 1 = defined
-					pointsCount++
 
 					currentSampleIdx++
 					if currentSampleIdx >= len(series) {
@@ -419,7 +413,7 @@ func writeTimeSeries(
 			return 0, 0, fmt.Errorf("getting next column writer: %w", err)
 		}
 
-		_, err = valueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
+		written, err := valueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
 		if err != nil {
 			return 0, 0, fmt.Errorf("writing values: %w", err)
 		}
@@ -430,6 +424,7 @@ func writeTimeSeries(
 		}
 
 		timings.write += time.Since(tWrite)
+		pointsCount += int(written)
 	}
 
 	tWrite = time.Now()

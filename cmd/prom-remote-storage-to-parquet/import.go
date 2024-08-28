@@ -19,7 +19,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -304,9 +303,7 @@ func remoteWriteSeries(series prompb.TimeSeries, opts options) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		content, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, content)
+		return fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	return nil
@@ -347,9 +344,7 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		content, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("received non-200 response: %d\n%s", resp.StatusCode, content)
+		return fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	return nil

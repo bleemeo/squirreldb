@@ -29,6 +29,11 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const (
+	defaultMaxEvalSeries = 10_000
+	defaultMaxEvalPoints = 2_000_000
+)
+
 var (
 	errInvalidPosArgs        = errors.New("expected exactly one positional argument <import | export>")
 	errInvalidOperation      = errors.New("invalid operation")
@@ -74,8 +79,8 @@ func parseOptions(args []string) (options, error) {
 	now := time.Now().Truncate(time.Second)
 
 	flags.StringVar(&opts.tenantHeader, "tenant", "", "SquirrelDB tenant header")
-	flags.Uint32Var(&opts.squirrelDBMaxEvalSeries, "squirreldb-max-evaluated-series", 10_000, "Max evaluated series on SquirrelDB (0=unlimited)")    //nolint:lll
-	flags.Uint64Var(&opts.squirrelDBMaxEvalPoints, "squirreldb-max-evaluated-points", 2_000_000, "Max evaluated points on SquirrelDB (0=unlimited)") //nolint:lll
+	flags.Uint32Var(&opts.squirrelDBMaxEvalSeries, "squirreldb-max-evaluated-series", defaultMaxEvalSeries, "Max evaluated series on SquirrelDB (0=unlimited)") //nolint:lll
+	flags.Uint64Var(&opts.squirrelDBMaxEvalPoints, "squirreldb-max-evaluated-points", defaultMaxEvalPoints, "Max evaluated points on SquirrelDB (0=unlimited)") //nolint:lll
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
 	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll

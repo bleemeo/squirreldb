@@ -16,14 +16,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/bleemeo/squirreldb/logger"
 
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog/log"
 )
 
@@ -76,4 +80,26 @@ func formatTimeRange(start, end time.Time) string {
 	}
 
 	return d.String()
+}
+
+// tryParseErrorBody decodes the body and returns a string representation of it.
+func tryParseErrorBody(body io.Reader) string {
+	content, err := io.ReadAll(body)
+	if err != nil {
+		return "can't read response body: " + err.Error()
+	}
+
+	jsonDec := json.NewDecoder(bytes.NewReader(content))
+	jsonDec.DisallowUnknownFields() // Ensure the type we get is the type we want
+
+	var promErrorResp v1.Response
+	if err = jsonDec.Decode(&promErrorResp); err == nil {
+		if promErrorResp.Status == "error" {
+			return fmt.Sprintf("%s: %s", promErrorResp.ErrorType, promErrorResp.Error)
+		}
+
+		return fmt.Sprintf("%+v", promErrorResp)
+	}
+
+	return string(content)
 }
