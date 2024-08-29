@@ -45,7 +45,7 @@ var errCantSeekTimestamp = errors.New("can't seek timestamp")
 func importData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).
 		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).
-		Any("pre-aggreg-url", opts.preAggregURL.String()).Msg("Import options")
+		Str("pre-aggreg-url", fmt.Sprint(opts.preAggregURL)).Msg("Import options")
 
 	var m1, m2 runtime.MemStats
 
@@ -54,7 +54,7 @@ func importData(opts options) error {
 
 	t0 := time.Now()
 
-	importedSeries, firstTS, lastTS, timePerSeries, err := importSeries(opts)
+	importedSeries, importedPoints, firstTS, lastTS, timePerSeries, err := importSeries(opts)
 	if err != nil {
 		return fmt.Errorf("importing series: %w", err)
 	}
@@ -63,8 +63,8 @@ func importData(opts options) error {
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Imported %d serie(s) across a time range of %s from parquet in %s (~%s per series)",
-		importedSeries,
+		"Imported %d serie(s) and %d point(s) across a time range of %s from parquet in %s (~%s per series)",
+		importedSeries, importedPoints,
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
 		time.Since(t0).Round(time.Millisecond).String(),
 		timePerSeries.Round(time.Millisecond).String(),
@@ -76,10 +76,17 @@ func importData(opts options) error {
 // importSeries loads each metric series from the specified parquet file,
 // and imports it to SquirrelDB.
 // It returns the first and last timestamps seen, or any error.
-func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, timePerSeries time.Duration, err error) {
+func importSeries(opts options) (
+	importedSeries, importedPoints int,
+	firstTS, lastTS int64,
+	timePerSeries time.Duration,
+	err error,
+) {
+	log.Warn().Msg("With xitongsys library")
+
 	fr, err := local.NewLocalFileReader(opts.inputFile)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("open input file: %w", err)
+		return 0, 0, 0, 0, 0, fmt.Errorf("open input file: %w", err)
 	}
 
 	defer func() {
@@ -91,7 +98,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 	pr, err := reader.NewParquetReader(fr, nil, parallelWorkers)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
+		return 0, 0, 0, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
 	}
 
 	defer pr.ReadStop()
@@ -100,7 +107,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 	labelsPerColName, matchersPerColName, err := getLabelsFromSchema(pr.SchemaHandler.Infos)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("can't parse series labels: %w", err)
+		return 0, 0, 0, 0, 0, fmt.Errorf("can't parse series labels: %w", err)
 	}
 
 	deniedColumns, importedSeriesPerColName := filterLabels(matchersPerColName, opts.labelMatchers)
@@ -108,17 +115,17 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 	wantedTS, startIdx, endIdx, err := readAllTimestamps(pr, startTS, endTS)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, err
 	}
 
 	if len(wantedTS) == 0 {
-		return 0, 0, 0, 0, errNoSeriesFound
+		return 0, 0, 0, 0, 0, errNoSeriesFound
 	}
 
 	if startIdx > 0 {
 		err = pr.SkipRows(startIdx)
 		if err != nil {
-			return 0, 0, 0, 0, fmt.Errorf("%w: %w", errCantSeekTimestamp, err)
+			return 0, 0, 0, 0, 0, fmt.Errorf("%w: %w", errCantSeekTimestamp, err)
 		}
 	}
 
@@ -138,7 +145,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 		samples, err := readSeriesSamples(pr, wantedTS, colIdx, colNameWithoutPrefix, endIdx)
 		if err != nil {
-			return 0, 0, 0, 0, err
+			return 0, 0, 0, 0, 0, err
 		}
 
 		if len(samples) == 0 {
@@ -154,7 +161,7 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 
 		err = remoteWriteSeries(timeSeries, opts)
 		if err != nil {
-			return 0, 0, 0, 0, fmt.Errorf("remotely writing series from column n°%d: %w", colIdx, err)
+			return 0, 0, 0, 0, 0, fmt.Errorf("remotely writing series from column n°%d: %w", colIdx, err)
 		}
 
 		seriesFirstTS := samples[0].Timestamp
@@ -162,13 +169,16 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 		seriesLabels := importedSeriesPerColName[colNameWithoutPrefix]
 
 		if opts.preAggregURL != nil {
+			log.Trace().Msgf("Pre-aggregating column %s ...", colNameWithoutPrefix)
+
 			err = triggerPreAggregation(opts.preAggregURL.String(), opts.tenantHeader, seriesFirstTS, seriesLastTS, seriesLabels)
 			if err != nil {
-				return 0, 0, 0, 0, fmt.Errorf("triggering pre-aggregation: %w", err)
+				return 0, 0, 0, 0, 0, fmt.Errorf("triggering pre-aggregation: %w", err)
 			}
 		}
 
 		importedSeries++
+		importedPoints += len(samples)
 
 		if firstTS == 0 || seriesFirstTS < firstTS {
 			firstTS = seriesFirstTS
@@ -180,12 +190,12 @@ func importSeries(opts options) (importedSeries int, firstTS, lastTS int64, time
 	}
 
 	if importedSeries == 0 {
-		return 0, 0, 0, 0, errNoSeriesFound
+		return 0, 0, 0, 0, 0, errNoSeriesFound
 	}
 
 	timePerSeries = time.Since(t0) / time.Duration(importedSeries)
 
-	return importedSeries, firstTS, lastTS, timePerSeries, nil
+	return importedSeries, importedPoints, firstTS, lastTS, timePerSeries, nil
 }
 
 func getLabelsFromSchema(infos []*common.Tag) (
@@ -302,8 +312,8 @@ func remoteWriteSeries(series prompb.TimeSeries, opts options) error {
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("received non-200 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("received non-204 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	return nil
