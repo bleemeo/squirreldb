@@ -25,6 +25,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 )
@@ -65,6 +66,7 @@ func parseOptions(args []string) (options, error) {
 		writeURL, readURL string
 		preAggregURL      string
 		start, end        string
+		logLevel          string
 	)
 
 	flags := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
@@ -89,6 +91,7 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&start, "start", now.Add(-24*time.Hour).Format(time.RFC3339), "Start time")
 	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time")
 	flags.StringVar(&opts.metricSelector, "metric-selector", "", "PromQL metric selector")
+	flags.StringVar(&logLevel, "log-level", zerolog.LevelDebugValue, "Displayed logs minimum level")
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -189,6 +192,13 @@ func parseOptions(args []string) (options, error) {
 			return options{}, fmt.Errorf("%w: %w", errInvalidMetricSelector, err)
 		}
 	}
+
+	logLvl, err := zerolog.ParseLevel(logLevel)
+	if err != nil {
+		return options{}, fmt.Errorf("invalid log level: %w", err)
+	}
+
+	zerolog.SetGlobalLevel(logLvl)
 
 	return opts, nil
 }
