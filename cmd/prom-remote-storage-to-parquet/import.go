@@ -17,30 +17,24 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/bleemeo/squirreldb/types"
 
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/golang/snappy"
-	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/rs/zerolog/log"
-	"github.com/xitongsys/parquet-go-source/local"
-	"github.com/xitongsys/parquet-go/common"
-	"github.com/xitongsys/parquet-go/reader"
 )
-
-const readBatchSize = 1000
-
-var errCantSeekTimestamp = errors.New("can't seek timestamp")
 
 func importData(opts options) error {
 	log.Debug().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).
@@ -54,7 +48,7 @@ func importData(opts options) error {
 
 	t0 := time.Now()
 
-	importedSeries, importedPoints, firstTS, lastTS, timePerSeries, err := importSeries(opts)
+	importedSeries, importedPoints, firstTS, lastTS, timings, err := importSeries(opts)
 	if err != nil {
 		return fmt.Errorf("importing series: %w", err)
 	}
@@ -63,14 +57,26 @@ func importData(opts options) error {
 	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
 
 	log.Info().Msgf(
-		"Imported %d serie(s) and %d point(s) across a time range of %s from parquet in %s (~%s per series)",
+		"Imported %d serie(s) and %d point(s) across a time range of %s from parquet in %s (read: %s, send: %s, pre-aggreg: %s)", //nolint:lll
 		importedSeries, importedPoints,
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
 		time.Since(t0).Round(time.Millisecond).String(),
-		timePerSeries.Round(time.Millisecond).String(),
+		timings.read.Round(time.Millisecond).String(),
+		timings.send.Round(time.Millisecond).String(),
+		timings.preAggreg.Round(time.Millisecond).String(),
 	)
 
 	return nil
+}
+
+type importTimings struct {
+	read, send, preAggreg time.Duration
+}
+
+type columnDetail struct {
+	index int
+	name  string
+	lbls  []prompb.Label
 }
 
 // importSeries loads each metric series from the specified parquet file,
@@ -79,203 +85,285 @@ func importData(opts options) error {
 func importSeries(opts options) (
 	importedSeries, importedPoints int,
 	firstTS, lastTS int64,
-	timePerSeries time.Duration,
+	timings importTimings,
 	err error,
 ) {
-	log.Warn().Msg("With xitongsys library")
-
-	fr, err := local.NewLocalFileReader(opts.inputFile)
+	f, err := os.Open(opts.inputFile)
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("open input file: %w", err)
+		return 0, 0, 0, 0, importTimings{}, fmt.Errorf("failed to open parquet file: %w", err)
+	}
+
+	// f will be automatically closed at the same time as the parquet reader.
+
+	pr, err := file.NewParquetReader(f)
+	if err != nil {
+		return 0, 0, 0, 0, importTimings{}, fmt.Errorf("failed to create parquet reader: %w", err)
 	}
 
 	defer func() {
-		err := fr.Close()
-		if err != nil {
-			log.Err(err).Msg("Failed to close parquet file")
+		closeErr := pr.Close()
+		if closeErr != nil && err == nil { // so as not to override the (probably) responsible error
+			err = fmt.Errorf("closing writer: %w", closeErr)
 		}
 	}()
 
-	pr, err := reader.NewParquetReader(fr, nil, parallelWorkers)
+	cols, err := getColumnsFromSchema(opts, pr)
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("can't initialize parquet reader: %w", err)
+		return 0, 0, 0, 0, importTimings{}, err
 	}
 
-	defer pr.ReadStop()
+	tRead := time.Now()
 
-	t0 := time.Now()
+	minTS, maxTS := opts.start.UnixMilli(), opts.end.UnixMilli()
 
-	labelsPerColName, matchersPerColName, err := getLabelsFromSchema(pr.SchemaHandler.Infos)
+	timestamps, minRG, maxRG, err := readTimestamps(pr, minTS, maxTS)
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("can't parse series labels: %w", err)
+		return 0, 0, 0, 0, importTimings{}, err
 	}
 
-	deniedColumns, importedSeriesPerColName := filterLabels(matchersPerColName, opts.labelMatchers)
-	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
+	timings.read += time.Since(tRead)
 
-	wantedTS, startIdx, endIdx, err := readAllTimestamps(pr, startTS, endTS)
-	if err != nil {
-		return 0, 0, 0, 0, 0, err
-	}
+	log.Info().Msgf("Found %d timestamps matching the given time range", len(timestamps))
 
-	if len(wantedTS) == 0 {
-		return 0, 0, 0, 0, 0, errNoSeriesFound
-	}
+	for c, col := range cols {
+		log.Debug().Msgf("Importing column %d/%d", c+1, len(cols))
 
-	if startIdx > 0 {
-		err = pr.SkipRows(startIdx)
+		colImportedPoints, colFirstTS, colLastTS, err := importColumn(opts, pr, col, minTS, maxTS, timestamps, minRG, maxRG, &timings) //nolint:lll
 		if err != nil {
-			return 0, 0, 0, 0, 0, fmt.Errorf("%w: %w", errCantSeekTimestamp, err)
-		}
-	}
-
-	totalColumns := len(pr.SchemaHandler.ValueColumns) - len(deniedColumns) - 1
-
-	for colIdx, colName := range pr.SchemaHandler.ValueColumns {
-		if colIdx == 0 {
-			continue // skip timestamps column
-		}
-
-		colNameWithoutPrefix := common.StrToPath(colName)[1] // remove schema root prefix
-		if deniedColumns[colNameWithoutPrefix] {
-			continue
-		}
-
-		log.Debug().Msgf("Importing column %d/%d", colIdx, totalColumns)
-
-		samples, err := readSeriesSamples(pr, wantedTS, colIdx, colNameWithoutPrefix, endIdx)
-		if err != nil {
-			return 0, 0, 0, 0, 0, err
-		}
-
-		if len(samples) == 0 {
-			log.Debug().Msgf("No values found within the given time range in column %q", colNameWithoutPrefix)
-
-			continue
-		}
-
-		timeSeries := prompb.TimeSeries{
-			Labels:  labelsPerColName[colNameWithoutPrefix],
-			Samples: samples,
-		}
-
-		err = remoteWriteSeries(timeSeries, opts)
-		if err != nil {
-			return 0, 0, 0, 0, 0, fmt.Errorf("remotely writing series from column n°%d: %w", colIdx, err)
-		}
-
-		seriesFirstTS := samples[0].Timestamp
-		seriesLastTS := samples[len(samples)-1].Timestamp
-		seriesLabels := importedSeriesPerColName[colNameWithoutPrefix]
-
-		if opts.preAggregURL != nil {
-			log.Trace().Msgf("Pre-aggregating column %s ...", colNameWithoutPrefix)
-
-			err = triggerPreAggregation(opts.preAggregURL.String(), opts.tenantHeader, seriesFirstTS, seriesLastTS, seriesLabels)
-			if err != nil {
-				return 0, 0, 0, 0, 0, fmt.Errorf("triggering pre-aggregation: %w", err)
-			}
+			return 0, 0, 0, 0, importTimings{},
+				fmt.Errorf("importing column %d: %w", c+1, err)
 		}
 
 		importedSeries++
-		importedPoints += len(samples)
+		importedPoints += colImportedPoints
 
-		if firstTS == 0 || seriesFirstTS < firstTS {
-			firstTS = seriesFirstTS
+		if firstTS == 0 || colFirstTS < firstTS {
+			firstTS = colFirstTS
 		}
 
-		if lastTS == 0 || seriesLastTS > lastTS {
-			lastTS = seriesLastTS
+		if colLastTS > lastTS {
+			lastTS = colLastTS
 		}
 	}
 
-	if importedSeries == 0 {
-		return 0, 0, 0, 0, 0, errNoSeriesFound
-	}
-
-	timePerSeries = time.Since(t0) / time.Duration(importedSeries)
-
-	return importedSeries, importedPoints, firstTS, lastTS, timePerSeries, nil
+	return importedSeries, importedPoints, firstTS, lastTS, timings, nil
 }
 
-func getLabelsFromSchema(infos []*common.Tag) (
-	labelsPerColName map[string][]prompb.Label,
-	matchersPerColName map[string][]*labels.Matcher,
-	err error,
-) {
-	seriesCount := len(infos) - 2 // -2 for schema root & timestamps col
-	labelsPerColName = make(map[string][]prompb.Label, seriesCount)
-	matchersPerColName = make(map[string][]*labels.Matcher, seriesCount)
+func getColumnsFromSchema(opts options, pr *file.Reader) ([]columnDetail, error) {
+	sch := pr.MetaData().GetSchema()
+	cols := make([]columnDetail, 0, len(sch)-2)
 
-	for i, info := range infos[2:] {
-		colName := info.InName
-		labelsText := info.ExName
-
-		matchers, err := parser.ParseMetricSelector("{" + labelsText + "}")
-		if err != nil {
-			return nil, nil, fmt.Errorf("series column n°%d: %w", i+1, err)
+COLUMNS:
+	for c, col := range sch[2:] {
+		if col.GetType().String() != parquet.Types.Double.String() {
+			return nil, fmt.Errorf("unexpected type %q in column %s", col.GetType(), col.GetName())
 		}
 
-		prompbLabels := make([]prompb.Label, 0, len(matchers))
+		colName := col.GetName()
 
-		for _, label := range matchers {
+		seriesMatchers, err := parser.ParseMetricSelector("{" + colName + "}")
+		if err != nil {
+			return nil, fmt.Errorf("bad column name %s: %w", colName, err)
+		}
+
+		prompbLabels := make([]prompb.Label, 0, len(seriesMatchers))
+
+		for _, label := range seriesMatchers {
+			for _, givenMatcher := range opts.labelMatchers {
+				if givenMatcher.Name == label.Name {
+					if !givenMatcher.Matches(label.Value) {
+						continue COLUMNS
+					}
+				}
+			}
+
 			prompbLabels = append(prompbLabels, prompb.Label{Name: label.Name, Value: label.Value})
 		}
 
-		labelsPerColName[colName] = prompbLabels
-		matchersPerColName[colName] = matchers
+		cols = append(cols, columnDetail{
+			index: c + 1,
+			name:  colName,
+			lbls:  prompbLabels,
+		})
 	}
 
-	return labelsPerColName, matchersPerColName, nil
+	return cols, nil
 }
 
-// readSeriesSamples loads one metric series from the given parquet reader,
-// and returns it as a slice of prompb.Sample.
-func readSeriesSamples(
-	pr *reader.ParquetReader,
-	wantedTS []int64,
-	colIdx int,
-	colName string,
-	endIdx int64,
-) ([]prompb.Sample, error) {
-	samples := make([]prompb.Sample, 0, len(wantedTS))
+// readTimestamps loads the timestamps from all row groups.
+// We assume they're in ascending order.
+func readTimestamps(pr *file.Reader, minTS int64, maxTS int64) (timestamps []int64, minRG, maxRG int, err error) {
+	timestamps = make([]int64, 0, pr.NumRows())
+	minRG = -1 // -1 = unset
 
-ROWS:
-	for i := 0; i < len(wantedTS); i += readBatchSize {
-		values, _, _, err := pr.ReadColumnByIndex(int64(colIdx), readBatchSize)
+	for rg := range pr.NumRowGroups() {
+		rgr := pr.RowGroup(rg)
+
+		colReader, err := rgr.Column(0) // The first column contains the timestamps
 		if err != nil {
-			return nil, fmt.Errorf("can't read column %q: %w", colName, err)
+			return nil, 0, 0, fmt.Errorf("failed to create column reader: %w", err)
 		}
 
-		for j, v := range values {
-			rowIdx := int64(i + j)
-			if rowIdx > endIdx {
-				break ROWS
-			}
+		rgTimestamps := make([]int64, rgr.NumRows())
 
-			if v == nil {
+		rowsRead, tsRead, err := colReader.(*file.Int64ColumnChunkReader).ReadBatch(rgr.NumRows(), rgTimestamps, nil, nil) //nolint:lll, forcetypeassert
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to read timestamps column: %w", err)
+		}
+
+		if rowsRead != int64(tsRead) {
+			return nil, 0, 0, fmt.Errorf("unexpected number of timestamps rows read VS values read: %d / %d", rowsRead, tsRead)
+		}
+
+		if len(rgTimestamps) == 0 || rgTimestamps[len(rgTimestamps)-1] < minTS {
+			continue
+		}
+
+		if rgTimestamps[0] > maxTS {
+			break
+		}
+
+		if minRG < 0 {
+			minRG = rg
+		}
+
+		maxRG = rg // so far
+
+		maxReached := false
+
+		for i, ts := range rgTimestamps {
+			if ts < minTS {
+				// We keep timestamps from this row-group even when they're inferior to minTS,
+				// so as not to have to handle a shift in the values columns.
 				continue
 			}
 
-			val, ok := v.(float64)
-			if !ok {
-				return nil, fmt.Errorf("bad data type %T for column %q row %d", v, colName, rowIdx)
-			}
+			if ts > maxTS {
+				rgTimestamps = rgTimestamps[:i]
+				maxReached = true
 
-			if math.IsNaN(val) {
-				continue
+				break
 			}
+		}
 
-			sample := prompb.Sample{
-				Value:     val,
-				Timestamp: wantedTS[rowIdx],
-			}
+		timestamps = append(timestamps, rgTimestamps...)
 
-			samples = append(samples, sample)
+		if maxReached {
+			break
 		}
 	}
 
-	return samples, nil
+	return timestamps, minRG, maxRG, nil
+}
+
+func importColumn(opts options,
+	pr *file.Reader,
+	col columnDetail,
+	minTS, maxTS int64,
+	timestamps []int64,
+	minRG, maxRG int,
+	timings *importTimings,
+) (importedPoints int, firstTS, lastTS int64, err error) {
+	samples := make([]prompb.Sample, 0, len(timestamps)) // Max theoretic length
+	tsIndex := 0
+
+	tRead := time.Now()
+
+	for rg := range pr.NumRowGroups() {
+		if rg < minRG {
+			continue
+		}
+
+		if rg > maxRG {
+			break
+		}
+
+		rgr := pr.RowGroup(rg)
+
+		log.Trace().Msgf("  Loading row-group %d/%d", (rg-minRG)+1, (maxRG-minRG)+1)
+
+		colReader, err := rgr.Column(col.index)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("failed to create column reader: %w", err)
+		}
+
+		values := make([]float64, rgr.NumRows())
+		defLevels := make([]int16, rgr.NumRows())
+
+		_, pointsRead, err := colReader.(*file.Float64ColumnChunkReader).ReadBatch(rgr.NumRows(), values, defLevels, nil) //nolint:lll, forcetypeassert
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("failed to read column values: %w", err)
+		}
+
+		currentPointIdx := 0
+
+	TIMESTAMPS:
+		for i, ts := range timestamps[tsIndex : tsIndex+len(defLevels)] { // only read the timestamps from this row-group
+			switch {
+			case ts > maxTS:
+				break TIMESTAMPS
+			case ts < minTS:
+				if defLevels[i] == 1 {
+					currentPointIdx++ // effectively skip the value
+				}
+
+				fallthrough
+			case defLevels[i] == 0:
+				continue
+			}
+
+			val := values[currentPointIdx]
+			if !math.IsNaN(val) {
+				samples = append(samples, prompb.Sample{Timestamp: ts, Value: val})
+			}
+
+			currentPointIdx++
+			if currentPointIdx == pointsRead {
+				break
+			}
+		}
+
+		tsIndex += len(defLevels)
+	}
+
+	timings.read += time.Since(tRead)
+
+	if len(samples) == 0 {
+		return 0, 0, 0, nil
+	}
+
+	importedPoints += len(samples)
+	firstTS = samples[0].Timestamp
+	lastTS = samples[len(samples)-1].Timestamp
+
+	series := prompb.TimeSeries{
+		Labels:  col.lbls,
+		Samples: samples,
+	}
+
+	tSend := time.Now()
+
+	err = remoteWriteSeries(series, opts)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("remotely writing series from column %s: %w", col.name, err)
+	}
+
+	timings.send += time.Since(tSend)
+
+	if opts.preAggregURL != nil {
+		log.Trace().Msgf("Pre-aggregating column %s ...", col.name)
+
+		tPreAggreg := time.Now()
+
+		err = triggerPreAggregation(opts.preAggregURL.String(), opts.tenantHeader, firstTS, lastTS, col.lbls)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("triggering pre-aggregation on column %s: %w", col.name, err)
+		}
+
+		timings.preAggreg += time.Since(tPreAggreg)
+	}
+
+	return importedPoints, firstTS, lastTS, nil
 }
 
 // remoteWriteSeries sends the given metric series to the specified SquirrelDB.
@@ -320,7 +408,7 @@ func remoteWriteSeries(series prompb.TimeSeries, opts options) error {
 }
 
 // triggerPreAggregation will send a pre-aggregation request to SquirrelDB for the given series.
-func triggerPreAggregation(preAggregURL, tenant string, from, to int64, importedLabels map[string]string) error {
+func triggerPreAggregation(preAggregURL, tenant string, from, to int64, importedLabels []prompb.Label) error {
 	preAggURL, _ := url.Parse(preAggregURL)
 	q := preAggURL.Query()
 
@@ -329,8 +417,8 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 
 	lbls := make([]string, 0, len(importedLabels))
 
-	for label, value := range importedLabels {
-		lbls = append(lbls, label+"="+value)
+	for _, label := range importedLabels {
+		lbls = append(lbls, label.GetName()+"="+label.GetValue())
 	}
 
 	q.Set("labels", strings.Join(lbls, ","))
@@ -358,90 +446,4 @@ func triggerPreAggregation(preAggregURL, tenant string, from, to int64, imported
 	}
 
 	return nil
-}
-
-func readAllTimestamps(
-	pr *reader.ParquetReader,
-	startTS, endTS int64,
-) (
-	allTS []int64,
-	firstRowIdx, lastRowIdx int64,
-	err error,
-) {
-	totalRows := pr.GetNumRows()
-	allTS = make([]int64, totalRows)
-	firstRowIdx = -1
-
-ROWS:
-	for i := int64(0); i < pr.GetNumRows(); i += readBatchSize {
-		values, _, _, err := pr.ReadColumnByIndex(0, min(readBatchSize, totalRows-i)) // 0 is the first column
-		if err != nil {
-			return nil, 0, 0, err
-		}
-
-		// If the last timestamp of this batch is less than the start ts, skip the whole batch.
-		if lastVal, ok := values[len(values)-1].(int64); ok && lastVal < startTS {
-			continue
-		}
-
-		for j, e := range values {
-			tsIdx := i + int64(j)
-
-			ts, ok := e.(int64)
-			if !ok {
-				return nil, 0, 0, fmt.Errorf("invalid timestamp value '%v' at row %d", e, tsIdx)
-			}
-
-			if ts < startTS {
-				continue
-			} else if firstRowIdx < 0 {
-				firstRowIdx = tsIdx
-			}
-
-			if endTS != 0 && ts > endTS {
-				break ROWS
-			}
-
-			allTS[tsIdx] = ts
-			lastRowIdx = tsIdx
-		}
-	}
-
-	return allTS[firstRowIdx : lastRowIdx+1], firstRowIdx, lastRowIdx, nil
-}
-
-// filterLabels generates two collections:
-// - deniedColumns: a map of parquet columns that don't match the given selector (label matchers)
-// - importedSeriesPerColName: a map of parquet columns containing the metrics labels.
-func filterLabels(
-	metricPerColName map[string][]*labels.Matcher,
-	labelsMatchers []*labels.Matcher,
-) (deniedColumns map[string]bool, importedSeriesPerColName map[string]map[string]string) {
-	deniedColumns = make(map[string]bool)
-	importedSeriesPerColName = make(map[string]map[string]string, len(metricPerColName))
-
-COLUMNS:
-	for col, metricMatchers := range metricPerColName {
-		for _, givenMatcher := range labelsMatchers {
-			for _, metricMatcher := range metricMatchers {
-				if givenMatcher.Name == metricMatcher.Name {
-					if !givenMatcher.Matches(metricMatcher.Value) {
-						deniedColumns[col] = true
-
-						continue COLUMNS
-					}
-				}
-			}
-		}
-
-		labelsMap := make(map[string]string, len(metricMatchers))
-
-		for _, label := range metricMatchers {
-			labelsMap[label.Name] = label.Value
-		}
-
-		importedSeriesPerColName[col] = labelsMap
-	}
-
-	return deniedColumns, importedSeriesPerColName
 }

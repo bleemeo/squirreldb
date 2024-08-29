@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/bleemeo/squirreldb/logger"
@@ -37,9 +36,6 @@ const (
 	opImport operationType = "import"
 	opExport operationType = "export"
 )
-
-// const.
-var parallelWorkers = int64(runtime.NumCPU()) //nolint:gochecknoglobals
 
 var errNoSeriesFound = errors.New("no series found")
 
