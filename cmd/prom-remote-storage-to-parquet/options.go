@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/rs/zerolog"
@@ -31,20 +32,22 @@ import (
 )
 
 const (
-	defaultMaxEvalSeries = 10_000
-	defaultMaxEvalPoints = 2_000_000
+	defaultMaxEvalSeries        = 10_000
+	defaultMaxEvalPoints        = 2_000_000
+	defaultZstdCompressionLevel = int(zstd.SpeedDefault)
 )
 
 var (
-	errInvalidPosArgs        = errors.New("expected exactly one positional argument <import | export>")
-	errInvalidOperation      = errors.New("invalid operation")
-	errIsNotAbsolute         = errors.New("is not absolute")
-	errNoInputFileProvided   = errors.New("no input file provided")
-	errNoOutputFileProvided  = errors.New("no output file provided")
-	errNoStartTimeProvided   = errors.New("no start time provided")
-	errNoEndTimeProvided     = errors.New("no end time provided")
-	errStartAfterEnd         = errors.New("start time can't be after end time")
-	errInvalidMetricSelector = errors.New("invalid metric selector")
+	errInvalidPosArgs          = errors.New("expected exactly one positional argument <import | export>")
+	errInvalidOperation        = errors.New("invalid operation")
+	errIsNotAbsolute           = errors.New("is not absolute")
+	errNoInputFileProvided     = errors.New("no input file provided")
+	errNoOutputFileProvided    = errors.New("no output file provided")
+	errNoStartTimeProvided     = errors.New("no start time provided")
+	errNoEndTimeProvided       = errors.New("no end time provided")
+	errStartAfterEnd           = errors.New("start time can't be after end time")
+	errInvalidMetricSelector   = errors.New("invalid metric selector")
+	errInvalidCompressionLevel = errors.New("invalid compression level")
 )
 
 type options struct {
@@ -58,15 +61,18 @@ type options struct {
 	start, end              time.Time
 	metricSelector          string
 	labelMatchers           []*labels.Matcher
+	exportBatchSize         time.Duration
+	exportCompressionLevel  zstd.EncoderLevel
 }
 
 func parseOptions(args []string) (options, error) {
 	var (
-		opts              options
-		writeURL, readURL string
-		preAggregURL      string
-		start, end        string
-		logLevel          string
+		opts                   options
+		writeURL, readURL      string
+		preAggregURL           string
+		start, end             string
+		exportCompressionLevel int
+		logLevel               string
 	)
 
 	flags := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
@@ -91,6 +97,8 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&start, "start", now.Add(-24*time.Hour).Format(time.RFC3339), "Start time")
 	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time")
 	flags.StringVar(&opts.metricSelector, "metric-selector", "", "PromQL metric selector")
+	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")      //nolint:lll
+	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Default zstd compression level") //nolint:lll
 	flags.StringVar(&logLevel, "log-level", zerolog.LevelDebugValue, "Displayed logs minimum level")
 
 	err := flags.Parse(args)
@@ -150,6 +158,12 @@ func parseOptions(args []string) (options, error) {
 		if opts.metricSelector == "" {
 			return options{}, errInvalidMetricSelector
 		}
+
+		if exportCompressionLevel < int(zstd.SpeedFastest) || exportCompressionLevel > int(zstd.SpeedBestCompression) {
+			return options{}, fmt.Errorf("%w: %d", errInvalidCompressionLevel, exportCompressionLevel)
+		}
+
+		opts.exportCompressionLevel = zstd.EncoderLevelFromZstd(exportCompressionLevel)
 
 		opts.operation = opExport
 	default:

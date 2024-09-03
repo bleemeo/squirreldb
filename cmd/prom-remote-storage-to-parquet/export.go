@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,24 +43,11 @@ import (
 	"google.golang.org/protobuf/protoadapt"
 )
 
-const (
-	seriesFetchBatchSizeDays = 1
-	zstdCompressionLevel     = zstd.SpeedBestCompression
-)
-
 type batchTimings struct {
-	fetch, merge, write time.Duration
+	fetch, write time.Duration
 }
 
 func exportData(opts options) error {
-	log.Debug().Str("tenant", opts.tenantHeader).Stringer("read-url", opts.readURL).Str("output-file", opts.outputFile).
-		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).Msg("Export options")
-
-	var m1, m2 runtime.MemStats
-
-	runtime.GC() // TODO: remove
-	runtime.ReadMemStats(&m1)
-
 	tFind := time.Now()
 
 	seriesLabels, err := findSeries(opts)
@@ -73,7 +59,7 @@ func exportData(opts options) error {
 		return errNoSeriesFound
 	}
 
-	log.Debug().Msgf("Found %d serie(s) in %s", len(seriesLabels), time.Since(tFind).Round(time.Millisecond))
+	log.Debug().Msgf("Found %d serie%s in %s", len(seriesLabels), plural(len(seriesLabels)), time.Since(tFind).Round(time.Millisecond)) //nolint:lll
 
 	tExport := time.Now()
 
@@ -82,18 +68,16 @@ func exportData(opts options) error {
 		return fmt.Errorf("exporting: %w", err)
 	}
 
-	runtime.ReadMemStats(&m2) // TODO: remove
-	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
-
 	log.Info().Msgf(
-		"Exported %d serie(s) totaling %d row(s) and %d point(s) across a time range of %s to parquet in %s (find: %s, export: %s (fetch: %s, merge: %s, write: %s))", //nolint:lll
-		totalSeries, totalRows, totalPoints,
+		"Exported %d serie%s totaling %d row%s and %d point%s across a time range of %s to parquet in %s (find: %s, export: %s (fetch: %s, write: %s))", //nolint:lll
+		totalSeries, plural(totalSeries),
+		totalRows, plural(totalRows),
+		totalPoints, plural(totalPoints),
 		formatTimeRange(opts.start, opts.end),
 		time.Since(tFind).Round(time.Millisecond).String(),
 		tExport.Sub(tFind).Round(time.Millisecond).String(),
 		time.Since(tExport).Round(time.Millisecond).String(),
 		timings.fetch.Round(time.Millisecond),
-		timings.merge.Round(time.Millisecond),
 		timings.write.Round(time.Millisecond),
 	)
 
@@ -149,9 +133,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 	timings batchTimings,
 	err error,
 ) {
-	const batchSizeMs = seriesFetchBatchSizeDays * 24 * 60 * 60 * 1000
-
-	seriesNames, pw, err := makeParquetWriter(opts.outputFile, seriesLabels)
+	seriesNames, pw, err := makeParquetWriter(opts.outputFile, seriesLabels, opts.exportCompressionLevel)
 	if err != nil {
 		return 0, 0, 0, batchTimings{}, err
 	}
@@ -163,6 +145,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 		}
 	}()
 
+	batchSizeMs := opts.exportBatchSize.Milliseconds()
 	actualSeries := make(map[string]struct{}, len(seriesNames))
 
 	startTS, endTS := opts.start.UnixMilli(), opts.end.UnixMilli()
@@ -206,7 +189,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 	return len(actualSeries), totalRows, totalPoints, timings, nil
 }
 
-func makeParquetWriter(outputFile string, seriesLabels []map[string]string) (
+func makeParquetWriter(outputFile string, seriesLabels []map[string]string, compressionLevel zstd.EncoderLevel) (
 	allSeries []string,
 	pw *file.Writer,
 	err error,
@@ -227,18 +210,7 @@ func makeParquetWriter(outputFile string, seriesLabels []map[string]string) (
 		col := 1 + s // +1 for timestamps col
 		labelsText := labelsTextFromMap(labels)
 		allSeries[s] = labelsText
-
-		fields[col], err = schema.NewPrimitiveNodeLogical(
-			labelsText,
-			parquet.Repetitions.Optional,
-			nil,
-			parquet.Types.Double,
-			1, // what is this ?
-			int32(col),
-		)
-		if err != nil {
-			return nil, nil, fmt.Errorf("making column %s of schema: %w", labelsText, err)
-		}
+		fields[col] = schema.NewFloat64Node(labelsText, parquet.Repetitions.Optional, int32(col))
 	}
 
 	schemaDef, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
@@ -254,9 +226,8 @@ func makeParquetWriter(outputFile string, seriesLabels []map[string]string) (
 	// f will be automatically closed when closing the parquet writer.
 
 	pw = file.NewParquetWriter(f, schemaDef, file.WithWriterProps(
-		// parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy)), // Snappy has no compression level
 		parquet.NewWriterProperties(
-			parquet.WithCompression(compress.Codecs.Zstd), parquet.WithCompressionLevel(int(zstdCompressionLevel)),
+			parquet.WithCompression(compress.Codecs.Zstd), parquet.WithCompressionLevel(int(compressionLevel)),
 		),
 	))
 
@@ -346,7 +317,6 @@ func writeTimeSeries(
 	seriesByName map[string][]prompb.Sample,
 	timings *batchTimings,
 ) (rowsCount, pointsCount int, err error) {
-	tMerge := time.Now()
 	timestamps := make(map[int64]struct{})
 
 	for _, samples := range seriesByName {
@@ -359,7 +329,6 @@ func writeTimeSeries(
 
 	slices.Sort(tss)
 
-	timings.merge += time.Since(tMerge)
 	tWrite := time.Now()
 
 	// Writing the timestamps
@@ -387,7 +356,6 @@ func writeTimeSeries(
 
 		// All columns must be defined; series absent from this batch will be filled with null (definition level = 0).
 		if series, found := seriesByName[seriesName]; found {
-			tMerge = time.Now()
 			currentSampleIdx := 0
 
 			for t, ts := range tss {
@@ -402,8 +370,6 @@ func writeTimeSeries(
 					}
 				}
 			}
-
-			timings.merge += time.Since(tMerge)
 		}
 
 		tWrite = time.Now()

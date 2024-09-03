@@ -27,6 +27,7 @@ import (
 	"github.com/bleemeo/squirreldb/logger"
 
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -40,6 +41,7 @@ const (
 var errNoSeriesFound = errors.New("no series found")
 
 func main() {
+	zerolog.TimeFieldFormat = time.RFC3339Nano // Prevent timestamp's milliseconds from always being 000
 	log.Logger = logger.NewTestLogger(false)
 
 	opts, err := parseOptions(os.Args[1:])
@@ -57,6 +59,15 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msgf("Failed to run parquet %s", opts.operation)
 	}
+}
+
+// plural returns the appropriate plural mark for the given count.
+func plural[T int | int64](count T) string {
+	if count > 1 {
+		return "s"
+	}
+
+	return ""
 }
 
 // formatTimeRange returns the difference between the two given dates

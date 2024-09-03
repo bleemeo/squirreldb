@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -37,15 +36,6 @@ import (
 )
 
 func importData(opts options) error {
-	log.Debug().Str("tenant", opts.tenantHeader).Stringer("write-url", opts.writeURL).Str("input-file", opts.inputFile).
-		Time("start", opts.start).Time("end", opts.end).Any("metric-selector", opts.labelMatchers).
-		Str("pre-aggreg-url", fmt.Sprint(opts.preAggregURL)).Msg("Import options")
-
-	var m1, m2 runtime.MemStats
-
-	runtime.GC() // TODO: remove
-	runtime.ReadMemStats(&m1)
-
 	t0 := time.Now()
 
 	importedSeries, importedPoints, firstTS, lastTS, timings, err := importSeries(opts)
@@ -53,12 +43,10 @@ func importData(opts options) error {
 		return fmt.Errorf("importing series: %w", err)
 	}
 
-	runtime.ReadMemStats(&m2) // TODO: remove
-	log.Warn().Uint64("total", m2.TotalAlloc-m1.TotalAlloc).Uint64("mallocs", m2.Mallocs-m1.Mallocs).Msg("Memory:")
-
 	log.Info().Msgf(
-		"Imported %d serie(s) and %d point(s) across a time range of %s from parquet in %s (read: %s, send: %s, pre-aggreg: %s)", //nolint:lll
-		importedSeries, importedPoints,
+		"Imported %d serie%s and %d point%s across a time range of %s from parquet in %s (read: %s, send: %s, pre-aggreg: %s)", //nolint:lll
+		importedSeries, plural(importedSeries),
+		importedPoints, plural(importedPoints),
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
 		time.Since(t0).Round(time.Millisecond).String(),
 		timings.read.Round(time.Millisecond).String(),
