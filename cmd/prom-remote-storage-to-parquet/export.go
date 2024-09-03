@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/schema"
 	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
+	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/exp/maps"
@@ -177,7 +179,7 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			actualSeries[labelsText] = struct{}{}
 		}
 
-		rowsCount, pointsCount, err := writeTimeSeries(seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
+		rowsCount, pointsCount, err := writeTimeSeries(opts, seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
 		if err != nil {
 			return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
 		}
@@ -312,6 +314,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 }
 
 func writeTimeSeries(
+	opts options,
 	allSeries []string,
 	rgw file.SerialRowGroupWriter,
 	seriesByName map[string][]prompb.Sample,
@@ -319,8 +322,18 @@ func writeTimeSeries(
 ) (rowsCount, pointsCount int, err error) {
 	timestamps := make(map[int64]struct{})
 
-	for _, samples := range seriesByName {
-		for _, sample := range samples {
+	for s, samples := range seriesByName {
+		for i, sample := range samples {
+			if value.IsStaleNaN(sample.Value) {
+				if opts.exportDropStaleNaNs {
+					continue
+				}
+
+				seriesByName[s][i].Value = math.NaN() // StaleNaNs aren't well-supported by parquet
+			} else if opts.exportDropNormalNaNs && math.IsNaN(sample.Value) {
+				continue
+			}
+
 			timestamps[sample.Timestamp] = struct{}{}
 		}
 	}

@@ -55,51 +55,66 @@ type options struct {
 	tenantHeader            string
 	squirrelDBMaxEvalSeries uint32
 	squirrelDBMaxEvalPoints uint64
-	writeURL, readURL       *url.URL
-	preAggregURL            *url.URL
-	inputFile, outputFile   string
 	start, end              time.Time
 	metricSelector          string
 	labelMatchers           []*labels.Matcher
-	exportBatchSize         time.Duration
-	exportCompressionLevel  zstd.EncoderLevel
+
+	writeURL, readURL        *url.URL
+	preAggregURL             *url.URL
+	inputFile, outputFile    string
+	importNaNs               bool
+	importConvertToStaleNaNs bool
+	exportDropNormalNaNs     bool
+	exportDropStaleNaNs      bool
+	exportBatchSize          time.Duration
+	exportCompressionLevel   zstd.EncoderLevel
 }
 
 func parseOptions(args []string) (options, error) {
 	var (
 		opts                   options
+		start, end             string
+		logLevel               string
 		writeURL, readURL      string
 		preAggregURL           string
-		start, end             string
 		exportCompressionLevel int
-		logLevel               string
 	)
 
 	flags := pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 	flags.SortFlags = false
 	flags.Usage = func() {
 		log.Info().Msgf("Usage:")
-		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [--start=<time>] [--end=<time>] [--metric-selector=<k=v pairs>] [--write-url=<url>] [--tenant=<tenant>] [--pre-aggreg-url=<url>]")                                                                        //nolint:lll
-		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path | -> --metric-selector=<promql selector> [--start=<time>] [--end=<time>] [--read-url=<url>] [--tenant=<tenant>] [--squirreldb-max-evaluated-series=<count>] [--squirreldb-max-evaluated-points=<count>]") //nolint:lll
+		fmt.Fprintln(os.Stderr, os.Args[0], "import --input-file=<path> [option]...")
+		fmt.Fprintln(os.Stderr, os.Args[0], "export --output-file=<path> --metric-selector=<promql selector> [option]...")
+		fmt.Fprintln(os.Stderr, "\nAvailable options:")
 		fmt.Fprintln(os.Stderr, flags.FlagUsages())
 	}
 
 	now := time.Now().Truncate(time.Second)
 
+	// Import & Export options
 	flags.StringVar(&opts.tenantHeader, "tenant", "", "SquirrelDB tenant header")
 	flags.Uint32Var(&opts.squirrelDBMaxEvalSeries, "squirreldb-max-evaluated-series", defaultMaxEvalSeries, "Max evaluated series on SquirrelDB (0=unlimited)") //nolint:lll
 	flags.Uint64Var(&opts.squirrelDBMaxEvalPoints, "squirreldb-max-evaluated-points", defaultMaxEvalPoints, "Max evaluated points on SquirrelDB (0=unlimited)") //nolint:lll
-	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
-	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
-	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll
-	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
-	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file (can be '-' for stdout)")
 	flags.StringVar(&start, "start", now.Add(-24*time.Hour).Format(time.RFC3339), "Start time")
-	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time")
+	flags.StringVar(&end, "end", now.Format(time.RFC3339), "End time  ") // extra spaces to align with start time
 	flags.StringVar(&opts.metricSelector, "metric-selector", "", "PromQL metric selector")
-	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")      //nolint:lll
-	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Default zstd compression level") //nolint:lll
 	flags.StringVar(&logLevel, "log-level", zerolog.LevelDebugValue, "Displayed logs minimum level")
+
+	// Import options
+	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
+	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
+	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll
+	flags.BoolVar(&opts.importNaNs, "import-drop-nan", true, "Whether NaNs should be imported")
+	flags.BoolVar(&opts.importConvertToStaleNaNs, "import-convert-to-stale-nan", true, "Whether NaNs should be converted to stale NaNs") //nolint:lll
+
+	// Export options
+	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
+	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file")
+	flags.BoolVar(&opts.exportDropNormalNaNs, "export-drop-normal-nan", true, "Whether normal NaNs should be dropped during export")                                            //nolint:lll
+	flags.BoolVar(&opts.exportDropStaleNaNs, "export-drop-stale-nan", false, "Whether stale NaNs should be dropped during export (if so, they will be written as normal NaNs)") //nolint:lll
+	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")                                                 //nolint:lll
+	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Zstd compression level to apply")                                           //nolint:lll
 
 	err := flags.Parse(args)
 	if err != nil {

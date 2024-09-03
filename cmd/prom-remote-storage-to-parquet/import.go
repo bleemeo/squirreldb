@@ -30,6 +30,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/golang/snappy"
+	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/rs/zerolog/log"
@@ -287,6 +288,10 @@ func importColumn(opts options,
 
 	TIMESTAMPS:
 		for i, ts := range timestamps[tsIndex : tsIndex+len(defLevels)] { // only read the timestamps from this row-group
+			if currentPointIdx == pointsRead {
+				break
+			}
+
 			switch {
 			case ts > maxTS:
 				break TIMESTAMPS
@@ -301,14 +306,20 @@ func importColumn(opts options,
 			}
 
 			val := values[currentPointIdx]
-			if !math.IsNaN(val) {
-				samples = append(samples, prompb.Sample{Timestamp: ts, Value: val})
+			if math.IsNaN(val) {
+				if !opts.importNaNs {
+					currentPointIdx++
+
+					continue
+				}
+
+				if opts.importConvertToStaleNaNs {
+					val = math.Float64frombits(value.StaleNaN)
+				}
 			}
 
+			samples = append(samples, prompb.Sample{Timestamp: ts, Value: val})
 			currentPointIdx++
-			if currentPointIdx == pointsRead {
-				break
-			}
 		}
 
 		tsIndex += len(defLevels)
@@ -388,8 +399,8 @@ func remoteWriteSeries(series prompb.TimeSeries, opts options) error {
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("received non-204 response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("received non-successful response: %d %s", resp.StatusCode, tryParseErrorBody(resp.Body))
 	}
 
 	return nil
