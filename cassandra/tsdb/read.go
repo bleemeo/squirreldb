@@ -151,7 +151,15 @@ func (i *readIter) Next() bool {
 	if fromTimestamp <= i.request.ToTimestamp {
 		readRaw = true
 
-		newData, newTmp, err := i.c.readRawData(i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp)
+		newData, newTmp, err := i.c.readRawData(
+			i.ctx,
+			id,
+			data,
+			fromTimestamp,
+			i.request.ToTimestamp,
+			i.tmp,
+			i.request.Function,
+		)
 
 		i.tmp = newTmp
 		data = newData
@@ -334,12 +342,14 @@ func (c *CassandraTSDB) readAggregatePartitionData(
 }
 
 // Returns raw data between the specified timestamps of the requested metric. Return points in descending order.
+// If the given function equals "series", only the first batch of points will be returned.
 func (c *CassandraTSDB) readRawData(
 	ctx context.Context,
 	id types.MetricID,
 	buffer types.MetricData,
 	fromTimestamp, toTimestamp int64,
 	tmp []types.MetricPoint,
+	function string,
 ) (rawData types.MetricData, newTmp []types.MetricPoint, err error) {
 	start := time.Now()
 	initialPointCount := len(buffer.Points)
@@ -355,6 +365,10 @@ func (c *CassandraTSDB) readRawData(
 			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points) - initialPointCount))
 
 			return buffer, tmp, err
+		}
+
+		if function == "series" && len(tmp) > 0 {
+			break
 		}
 	}
 
