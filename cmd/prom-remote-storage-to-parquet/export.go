@@ -59,7 +59,7 @@ func exportData(opts options) error {
 		return errNoSeriesFound
 	}
 
-	log.Debug().Msgf("Found %d serie%s in %s", len(seriesLabels), plural(len(seriesLabels)), time.Since(tFind).Round(time.Millisecond)) //nolint:lll
+	log.Debug().Msgf("Found %d series in %s", len(seriesLabels), time.Since(tFind).Round(time.Millisecond))
 
 	tExport := time.Now()
 
@@ -69,8 +69,8 @@ func exportData(opts options) error {
 	}
 
 	log.Info().Msgf(
-		"Exported %d serie%s totaling %d row%s and %d point%s across a time range of %s to parquet in %s (find: %s, export: %s (fetch: %s, write: %s))", //nolint:lll
-		totalSeries, plural(totalSeries),
+		"Exported %d series totaling %d row%s and %d point%s across a time range of %s to parquet in %s (find: %s, export: %s (fetch: %s, write: %s))", //nolint:lll
+		totalSeries,
 		totalRows, plural(totalRows),
 		totalPoints, plural(totalPoints),
 		formatTimeRange(opts.start, opts.end),

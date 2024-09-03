@@ -44,8 +44,8 @@ func importData(opts options) error {
 	}
 
 	log.Info().Msgf(
-		"Imported %d serie%s and %d point%s across a time range of %s from parquet in %s (read: %s, send: %s, pre-aggreg: %s)", //nolint:lll
-		importedSeries, plural(importedSeries),
+		"Imported %d series and %d point%s across a time range of %s from parquet in %s (read: %s, send: %s, pre-aggreg: %s)", //nolint:lll
+		importedSeries,
 		importedPoints, plural(importedPoints),
 		formatTimeRange(time.UnixMilli(firstTS), time.UnixMilli(lastTS)),
 		time.Since(t0).Round(time.Millisecond).String(),
