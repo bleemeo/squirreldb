@@ -307,7 +307,7 @@ func importColumn(opts options,
 
 			val := values[currentPointIdx]
 			if math.IsNaN(val) {
-				if !opts.importNaNs {
+				if !opts.importKeepNaNs {
 					currentPointIdx++
 
 					continue

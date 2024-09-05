@@ -38,16 +38,17 @@ const (
 )
 
 var (
-	errInvalidPosArgs          = errors.New("expected exactly one positional argument <import | export>")
-	errInvalidOperation        = errors.New("invalid operation")
-	errIsNotAbsolute           = errors.New("is not absolute")
-	errNoInputFileProvided     = errors.New("no input file provided")
-	errNoOutputFileProvided    = errors.New("no output file provided")
-	errNoStartTimeProvided     = errors.New("no start time provided")
-	errNoEndTimeProvided       = errors.New("no end time provided")
-	errStartAfterEnd           = errors.New("start time can't be after end time")
-	errInvalidMetricSelector   = errors.New("invalid metric selector")
-	errInvalidCompressionLevel = errors.New("invalid compression level")
+	errInvalidPosArgs               = errors.New("expected exactly one positional argument <import | export>")
+	errInvalidOperation             = errors.New("invalid operation")
+	errIsNotAbsolute                = errors.New("is not absolute")
+	errNoInputFileProvided          = errors.New("no input file provided")
+	errNoOutputFileProvided         = errors.New("no output file provided")
+	errNoStartTimeProvided          = errors.New("no start time provided")
+	errNoEndTimeProvided            = errors.New("no end time provided")
+	errStartAfterEnd                = errors.New("start time can't be after end time")
+	errInvalidMetricSelector        = errors.New("invalid metric selector")
+	errInvalidCompressionLevel      = errors.New("invalid compression level")
+	errConvertNaNsWhileDroppingThem = errors.New("NaNs conversion is enabled but they will be dropped anyway")
 )
 
 type options struct {
@@ -62,7 +63,7 @@ type options struct {
 	writeURL, readURL        *url.URL
 	preAggregURL             *url.URL
 	inputFile, outputFile    string
-	importNaNs               bool
+	importKeepNaNs           bool
 	importConvertToStaleNaNs bool
 	exportDropNormalNaNs     bool
 	exportDropStaleNaNs      bool
@@ -104,17 +105,17 @@ func parseOptions(args []string) (options, error) {
 	// Import options
 	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
-	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')") //nolint:lll
-	flags.BoolVar(&opts.importNaNs, "import-drop-nan", true, "Whether NaNs should be imported")
-	flags.BoolVar(&opts.importConvertToStaleNaNs, "import-convert-to-stale-nan", true, "Whether NaNs should be converted to stale NaNs") //nolint:lll
+	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')")                 //nolint:lll
+	flags.BoolVar(&opts.importKeepNaNs, "import-keep-nan", false, "Whether NaNs should be imported (be aware that parquet export/import doesn't allow to distinguish stale NaNs & normal NaNs)") //nolint:lll
+	flags.BoolVar(&opts.importConvertToStaleNaNs, "import-convert-to-stale-nan", false, "Whether NaNs should be converted to stale NaNs")                                                        //nolint:lll
 
 	// Export options
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
 	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file")
-	flags.BoolVar(&opts.exportDropNormalNaNs, "export-drop-normal-nan", true, "Whether normal NaNs should be dropped during export")                                            //nolint:lll
-	flags.BoolVar(&opts.exportDropStaleNaNs, "export-drop-stale-nan", false, "Whether stale NaNs should be dropped during export (if so, they will be written as normal NaNs)") //nolint:lll
-	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")                                                 //nolint:lll
-	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Zstd compression level to apply")                                           //nolint:lll
+	flags.BoolVar(&opts.exportDropNormalNaNs, "export-drop-normal-nan", false, "Whether normal NaNs should be dropped during export")                                                    //nolint:lll
+	flags.BoolVar(&opts.exportDropStaleNaNs, "export-drop-stale-nan", false, "Whether stale NaNs should be dropped during export (if not dropped, they will be written as normal NaNs)") //nolint:lll
+	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")                                                          //nolint:lll
+	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Zstd compression level to apply")                                                    //nolint:lll
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -153,6 +154,11 @@ func parseOptions(args []string) (options, error) {
 
 		if opts.inputFile == "" {
 			return options{}, errNoInputFileProvided
+		}
+
+		if !opts.importKeepNaNs && opts.importConvertToStaleNaNs {
+			return options{},
+				fmt.Errorf("%w - they can be imported with --import-keep-nan", errConvertNaNsWhileDroppingThem)
 		}
 
 		opts.operation = opImport
