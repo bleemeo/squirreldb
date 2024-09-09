@@ -359,7 +359,7 @@ func (c *CassandraTSDB) readRawData(
 	buffer.ID = id
 
 	for baseTS := toBaseTimestamp; baseTS >= fromBaseTimestamp; baseTS -= rawPartitionSize.Milliseconds() {
-		tmp, err = c.readRawPartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp)
+		tmp, err = c.readRawPartitionData(ctx, &buffer, fromTimestamp, toTimestamp, baseTS, tmp, function)
 		if err != nil {
 			c.metrics.RequestsSeconds.WithLabelValues("read", "raw").Observe(time.Since(start).Seconds())
 			c.metrics.RequestsPoints.WithLabelValues("read", "raw").Add(float64(len(buffer.Points) - initialPointCount))
@@ -384,6 +384,7 @@ func (c *CassandraTSDB) readRawPartitionData(
 	rawData *types.MetricData,
 	fromTimestamp, toTimestamp, baseTimestamp int64,
 	tmp []types.MetricPoint,
+	function string,
 ) (newTmp []types.MetricPoint, err error) {
 	fromOffsetTimestamp := fromTimestamp - baseTimestamp - rawPartitionSize.Milliseconds()
 	toOffsetTimestamp := toTimestamp - baseTimestamp
@@ -432,6 +433,10 @@ func (c *CassandraTSDB) readRawPartitionData(
 		if len(points) > 0 {
 			rawData.Points = mergePoints(rawData.Points, points)
 			rawData.TimeToLive = compare.MaxInt64(rawData.TimeToLive, timeToLive)
+
+			if function == "series" {
+				break
+			}
 		}
 
 		start = time.Now()
