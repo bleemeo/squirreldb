@@ -1777,7 +1777,14 @@ func (c *CassandraIndex) refreshExpiration(
 }
 
 // Search a free ID using dichotomy.
-func findFreeID(bitmap *roaring.Bitmap) uint64 {
+func findFreeID(bitmap *roaring.Bitmap) (id uint64) {
+	defer func() {
+		// Ensuring no id will overflow types.MetricID
+		if id > math.MaxInt64 {
+			id = 0
+		}
+	}()
+
 	card := bitmap.Count()
 	if card == 0 {
 		return 1
