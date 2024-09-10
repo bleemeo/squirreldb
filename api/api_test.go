@@ -877,11 +877,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 			idx, store := makeIdxAndStore(tt.storeData)
 			squirrelDBAPI := &API{
-				Logger:         logger.NewTestLogger(true),
-				Index:          idx,
-				Reader:         store,
-				MetricRegistry: prometheus.NewRegistry(),
-				Writer:         dummy.DiscardTSDB{},
+				Logger:                  logger.NewTestLogger(true),
+				Index:                   idx,
+				Reader:                  store,
+				MetricRegistry:          prometheus.NewRegistry(),
+				Writer:                  dummy.DiscardTSDB{},
+				MaxRequestBodySizeBytes: 1024,
 			}
 			squirrelDBAPI.init()
 			squirrelDBAPI.Ready()

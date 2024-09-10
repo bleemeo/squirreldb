@@ -2323,11 +2323,12 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 	}
 
 	c.lookupIDMutex.Lock()
-	if c.existingShards == nil {
-		c.existingShards = roaring.NewBTreeBitmap()
+
+	existing, err := c.getExistingShards(ctx, false)
+	if err == nil {
+		_, err = existing.AddN(newShard...)
 	}
 
-	_, err = c.existingShards.AddN(newShard...)
 	c.lookupIDMutex.Unlock()
 
 	if err != nil {

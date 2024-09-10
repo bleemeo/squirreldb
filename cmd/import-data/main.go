@@ -17,8 +17,8 @@
 // Command used to import data generated from the PromQL API.
 // The data can be generated with curl with a query or a query range:
 // curl 'http://localhost:9201/api/v1/query_range' -d 'query=cpu_used' -d 'start=2023-02-23T10:30:30.781Z' \
-// -d 'end=2023-02-23T10:31:00.781Z' -d 'step=10s' | go run ./cmd/import_data
-// curl 'http://localhost:9201/api/v1/query' -d 'query=cpu_used[5m]' | go run ./cmd/import_data
+// -d 'end=2023-02-23T10:31:00.781Z' -d 'step=10s' | go run ./cmd/import-data
+// curl 'http://localhost:9201/api/v1/query' -d 'query=cpu_used[5m]' | go run ./cmd/import-data
 
 package main
 

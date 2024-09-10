@@ -8927,3 +8927,77 @@ func concurrentAccessReader(
 
 	return nil
 }
+
+// TestLookForOldData tends to reproduce a behavior which can be described as:
+//   - Cassandra exists with a metric that has old points (at least 2 weeks ago)
+//   - At SquirrelDB start, we write points for the same metrics but at current timestamp
+//   - Then, within the first minute of SquirrelDB's existence,
+//     we try to look the points we talked about in the first step.
+func TestLookForOldData(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	oldMetricDate := now.Add(-30 * 24 * time.Hour) // a few shards ago
+	existingMetrics := map[types.MetricID]map[string]string{
+		MetricIDTest1: {
+			"__name__": "cpu_used",
+			"instance": "localhost:8015",
+		},
+	}
+	existingIndex := mockIndexFromMetrics(oldMetricDate, oldMetricDate, existingMetrics)
+
+	// Creating a new index with an empty cache, as when SquirrelDB (re)starts.
+	// The existing store is persisted, as Cassandra does.
+	index, err := initialize(
+		ctx,
+		existingIndex.store,
+		Options{
+			DefaultTimeToLive: 365 * 24 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+			States:            &mockState{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		getTestLogger().With().Str("component", "index").Logger(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqTime := now.Truncate(10 * time.Second)
+	writeReqs := []types.LookupRequest{
+		{
+			Start: reqTime,
+			End:   reqTime,
+			Labels: labels.Labels{
+				{
+					Name:  "__name__",
+					Value: "cpu_used",
+				},
+				{
+					Name:  "instance",
+					Value: "localhost:8015",
+				},
+			},
+			TTLSeconds: 0,
+		},
+	}
+
+	// Simulating a writing request in the current shard
+	_, _, err = index.lookupIDs(ctx, writeReqs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, "__name__", "cpu_used"),
+	}
+	// Now looking for old points, like the one we wrote earlier ...
+	metricSet, err := index.Search(ctx, oldMetricDate, oldMetricDate.Add(10*time.Minute), matchers)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count := metricSet.Count(); count != 1 {
+		t.Fatalf("Expected index to return 1 metric, got %d", count)
+	}
+}
