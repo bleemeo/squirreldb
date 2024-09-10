@@ -545,6 +545,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.PromQL.MaxEvaluatedPoints)
 	s.api.PromQLMaxEvaluatedSeries = uint32(s.Config.PromQL.MaxEvaluatedSeries)
 	s.api.MaxConcurrentRemoteRequests = s.Config.RemoteStorage.MaxConcurrentRequests
+	s.api.MaxRequestBodySizeBytes = s.Config.MaxRequestBodySize << 20 // MiB to B
 	s.api.TenantLabelName = s.Config.TenantLabelName
 	s.api.MutableLabelDetector = s.mutableLabelProcessor
 	s.api.RequireTenantHeader = s.Config.RequireTenantHeader
