@@ -546,7 +546,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 			return nil, fmt.Errorf("read length for stream %d: %w", i, err)
 		}
 
-		_, err = reader.Seek(int64(length), io.SeekCurrent)
+		_, err = reader.Seek(int64(length), io.SeekCurrent) //nolint:gosec
 		if err != nil {
 			return nil, fmt.Errorf("seek in stream: %w", err)
 		}
@@ -558,7 +558,7 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 	}
 
 	startIndex, _ := reader.Seek(0, io.SeekCurrent)
-	endIndex := int(startIndex) + int(length)
+	endIndex := int(startIndex) + int(length) //nolint:gosec
 
 	if endIndex > len(values) {
 		return nil, errors.New("corrupted values, stored length larger than actual length")

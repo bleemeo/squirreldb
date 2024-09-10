@@ -39,7 +39,7 @@ func (idx *limitingIndex) Search(
 		return r, err //nolint:wrapcheck
 	}
 
-	totalSeries := atomic.AddUint32(idx.returnedSeries, uint32(r.Count()))
+	totalSeries := atomic.AddUint32(idx.returnedSeries, uint32(r.Count())) //nolint:gosec
 	if idx.maxTotalSeries != 0 && totalSeries > idx.maxTotalSeries {
 		return &dummy.MetricsLabel{}, errors.New("too many series evaluated by this PromQL")
 	}

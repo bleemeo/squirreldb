@@ -1983,17 +1983,17 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 
 func Test_randomDuration(t *testing.T) {
 	target := 50 * time.Millisecond
-	min := 40 * time.Millisecond
-	max := 60 * time.Millisecond
+	tMin := 40 * time.Millisecond
+	tMax := 60 * time.Millisecond
 
 	for range 100 {
 		got := randomDuration(target)
-		if got < min {
-			t.Errorf("randomDuration() = %v, want >= %v", got, min)
+		if got < tMin {
+			t.Errorf("randomDuration() = %v, want >= %v", got, tMin)
 		}
 
-		if max < got {
-			t.Errorf("randomDuration() = %v, want <= %v", got, max)
+		if tMax < got {
+			t.Errorf("randomDuration() = %v, want <= %v", got, tMax)
 		}
 	}
 }

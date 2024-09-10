@@ -198,11 +198,11 @@ func encode(topic string, message []byte) (string, error) {
 	b64w := base64.NewEncoder(base64.StdEncoding, result)
 	snapWriter := snappy.NewBufferedWriter(b64w)
 
-	if err := binary.Write(snapWriter, binary.BigEndian, uint8(len(topic))); err != nil {
+	if err := binary.Write(snapWriter, binary.BigEndian, uint8(len(topic))); err != nil { //nolint:gosec
 		return "", err
 	}
 
-	if err := binary.Write(snapWriter, binary.BigEndian, uint32(len(message))); err != nil {
+	if err := binary.Write(snapWriter, binary.BigEndian, uint32(len(message))); err != nil { //nolint:gosec
 		return "", err
 	}
 

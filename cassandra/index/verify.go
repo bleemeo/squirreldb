@@ -200,7 +200,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 				break
 			}
 
-			metricID := types.MetricID(id)
+			metricID := types.MetricID(id) //nolint:gosec
 
 			count++
 
@@ -240,7 +240,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 	}
 
 	for _, shard := range shards.Slice() {
-		shard := int32(shard)
+		shard := int32(shard) //nolint:gosec
 		fmt.Fprintf(ve.output, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
 		shardHadIssue, err := ve.verifyShard(ctx, shard)
@@ -318,7 +318,7 @@ func (ve *verifierExecution) verifyMissingShard(
 			return 0, shards, ctx.Err()
 		}
 
-		shard := int32(shard)
+		shard := int32(shard) //nolint:gosec
 
 		it, err := ve.index.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
@@ -695,7 +695,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				break
 			}
 
-			pendingIDs = append(pendingIDs, types.MetricID(id))
+			pendingIDs = append(pendingIDs, types.MetricID(id)) //nolint:gosec
 			if len(pendingIDs) > 1000 {
 				break
 			}
@@ -1221,12 +1221,12 @@ func truncatedIDList(bitmap *roaring.Bitmap, maxItem int) string {
 
 		if len(buffer) == maxItem {
 			elipsis = true
-			numberMore = int(bitmap.Count()) - maxItem
+			numberMore = int(bitmap.Count()) - maxItem //nolint:gosec
 
 			break
 		}
 
-		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10)) //nolint:gosec
 	}
 
 	if len(buffer) == 0 {
@@ -1254,7 +1254,7 @@ func truncatedSliceIDList(ids []uint64, maxItem int) string {
 			break
 		}
 
-		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10)) //nolint:gosec
 	}
 
 	if len(buffer) == 0 {

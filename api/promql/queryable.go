@@ -158,7 +158,7 @@ func (s Store) makePerRequestData(r *http.Request) (perRequest, error) {
 			return perRequest{}, err
 		}
 
-		maxEvaluatedSeries = uint32(tmp)
+		maxEvaluatedSeries = uint32(tmp) //nolint:gosec
 	}
 
 	limitIndex := &limitingIndex{
@@ -379,7 +379,7 @@ func (q *querier) Select(ctx context.Context, sortSeries bool, hints *storage.Se
 
 // LabelValues returns all potential values for a label name.
 // It is not safe to use the strings beyond the lifefime of the querier.
-func (q *querier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
+func (q *querier) LabelValues(ctx context.Context, name string, _ *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 
@@ -394,7 +394,7 @@ func (q *querier) LabelValues(ctx context.Context, name string, matchers ...*lab
 }
 
 // LabelNames returns all the unique label names present in the block in sorted order.
-func (q *querier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
+func (q *querier) LabelNames(ctx context.Context, _ *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) { //nolint: lll
 	minT := time.UnixMilli(q.mint)
 	maxT := time.UnixMilli(q.maxt)
 

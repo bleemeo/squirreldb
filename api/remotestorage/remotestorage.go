@@ -137,23 +137,23 @@ func (r *RemoteStorage) metricsFromTimeSeries(
 	requests := make([]types.LookupRequest, 0, len(pendingTimeSeries))
 
 	for _, promSeries := range pendingTimeSeries {
-		min := int64(math.MaxInt64)
-		max := int64(math.MinInt64)
+		tMin := int64(math.MaxInt64)
+		tMax := int64(math.MinInt64)
 
 		for _, s := range promSeries.Samples {
-			if min > s.Timestamp {
-				min = s.Timestamp
+			if tMin > s.Timestamp {
+				tMin = s.Timestamp
 			}
 
-			if max < s.Timestamp {
-				max = s.Timestamp
+			if tMax < s.Timestamp {
+				tMax = s.Timestamp
 			}
 		}
 
-		if min < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
+		if tMin < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
 			r.lastLogPointInPastLock.Lock()
 			if time.Since(r.lastLogPointInPastAt) > pointInPastLogPeriod {
-				log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(min/1000, 0))
+				log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(tMin/1000, 0))
 				r.lastLogPointInPastAt = time.Now()
 			}
 			r.lastLogPointInPastLock.Unlock()
@@ -162,8 +162,8 @@ func (r *RemoteStorage) metricsFromTimeSeries(
 		requests = append(requests, types.LookupRequest{
 			Labels:     promSeries.Labels,
 			TTLSeconds: timeToLiveSeconds,
-			End:        time.Unix(max/1000, max%1000),
-			Start:      time.Unix(min/1000, min%1000),
+			End:        time.Unix(tMax/1000, tMax%1000),
+			Start:      time.Unix(tMin/1000, tMin%1000),
 		})
 	}
 

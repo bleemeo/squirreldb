@@ -69,10 +69,10 @@ func run(ctx context.Context) error {
 	defer squirreldb.Stop()
 
 	squirrelDBURL := fmt.Sprintf("http://127.0.0.1:%d", squirreldb.ListenPort())
-	min := time.Now().Add(-48 * time.Hour)
-	max := time.Now().Add(-24 * time.Hour)
-	minTS := time.Date(min.Year(), min.Month(), min.Day(), 14, 0, 0, 0, time.UTC)
-	maxTS := time.Date(max.Year(), max.Month(), max.Day(), 14, 0, 0, 0, time.UTC)
+	tMin := time.Now().Add(-48 * time.Hour)
+	tMax := time.Now().Add(-24 * time.Hour)
+	minTS := time.Date(tMin.Year(), tMin.Month(), tMin.Day(), 14, 0, 0, 0, time.UTC)
+	maxTS := time.Date(tMax.Year(), tMax.Month(), tMax.Day(), 14, 0, 0, 0, time.UTC)
 
 	// Write data with a known average/min/max over 5 minutes.
 	// Check the average/min/max with PromQL queries.

@@ -19,7 +19,6 @@ import (
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -411,21 +410,23 @@ func TestWriteHandler(t *testing.T) {
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "__name__", Value: "na-me"},
 			},
-			expectStatus:         http.StatusOK,
+			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
 		},
 		{
 			name: "invalid-label-name",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
+				{Name: "__name__", Value: "name"},
 				{Name: "la-bel", Value: "val"},
 			},
-			expectStatus:         http.StatusOK,
+			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
 		},
 		{
 			name: "missing-tenant-header",
 			labels: []prompb.Label{
+				{Name: "__name__", Value: "name"},
 				{Name: "label", Value: "value"},
 			},
 			expectStatus:         http.StatusBadRequest,
@@ -437,9 +438,10 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-mutable-label",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
+				{Name: "__name__", Value: "name"},
 				{Name: "group", Value: "my_group"},
 			},
-			expectStatus:         http.StatusOK,
+			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 1,
 			absentMatchers: []*labels.Matcher{
 				{Name: "group", Value: "my_group"},
@@ -481,7 +483,7 @@ func TestWriteHandler(t *testing.T) {
 				true,
 				reg,
 			)
-			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable)
+			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable, allowedProtoMsgs)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{
