@@ -212,7 +212,7 @@ func makeParquetWriter(outputFile string, seriesLabels []map[string]string, comp
 		col := 1 + s // +1 for timestamps col
 		labelsText := labelsTextFromMap(labels)
 		allSeries[s] = labelsText
-		fields[col] = schema.NewFloat64Node(labelsText, parquet.Repetitions.Optional, int32(col))
+		fields[col] = schema.NewFloat64Node(labelsText, parquet.Repetitions.Optional, int32(col)) //nolint: gosec
 	}
 
 	schemaDef, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
@@ -246,7 +246,7 @@ func fetchSeries(opts options, batchStartTS, batchEndTS int64) ([]*prompb.TimeSe
 
 	for _, matcher := range opts.labelMatchers {
 		query.Matchers = append(query.Matchers, &prompb.LabelMatcher{
-			Type:  prompb.LabelMatcher_Type(matcher.Type),
+			Type:  prompb.LabelMatcher_Type(matcher.Type), //nolint: gosec
 			Name:  matcher.Name,
 			Value: matcher.Value,
 		})
