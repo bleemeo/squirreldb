@@ -20,16 +20,16 @@
 //    -v $(pwd):/srv/squirreldb/data:ro -w /srv/squirreldb/data --name sstabletools cassandra:latest bash
 //
 // Build the command and copy the command to the container:
-// GOOS=linux go build ./cmd/sstable_data_content
-// docker cp sstable_data_content sstabletools:/tmp
+// GOOS=linux go build ./cmd/sstable-data-content
+// docker cp sstable-data-content sstabletools:/tmp
 //
 // Then from inside the container:
 // ls -l md-288820-big-Data.db
-// /opt/cassandra/tools/bin/sstabledump -l md-288820-big-Data.db | /tmp/sstable_data_content
+// /opt/cassandra/tools/bin/sstabledump -l md-288820-big-Data.db | /tmp/sstable-data-content
 //
 // To export as CSV, from outside the container:
 // docker exec sstabletools sh -c '/opt/cassandra/tools/bin/sstabledump -l md-288820-big-Data.db | \
-// 		/tmp/sstable_data_content -csv' | gzip > POSSIBLY_BIG.csv.gz
+// 		/tmp/sstable-data-content -csv' | gzip > POSSIBLY_BIG.csv.gz
 
 package main
 

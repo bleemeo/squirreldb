@@ -12,6 +12,8 @@ import (
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
+
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 const (
@@ -156,12 +158,18 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 // The forced pre-aggregation will run even if data are already pre-aggregated and
 // will not change the stored position where pre-aggregation think it stopped.
 // The from & to will be extended to be aligned with the aggregation size.
+// Metrics will be filtered by labels if `matchers` is not nil.
 //
 // Forcing pre-aggregation should only serve when:
 //  1. a bug caused the normal pre-aggregation to have anormal result
 //  2. data were inserted with too many delay and normal pre-aggregation already
 //     processed the time range.
-func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int, from time.Time, to time.Time) error {
+func (c *CassandraTSDB) ForcePreAggregation(
+	ctx context.Context,
+	threadCount int,
+	from time.Time, to time.Time,
+	matchers []*labels.Matcher,
+) error {
 	var (
 		wg         sync.WaitGroup
 		rangeCount int
@@ -195,7 +203,12 @@ func (c *CassandraTSDB) ForcePreAggregation(ctx context.Context, threadCount int
 
 				retry.Print(func() error {
 					var err error
-					ids, err = c.index.AllIDs(ctx, currentFrom, currentTo)
+
+					if matchers != nil {
+						ids, err = c.findMatchingMetrics(ctx, currentFrom, currentTo, matchers)
+					} else {
+						ids, err = c.index.AllIDs(ctx, currentFrom, currentTo)
+					}
 
 					return err //nolint:wrapcheck
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
@@ -459,4 +472,23 @@ func (c *CassandraTSDB) doAggregation(ctx context.Context,
 	}
 
 	return pointsRead, nil
+}
+
+func (c *CassandraTSDB) findMatchingMetrics(
+	ctx context.Context,
+	from time.Time, to time.Time,
+	matchers []*labels.Matcher,
+) ([]types.MetricID, error) {
+	metricSet, err := c.index.Search(ctx, from, to, matchers)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]types.MetricID, 0, metricSet.Count())
+
+	for metricSet.Next() {
+		ids = append(ids, metricSet.At().ID)
+	}
+
+	return ids, metricSet.Err()
 }
