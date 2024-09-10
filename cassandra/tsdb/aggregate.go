@@ -449,7 +449,7 @@ func (c *CassandraTSDB) doAggregation(ctx context.Context,
 		metric.TimeToLive = 0
 		metric.Points = metric.Points[:0]
 
-		metric, tmp, err = c.readRawData(ctx, id, metric, fromTimestamp, toTimestamp, tmp)
+		metric, tmp, err = c.readRawData(ctx, id, metric, fromTimestamp, toTimestamp, tmp, "")
 		if err != nil {
 			return pointsRead, err
 		}
