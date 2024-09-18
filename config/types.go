@@ -18,9 +18,9 @@ type Config struct {
 	Telemetry           Telemetry     `yaml:"telemetry"`
 	// MaxRequestBodySize defines the maximum size of incoming requests body in MiB.
 	MaxRequestBodySize int64 `yaml:"max_request_body_size"`
-	// FuturePointsBackdateOffset defines the offset to subtract to
-	// the points' timestamps that are more than 10 minutes in the future.
-	FuturePointsBackdateOffset time.Duration `yaml:"future_points_backdate_offset"`
+	// MaxAllowedTimeInFuture defines how much duration in the future is allowed for points' timestamps.
+	// Point more that this amount in the future might be rejected.
+	MaxAllowedTimeInFuture time.Duration `yaml:"max_allowed_time_in_future"`
 }
 
 type Internal struct {

@@ -79,7 +79,7 @@ func DefaultConfig() Config {
 			UseThanosPromQLEngine: false,
 			DisablePreAggregation: false,
 		},
-		MaxRequestBodySize:         64, // MiB
-		FuturePointsBackdateOffset: 48 * time.Hour,
+		MaxRequestBodySize:     64, // MiB
+		MaxAllowedTimeInFuture: 48 * time.Hour,
 	}
 }

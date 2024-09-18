@@ -226,6 +226,10 @@ func backdateSeries[TimeSeries prompb.TimeSeries | writev2.TimeSeries](
 
 	for t, s := range series {
 		refSamples := reflect.ValueOf(s).FieldByName("Samples")
+		if refSamples.Len() == 0 {
+			continue
+		}
+
 		// We assume the last sample is the highest one of its series.
 		lastSample := refSamples.Index(refSamples.Len() - 1)
 		// Prometheus' threshold is currently 10 minutes, but we use 9 to be safe.
