@@ -245,7 +245,7 @@ func (a *API) init() {
 		a.Logger,
 	)
 
-	patchRemoteWriter(api, a.FuturePointsBackdateOffset)
+	patchRemoteWriteHandler(api, a.FuturePointsBackdateOffset)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
 	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {

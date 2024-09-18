@@ -27,12 +27,12 @@ import (
 
 const appProtoContentType = "application/x-protobuf"
 
-// patchRemoteWriter replaces the given api's remoteWriteHandler field
+// patchRemoteWriteHandler replaces the given api's remoteWriteHandler field
 // by a fake one that makes the ServeHTTP method backdate the timestamps
 // of the points that are in the future by the given backdateOffset.
 // The purpose of this operation is to avoid the points that are produced by
-// bleemeo-forecast getting blocked by Prometheus' 10mins barrier.
-func patchRemoteWriter(api *v1.API, backdateOffset time.Duration) {
+// bleemeo-forecast getting blocked by Prometheus' 10-minute barrier.
+func patchRemoteWriteHandler(api *v1.API, backdateOffset time.Duration) {
 	writeHandlerField := reflect.ValueOf(api).Elem().FieldByName("remoteWriteHandler")
 	ourWriteHandler := &fakeWriteHandler{
 		futurePointsBackdateOffset: backdateOffset,
@@ -57,11 +57,6 @@ type writeHandler struct {
 	acceptedProtoMsgs map[config.RemoteWriteProtoMsg]struct{}
 }
 
-type fakeWriteHandler struct {
-	futurePointsBackdateOffset time.Duration
-	originalWriteHandler       *writeHandler
-}
-
 //go:linkname parseProtoMsg github.com/prometheus/prometheus/storage/remote.(*writeHandler).parseProtoMsg
 func parseProtoMsg(h *writeHandler, contentType string) (config.RemoteWriteProtoMsg, error)
 
@@ -70,6 +65,11 @@ func write(h *writeHandler, ctx context.Context, req *prompb.WriteRequest) error
 
 //go:linkname writeV2 github.com/prometheus/prometheus/storage/remote.(*writeHandler).writeV2
 func writeV2(h *writeHandler, ctx context.Context, req *writev2.Request) (remote.WriteResponseStats, int, error) //nolint: revive,lll
+
+type fakeWriteHandler struct {
+	futurePointsBackdateOffset time.Duration
+	originalWriteHandler       *writeHandler
+}
 
 // ServeHTTP is a copy of github.com/prometheus/prometheus/storage/remote.(*writeHandler).ServeHTTP,
 // but slightly modified to be able to access private fields and methods,
@@ -226,6 +226,7 @@ func backdateSeries[TimeSeries prompb.TimeSeries | writev2.TimeSeries](
 
 	for t, s := range series {
 		refSamples := reflect.ValueOf(s).FieldByName("Samples")
+		// We assume the last sample is the highest one of its series.
 		lastSample := refSamples.Index(refSamples.Len() - 1)
 		// Prometheus' threshold is currently 10 minutes, but we use 9 to be safe.
 		if lastSample.FieldByName("Timestamp").Int() < time.Now().Add(9*time.Minute).UnixMilli() {
