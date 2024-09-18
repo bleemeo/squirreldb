@@ -553,6 +553,8 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 
+	s.api.FuturePointsBackdateOffset = s.Config.FuturePointsBackdateOffset
+
 	s.api.Run(ctx, readiness)
 }
 

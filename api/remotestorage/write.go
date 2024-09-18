@@ -48,6 +48,9 @@ type writeMetrics struct {
 
 	// Release a spot in the remote write gate. Must be called.
 	done func()
+
+	// Offset in ms by which points have been backdated.
+	backdateOffset int64
 }
 
 // timeSeries represents samples and labels for a single time series.
@@ -88,7 +91,7 @@ func (w *writeMetrics) Append(_ storage.SeriesRef, l labels.Labels, t int64, v f
 
 	labelsHash := l.Hash()
 	metricPoint := types.MetricPoint{
-		Timestamp: t,
+		Timestamp: t + w.backdateOffset,
 		Value:     v,
 	}
 

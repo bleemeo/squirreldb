@@ -145,6 +145,9 @@ func WrapContext(ctx context.Context, r *http.Request) context.Context {
 	return context.WithValue(ctx, RequestContextKey{}, r)
 }
 
+// BackdateContextKey is used as a key in a context to a points backdate offset.
+type BackdateContextKey struct{}
+
 // HTTP headers available to dynamically change settings on PromQL and remote read.
 const (
 	// Add one matcher to limit the evaluated series.

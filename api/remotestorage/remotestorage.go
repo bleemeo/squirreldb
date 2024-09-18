@@ -115,6 +115,13 @@ func (r *RemoteStorage) Appender(ctx context.Context) storage.Appender {
 		done:                  r.remoteWriteGate.Done,
 	}
 
+	if offset := ctx.Value(types.BackdateContextKey{}); offset != nil {
+		writeMetrics.backdateOffset, ok = offset.(int64)
+		if !ok {
+			return errAppender{fmt.Errorf("invalid backdate offset type %T", offset)}
+		}
+	}
+
 	return writeMetrics
 }
 
