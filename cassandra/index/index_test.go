@@ -216,13 +216,14 @@ func (l *mockLock) TryLock(ctx context.Context, retryDelay time.Duration) bool {
 }
 
 type mockStore struct {
-	expiration    map[int64][]byte
-	labels2id     map[string]types.MetricID
-	postings      map[int32]map[string]map[string][]byte
-	id2labels     map[types.MetricID]labels.Labels
-	id2expiration map[types.MetricID]time.Time
-	queryCount    int
-	mutex         sync.Mutex
+	expiration      map[int64][]byte
+	labels2id       map[string]types.MetricID
+	postings        map[int32]map[string]map[string][]byte
+	id2labels       map[types.MetricID]labels.Labels
+	id2expiration   map[types.MetricID]time.Time
+	queryCount      int
+	writeQueryCount int
+	mutex           sync.Mutex
 
 	HookSelectPostingByNameValueStart func(ctx context.Context, shard int32, name string, value string) context.Context
 	HookSelectPostingByNameValueEnd   func(ctx context.Context, shard int32, name string, value string)
@@ -785,6 +786,7 @@ func (s *mockStore) InsertPostings(ctx context.Context, shard int32, name string
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	if shard == 0 {
 		panic("uninitialized shard value")
@@ -817,6 +819,7 @@ func (s *mockStore) InsertID2Labels(
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	s.id2labels[id] = sortedLabels
 	s.id2expiration[id] = expiration
@@ -829,6 +832,7 @@ func (s *mockStore) InsertLabels2ID(ctx context.Context, sortedLabelsString stri
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	s.labels2id[sortedLabelsString] = id
 
@@ -840,6 +844,7 @@ func (s *mockStore) InsertExpiration(ctx context.Context, day time.Time, bitset 
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	s.expiration[day.Unix()] = bitset
 
@@ -851,6 +856,7 @@ func (s *mockStore) UpdateID2LabelsExpiration(ctx context.Context, id types.Metr
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	s.id2expiration[id] = expiration
 
@@ -862,6 +868,7 @@ func (s *mockStore) DeleteLabels2ID(ctx context.Context, sortedLabelsString stri
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	_, ok := s.labels2id[sortedLabelsString]
 	if !ok {
@@ -878,6 +885,7 @@ func (s *mockStore) DeleteID2Labels(ctx context.Context, id types.MetricID) erro
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	_, ok := s.id2labels[id]
 	_, ok2 := s.id2expiration[id]
@@ -897,6 +905,7 @@ func (s *mockStore) DeleteExpiration(ctx context.Context, day time.Time) error {
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	if _, ok := s.expiration[day.Unix()]; !ok {
 		return gocql.ErrNotFound
@@ -912,6 +921,7 @@ func (s *mockStore) DeletePostings(ctx context.Context, shard int32, name string
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	if shard == 0 {
 		panic("uninitialized shard value")
@@ -949,6 +959,7 @@ func (s *mockStore) DeletePostingsByNames(ctx context.Context, shard int32, name
 	defer s.mutex.Unlock()
 
 	s.queryCount++
+	s.writeQueryCount++
 
 	if shard == 0 {
 		panic("uninitialized shard value")
@@ -8999,5 +9010,107 @@ func TestLookForOldData(t *testing.T) {
 
 	if count := metricSet.Count(); count != 1 {
 		t.Fatalf("Expected index to return 1 metric, got %d", count)
+	}
+}
+
+// TestBadInitilizationOfIdInShard check a "bug" where SquirrelDB perform
+// unnecessary update due to idInShard cache being initilized with wrong (empty) value.
+// Step:
+//   - SquirrelDB write (current) data in Cassandra
+//   - SquirrelDB is re-started, and write the same metrics. Index shouldn't need any
+//     update (we write in the same shard), but the bug caused update of the index.
+func TestBadInitilizationOfIdInShard(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2024, 9, 16, 11, 1, 0, 0, time.UTC)
+	past := now.Add(-1 * time.Minute)
+
+	store := &mockStore{}
+
+	index, err := initialize(
+		context.Background(),
+		store,
+		Options{
+			DefaultTimeToLive: 1 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		getTestLogger().With().Str("component", "index").Logger(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeReqs := []types.LookupRequest{
+		{
+			Start: past,
+			End:   past,
+			Labels: labels.Labels{
+				{
+					Name:  "__name__",
+					Value: "cpu_used",
+				},
+				{
+					Name:  "instance",
+					Value: "localhost:8015",
+				},
+			},
+			TTLSeconds: 0,
+		},
+	}
+
+	// Simulating a writing request in the current shard
+	_, _, err = index.lookupIDs(ctx, writeReqs, past)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeBeforeStop := store.writeQueryCount
+
+	// Creating a new index with an empty cache, as when SquirrelDB (re)starts.
+	// The existing store is persisted, as Cassandra does.
+	index, err = initialize(
+		ctx,
+		store,
+		Options{
+			DefaultTimeToLive: 1 * time.Hour,
+			LockFactory:       &mockLockFactory{},
+			Cluster:           &dummy.LocalCluster{},
+		},
+		newMetrics(prometheus.NewRegistry()),
+		getTestLogger().With().Str("component", "index").Logger(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeReqs = []types.LookupRequest{
+		{
+			Start: now,
+			End:   now,
+			Labels: labels.Labels{
+				{
+					Name:  "__name__",
+					Value: "cpu_used",
+				},
+				{
+					Name:  "instance",
+					Value: "localhost:8015",
+				},
+			},
+			TTLSeconds: 0,
+		},
+	}
+
+	// Same lookup as previous one, but 1 minute later
+	_, _, err = index.lookupIDs(ctx, writeReqs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeAfterRestart := store.writeQueryCount
+
+	if writeBeforeStop != writeAfterRestart {
+		t.Fatalf("writeAfterRestart = %d, want %d", writeAfterRestart, writeBeforeStop)
 	}
 }

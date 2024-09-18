@@ -2120,7 +2120,7 @@ func (c *CassandraIndex) updatePostingShards(
 		c.metrics.UpdatePostingSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	if updateCache {
+	if updateCache { //nolint:nestif
 		shardAffected := make(map[int32]bool)
 
 		for _, entry := range pending {
@@ -2132,6 +2132,28 @@ func (c *CassandraIndex) updatePostingShards(
 		err := c.refreshPostingIDInShard(ctx, shardAffected)
 		if err != nil {
 			return err
+		}
+	} else {
+		// Make sure missing entry in c.idInShard cache are fetched.
+		shardCacheMiss := make(map[int32]bool)
+
+		// Need the lock while reading c.idInShard
+		c.lookupIDMutex.Lock()
+
+		for _, entry := range pending {
+			for _, shard := range entry.wantedShards {
+				if c.idInShard[shard] == nil {
+					shardCacheMiss[shard] = true
+				}
+			}
+		}
+		c.lookupIDMutex.Unlock()
+
+		if len(shardCacheMiss) > 0 {
+			err := c.refreshPostingIDInShard(ctx, shardCacheMiss)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
