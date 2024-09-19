@@ -8,24 +8,58 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/types"
-	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/route"
+	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/prompb"
+	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/rs/zerolog"
+)
+
+// nolint: gochecknoglobals,nolintlint
+var (
+	seriesV1 = prompb.TimeSeries{
+		Labels: []prompb.Label{
+			{
+				Name:  "__bleemeo_account__",
+				Value: "some-uuid",
+			},
+			{
+				Name:  "__name__",
+				Value: "cpu_used",
+			},
+		},
+		Samples: []prompb.Sample{
+			{
+				Value:     7,
+				Timestamp: -1, // to be defined in each test
+			},
+		},
+	}
+
+	seriesV2 = writev2.TimeSeries{
+		LabelsRefs: []uint32{0, 1, 2, 3}, // indices of labels keys and values
+		Samples: []writev2.Sample{
+			{
+				Value:     7,
+				Timestamp: -1, // to be defined in each test
+			},
+		},
+	}
 )
 
 func TestFakeRemoteWriter(t *testing.T) {
@@ -67,78 +101,98 @@ func TestFakeRemoteWriter(t *testing.T) {
 		prometheus.NewRegistry(),
 	)
 
+	msgVersions := map[string]config.RemoteWriteProtoMsg{
+		"V1": config.RemoteWriteProtoMsgV1,
+		"V2": config.RemoteWriteProtoMsgV2,
+	}
+
 	for _, tc := range testCases {
-		name := fmt.Sprintf("Point in %s and offset of %s", tc.pointFutureness, tc.backdateOffset)
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		for vName, msgVersion := range msgVersions {
+			tcName := fmt.Sprintf(
+				"Point in %s and offset of %s as %s",
+				tc.pointFutureness, tc.backdateOffset, vName,
+			)
+			t.Run(tcName, func(t *testing.T) {
+				t.Parallel()
 
-			appendable := new(dummyAppendable)
-			api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), false, zlog)
-			router := route.New()
+				appendable := new(dummyAppendable)
+				api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), false, zlog)
+				router := route.New()
 
-			patchRemoteWriteHandler(api, tc.backdateOffset)
-			api.Register(router)
+				patchRemoteWriteHandler(api, tc.backdateOffset)
+				api.Register(router)
 
-			pointTS := time.Now().Round(time.Second).Add(tc.pointFutureness)
+				pointTS := time.Now().Round(time.Second).Add(tc.pointFutureness)
 
-			req, err := http.NewRequest(http.MethodPost, "/write", makeWriteReqBody(t, pointTS)) //nolint: noctx
-			if err != nil {
-				t.Fatal("Failed to make request:", err)
-			}
-
-			recorder := httptest.NewRecorder()
-
-			router.ServeHTTP(recorder, req)
-
-			if recorder.Code != tc.expectStatusCode {
-				t.Fatalf("Expected status code %d, got %d", tc.expectStatusCode, recorder.Code)
-			}
-
-			if recorder.Code < 300 {
-				if len(appendable.points) != 1 {
-					t.Fatalf("Expected 1 point, got %d", len(appendable.points))
+				req, err := http.NewRequest(http.MethodPost, "/write", makeWriteReqBody(t, msgVersion, pointTS)) //nolint: noctx
+				if err != nil {
+					t.Fatal("Failed to make request:", err)
 				}
 
-				gotTime := time.UnixMilli(appendable.points[0].Timestamp)
-				if !gotTime.Equal(pointTS) {
-					diff := math.Abs(gotTime.Sub(pointTS).Seconds()) * float64(time.Second)
-					t.Fatalf("The point was not written at the good timestamp: want %s, got %s (diff of %s)",
-						pointTS.Format(time.DateTime), gotTime.Format(time.DateTime), time.Duration(diff),
-					)
+				req.Header.Set("Content-Type", "application/x-protobuf;proto="+string(msgVersion))
+
+				recorder := httptest.NewRecorder()
+
+				router.ServeHTTP(recorder, req)
+
+				if recorder.Code != tc.expectStatusCode {
+					if recorder.Code >= 400 {
+						t.Log("Response:", recorder.Body.String())
+					}
+
+					t.Fatalf("Expected status code %d, got %d", tc.expectStatusCode, recorder.Code)
 				}
-			}
-		})
+
+				if recorder.Code < 300 {
+					if len(appendable.points) != 1 {
+						t.Fatalf("Expected 1 point, got %d", len(appendable.points))
+					}
+
+					gotTime := time.UnixMilli(appendable.points[0].Timestamp)
+					if !gotTime.Equal(pointTS) {
+						diff := math.Abs(gotTime.Sub(pointTS).Seconds()) * float64(time.Second)
+						t.Fatalf("The point was not written at the good timestamp: want %s, got %s (diff of %s)",
+							pointTS.Format(time.DateTime), gotTime.Format(time.DateTime), time.Duration(diff),
+						)
+					}
+				}
+			})
+		}
 	}
 }
 
-func makeWriteReqBody(t *testing.T, pointTS time.Time) io.Reader {
+func makeWriteReqBody(t *testing.T, msgVersion config.RemoteWriteProtoMsg, pointTS time.Time) io.Reader {
 	t.Helper()
 
-	series := prompb.TimeSeries{
-		Labels: []prompb.Label{
-			{
-				Name:  "__bleemeo_account__",
-				Value: "some-uuid",
+	var req interface{ Marshal() ([]byte, error) }
+
+	if msgVersion == config.RemoteWriteProtoMsgV1 {
+		series := prompb.TimeSeries{
+			Labels:  seriesV1.Labels,
+			Samples: slices.Clone(seriesV1.Samples),
+		}
+		series.Samples[0].Timestamp = pointTS.UnixMilli()
+		req = &prompb.WriteRequest{
+			Timeseries: []prompb.TimeSeries{series},
+		}
+	} else {
+		series := writev2.TimeSeries{
+			LabelsRefs: seriesV2.LabelsRefs,
+			Samples:    slices.Clone(seriesV2.Samples),
+		}
+		series.Samples[0].Timestamp = pointTS.UnixMilli()
+		req = &writev2.Request{
+			Timeseries: []writev2.TimeSeries{series},
+			Symbols: []string{
+				"__bleemeo_account__", "some-uuid",
+				"__name__", "cpu_used",
 			},
-			{
-				Name:  "__name__",
-				Value: "cpu_used",
-			},
-		},
-		Samples: []prompb.Sample{
-			{
-				Value:     7,
-				Timestamp: pointTS.UnixMilli(),
-			},
-		},
-	}
-	writeReq := prompb.WriteRequest{
-		Timeseries: []prompb.TimeSeries{series},
+		}
 	}
 
-	body, err := writeReq.Marshal()
+	body, err := req.Marshal()
 	if err != nil {
-		t.Fatal("Failed to marshal write request:", err)
+		t.Fatalf("Failed to marshal %s write request: %s", msgVersion, err)
 	}
 
 	compressedBody := snappy.Encode(nil, body)
@@ -207,12 +261,13 @@ func (der *dummyAppender) AppendHistogram(
 	panic("implement me")
 }
 
+// UpdateMetadata is called during write V2.
 func (der *dummyAppender) UpdateMetadata(
-	storage.SeriesRef,
-	labels.Labels,
-	metadata.Metadata,
+	ref storage.SeriesRef,
+	_ labels.Labels,
+	_ metadata.Metadata,
 ) (storage.SeriesRef, error) {
-	panic("implement me")
+	return ref, nil
 }
 
 func (der *dummyAppender) AppendCTZeroSample(
@@ -246,26 +301,8 @@ func TestBackdatePoints(t *testing.T) {
 	t.Run("V1", func(t *testing.T) {
 		t.Parallel()
 
-		series := []prompb.TimeSeries{
-			{
-				Labels: []prompb.Label{
-					{
-						Name:  "__bleemeo_account__",
-						Value: "some-uuid",
-					},
-					{
-						Name:  "__name__",
-						Value: "cpu_used",
-					},
-				},
-				Samples: []prompb.Sample{
-					{
-						Value:     7,
-						Timestamp: pointTS.UnixMilli(),
-					},
-				},
-			},
-		}
+		series := []prompb.TimeSeries{seriesV1}
+		series[0].Samples[0].Timestamp = pointTS.UnixMilli()
 
 		ctx := backdateSeries(context.Background(), series, offsetMs)
 
@@ -275,17 +312,8 @@ func TestBackdatePoints(t *testing.T) {
 	t.Run("V2", func(t *testing.T) {
 		t.Parallel()
 
-		series := []writev2.TimeSeries{
-			{
-				// Labels in v2 are weird
-				Samples: []writev2.Sample{
-					{
-						Value:     7,
-						Timestamp: pointTS.UnixMilli(),
-					},
-				},
-			},
-		}
+		series := []writev2.TimeSeries{seriesV2}
+		series[0].Samples[0].Timestamp = pointTS.UnixMilli()
 
 		ctx := backdateSeries(context.Background(), series, offsetMs)
 
