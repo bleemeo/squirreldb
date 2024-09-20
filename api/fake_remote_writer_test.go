@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
 	"time"
 
@@ -28,38 +27,6 @@ import (
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/rs/zerolog"
-)
-
-// nolint: gochecknoglobals,nolintlint
-var (
-	seriesV1 = prompb.TimeSeries{
-		Labels: []prompb.Label{
-			{
-				Name:  "__bleemeo_account__",
-				Value: "some-uuid",
-			},
-			{
-				Name:  "__name__",
-				Value: "cpu_used",
-			},
-		},
-		Samples: []prompb.Sample{
-			{
-				Value:     7,
-				Timestamp: -1, // to be defined in each test
-			},
-		},
-	}
-
-	seriesV2 = writev2.TimeSeries{
-		LabelsRefs: []uint32{0, 1, 2, 3}, // indices of labels keys and values
-		Samples: []writev2.Sample{
-			{
-				Value:     7,
-				Timestamp: -1, // to be defined in each test
-			},
-		},
-	}
 )
 
 func TestFakeRemoteWriter(t *testing.T) {
@@ -161,28 +128,51 @@ func TestFakeRemoteWriter(t *testing.T) {
 	}
 }
 
+func getV1Series(pointTS time.Time) prompb.TimeSeries {
+	return prompb.TimeSeries{
+		Labels: []prompb.Label{
+			{
+				Name:  "__bleemeo_account__",
+				Value: "some-uuid",
+			},
+			{
+				Name:  "__name__",
+				Value: "cpu_used",
+			},
+		},
+		Samples: []prompb.Sample{
+			{
+				Value:     7,
+				Timestamp: pointTS.UnixMilli(),
+			},
+		},
+	}
+}
+
+func getV2Series(pointTS time.Time) writev2.TimeSeries {
+	return writev2.TimeSeries{
+		LabelsRefs: []uint32{0, 1, 2, 3}, // indices of labels keys and values
+		Samples: []writev2.Sample{
+			{
+				Value:     7,
+				Timestamp: pointTS.UnixMilli(),
+			},
+		},
+	}
+}
+
 func makeWriteReqBody(t *testing.T, msgVersion config.RemoteWriteProtoMsg, pointTS time.Time) io.Reader {
 	t.Helper()
 
 	var req interface{ Marshal() ([]byte, error) }
 
 	if msgVersion == config.RemoteWriteProtoMsgV1 {
-		series := prompb.TimeSeries{
-			Labels:  seriesV1.Labels,
-			Samples: slices.Clone(seriesV1.Samples),
-		}
-		series.Samples[0].Timestamp = pointTS.UnixMilli()
 		req = &prompb.WriteRequest{
-			Timeseries: []prompb.TimeSeries{series},
+			Timeseries: []prompb.TimeSeries{getV1Series(pointTS)},
 		}
 	} else {
-		series := writev2.TimeSeries{
-			LabelsRefs: seriesV2.LabelsRefs,
-			Samples:    slices.Clone(seriesV2.Samples),
-		}
-		series.Samples[0].Timestamp = pointTS.UnixMilli()
 		req = &writev2.Request{
-			Timeseries: []writev2.TimeSeries{series},
+			Timeseries: []writev2.TimeSeries{getV2Series(pointTS)},
 			Symbols: []string{
 				"__bleemeo_account__", "some-uuid",
 				"__name__", "cpu_used",
@@ -301,9 +291,7 @@ func TestBackdatePoints(t *testing.T) {
 	t.Run("V1", func(t *testing.T) {
 		t.Parallel()
 
-		series := []prompb.TimeSeries{seriesV1}
-		series[0].Samples[0].Timestamp = pointTS.UnixMilli()
-
+		series := []prompb.TimeSeries{getV1Series(pointTS)}
 		ctx := backdateSeries(context.Background(), series, offsetMs)
 
 		testFn(t, ctx, series[0].Samples[0].Timestamp)
@@ -312,9 +300,7 @@ func TestBackdatePoints(t *testing.T) {
 	t.Run("V2", func(t *testing.T) {
 		t.Parallel()
 
-		series := []writev2.TimeSeries{seriesV2}
-		series[0].Samples[0].Timestamp = pointTS.UnixMilli()
-
+		series := []writev2.TimeSeries{getV2Series(pointTS)}
 		ctx := backdateSeries(context.Background(), series, offsetMs)
 
 		testFn(t, ctx, series[0].Samples[0].Timestamp)
