@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,63 @@ func TestFakeRemoteWriter(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestWriterHandlerLogger(t *testing.T) {
+	t.Parallel()
+
+	logBuffer := bytes.NewBuffer(nil)
+	zlog := zerolog.New(logBuffer)
+
+	index := dummy.NewIndex([]types.MetricLabel{})
+	tsdb := &dummy.MemoryTSDB{}
+	store := promql.NewStore(
+		zlog,
+		index,
+		tsdb,
+		"__account_id",
+		false,
+		0,
+		0,
+		prometheus.NewRegistry(),
+	)
+
+	appendable := new(dummyAppendable)
+	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), false, zlog)
+	router := route.New()
+
+	patchRemoteWriteHandler(api, time.Hour)
+	api.Register(router)
+
+	req, err := http.NewRequest( //nolint: noctx
+		http.MethodPost,
+		"/write",
+		bytes.NewReader([]byte("an invalid snappy payload that generate an error")),
+	)
+	if err != nil {
+		t.Fatal("Failed to make request:", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-protobuf;proto="+string(config.RemoteWriteProtoMsgV1))
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		if recorder.Code >= 400 {
+			t.Log("Response:", recorder.Body.String())
+		}
+
+		t.Errorf("Status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	// This is a copy of a log message from fake_remote_writer.go, to ensure access to
+	// fwh.originalWriteHandler.logger works.
+	expectedContent := "Error decompressing remote write request"
+	if !strings.Contains(logBuffer.String(), expectedContent) {
+		t.Errorf("Log buffer don't contains expected string: %s", expectedContent)
 	}
 }
 
