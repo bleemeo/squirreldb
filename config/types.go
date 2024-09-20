@@ -18,6 +18,9 @@ type Config struct {
 	Telemetry           Telemetry     `yaml:"telemetry"`
 	// MaxRequestBodySize defines the maximum size of incoming requests body in MiB.
 	MaxRequestBodySize int64 `yaml:"max_request_body_size"`
+	// MaxAllowedTimeInFuture defines how much duration in the future is allowed for points' timestamps.
+	// Point more that this amount in the future might be rejected.
+	MaxAllowedTimeInFuture time.Duration `yaml:"max_allowed_time_in_future"`
 }
 
 type Internal struct {

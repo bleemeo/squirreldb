@@ -84,6 +84,8 @@ type API struct {
 
 	l                   sync.Mutex
 	defaultDebugRequest bool
+
+	FuturePointsBackdateOffset time.Duration
 }
 
 type MutableLabelInterface interface {
@@ -242,6 +244,8 @@ func (a *API) init() {
 		a.UseThanosPromQLEngine,
 		a.Logger,
 	)
+
+	patchRemoteWriteHandler(api, a.FuturePointsBackdateOffset)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
 	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
