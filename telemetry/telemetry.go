@@ -25,6 +25,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/bleemeo/squirreldb/facts"
@@ -63,10 +64,11 @@ type Options struct {
 	// The way SquirrelDB was installed (Manual, Package, Docker, etc).
 	InstallationFormat string
 	// SquirrelDB version.
-	Version     string
-	LockFactory lockFactory
-	State       types.State
-	Logger      zerolog.Logger
+	Version       string
+	ClusterSizeFn func() int
+	LockFactory   lockFactory
+	State         types.State
+	Logger        zerolog.Logger
 }
 
 func New(opts Options) *Telemetry {
@@ -131,6 +133,7 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 	body, _ := json.Marshal(map[string]string{ //nolint:errchkjson // False positive.
 		"id":                  id,
 		"cluster_id":          clusterID,
+		"cluster_size":        strconv.Itoa(t.opts.ClusterSizeFn()),
 		"cpu_cores":           facts["cpu_cores"],
 		"cpu_model":           facts["cpu_model_name"],
 		"country":             facts["timezone"],

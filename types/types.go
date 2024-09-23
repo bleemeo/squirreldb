@@ -40,6 +40,8 @@ type Cluster interface {
 	// Publish sends a message that will be received by all subscribed nodes including sender.
 	Publish(ctx context.Context, topic string, message []byte) error
 	Subscribe(topic string, callback func([]byte))
+	// Size returns the size of the cluster, including *this* SquirrelDB.
+	Size() int
 	Close() error
 }
 

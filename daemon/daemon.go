@@ -31,6 +31,7 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -61,6 +62,7 @@ type MetricReadWriter interface {
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
 type SquirrelDB struct {
+	ID              uuid.UUID
 	Config          config.Config
 	ExistingCluster types.Cluster
 	MetricRegistry  prometheus.Registerer
@@ -165,6 +167,8 @@ func (s *SquirrelDB) ListenPort() int {
 // Init initialize SquirrelDB Locks & State.
 // Init could be retried.
 func (s *SquirrelDB) Init() error {
+	s.ID = uuid.New()
+
 	if s.MetricRegistry == nil {
 		s.MetricRegistry = prometheus.DefaultRegisterer
 	}
@@ -633,6 +637,7 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 	if s.ExistingCluster == nil {
 		if len(s.Config.Redis.Addresses) > 0 && s.Config.Redis.Addresses[0] != "" {
 			c := &cluster.Cluster{
+				ID:             s.ID,
 				RedisOptions:   s.Config.Redis,
 				MetricRegistry: s.MetricRegistry,
 				Keyspace:       s.Config.Redis.Keyspace,
@@ -776,7 +781,7 @@ func (s *SquirrelDB) TSDB(ctx context.Context) (MetricReadWriter, error) {
 
 			options := tsdb.Options{
 				DefaultTimeToLive:         s.Config.Cassandra.DefaultTimeToLive,
-				AggregateIntendedDuration: s.Config.Cassandra.Aggregate.IntendedDuration,
+				AggregateIntendedDuration: s.getAggregateIntendedDuration,
 				SchemaLock:                schemaLock,
 				ReadOnly:                  s.Config.Internal.ReadOnly,
 				DisablePreAggregation:     s.Config.Internal.DisablePreAggregation,
@@ -828,6 +833,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			URL:                s.Config.Telemetry.Address,
 			Version:            Version,
 			InstallationFormat: s.Config.Internal.Installation.Format,
+			ClusterSizeFn:      s.ExistingCluster.Size,
 			LockFactory:        s.lockFactory,
 			State:              state,
 			Logger:             s.Logger.With().Str("component", "telemetry").Logger(),
@@ -986,4 +992,11 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 	default:
 		readiness <- fmt.Errorf("unknown backend: %v", s.Config.Internal.Store)
 	}
+}
+
+// getAggregateIntendedDuration returns the duration the aggregation should last,
+// depending on the size of the SquirrelDB cluster.
+func (s *SquirrelDB) getAggregateIntendedDuration() time.Duration {
+	// The largest the cluster, the slower we can run pre-aggregation.
+	return s.Config.Cassandra.Aggregate.IntendedDuration * time.Duration(s.ExistingCluster.Size())
 }

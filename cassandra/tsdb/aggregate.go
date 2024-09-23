@@ -34,9 +34,7 @@ const MaxPastDelay = 8 * time.Hour
 // run starts all CassandraTSDB pre-aggregations.
 func (c *CassandraTSDB) run(ctx context.Context) {
 	shard := rand.Intn(shardNumber) //nolint:gosec
-	aggregateShardIntended := c.options.AggregateIntendedDuration / time.Duration(shardNumber)
-	ticker := time.NewTicker(aggregateShardIntended)
-	consecutiveNothingDone := 0 // number of time aggregateShard did nothing in a row
+	consecutiveNothingDone := 0     // number of time aggregateShard did nothing in a row
 
 	var (
 		lastNotifiedAggretedFrom  time.Time
@@ -44,8 +42,6 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 	)
 
 	aggregatedUntil := make(map[int]time.Time, shardNumber)
-
-	defer ticker.Stop()
 
 	for ctx.Err() == nil {
 		start := time.Now()
@@ -92,8 +88,12 @@ func (c *CassandraTSDB) run(ctx context.Context) {
 			}
 		}
 
+		// Since the pre-aggregation duration depends on the size of the cluster,
+		// we need to re-evaluate it regularly, as the cluster may evolve.
+		sleep := (c.options.AggregateIntendedDuration() / time.Duration(shardNumber)) - time.Since(start)
+
 		select {
-		case <-ticker.C:
+		case <-time.After(sleep):
 		case <-ctx.Done():
 			c.logger.Debug().Msg("Cassandra TSDB service stopped")
 
