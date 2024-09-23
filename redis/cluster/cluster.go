@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -31,10 +33,12 @@ var (
 
 const (
 	pubsubName              = "squirreldb:cluster:v1"
-	clusterDiscoveryChannel = "discovery"
+	clusterDiscoveryChannel = "discovery-v1"
 
 	discoveryMessagePeriod  = time.Minute
 	discoveryStalenessDelay = 3*discoveryMessagePeriod + discoveryMessagePeriod/3 // 3 times the period + a margin
+
+	discoveryClockDiffWarningThreshold = 10 * time.Second
 )
 
 // Cluster implement types.Cluster using Redis pub/sub.
@@ -102,10 +106,10 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 
-	c.Subscribe(clusterDiscoveryChannel, c.handleDiscoveryMessage)
-
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
 	c.cancel = cancel
+
+	c.Subscribe(clusterDiscoveryChannel, c.makeDiscoveryMessageHandler(ctx))
 
 	c.wg.Add(1)
 
@@ -177,6 +181,19 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 	defer c.wg.Done()
 
 	ch := pubsub.Channel()
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		c.Logger.Err(err).Msg("failed to retrieve hostname, using ID as name in discovery messages")
+
+		hostname = c.ID.String()
+	}
+
+	c.Logger.Info().Msgf("starting cluster loop under the name %s (ID %s)", hostname, c.ID)
+
+	// Sending the first message now, to avoid waiting a whole discoveryMessagePeriod.
+	c.sendDiscoveryMessage(ctx, hostname, true)
+
 	discoveryTicker := time.NewTicker(discoveryMessagePeriod)
 
 	defer discoveryTicker.Stop()
@@ -200,15 +217,7 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 
 			c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
 		case <-discoveryTicker.C:
-			payload, err := makeDiscoveryPayload(c.ID.String())
-			if err != nil {
-				c.Logger.Err(err).Msg("failed to encode discovery payload")
-			} else {
-				err = c.Publish(ctx, clusterDiscoveryChannel, payload)
-				if err != nil {
-					c.Logger.Err(err).Msg("failed to publish cluster discovery message")
-				}
-			}
+			c.sendDiscoveryMessage(ctx, hostname, false)
 		case <-ctx.Done():
 			continue
 		}
@@ -236,37 +245,78 @@ func (c *Cluster) Size() int {
 	return aliveCount
 }
 
-func (c *Cluster) handleDiscoveryMessage(msg []byte) {
-	var payload discoveryPayload
-
-	dec := gob.NewDecoder(bytes.NewReader(msg))
-
-	err := dec.Decode(&payload)
+func (c *Cluster) sendDiscoveryMessage(ctx context.Context, hostname string, isFirstMsg bool) {
+	payload, err := makeDiscoveryPayload(c.ID.String(), hostname, isFirstMsg)
 	if err != nil {
-		c.Logger.Err(err).Msg("failed to decode discovery message")
+		c.Logger.Err(err).Msg("failed to encode discovery payload")
+	} else {
+		err = c.Publish(ctx, clusterDiscoveryChannel, payload)
+		if err != nil {
+			c.Logger.Err(err).Msg("failed to publish cluster discovery message")
+		}
+	}
+}
 
-		return
+func (c *Cluster) makeDiscoveryMessageHandler(ctx context.Context) func([]byte) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = c.ID.String()
 	}
 
-	if payload.SenderID == c.ID.String() {
-		return // We don't store our own messages
+	return func(msg []byte) {
+		var payload discoveryPayload
+
+		dec := gob.NewDecoder(bytes.NewReader(msg))
+
+		err := dec.Decode(&payload)
+		if err != nil {
+			c.Logger.Err(err).Msg("failed to decode discovery message")
+
+			return
+		}
+
+		if payload.SenderID == c.ID.String() {
+			return // We don't store our own messages
+		}
+
+		c.Logger.Debug().Msgf("received discovery message from %s (%s)", payload.SenderName, payload.SenderID)
+
+		if payload.IsFirstMessage {
+			// The sender node just joined the cluster,
+			// immediately indicate our presence to it.
+			c.sendDiscoveryMessage(ctx, hostname, false)
+		}
+
+		nowMs := time.Now().UnixMilli()
+
+		diff := time.Duration(math.Abs(float64(nowMs-payload.TimestampMs))) * time.Millisecond
+		if diff > discoveryClockDiffWarningThreshold {
+			c.Logger.Warn().Msgf(
+				"clocks are mismatching of %s with node %s (%s)",
+				diff.Truncate(time.Second), payload.SenderName, payload.SenderID,
+			)
+		}
+
+		c.l.Lock()
+		defer c.l.Unlock()
+
+		c.discoveryTSPerID[payload.SenderID] = nowMs
 	}
-
-	c.l.Lock()
-	defer c.l.Unlock()
-
-	c.discoveryTSPerID[payload.SenderID] = payload.TimestampMs
 }
 
 type discoveryPayload struct {
-	SenderID    string
-	TimestampMs int64
+	IsFirstMessage bool
+	SenderID       string
+	SenderName     string
+	TimestampMs    int64
 }
 
-func makeDiscoveryPayload(id string) ([]byte, error) {
+func makeDiscoveryPayload(id, name string, isFirstMsg bool) ([]byte, error) {
 	payload := discoveryPayload{
-		SenderID:    id,
-		TimestampMs: time.Now().UnixMilli(),
+		SenderID:       id,
+		SenderName:     name,
+		TimestampMs:    time.Now().UnixMilli(),
+		IsFirstMessage: isFirstMsg,
 	}
 
 	buffer := bytes.NewBuffer(nil)
