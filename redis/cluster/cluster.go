@@ -211,7 +211,11 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 				continue
 			}
 
-			for _, f := range c.listeners[topic] {
+			c.l.Lock()
+			topicListeners := c.listeners[topic]
+			c.l.Unlock()
+
+			for _, f := range topicListeners {
 				f(message)
 			}
 
@@ -264,7 +268,7 @@ func (c *Cluster) makeDiscoveryMessageHandler(ctx context.Context) func([]byte) 
 	}
 
 	return func(msg []byte) {
-		var payload discoveryPayload
+		var payload discoveryPayloadV1
 
 		dec := gob.NewDecoder(bytes.NewReader(msg))
 
@@ -304,7 +308,7 @@ func (c *Cluster) makeDiscoveryMessageHandler(ctx context.Context) func([]byte) 
 	}
 }
 
-type discoveryPayload struct {
+type discoveryPayloadV1 struct {
 	IsFirstMessage bool
 	SenderID       string
 	SenderName     string
@@ -312,7 +316,7 @@ type discoveryPayload struct {
 }
 
 func makeDiscoveryPayload(id, name string, isFirstMsg bool) ([]byte, error) {
-	payload := discoveryPayload{
+	payload := discoveryPayloadV1{
 		SenderID:       id,
 		SenderName:     name,
 		TimestampMs:    time.Now().UnixMilli(),
