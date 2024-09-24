@@ -158,7 +158,7 @@ func (s Store) makePerRequestData(r *http.Request) (perRequest, error) {
 			return perRequest{}, err
 		}
 
-		maxEvaluatedSeries = uint32(tmp) //nolint:gosec
+		maxEvaluatedSeries = uint32(tmp)
 	}
 
 	limitIndex := &limitingIndex{

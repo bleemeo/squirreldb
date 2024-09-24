@@ -916,7 +916,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	var lbls labels.Labels
 
 	if len(labelsMap) == 0 {
-		fmt.Fprintf(w, "Metric ID %d not found in id2labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id)))
+		fmt.Fprintf(w, "Metric ID %d not found in id2labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id))) //nolint:gosec,lll
 	} else {
 		lbls = labelsMap[id]
 
@@ -926,7 +926,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			id,
 			lbls,
 			expiration[id],
-			allPosting.Contains(uint64(id)),
+			allPosting.Contains(uint64(id)), //nolint:gosec
 		)
 
 		sortedLabels := sortLabels(lbls)
@@ -971,8 +971,8 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			return err
 		}
 
-		inPosting := postingShard.Contains(uint64(id))
-		inMaybe := maybepostingShard.Contains(uint64(id))
+		inPosting := postingShard.Contains(uint64(id))    //nolint:gosec
+		inMaybe := maybepostingShard.Contains(uint64(id)) //nolint:gosec
 
 		fmt.Fprintf(
 			w,
@@ -992,7 +992,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 					return err
 				}
 
-				if !posting.Contains(uint64(id)) {
+				if !posting.Contains(uint64(id)) { //nolint:gosec
 					missingPostings = append(missingPostings, fmt.Sprintf("%s=%s", l.Name, l.Value))
 				}
 			}
@@ -1315,12 +1315,12 @@ func mergeSorted(left, right []string) (result []string) {
 		i++
 	}
 
-	for j := range len(left) {
+	for j := range left {
 		result[i] = left[j]
 		i++
 	}
 
-	for j := range len(right) {
+	for j := range right {
 		result[i] = right[j]
 		i++
 	}
@@ -1549,7 +1549,7 @@ func (c *CassandraIndex) lookupIDsFromCache(
 				return nil, nil, err
 			}
 
-			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id))
+			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id)) //nolint:gosec
 			found = false
 		}
 
@@ -1765,12 +1765,12 @@ func (c *CassandraIndex) refreshExpiration(
 
 	req := c.expirationUpdateRequests[previousDay.Unix()]
 
-	req.RemoveIDs = append(req.RemoveIDs, uint64(id))
+	req.RemoveIDs = append(req.RemoveIDs, uint64(id)) //nolint:gosec
 	c.expirationUpdateRequests[previousDay.Unix()] = req
 
 	req = c.expirationUpdateRequests[newDay.Unix()]
 
-	req.AddIDs = append(req.AddIDs, uint64(id))
+	req.AddIDs = append(req.AddIDs, uint64(id)) //nolint:gosec
 	c.expirationUpdateRequests[newDay.Unix()] = req
 
 	return nil
@@ -1917,13 +1917,13 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 
 		c.metrics.LookupIDConcurrentNew.Inc()
 
-		if !allPosting.Contains(uint64(id)) {
+		if !allPosting.Contains(uint64(id)) { //nolint:gosec
 			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
 
 			// Add the bad ID to next expiration, so it could be cleanup if possible
 			today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 			expReq := expirationUpdateRequests[today.Unix()]
-			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+			expReq.AddIDs = append(expReq.AddIDs, uint64(id)) //nolint:gosec
 			expirationUpdateRequests[today.Unix()] = expReq
 
 			// Do not use this ID. A new ID will be allocated.
@@ -1951,7 +1951,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 				// Add the bad ID to next expiration, so it could be cleanup if possible
 				today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 				expReq := expirationUpdateRequests[today.Unix()]
-				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
+				expReq.AddIDs = append(expReq.AddIDs, uint64(id)) //nolint:gosec
 				expirationUpdateRequests[today.Unix()] = expReq
 
 				// Do not use this ID. A new ID will be allocated.
@@ -1984,7 +1984,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 			return nil, errors.New("too many metrics registered, unable to find a free ID")
 		}
 
-		_, err = allPosting.AddN(uint64(newID))
+		_, err = allPosting.AddN(uint64(newID)) //nolint:gosec
 		if err != nil {
 			return nil, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -2005,7 +2005,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 		day := cassandraExpiration.Truncate(24 * time.Hour)
 		expReq := expirationUpdateRequests[day.Unix()]
 
-		expReq.AddIDs = append(expReq.AddIDs, uint64(newID))
+		expReq.AddIDs = append(expReq.AddIDs, uint64(newID)) //nolint:gosec
 
 		expirationUpdateRequests[day.Unix()] = expReq
 	}
@@ -2170,7 +2170,7 @@ func (c *CassandraIndex) updatePostingShards(
 			c.idInShardLastAccess[shard] = now
 
 			it := c.idInShard[shard]
-			if it != nil && it.Contains(uint64(entry.id)) {
+			if it != nil && it.Contains(uint64(entry.id)) { //nolint:gosec
 				continue
 			}
 
@@ -2183,7 +2183,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 			}
 
-			req.AddIDs = append(req.AddIDs, uint64(entry.id))
+			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
 			maybePresent[shard] = req
 
 			labelsList := make(labels.Labels, 0, len(entry.unsortedLabels)*2)
@@ -2219,7 +2219,7 @@ func (c *CassandraIndex) updatePostingShards(
 					m[lbl] = idx
 				}
 
-				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id))
+				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id)) //nolint:gosec
 			}
 
 			req, ok = precense[shard]
@@ -2231,7 +2231,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 			}
 
-			req.AddIDs = append(req.AddIDs, uint64(entry.id))
+			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
 			precense[shard] = req
 		}
 	}
@@ -2329,7 +2329,7 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 	newShard := make([]uint64, 0, len(maybePresent))
 
 	for shard := range maybePresent {
-		newShard = append(newShard, uint64(shard))
+		newShard = append(newShard, uint64(shard)) //nolint:gosec
 	}
 
 	_, err := c.postingUpdate(ctx, postingUpdateRequest{
@@ -3078,7 +3078,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 				dayToExpireUpdates[expireDay.Unix()] = idx
 			}
 
-			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id))
+			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id)) //nolint:gosec
 
 			continue
 		}
@@ -3187,7 +3187,7 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 			Name:  existingShardsLabel,
 			Value: existingShardsLabel,
 		},
-		RemoveIDs: []uint64{uint64(shard)},
+		RemoveIDs: []uint64{uint64(shard)}, //nolint:gosec
 	}
 
 	_, err = c.postingUpdate(ctx, updateRequest)
@@ -3499,7 +3499,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 		// With postings filtering, we do one Cassandra query per matchers.
 		// With explicit matching on labels, we do one Cassandra query per IDs BUT this query will be done anyway if the
 		// series would be kept.
-		if results != nil && results.Count() <= uint64(directCheckThreshold) {
+		if results != nil && results.Count() <= uint64(directCheckThreshold) { //nolint:gosec
 			needCheckMatches = true
 
 			break
@@ -3548,7 +3548,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 			return nil, false, ctx.Err()
 		}
 
-		if results != nil && results.Count() <= uint64(directCheckThreshold) {
+		if results != nil && results.Count() <= uint64(directCheckThreshold) { //nolint:gosec
 			needCheckMatches = true
 
 			break
@@ -3856,7 +3856,7 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	current := startShard
 
 	for current <= endShard {
-		if returnAll || existingShards.Contains(uint64(current)) {
+		if returnAll || existingShards.Contains(uint64(current)) { //nolint:gosec
 			results = append(results, current)
 		}
 

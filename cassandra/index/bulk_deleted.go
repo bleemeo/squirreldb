@@ -32,7 +32,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 // sortedLabels may be nil if labels are unknown (so only ID is deleted from all postings).
 // Skipping labels2id is used by index fix. It shouldn't be used in normal condition.
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
-	d.deleteIDs = append(d.deleteIDs, uint64(id))
+	d.deleteIDs = append(d.deleteIDs, uint64(id)) //nolint:gosec
 
 	if sortedLabels != nil && !skipLabels2Id {
 		sortedLabelsString := sortedLabels.String()
@@ -67,7 +67,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			d.labelToPostingUpdates[label] = idx
 		}
 
-		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id))
+		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id)) //nolint:gosec
 	}
 }
 
@@ -152,7 +152,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
 			// deleting it from existingShardsLabel.
 			// Cleanup entry in existingShardsLabel
-			shardDeleter.ShardsListUpdate.RemoveIDs = append(shardDeleter.ShardsListUpdate.RemoveIDs, uint64(shard))
+			shardDeleter.ShardsListUpdate.RemoveIDs = append(shardDeleter.ShardsListUpdate.RemoveIDs, uint64(shard)) //nolint:gosec,lll
 
 			continue
 		}
@@ -343,7 +343,7 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 					// it is nil iff it's empty (or an error occure)
 					if it == nil || errors.Is(err, errBitmapEmpty) {
 						d.l.Lock()
-						d.ShardsListUpdate.RemoveIDs = append(d.ShardsListUpdate.RemoveIDs, uint64(req.Shard))
+						d.ShardsListUpdate.RemoveIDs = append(d.ShardsListUpdate.RemoveIDs, uint64(req.Shard)) //nolint:gosec
 						d.l.Unlock()
 					}
 
