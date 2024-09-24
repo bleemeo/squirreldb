@@ -27,6 +27,8 @@ var (
 )
 
 func main() {
+	flag.Parse()
+
 	daemon.SetTestEnvironment()
 
 	err := daemon.RunWithSignalHandler(run)
@@ -236,6 +238,8 @@ func (b *BenchClient) thread(ctx context.Context, deadline time.Time, processID 
 		err      error
 	)
 
+	t0 := time.Now()
+
 	for ctx.Err() == nil && time.Now().Before(deadline) {
 		payload := []byte(fmt.Sprintf("%d-%d-%d", processID, workerID, counter1+counter2))
 
@@ -249,6 +253,14 @@ func (b *BenchClient) thread(ctx context.Context, deadline time.Time, processID 
 
 		if err != nil {
 			break
+		}
+
+		rate := float64(counter1+counter2) / time.Since(t0).Seconds()
+		if rate > 500 {
+			// We want to avoid publishing messages at a too high rate,
+			// so the receiving is not overwhelmed.
+			// 500 msg/s seems a good tradeoff.
+			time.Sleep(time.Millisecond)
 		}
 	}
 
