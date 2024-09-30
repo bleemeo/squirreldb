@@ -290,7 +290,7 @@ func (ve *verifierExecution) verifyMissingShard(
 				return 0, shards, err
 			}
 
-			if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
+			if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) { //nolint:gosec
 				errorCount++
 
 				fmt.Fprintf(
@@ -301,7 +301,7 @@ func (ve *verifierExecution) verifyMissingShard(
 				)
 
 				if ve.doFix {
-					_, err = shards.AddN(uint64(queryShard[0]))
+					_, err = shards.AddN(uint64(queryShard[0])) //nolint:gosec
 					if err != nil {
 						return 0, shards, fmt.Errorf("update bitmap: %w", err)
 					}
@@ -335,7 +335,7 @@ func (ve *verifierExecution) verifyMissingShard(
 			)
 
 			if ve.doFix {
-				_, err = shards.RemoveN(uint64(shard))
+				_, err = shards.RemoveN(uint64(shard)) //nolint:gosec
 				if err != nil {
 					return 0, shards, fmt.Errorf("update bitmap: %w", err)
 				}
@@ -385,7 +385,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 		}
 
 		if !ok {
-			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil { //nolint:gosec
 				return false, err
 			}
 
@@ -407,7 +407,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 		}
 
 		if !ok {
-			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil { //nolint:gosec
 				return false, err
 			}
 
@@ -446,7 +446,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			it = roaring.NewBTreeBitmap()
 		}
 
-		if _, err := it.AddN(uint64(id)); err != nil {
+		if _, err := it.AddN(uint64(id)); err != nil { //nolint:gosec
 			return false, err
 		}
 
@@ -506,7 +506,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 					ve.bulkDeleter.PrepareDelete(id2, lbls, false)
 					ve.bulkDeleter.PrepareDelete(id, lbls, false)
 				}
-			case !ve.allPosting.Contains(uint64(id2)):
+			case !ve.allPosting.Contains(uint64(id2)): //nolint:gosec
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
@@ -557,7 +557,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			continue
 		}
 
-		_, err = ve.allGoodIDs.AddN(uint64(id))
+		_, err = ve.allGoodIDs.AddN(uint64(id)) //nolint:gosec
 		if err != nil {
 			return hadIssue, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -719,7 +719,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 					bitset = roaring.NewBTreeBitmap()
 				}
 
-				_, err = bitset.AddN(uint64(id))
+				_, err = bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
 					return true, fmt.Errorf("update bitmap: %w", err)
 				}
@@ -736,7 +736,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 					bitset = roaring.NewBTreeBitmap()
 				}
 
-				_, err = bitset.AddN(uint64(id))
+				_, err = bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
 					return true, fmt.Errorf("update bitmap: %w", err)
 				}

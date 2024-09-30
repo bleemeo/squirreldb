@@ -38,10 +38,10 @@ func patchRemoteWriteHandler(api *v1.API, backdateOffset time.Duration) {
 		futurePointsBackdateOffset: backdateOffset,
 		// Unsafely casting the original write handler in our own type that mimics the original one,
 		// to be able to access its private fields and methods.
-		originalWriteHandler: (*writeHandler)(unsafe.Pointer(writeHandlerField.Elem().Pointer())), //nolint: gosec
+		originalWriteHandler: (*writeHandler)(unsafe.Pointer(writeHandlerField.Elem().Pointer())),
 	}
 
-	writableWriteHandler := reflect.NewAt(writeHandlerField.Type(), unsafe.Pointer(writeHandlerField.UnsafeAddr())).Elem() //nolint: gosec,lll
+	writableWriteHandler := reflect.NewAt(writeHandlerField.Type(), unsafe.Pointer(writeHandlerField.UnsafeAddr())).Elem()
 	// Setting our own write-handler in the API's remoteWriteHandler field
 	writableWriteHandler.Set(reflect.ValueOf(ourWriteHandler))
 }

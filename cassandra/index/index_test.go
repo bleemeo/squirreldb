@@ -5911,7 +5911,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	}
 
 	// Check in store that correct write happened
-	for n := range len(metrics) {
+	for n := range metrics {
 		labels := labelsMapToList(metrics[n], true)
 		id := metricsID[n]
 
