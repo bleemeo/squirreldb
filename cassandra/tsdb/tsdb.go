@@ -36,7 +36,7 @@ var (
 type Options struct {
 	SchemaLock                sync.Locker
 	DefaultTimeToLive         time.Duration
-	AggregateIntendedDuration time.Duration
+	AggregateIntendedDuration func() time.Duration
 	ReadOnly                  bool
 	DisablePreAggregation     bool
 }

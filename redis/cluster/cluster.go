@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/bleemeo/squirreldb/redis/client"
 
 	"github.com/golang/snappy"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -28,22 +32,30 @@ var (
 )
 
 const (
-	pubsubName = "squirreldb:cluster:v1"
+	pubsubName              = "squirreldb:cluster:v1"
+	clusterDiscoveryChannel = "discovery-v1"
+
+	discoveryMessagePeriod  = time.Minute
+	discoveryStalenessDelay = 3*discoveryMessagePeriod + discoveryMessagePeriod/3 // 3 times the period + a margin
+
+	discoveryClockDiffWarningThreshold = 10 * time.Second
 )
 
 // Cluster implement types.Cluster using Redis pub/sub.
 type Cluster struct {
+	ID             uuid.UUID
 	RedisOptions   config.Redis
 	MetricRegistry prometheus.Registerer
 	Keyspace       string
 	Logger         zerolog.Logger
 
-	client       *client.Client
-	cancel       context.CancelFunc
-	listenner    map[string][]func([]byte)
-	redisChannel string
-	l            sync.Mutex
-	wg           sync.WaitGroup
+	client           *client.Client
+	cancel           context.CancelFunc
+	listeners        map[string][]func([]byte)
+	redisChannel     string
+	discoveryTSPerID map[string]int64 // map[uuid] -> millis
+	l                sync.Mutex
+	wg               sync.WaitGroup
 
 	metrics *metrics
 }
@@ -61,6 +73,8 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 		c.metrics = newMetrics(reg)
 	}
+
+	c.discoveryTSPerID = make(map[string]int64)
 
 	c.redisChannel = c.Keyspace + pubsubName
 	c.client = client.New(c.RedisOptions)
@@ -94,6 +108,8 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
 	c.cancel = cancel
+
+	c.Subscribe(clusterDiscoveryChannel, c.makeDiscoveryMessageHandler(ctx))
 
 	c.wg.Add(1)
 
@@ -154,17 +170,33 @@ func (c *Cluster) Subscribe(topic string, callback func([]byte)) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	if c.listenner == nil {
-		c.listenner = make(map[string][]func([]byte))
+	if c.listeners == nil {
+		c.listeners = make(map[string][]func([]byte))
 	}
 
-	c.listenner[topic] = append(c.listenner[topic], callback)
+	c.listeners[topic] = append(c.listeners[topic], callback)
 }
 
 func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 	defer c.wg.Done()
 
 	ch := pubsub.Channel()
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		c.Logger.Err(err).Msg("failed to retrieve hostname, using ID as name in discovery messages")
+
+		hostname = c.ID.String()
+	}
+
+	c.Logger.Info().Msgf("starting cluster loop under the name %s (ID %s)", hostname, c.ID)
+
+	// Sending the first message now, to avoid waiting a whole discoveryMessagePeriod.
+	c.sendDiscoveryMessage(ctx, hostname, true)
+
+	discoveryTicker := time.NewTicker(discoveryMessagePeriod)
+
+	defer discoveryTicker.Stop()
 
 	for ctx.Err() == nil {
 		select {
@@ -179,17 +211,127 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 				continue
 			}
 
-			for _, f := range c.listenner[topic] {
+			c.l.Lock()
+			topicListeners := c.listeners[topic]
+			c.l.Unlock()
+
+			for _, f := range topicListeners {
 				f(message)
 			}
 
 			c.metrics.MessageSeconds.WithLabelValues("receive").Observe(time.Since(start).Seconds())
+		case <-discoveryTicker.C:
+			c.sendDiscoveryMessage(ctx, hostname, false)
 		case <-ctx.Done():
 			continue
 		}
 	}
 
 	pubsub.Close()
+}
+
+func (c *Cluster) Size() int {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	now := time.Now().UnixMilli()
+	purgeDelay := discoveryStalenessDelay.Milliseconds()
+	aliveCount := 1 // We also count *this* SquirrelDB
+
+	for id, ts := range c.discoveryTSPerID {
+		if now-ts > purgeDelay {
+			delete(c.discoveryTSPerID, id)
+		} else {
+			aliveCount++
+		}
+	}
+
+	return aliveCount
+}
+
+func (c *Cluster) sendDiscoveryMessage(ctx context.Context, hostname string, isFirstMsg bool) {
+	payload, err := makeDiscoveryPayload(c.ID.String(), hostname, isFirstMsg)
+	if err != nil {
+		c.Logger.Err(err).Msg("failed to encode discovery payload")
+	} else {
+		err = c.Publish(ctx, clusterDiscoveryChannel, payload)
+		if err != nil {
+			c.Logger.Err(err).Msg("failed to publish cluster discovery message")
+		}
+	}
+}
+
+func (c *Cluster) makeDiscoveryMessageHandler(ctx context.Context) func([]byte) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = c.ID.String()
+	}
+
+	return func(msg []byte) {
+		var payload discoveryPayloadV1
+
+		dec := gob.NewDecoder(bytes.NewReader(msg))
+
+		err := dec.Decode(&payload)
+		if err != nil {
+			c.Logger.Err(err).Msg("failed to decode discovery message")
+
+			return
+		}
+
+		if payload.SenderID == c.ID.String() {
+			return // We don't store our own messages
+		}
+
+		c.Logger.Debug().Msgf("received discovery message from %s (%s)", payload.SenderName, payload.SenderID)
+
+		if payload.IsFirstMessage {
+			// The sender node just joined the cluster,
+			// immediately indicate our presence to it.
+			c.sendDiscoveryMessage(ctx, hostname, false)
+		}
+
+		nowMs := time.Now().UnixMilli()
+
+		diff := time.Duration(math.Abs(float64(nowMs-payload.TimestampMs))) * time.Millisecond
+		if diff > discoveryClockDiffWarningThreshold {
+			c.Logger.Warn().Msgf(
+				"clocks are mismatching of %s with node %s (%s)",
+				diff.Truncate(time.Second), payload.SenderName, payload.SenderID,
+			)
+		}
+
+		c.l.Lock()
+		defer c.l.Unlock()
+
+		c.discoveryTSPerID[payload.SenderID] = nowMs
+	}
+}
+
+type discoveryPayloadV1 struct {
+	IsFirstMessage bool
+	SenderID       string
+	SenderName     string
+	TimestampMs    int64
+}
+
+func makeDiscoveryPayload(id, name string, isFirstMsg bool) ([]byte, error) {
+	payload := discoveryPayloadV1{
+		SenderID:       id,
+		SenderName:     name,
+		TimestampMs:    time.Now().UnixMilli(),
+		IsFirstMessage: isFirstMsg,
+	}
+
+	buffer := bytes.NewBuffer(nil)
+	enc := gob.NewEncoder(buffer)
+
+	err := enc.Encode(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return buffer.Bytes(), nil
 }
 
 func encode(topic string, message []byte) (string, error) {
