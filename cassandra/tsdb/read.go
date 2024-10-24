@@ -54,6 +54,42 @@ func RequestUseAggregatedData(request types.MetricRequest) bool {
 	return readAggregate
 }
 
+// AggregateWithFuncType aggregates the given data,
+// handling each point according to the given promql function.
+func AggregateWithFuncType(data types.MetricData, function string) types.MetricData {
+	aggregatedData := aggregate.Aggregate(data, aggregateResolution.Milliseconds())
+	functionType := promqlFunctionToType(function)
+	points := make([]types.MetricPoint, 0, len(aggregatedData.Points))
+
+	for _, aggregatedPoint := range aggregatedData.Points {
+		var value float64
+
+		switch functionType {
+		case promqlFunctionMin:
+			value = aggregatedPoint.Min
+		case promqlFunctionMax:
+			value = aggregatedPoint.Max
+		case promqlFunctionAverage:
+			value = aggregatedPoint.Average
+		case promqlFunctionCount:
+			value = aggregatedPoint.Count
+		default:
+			value = aggregatedPoint.Average
+		}
+
+		points = append(points, types.MetricPoint{
+			Timestamp: aggregatedPoint.Timestamp,
+			Value:     value,
+		})
+	}
+
+	return types.MetricData{
+		Points:     points,
+		ID:         aggregatedData.ID,
+		TimeToLive: aggregatedData.TimeToLive,
+	}
+}
+
 // ReadIter returns metrics according to the request made.
 func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
 	c.l.Lock()
@@ -180,37 +216,7 @@ func (i *readIter) Next() bool {
 		// The aggregated point at 11:55 PM represents the average over the next five minutes,
 		// so this decreased the rate() with the next raw point at 12:00 AM.
 		if readAggregate {
-			aggregatedData := aggregate.Aggregate(data, aggregateResolution.Milliseconds())
-			points := make([]types.MetricPoint, 0, len(aggregatedData.Points))
-			functionType := promqlFunctionToType(i.request.Function)
-
-			for _, aggregatedPoint := range aggregatedData.Points {
-				var value float64
-
-				switch functionType {
-				case promqlFunctionMin:
-					value = aggregatedPoint.Min
-				case promqlFunctionMax:
-					value = aggregatedPoint.Max
-				case promqlFunctionAverage:
-					value = aggregatedPoint.Average
-				case promqlFunctionCount:
-					value = aggregatedPoint.Count
-				default:
-					value = aggregatedPoint.Average
-				}
-
-				points = append(points, types.MetricPoint{
-					Timestamp: aggregatedPoint.Timestamp,
-					Value:     value,
-				})
-			}
-
-			data = types.MetricData{
-				Points:     points,
-				ID:         aggregatedData.ID,
-				TimeToLive: aggregatedData.TimeToLive,
-			}
+			data = AggregateWithFuncType(data, i.request.Function)
 		}
 	}
 
