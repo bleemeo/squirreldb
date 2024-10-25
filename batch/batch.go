@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -794,6 +795,10 @@ func (i *readIter) tryNext(id types.MetricID) bool {
 		data.Points = temporaryData.Points
 		for len(data.Points) > 0 && data.Points[0].Timestamp < idRequest.FromTimestamp {
 			data.Points = data.Points[1:]
+		}
+
+		if tsdb.RequestUseAggregatedData(i.request) {
+			data = tsdb.AggregateWithFuncType(data, i.request.Function)
 		}
 	}
 
