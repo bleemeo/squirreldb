@@ -27,8 +27,8 @@ import (
 
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
