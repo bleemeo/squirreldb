@@ -4053,11 +4053,11 @@ func (i *cassandraByteIter) HasNext() bool {
 	return false
 }
 
-func (i cassandraByteIter) Next() (string, []byte) {
+func (i *cassandraByteIter) Next() (string, []byte) {
 	return i.value, i.buffer
 }
 
-func (i cassandraByteIter) Err() error {
+func (i *cassandraByteIter) Err() error {
 	if errors.Is(i.err, gocql.ErrNotFound) {
 		i.err = nil
 	}

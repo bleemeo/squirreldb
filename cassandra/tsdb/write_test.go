@@ -245,7 +245,7 @@ func Benchmark_pointsEncode(b *testing.B) {
 				xorChunkPool: chunkenc.NewPool(),
 			}
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, err := c.encodePoints(tt.args.points)
 				if err != nil {
 					b.Error(err)
@@ -333,7 +333,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 
 				b.ResetTimer()
 
-				for n := 0; n < b.N; n++ {
+				for range b.N {
 					if !reuse {
 						tmp = nil
 					}
@@ -615,7 +615,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 				xorChunkPool: chunkenc.NewPool(),
 			}
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints)
 				if err != nil {
 					b.Errorf("encodeAggregatedPoints failed: %v", err)

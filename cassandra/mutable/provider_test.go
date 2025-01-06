@@ -61,7 +61,7 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	// Don't benchmark the initial data generation.
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		lbls, err := provider.GetMutable(
 			context.Background(),
 			searchedTenant,

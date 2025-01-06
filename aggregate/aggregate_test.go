@@ -636,7 +636,7 @@ func Benchmark_aggregateData(b *testing.B) {
 
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = Aggregate(data, tt.Resolution)
 			}
 		})

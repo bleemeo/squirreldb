@@ -655,11 +655,11 @@ func (i *mockPostingIter) Next() (string, []byte) {
 	return r.value, r.buffer
 }
 
-func (i mockPostingIter) Err() error {
+func (i *mockPostingIter) Err() error {
 	return i.err
 }
 
-func (i mockPostingIter) Close() {
+func (i *mockPostingIter) Close() {
 }
 
 func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
@@ -1281,7 +1281,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = tt.labels.Hash()
 			}
 		})
@@ -1355,7 +1355,7 @@ func Benchmark_labelsToID(b *testing.B) {
 		}
 
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				key := tt.labels.Hash()
 				idData, _ := c.getIDData(key, tt.labels)
 				c.setIDData(key, idData)
@@ -1632,7 +1632,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = tt.labels.String()
 			}
 		})
@@ -4864,7 +4864,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = findFreeID(tt.bitmap)
 			}
 		})

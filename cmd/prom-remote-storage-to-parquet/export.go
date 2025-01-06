@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -40,7 +41,6 @@ import (
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 )
@@ -338,7 +338,7 @@ func writeTimeSeries(
 		}
 	}
 
-	tss := maps.Keys(timestamps)
+	tss := slices.Collect(maps.Keys(timestamps))
 
 	slices.Sort(tss)
 
@@ -449,7 +449,7 @@ func labelsTextFromMap(labels map[string]string) string {
 		return ""
 	}
 
-	keys := maps.Keys(labels)
+	keys := slices.Collect(maps.Keys(labels))
 
 	slices.Sort(keys)
 

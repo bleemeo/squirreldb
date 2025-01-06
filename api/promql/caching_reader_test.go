@@ -890,7 +890,7 @@ func Benchmark_cachingReader(b *testing.B) {
 
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				if tt.recreateReader {
 					cachedTotalPoints += reader.cachedPointsCount
 					reader = &cachingReader{

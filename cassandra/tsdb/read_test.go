@@ -488,7 +488,7 @@ func BenchmarkMergePoints(b *testing.B) {
 
 	for nDst := 10; nDst < 10000; nDst *= 2 {
 		b.Run(fmt.Sprintf("best_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create the best case scenario for merge points:
 				// no overlaps and all points in src are before the points in dst.
 				benchmarkMergePoints(b, nSrc, nDst, 0, nSrc)
@@ -496,7 +496,7 @@ func BenchmarkMergePoints(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("worst_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create the worst case scenario for merge points:
 				// no overlap and all points in src are after the points in dst.
 				benchmarkMergePoints(b, nSrc, nDst, nDst+1, 0)
@@ -504,7 +504,7 @@ func BenchmarkMergePoints(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("overlap_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create dst to overlap with lah the points of src.
 				benchmarkMergePoints(b, nSrc, nDst, 0, nSrc/2)
 			}

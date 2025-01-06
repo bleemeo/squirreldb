@@ -47,7 +47,7 @@ func Benchmark_valuesFromData(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, _ = valuesFromData(tt.data, nil, nil)
 			}
 		})
@@ -57,7 +57,7 @@ func Benchmark_valuesFromData(b *testing.B) {
 
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, _ = valuesFromData(tt.data, buffer, dataSerialized)
 			}
 		})
@@ -106,7 +106,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, _ = dataFromValues(MetricIDTest1, dataBytes, nil)
 			}
 		})
@@ -116,7 +116,7 @@ func Benchmark_dataFromValues(b *testing.B) {
 
 			b.ResetTimer()
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, _ = dataFromValues(MetricIDTest1, dataBytes, dataSerialized)
 			}
 		})

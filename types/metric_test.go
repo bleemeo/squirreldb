@@ -624,7 +624,7 @@ func BenchmarkDeduplicatePoints(b *testing.B) {
 
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = DeduplicatePoints(tt.points)
 			}
 		})
