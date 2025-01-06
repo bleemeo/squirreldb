@@ -3,7 +3,7 @@
 set -e
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v2.3.2"
+GORELEASER_VERSION="v2.5.1"
 
 while [ ! -z "$1" ]; do
     case "$1" in
