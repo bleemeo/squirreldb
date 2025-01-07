@@ -36,7 +36,7 @@ func NewEngine(
 	metricRegistry prometheus.Registerer,
 ) promql.QueryEngine {
 	engineOpts := promql.EngineOpts{
-		Logger:               logger.NewKitLogger(&queryLogger),
+		Logger:               logger.NewSLogger(queryLogger),
 		Reg:                  metricRegistry,
 		MaxSamples:           50000000,
 		Timeout:              2 * time.Minute,

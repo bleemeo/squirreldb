@@ -168,6 +168,8 @@ func (w *writeMetrics) Rollback() error {
 	return nil
 }
 
+func (w *writeMetrics) SetOptions(*storage.AppendOptions) {}
+
 // validateLabels checks if the metric name and labels are valid.
 // https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 func validateLabels(ls labels.Labels) error {
@@ -206,13 +208,23 @@ func (w *writeMetrics) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar
 	return 0, ErrNotImplemented
 }
 
-func (w *writeMetrics) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
-	return 0, ErrNotImplemented
-}
-
 func (w *writeMetrics) AppendHistogram(
 	storage.SeriesRef, labels.Labels, int64, *histogram.Histogram, *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
+	return 0, ErrNotImplemented
+}
+
+func (w *writeMetrics) AppendHistogramCTZeroSample(
+	_ storage.SeriesRef,
+	_ labels.Labels,
+	_, _ int64,
+	_ *histogram.Histogram,
+	_ *histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
+	return 0, ErrNotImplemented
+}
+
+func (w *writeMetrics) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
 	return 0, ErrNotImplemented
 }
 

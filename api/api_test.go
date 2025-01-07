@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,6 @@ import (
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/google/go-cmp/cmp"
@@ -499,7 +499,8 @@ func TestWriteHandler(t *testing.T) {
 				true,
 				reg,
 			)
-			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable, allowedProtoMsgs)
+			sLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{

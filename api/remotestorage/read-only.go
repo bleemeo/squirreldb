@@ -59,6 +59,8 @@ func (appenderReadOnly) Rollback() error {
 	return nil
 }
 
+func (appenderReadOnly) SetOptions(*storage.AppendOptions) {}
+
 func (appenderReadOnly) AppendExemplar(
 	ref storage.SeriesRef,
 	l labels.Labels,
@@ -84,6 +86,16 @@ func (appenderReadOnly) AppendHistogram(
 	_ = h
 	_ = fh
 
+	return 0, ErrIsReadOnly
+}
+
+func (appenderReadOnly) AppendHistogramCTZeroSample(
+	_ storage.SeriesRef,
+	_ labels.Labels,
+	_, _ int64,
+	_ *histogram.Histogram,
+	_ *histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
 	return 0, ErrIsReadOnly
 }
 
