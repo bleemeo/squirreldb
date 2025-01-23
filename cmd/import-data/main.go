@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
@@ -46,6 +47,7 @@ var (
 	writeURL      = pflag.String("write-url", "http://localhost:9201/api/v1/write/", "Prometheus write API URL")
 	excludeLabels = pflag.StringSlice("ignore-labels", []string{"server_group"}, "Labels to exclude when writing")
 	addTime       = pflag.Duration("add-time", 0, "Add a fixed duration to all timestamps")
+	tenant        = pflag.String("tenant", "", "Add tenant HTTP header to write request")
 )
 
 var errRequestFailed = errors.New("request failed")
@@ -182,6 +184,10 @@ func writeTimeseries(timeseries []prompb.TimeSeries) error {
 	request.Header.Set("Content-Encoding", "snappy")
 	request.Header.Set("Content-Type", "application/x-protobuf")
 	request.Header.Set("X-Prometheus-Remote-Write-Version", "2.0.0")
+
+	if *tenant != "" {
+		request.Header.Set(types.HeaderTenant, *tenant)
+	}
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
