@@ -9131,7 +9131,7 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 	}
 }
 
-// TestStableLabelsToText check that Prometheus Labels to String() is stable across version
+// TestStableLabelsToText checks that Prometheus Labels to String() is stable across versions.
 func TestStableLabelsToText(t *testing.T) {
 	cases := []struct {
 		lbls labels.Labels

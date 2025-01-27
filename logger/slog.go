@@ -75,8 +75,6 @@ func (s2z slogToZerologAdapter) Handle(ctx context.Context, record slog.Record) 
 		evt = evt.Time(zerolog.TimestampFieldName, record.Time)
 	}
 
-	// TODO: handle record.PC
-
 	record.Attrs(func(attr slog.Attr) bool {
 		evt = s2z.eventWith(evt, s2z.fmtKey(attr.Key), attr.Value)
 

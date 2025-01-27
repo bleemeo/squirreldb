@@ -26,7 +26,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -424,7 +423,7 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-metric-name",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
-				{Name: "__name__", Value: "na-me"},
+				{Name: "__name__", Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
@@ -434,7 +433,7 @@ func TestWriteHandler(t *testing.T) {
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "__name__", Value: "name"},
-				{Name: "la-bel", Value: "val"},
+				{Name: "label", Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
@@ -499,7 +498,7 @@ func TestWriteHandler(t *testing.T) {
 				true,
 				reg,
 			)
-			sLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
 			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs)
 
 			now := time.Now()

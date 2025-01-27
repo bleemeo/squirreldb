@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/bleemeo/squirreldb/types"
 
@@ -170,16 +171,17 @@ func (w *writeMetrics) Rollback() error {
 
 func (w *writeMetrics) SetOptions(*storage.AppendOptions) {}
 
-// validateLabels checks if the metric name and labels are valid.
+// validateLabels checks if the metric name and labels are valid utf-8 strings,
+// while not containing the '|' character.
 // https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 func validateLabels(ls labels.Labels) error {
 	for _, l := range ls {
 		if l.Name == model.MetricNameLabel {
-			if !model.IsValidMetricName(model.LabelValue(l.Value)) {
-				return fmt.Errorf("%w: metric name '%s' should match %s", ErrInvalidMatcher, l.Value, model.MetricNameRE)
+			if !model.IsValidMetricName(model.LabelValue(l.Value)) || strings.Contains(l.Value, "|") {
+				return fmt.Errorf("%w: metric name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Value)
 			}
-		} else if !model.LabelName(l.Name).IsValid() {
-			return fmt.Errorf("%w: label name '%s' should match %s", ErrInvalidMatcher, l.Name, model.LabelNameRE)
+		} else if !model.LabelName(l.Name).IsValid() || strings.Contains(l.Name, "|") {
+			return fmt.Errorf("%w: label name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Name)
 		}
 	}
 
