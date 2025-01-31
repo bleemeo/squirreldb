@@ -1,3 +1,19 @@
+// Copyright 2015-2025 Bleemeo
+//
+// bleemeo.com an infrastructure monitoring solution in the Cloud
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package index
 
 import (
@@ -655,11 +671,11 @@ func (i *mockPostingIter) Next() (string, []byte) {
 	return r.value, r.buffer
 }
 
-func (i mockPostingIter) Err() error {
+func (i *mockPostingIter) Err() error {
 	return i.err
 }
 
-func (i mockPostingIter) Close() {
+func (i *mockPostingIter) Close() {
 }
 
 func (s *mockStore) SelectPostingByName(ctx context.Context, shard int32, name string) postingIter {
@@ -1281,7 +1297,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = tt.labels.Hash()
 			}
 		})
@@ -1355,7 +1371,7 @@ func Benchmark_labelsToID(b *testing.B) {
 		}
 
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				key := tt.labels.Hash()
 				idData, _ := c.getIDData(key, tt.labels)
 				c.setIDData(key, idData)
@@ -1632,7 +1648,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = tt.labels.String()
 			}
 		})
@@ -4864,7 +4880,7 @@ func Benchmark_freeFreeID(b *testing.B) {
 	}
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_ = findFreeID(tt.bitmap)
 			}
 		})

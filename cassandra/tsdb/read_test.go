@@ -1,3 +1,19 @@
+// Copyright 2015-2025 Bleemeo
+//
+// bleemeo.com an infrastructure monitoring solution in the Cloud
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package tsdb
 
 import (
@@ -488,7 +504,7 @@ func BenchmarkMergePoints(b *testing.B) {
 
 	for nDst := 10; nDst < 10000; nDst *= 2 {
 		b.Run(fmt.Sprintf("best_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create the best case scenario for merge points:
 				// no overlaps and all points in src are before the points in dst.
 				benchmarkMergePoints(b, nSrc, nDst, 0, nSrc)
@@ -496,7 +512,7 @@ func BenchmarkMergePoints(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("worst_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create the worst case scenario for merge points:
 				// no overlap and all points in src are after the points in dst.
 				benchmarkMergePoints(b, nSrc, nDst, nDst+1, 0)
@@ -504,7 +520,7 @@ func BenchmarkMergePoints(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("overlap_%d", nDst), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				// Create dst to overlap with lah the points of src.
 				benchmarkMergePoints(b, nSrc, nDst, 0, nSrc/2)
 			}

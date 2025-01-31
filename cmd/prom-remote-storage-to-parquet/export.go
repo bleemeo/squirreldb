@@ -1,4 +1,4 @@
-// Copyright 2015-2024 Bleemeo
+// Copyright 2015-2025 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -31,16 +32,15 @@ import (
 
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/compress"
-	"github.com/apache/arrow/go/v17/parquet/file"
-	"github.com/apache/arrow/go/v17/parquet/schema"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 )
@@ -338,7 +338,7 @@ func writeTimeSeries(
 		}
 	}
 
-	tss := maps.Keys(timestamps)
+	tss := slices.Collect(maps.Keys(timestamps))
 
 	slices.Sort(tss)
 
@@ -449,7 +449,7 @@ func labelsTextFromMap(labels map[string]string) string {
 		return ""
 	}
 
-	keys := maps.Keys(labels)
+	keys := slices.Collect(maps.Keys(labels))
 
 	slices.Sort(keys)
 

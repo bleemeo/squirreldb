@@ -1,3 +1,19 @@
+// Copyright 2015-2025 Bleemeo
+//
+// bleemeo.com an infrastructure monitoring solution in the Cloud
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package tsdb
 
 import (
@@ -245,7 +261,7 @@ func Benchmark_pointsEncode(b *testing.B) {
 				xorChunkPool: chunkenc.NewPool(),
 			}
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, err := c.encodePoints(tt.args.points)
 				if err != nil {
 					b.Error(err)
@@ -333,7 +349,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 
 				b.ResetTimer()
 
-				for n := 0; n < b.N; n++ {
+				for range b.N {
 					if !reuse {
 						tmp = nil
 					}
@@ -615,7 +631,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 				xorChunkPool: chunkenc.NewPool(),
 			}
 
-			for n := 0; n < b.N; n++ {
+			for range b.N {
 				_, err := c.encodeAggregatedPoints(tt.args.aggregatedPoints)
 				if err != nil {
 					b.Errorf("encodeAggregatedPoints failed: %v", err)
