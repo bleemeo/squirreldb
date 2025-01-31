@@ -21,11 +21,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -35,7 +35,6 @@ import (
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
-	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/google/go-cmp/cmp"
@@ -424,7 +423,7 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-metric-name",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
-				{Name: "__name__", Value: "na-me"},
+				{Name: "__name__", Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
@@ -434,7 +433,7 @@ func TestWriteHandler(t *testing.T) {
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
 				{Name: "__name__", Value: "name"},
-				{Name: "la-bel", Value: "val"},
+				{Name: "label", Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
@@ -499,7 +498,8 @@ func TestWriteHandler(t *testing.T) {
 				true,
 				reg,
 			)
-			writeHandler := remote.NewWriteHandler(log.NewLogfmtLogger(os.Stderr), reg, appendable, allowedProtoMsgs)
+			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
+			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{

@@ -9130,3 +9130,114 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 		t.Fatalf("writeAfterRestart = %d, want %d", writeAfterRestart, writeBeforeStop)
 	}
 }
+
+// TestStableLabelsToText checks that Prometheus Labels to String() is stable across versions.
+func TestStableLabelsToText(t *testing.T) {
+	cases := []struct {
+		lbls labels.Labels
+		want string
+	}{
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "cpu_used",
+			}),
+			want: "{__name__=\"cpu_used\"}",
+		},
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "cpu_utilisé",
+			}),
+			want: "{__name__=\"cpu_utilisé\"}",
+		},
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "utf8_values",
+				"key":      "value with unicode ☃︎ éß是 and quote \"'`",
+			}),
+			want: "{__name__=\"utf8_values\", key=\"value with unicode ☃︎ éß是 and quote \\\"'`\"}",
+		},
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "utf8_key",
+				"key with unicode ☃︎ éß是 and quote \"'`": "value",
+			}),
+			want: "{__name__=\"utf8_key\", \"key with unicode ☃︎ éß是 and quote \\\"'`\"=\"value\"}",
+		},
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "conflict1?",
+				"key":      "value",
+			}),
+			want: "{__name__=\"conflict1?\", key=\"value\"}",
+		},
+		{
+			lbls: labels.FromMap(map[string]string{
+				"__name__": "conflict3?",
+				"key1é":    "value",
+				"key2é":    "value",
+			}),
+			want: "{__name__=\"conflict3?\", \"key1é\"=\"value\", \"key2é\"=\"value\"}",
+		},
+	}
+
+	for _, tt := range cases {
+		got := tt.lbls.String()
+		if diff := cmp.Diff(tt.want, got); diff != "" {
+			t.Errorf("lbls.String() mismatch (-want +got)\n%s", diff)
+		}
+	}
+}
+
+// TestNoLabelsToTextConflict check that Prometheus Labels to String() can't produce conflict.
+// i.e. two different Labels don't have the same String() value.
+func TestNoLabelsToTextConflict(t *testing.T) {
+	cases := []struct {
+		lblsA labels.Labels
+		lblsB labels.Labels
+	}{
+		{
+			lblsA: labels.FromMap(map[string]string{
+				"__name__": "conflict1?",
+				"key":      "value",
+			}),
+			lblsB: labels.FromMap(map[string]string{
+				"__name__": "conflict1?",
+				"\"key\"":  "value",
+			}),
+		},
+		{
+			lblsA: labels.FromMap(map[string]string{
+				"__name__": "conflict2?",
+				"keyé":     "value",
+			}),
+			lblsB: labels.FromMap(map[string]string{
+				"__name__": "conflict2?",
+				"\"keyé\"": "value",
+			}),
+		},
+		{
+			lblsA: labels.FromMap(map[string]string{
+				"__name__": "conflict3?",
+				"key1é":    "value",
+				"key2é":    "value",
+			}),
+			lblsB: labels.FromMap(map[string]string{
+				"__name__":                   "conflict3?",
+				"key1é\"=\"value\", \"key2é": "value",
+			}),
+		},
+	}
+
+	for _, tt := range cases {
+		gotA := tt.lblsA.String()
+		gotB := tt.lblsB.String()
+
+		if labels.Equal(tt.lblsA, tt.lblsB) {
+			t.Errorf("Test itself is wrong, lblsA & lblsA are equal. lblsA = %s", tt.lblsA)
+		}
+
+		if gotA == gotB {
+			t.Errorf("both lbl.String() are equal with lblsA = %s", tt.lblsA)
+		}
+	}
+}

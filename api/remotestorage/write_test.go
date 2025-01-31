@@ -225,6 +225,10 @@ func Test_validateLabels(t *testing.T) {
 					Name:  "__name__",
 					Value: ":8_987daDp:fez",
 				},
+				{
+					Name:  "__name__",
+					Value: "utilisation mémoire",
+				},
 			},
 			wantErr: false,
 		},
@@ -243,28 +247,12 @@ func Test_validateLabels(t *testing.T) {
 					Name:  "A1_",
 					Value: "a",
 				},
+				{
+					Name:  "système",
+					Value: "a-b",
+				},
 			},
 			wantErr: false,
-		},
-		{
-			name: "invalidMetricNameMinus",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "TODO-if-absent-not-tsdb-points",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalidMetricNameDigit",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "0a",
-				},
-			},
-			wantErr: true,
 		},
 		{
 			name: "invalidMetricNameEmpty",
@@ -277,21 +265,41 @@ func Test_validateLabels(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalidLabelNameMinus",
+			name: "invalidMetricNameNotUTF8",
 			labels: []labels.Label{
 				{
-					Name:  "TODO-if-absent-not-tsdb-points",
-					Value: "a",
+					Name:  "__name__",
+					Value: "\xC0",
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name: "invalidLabelNameDigit",
+			name: "invalidMetricNameContainsPipeChar",
 			labels: []labels.Label{
 				{
-					Name:  "0a",
-					Value: "a",
+					Name:  "__name__",
+					Value: "one|two",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalidLabelNameNotUTF8",
+			labels: []labels.Label{
+				{
+					Name:  "label-\xC0",
+					Value: "value",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalidLabelNameContainsPipeChar",
+			labels: []labels.Label{
+				{
+					Name:  "one|two",
+					Value: "value",
 				},
 			},
 			wantErr: true,

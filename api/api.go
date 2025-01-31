@@ -173,18 +173,20 @@ func NewPrometheus(
 		mockTSDBAdminStat{},
 		dbDir,
 		enableAdmin,
-		logger.NewKitLogger(&apiLogger),
+		logger.NewSLogger(apiLogger),
 		rulesRetrieverFunc,
 		remoteReadSampleLimit,
 		maxConcurrent,
 		remoteReadMaxBytesInFrame,
-		false,
+		false, // isAgent
 		CORSOrigin,
 		runtimeInfoFunc,
 		&v1.PrometheusVersion{},
+		nil, // notificationsGetter - we currently have no UI
+		nil, // notificationsSub - same here
 		mockGatherer{},
 		metricRegistry,
-		nil,
+		nil, // statsRenderer
 		rwEnabled,
 		allowedProtoMsgs,
 		otlpEnabled,

@@ -226,6 +226,12 @@ func (a errAppender) Append(storage.SeriesRef, labels.Labels, int64, float64) (s
 	return 0, a.err
 }
 
+func (a errAppender) Commit() error { return a.err }
+
+func (a errAppender) Rollback() error { return a.err }
+
+func (a errAppender) SetOptions(*storage.AppendOptions) {}
+
 func (a errAppender) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar.Exemplar) (storage.SeriesRef, error) {
 	return 0, a.err
 }
@@ -236,13 +242,19 @@ func (a errAppender) AppendHistogram(
 	return 0, a.err
 }
 
-func (a errAppender) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
+func (a errAppender) AppendHistogramCTZeroSample(
+	_ storage.SeriesRef,
+	_ labels.Labels,
+	_, _ int64,
+	_ *histogram.Histogram,
+	_ *histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
 	return 0, a.err
 }
 
-func (a errAppender) Commit() error { return a.err }
-
-func (a errAppender) Rollback() error { return a.err }
+func (a errAppender) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
+	return 0, a.err
+}
 
 func (a errAppender) AppendCTZeroSample(storage.SeriesRef, labels.Labels, int64, int64) (storage.SeriesRef, error) {
 	return 0, a.err

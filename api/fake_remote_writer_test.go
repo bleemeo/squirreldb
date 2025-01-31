@@ -307,6 +307,10 @@ func (der *dummyAppender) Rollback() error {
 	return nil
 }
 
+func (der *dummyAppender) SetOptions(*storage.AppendOptions) {
+	panic("implement me")
+}
+
 func (der *dummyAppender) AppendExemplar(
 	storage.SeriesRef,
 	labels.Labels,
@@ -321,6 +325,16 @@ func (der *dummyAppender) AppendHistogram(
 	int64,
 	*histogram.Histogram,
 	*histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
+	panic("implement me")
+}
+
+func (der *dummyAppender) AppendHistogramCTZeroSample(
+	_ storage.SeriesRef,
+	_ labels.Labels,
+	_, _ int64,
+	_ *histogram.Histogram,
+	_ *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
 	panic("implement me")
 }

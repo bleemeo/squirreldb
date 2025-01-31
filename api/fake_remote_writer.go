@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"time"
@@ -28,8 +29,6 @@ import (
 
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"
@@ -57,14 +56,16 @@ func patchRemoteWriteHandler(api *v1.API, backdateOffset time.Duration) {
 		originalWriteHandler: (*writeHandler)(unsafe.Pointer(writeHandlerField.Elem().Pointer())),
 	}
 
+	// Making the API's remoteWriteHandler field writable
 	writableWriteHandler := reflect.NewAt(writeHandlerField.Type(), unsafe.Pointer(writeHandlerField.UnsafeAddr())).Elem()
 	// Setting our own write-handler in the API's remoteWriteHandler field
 	writableWriteHandler.Set(reflect.ValueOf(ourWriteHandler))
 }
 
 // writeHandler is a copy of github.com/prometheus/prometheus/storage/remote.writeHandler.
+// It must be updated each time it is modified on the Prometheus side.
 type writeHandler struct {
-	logger     log.Logger
+	logger     *slog.Logger
 	appendable storage.Appendable
 
 	samplesWithInvalidLabelsTotal  prometheus.Counter
@@ -100,8 +101,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	msgType, err := parseProtoMsg(fwh.originalWriteHandler, contentType)
 	if err != nil {
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decoding remote write request", "err", err) //nolint:errcheck
+		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 
 		return
@@ -116,8 +116,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return ret
 		}())
 
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decoding remote write request", "err", err) //nolint:errcheck
+		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 	}
 
@@ -131,16 +130,14 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			enc, remote.SnappyBlockCompression,
 		)
 
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decoding remote write request", "err", err) //nolint:errcheck
+		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 	}
 
 	// Read the request body.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decoding remote write request", "err", err.Error()) //nolint:errcheck
+		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -148,8 +145,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	decompressed, err := snappy.Decode(nil, body)
 	if err != nil {
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decompressing remote write request", "err", err.Error()) //nolint:errcheck
+		fwh.originalWriteHandler.logger.Error("Error decompressing remote write request", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -161,8 +157,8 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// PRW 1.0 flow has different proto message and no partial write handling.
 		var req prompb.WriteRequest
 		if err := proto.Unmarshal(decompressed, &req); err != nil {
-			level.Error(fwh.originalWriteHandler.logger).
-				Log("msg", "Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error()) //nolint:errcheck,lll
+			fwh.originalWriteHandler.logger.
+				Error("Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -180,8 +176,8 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				return
 			default:
-				level.Error(fwh.originalWriteHandler.logger).
-					Log("msg", "Error while remote writing the v1 request", "err", err.Error()) //nolint:errcheck
+				fwh.originalWriteHandler.logger.
+					Error("Error while remote writing the v1 request", "err", err.Error())
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 
 				return
@@ -196,8 +192,8 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Remote Write 2.x proto message handling.
 	var req writev2.Request
 	if err := proto.Unmarshal(decompressed, &req); err != nil {
-		level.Error(fwh.originalWriteHandler.logger).
-			Log("msg", "Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error()) //nolint:errcheck,lll
+		fwh.originalWriteHandler.logger.
+			Error("Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -211,8 +207,8 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if errHTTPCode/5 == 100 { // 5xx
-			level.Error(fwh.originalWriteHandler.logger).
-				Log("msg", "Error while remote writing the v2 request", "err", err.Error()) //nolint:errcheck
+			fwh.originalWriteHandler.logger.
+				Error("Error while remote writing the v2 request", "err", err.Error())
 		}
 
 		http.Error(w, err.Error(), errHTTPCode)
