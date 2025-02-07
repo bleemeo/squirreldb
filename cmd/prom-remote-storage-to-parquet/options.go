@@ -67,6 +67,7 @@ type options struct {
 	importConvertToStaleNaNs bool
 	exportDropNormalNaNs     bool
 	exportDropStaleNaNs      bool
+	exportUseFixedSchema     bool
 	exportBatchSize          time.Duration
 	exportCompressionLevel   zstd.EncoderLevel
 }
@@ -112,10 +113,11 @@ func parseOptions(args []string) (options, error) {
 	// Export options
 	flags.StringVar(&readURL, "read-url", "http://localhost:9201/api/v1/read", "SquirrelDB read URL")
 	flags.StringVarP(&opts.outputFile, "output-file", "o", "", "Output file")
-	flags.BoolVar(&opts.exportDropNormalNaNs, "export-drop-normal-nan", false, "Whether normal NaNs should be dropped during export")                                                    //nolint:lll
-	flags.BoolVar(&opts.exportDropStaleNaNs, "export-drop-stale-nan", false, "Whether stale NaNs should be dropped during export (if not dropped, they will be written as normal NaNs)") //nolint:lll
-	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")                                                          //nolint:lll
-	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Zstd compression level to apply")                                                    //nolint:lll
+	flags.BoolVar(&opts.exportDropNormalNaNs, "export-drop-normal-nan", false, "Whether normal NaNs should be dropped during export")                                                                               //nolint:lll
+	flags.BoolVar(&opts.exportDropStaleNaNs, "export-drop-stale-nan", false, "Whether stale NaNs should be dropped during export (if not dropped, they will be written as normal NaNs)")                            //nolint:lll
+	flags.DurationVar(&opts.exportBatchSize, "export-batch-size", 24*time.Hour, "Batches time range when fetching series data")                                                                                     //nolint:lll
+	flags.IntVar(&exportCompressionLevel, "export-compression-level", defaultZstdCompressionLevel, "Zstd compression level to apply")                                                                               //nolint:lll
+	flags.BoolVar(&opts.exportUseFixedSchema, "export-use-fixed-schema", false, "Whether we should use a fixed schema (timestamp, labels, value) rather than (timestamp, <metric_labels_1>, <metric_labels_2>...)") //nolint:lll
 
 	err := flags.Parse(args)
 	if err != nil {
