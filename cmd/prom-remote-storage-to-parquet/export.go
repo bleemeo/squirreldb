@@ -18,6 +18,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -44,6 +45,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 )
+
+var errUnexpectedWriterType = errors.New("unexpected writer type")
 
 type batchTimings struct {
 	fetch, write time.Duration
@@ -350,7 +353,12 @@ func writeTimeSeries(
 		return 0, 0, fmt.Errorf("getting timestamps column writer: %w", err)
 	}
 
-	_, err = timestampWriter.(*file.Int64ColumnChunkWriter).WriteBatch(tss, nil, nil)
+	tsWriter, ok := timestampWriter.(*file.Int64ColumnChunkWriter)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: want *file.Int64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+	}
+
+	_, err = tsWriter.WriteBatch(tss, nil, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("writing timestamp: %w", err)
 	}
@@ -392,7 +400,12 @@ func writeTimeSeries(
 			return 0, 0, fmt.Errorf("getting next column writer: %w", err)
 		}
 
-		written, err := valueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
+		valWriter, ok := valueWriter.(*file.Float64ColumnChunkWriter)
+		if !ok {
+			return 0, 0, fmt.Errorf("%w: want *file.Float64ColumnChunkWriter, got %T", errUnexpectedWriterType, valueWriter)
+		}
+
+		written, err := valWriter.WriteBatch(values, defLevels, nil)
 		if err != nil {
 			return 0, 0, fmt.Errorf("writing values: %w", err)
 		}

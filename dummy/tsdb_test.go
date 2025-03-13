@@ -17,7 +17,6 @@
 package dummy
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -170,7 +169,7 @@ func TestMemoryTSDB_ReadIter(t *testing.T) {
 				Data: dataMap,
 			}
 
-			gotIter, err := db.ReadIter(context.Background(), tt.request)
+			gotIter, err := db.ReadIter(t.Context(), tt.request)
 			if err != nil {
 				t.Fatalf("MemoryTSDB.ReadIter() error = %v", err)
 			}

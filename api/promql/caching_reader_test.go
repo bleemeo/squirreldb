@@ -17,7 +17,6 @@
 package promql
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -666,7 +665,7 @@ func Test_cachingReader_ReadIter(t *testing.T) { //nolint:maintidx
 					reqName = fmt.Sprintf("#%d", reqIdx)
 				}
 
-				wantIter, err := tt.reader.ReadIter(context.Background(), req.req)
+				wantIter, err := tt.reader.ReadIter(t.Context(), req.req)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -685,7 +684,7 @@ func Test_cachingReader_ReadIter(t *testing.T) { //nolint:maintidx
 
 				countBefore := countingReader.PointsRead()
 
-				gotIter, err := cacheReader.ReadIter(context.Background(), req.req)
+				gotIter, err := cacheReader.ReadIter(t.Context(), req.req)
 				if err != nil {
 					t.Errorf("req %s: %v", reqName, err)
 
@@ -876,7 +875,7 @@ func Benchmark_cachingReader(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			_, realStore := createTSDB()
 
-			_ = realStore.Write(context.Background(), []types.MetricData{
+			_ = realStore.Write(b.Context(), []types.MetricData{
 				{
 					Points:     generatePoint(maxTime.Add(-24*time.Hour), maxTime, time.Minute),
 					ID:         extraMetric1,
@@ -916,7 +915,7 @@ func Benchmark_cachingReader(b *testing.B) {
 				}
 
 				for _, req := range tt.reqs {
-					iter, err := actualReader.ReadIter(context.Background(), req)
+					iter, err := actualReader.ReadIter(b.Context(), req)
 					if err != nil {
 						b.Error(err)
 
@@ -1757,7 +1756,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 				// Make sure __name__ isn't remove from Labels inside the index. We had a case where the labels.Labels
 				// was mutated.
 				// time.Time{} is used, because dummy index ignore min/max time.
-				metrics, err := index.Search(context.Background(), time.Time{}, time.Time{}, nil)
+				metrics, err := index.Search(t.Context(), time.Time{}, time.Time{}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

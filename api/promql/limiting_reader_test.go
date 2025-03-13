@@ -17,7 +17,6 @@
 package promql
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bleemeo/squirreldb/types"
@@ -159,7 +158,7 @@ func Test_limitingReader_ReadIter(t *testing.T) {
 			}
 
 			for i, r := range tt.reads {
-				got, err := rdr.ReadIter(context.Background(), r.req)
+				got, err := rdr.ReadIter(t.Context(), r.req)
 				if err != nil {
 					t.Fatal(err)
 				}

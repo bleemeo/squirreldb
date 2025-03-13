@@ -17,7 +17,6 @@
 package mutable_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -35,7 +34,7 @@ func Test_interfaces(t *testing.T) {
 
 	dummyIndex := dummy.NewIndex(nil)
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
+	provider := mutable.NewProvider(t.Context(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	labelProcessor := mutable.NewLabelProcessor(provider, "__account_id")
 	index := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger(true))
 
@@ -83,7 +82,7 @@ func TestMutableIndex(t *testing.T) {
 
 	dummyIndex := dummy.NewIndex(metrics)
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
+	provider := mutable.NewProvider(t.Context(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	labelProcessor := mutable.NewLabelProcessor(provider, "__account_id")
 	idx := mutable.NewIndexWrapper(dummyIndex, labelProcessor, logger.NewTestLogger(true))
 
@@ -134,7 +133,7 @@ func TestMutableIndex(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := idx.Search(context.Background(), now, now, test.matchers)
+			got, err := idx.Search(t.Context(), now, now, test.matchers)
 			if err != nil {
 				t.Fatal(err)
 			}

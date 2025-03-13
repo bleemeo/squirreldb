@@ -380,7 +380,7 @@ func TestBackdatePoints(t *testing.T) {
 		t.Parallel()
 
 		series := []prompb.TimeSeries{getV1Series(pointTS)}
-		ctx := backdateSeries(context.Background(), series, offsetMs)
+		ctx := backdateSeries(t.Context(), series, offsetMs)
 
 		testFn(t, ctx, series[0].Samples[0].Timestamp)
 	})
@@ -389,7 +389,7 @@ func TestBackdatePoints(t *testing.T) {
 		t.Parallel()
 
 		series := []writev2.TimeSeries{getV2Series(pointTS)}
-		ctx := backdateSeries(context.Background(), series, offsetMs)
+		ctx := backdateSeries(t.Context(), series, offsetMs)
 
 		testFn(t, ctx, series[0].Samples[0].Timestamp)
 	})
