@@ -106,7 +106,7 @@ type mockState struct {
 	values map[string]string
 }
 
-func (m *mockState) Read(_ context.Context, name string, output interface{}) (bool, error) {
+func (m *mockState) Read(_ context.Context, name string, output any) (bool, error) {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -125,7 +125,7 @@ func (m *mockState) Read(_ context.Context, name string, output interface{}) (bo
 	return true, nil
 }
 
-func (m *mockState) Write(_ context.Context, name string, value interface{}) error {
+func (m *mockState) Write(_ context.Context, name string, value any) error {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -1007,14 +1007,14 @@ type mockCluster struct {
 
 	l            sync.Mutex
 	delay        time.Duration
-	callbackChan chan interface{}
+	callbackChan chan any
 	wg           *sync.WaitGroup
 }
 
 func newMockCluster(cluster *dummy.LocalCluster) *mockCluster {
 	return &mockCluster{
 		LocalCluster: cluster,
-		callbackChan: make(chan interface{}),
+		callbackChan: make(chan any),
 		wg:           &sync.WaitGroup{},
 	}
 }
@@ -1077,7 +1077,7 @@ func (c *mockCluster) ProcessMessage() {
 	delay := c.delay
 
 	c.wg = &sync.WaitGroup{}
-	c.callbackChan = make(chan interface{})
+	c.callbackChan = make(chan any)
 
 	if c.delay != 0 {
 		close(c.callbackChan)
@@ -1385,7 +1385,7 @@ func Benchmark_labelsToID(b *testing.B) {
 
 // Test_interfaces make sure the CassandraIndex implement some interfaces.
 func Test_interfaces(t *testing.T) {
-	var iface interface{}
+	var iface any
 
 	index := &CassandraIndex{}
 	iface = index

@@ -924,7 +924,7 @@ func (b *Batch) write(
 		ownerShipInitialPoints []types.MetricData
 	)
 
-	metricToFlush := make(map[types.MetricID]interface{})
+	metricToFlush := make(map[types.MetricID]any)
 
 	pointsCount, err := b.memoryStore.Append(ctx, metrics)
 	if err != nil {

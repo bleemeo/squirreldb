@@ -170,7 +170,7 @@ func Test_PointsEncode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return make([]byte, 15)
 					},
 				},
@@ -254,7 +254,7 @@ func Benchmark_pointsEncode(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return make([]byte, 15)
 					},
 				},
@@ -331,7 +331,7 @@ func Benchmark_pointsDecode(b *testing.B) {
 			b.Run(tt.name, func(b *testing.B) {
 				c := CassandraTSDB{
 					bytesPool: sync.Pool{
-						New: func() interface{} {
+						New: func() any {
 							return make([]byte, 15)
 						},
 					},
@@ -487,7 +487,7 @@ func Test_EncodeAggregate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return make([]byte, 15)
 					},
 				},
@@ -624,7 +624,7 @@ func Benchmark_EncodeAggregate(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			c := CassandraTSDB{
 				bytesPool: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return make([]byte, 15)
 					},
 				},

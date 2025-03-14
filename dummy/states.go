@@ -31,7 +31,7 @@ type States struct {
 	mutex  sync.Mutex
 }
 
-func (s *States) Read(_ context.Context, name string, value interface{}) (bool, error) {
+func (s *States) Read(_ context.Context, name string, value any) (bool, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -65,7 +65,7 @@ func (s *States) Read(_ context.Context, name string, value interface{}) (bool, 
 	return true, nil
 }
 
-func (s *States) Write(_ context.Context, name string, value interface{}) error {
+func (s *States) Write(_ context.Context, name string, value any) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

@@ -1129,7 +1129,7 @@ func TestStoreGetSetPointsAndOffset(t *testing.T) { //nolint:maintidx
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Store{
 				metricsStore: tt.fields.metrics,
-				knownMetrics: make(map[types.MetricID]interface{}),
+				knownMetrics: make(map[types.MetricID]any),
 				metrics:      newMetrics(prometheus.NewRegistry()),
 			}
 

@@ -121,7 +121,7 @@ type sstableDumpRowCluster struct {
 }
 
 func (f *sstableDumpRowCluster) UnmarshalJSON(b []byte) error {
-	work := make([]interface{}, 0, 2)
+	work := make([]any, 0, 2)
 
 	if err := json.Unmarshal(b, &work); err != nil {
 		return err

@@ -168,7 +168,7 @@ func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
 
 // mergeFunc return a merge function to use with koanf.
 func mergeFunc(opts ...func(*mergo.Config)) koanf.Option {
-	merge := func(src, dest map[string]interface{}) error {
+	merge := func(src, dest map[string]any) error {
 		err := mergo.Merge(&dest, src, opts...)
 		if err != nil {
 			log.Err(err).Msg("Failed to merge config")

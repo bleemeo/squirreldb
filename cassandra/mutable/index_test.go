@@ -30,7 +30,7 @@ import (
 
 // Test_interfaces make sure the indexWrapper implement some interfaces.
 func Test_interfaces(t *testing.T) {
-	var iface interface{}
+	var iface any
 
 	dummyIndex := dummy.NewIndex(nil)
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
