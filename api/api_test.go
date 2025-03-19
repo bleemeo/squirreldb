@@ -32,12 +32,14 @@ import (
 
 	"github.com/bleemeo/squirreldb/api/remotestorage"
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,6 +47,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
+	"github.com/rs/zerolog/log"
 )
 
 type promQlData struct {
@@ -559,6 +562,225 @@ func TestWriteHandler(t *testing.T) {
 				if metrics.Count() > 0 {
 					t.Fatalf("%d metrics matched %s", metrics.Count(), test.absentMatchers)
 				}
+			}
+		})
+	}
+}
+
+type metricPointsAndLabels struct {
+	Points []types.MetricPoint
+	Labels labels.Labels
+}
+
+func (metric metricPointsAndLabels) ToTimeseries() prompb.TimeSeries {
+	samples := make([]prompb.Sample, 0, len(metric.Points))
+
+	for _, pt := range metric.Points {
+		samples = append(samples, prompb.Sample{
+			Value:     pt.Value,
+			Timestamp: pt.Timestamp,
+		})
+	}
+
+	return prompb.TimeSeries{
+		Labels:  prompb.FromLabels(metric.Labels, nil),
+		Samples: samples,
+	}
+}
+
+func metricsToWriteRequest(data []metricPointsAndLabels) *prompb.WriteRequest {
+	series := make([]prompb.TimeSeries, 0, len(data))
+
+	for _, metric := range data {
+		series = append(series, metric.ToTimeseries())
+	}
+
+	return &prompb.WriteRequest{
+		Timeseries: series,
+	}
+}
+
+func metricsFromStore(t *testing.T, idx *dummy.Index, store *dummy.MemoryTSDB) []metricPointsAndLabels {
+	t.Helper()
+
+	result := make([]metricPointsAndLabels, 0, len(store.Data))
+
+	for _, metric := range store.Data {
+		lbls := idx.InternalIDToLabels(metric.ID)
+
+		result = append(result, metricPointsAndLabels{
+			Points: metric.Points,
+			Labels: lbls,
+		})
+	}
+
+	return result
+}
+
+// TestWriteHandlerOfAPI test the "full" API (using normal init() method) and with actual datapoints.
+func TestWriteHandlerOfAPI(t *testing.T) {
+	t.Parallel()
+
+	const (
+		tenantLabelName = "__account_id"
+		tenantValue     = "1234"
+	)
+
+	tests := []struct {
+		name          string
+		writtenPoints []metricPointsAndLabels
+	}{
+		{
+			name: "one-points",
+			writtenPoints: []metricPointsAndLabels{
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Now().UnixMilli(),
+							Value:     42.1,
+						},
+					},
+					Labels: labels.FromMap(map[string]string{
+						"__name__": "single_metrics",
+					}),
+				},
+			},
+		},
+		{
+			name: "one-points-future",
+			writtenPoints: []metricPointsAndLabels{
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Now().Add(8 * time.Hour).UnixMilli(),
+							Value:     42.1,
+						},
+					},
+					Labels: labels.FromMap(map[string]string{
+						"__name__": "single_metrics",
+					}),
+				},
+			},
+		},
+		{
+			name: "three-points-past-present-and-future",
+			writtenPoints: []metricPointsAndLabels{
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Now().Add(8 * time.Hour).UnixMilli(),
+							Value:     42.1,
+						},
+					},
+					Labels: labels.FromMap(map[string]string{
+						"__name__": "metric1_future",
+					}),
+				},
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Now().UnixMilli(),
+							Value:     42.1,
+						},
+					},
+					Labels: labels.FromMap(map[string]string{
+						"__name__": "metric2_present",
+					}),
+				},
+				{
+					Points: []types.MetricPoint{
+						{
+							Timestamp: time.Now().Add(-1 * time.Hour).UnixMilli(),
+							Value:     42.1,
+						},
+					},
+					Labels: labels.FromMap(map[string]string{
+						"__name__": "metric2_past",
+					}),
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := dummy.NewMutableLabelStore(dummy.MutableLabels{})
+
+			provider := mutable.NewProvider(context.Background(),
+				prometheus.NewRegistry(),
+				&dummy.LocalCluster{},
+				store,
+				logger.NewTestLogger(true),
+			)
+			labelProcessor := mutable.NewLabelProcessor(provider, tenantLabelName)
+
+			dummyWriter := new(dummy.MemoryTSDB)
+			dummyIndex := &dummy.Index{
+				StoreMetricIDInMemory: true,
+			}
+
+			promReqitry := prometheus.NewRegistry()
+
+			// Try to be as close as daemon.go apiTask
+			api := &API{
+				ListenAddress:               "not used",
+				ReadOnly:                    config.DefaultConfig().Internal.ReadOnly,
+				Index:                       dummyIndex,
+				Reader:                      dummyWriter,
+				Writer:                      dummyWriter,
+				PromQLMaxEvaluatedPoints:    uint64(config.DefaultConfig().PromQL.MaxEvaluatedPoints),
+				PromQLMaxEvaluatedSeries:    uint32(config.DefaultConfig().PromQL.MaxEvaluatedSeries),
+				MaxConcurrentRemoteRequests: config.DefaultConfig().RemoteStorage.MaxConcurrentRequests,
+				MaxRequestBodySizeBytes:     config.DefaultConfig().MaxRequestBodySize << 20,
+				TenantLabelName:             config.DefaultConfig().TenantLabelName,
+				MutableLabelDetector:        labelProcessor,
+				RequireTenantHeader:         config.DefaultConfig().RequireTenantHeader,
+				UseThanosPromQLEngine:       config.DefaultConfig().Internal.UseThanosPromQLEngine,
+				MetricRegistry:              promReqitry,
+				Logger:                      log.With().Logger(),
+				FuturePointsBackdateOffset:  config.DefaultConfig().MaxAllowedTimeInFuture,
+			}
+			api.init()
+			api.Ready()
+
+			wr := metricsToWriteRequest(test.writtenPoints)
+
+			data, err := proto.Marshal(wr)
+			if err != nil {
+				panic(err)
+			}
+
+			encoded := snappy.Encode(nil, data)
+			body := bytes.NewReader(encoded)
+
+			req, err := http.NewRequest(http.MethodPost, "http://localhost:9201/api/v1/write", body) //nolint: noctx
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req = req.WithContext(types.WrapContext(context.Background(), req))
+
+			recorder := httptest.NewRecorder()
+			api.ServeHTTP(recorder, req)
+
+			resp := recorder.Result()
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("response is: %s", recorder.Body.String())
+				t.Fatalf("StatusCode = %v, want %v", resp.StatusCode, http.StatusNoContent)
+			}
+
+			metricsInStore := metricsFromStore(t, dummyIndex, dummyWriter)
+
+			lessFunc := func(a, b metricPointsAndLabels) bool {
+				return labels.Compare(a.Labels, b.Labels) < 0
+			}
+
+			if diff := cmp.Diff(test.writtenPoints, metricsInStore, cmpopts.SortSlices(lessFunc)); diff != "" {
+				t.Errorf("MetricsFromStore mismatch (-want +got)\n%s", diff)
 			}
 		})
 	}
