@@ -707,7 +707,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 
 			store := dummy.NewMutableLabelStore(dummy.MutableLabels{})
 
-			provider := mutable.NewProvider(context.Background(),
+			provider := mutable.NewProvider(t.Context(),
 				prometheus.NewRegistry(),
 				&dummy.LocalCluster{},
 				store,
@@ -759,7 +759,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req = req.WithContext(types.WrapContext(context.Background(), req))
+			req = req.WithContext(types.WrapContext(t.Context(), req))
 
 			recorder := httptest.NewRecorder()
 			api.ServeHTTP(recorder, req)
