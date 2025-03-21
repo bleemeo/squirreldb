@@ -522,7 +522,7 @@ func writeTimeSeries(
 	return len(tss), pointsCount, nil
 }
 
-func writeTimeSeriesFixedSchema(
+func writeTimeSeriesFixedSchema( //nolint:maintidx
 	opts options,
 	rgw file.SerialRowGroupWriter,
 	series []*prompb.TimeSeries,
@@ -549,7 +549,12 @@ func writeTimeSeriesFixedSchema(
 
 		tWrite := time.Now()
 
-		_, err = timestampWriter.(*file.Int64ColumnChunkWriter).WriteBatch(tss, nil, nil)
+		int64Writer, ok := timestampWriter.(*file.Int64ColumnChunkWriter)
+		if !ok {
+			return 0, 0, 0, fmt.Errorf("%w: want *file.Int64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+		}
+
+		_, err = int64Writer.WriteBatch(tss, nil, nil)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("writing timestamp: %w", err)
 		}
@@ -619,7 +624,15 @@ func writeTimeSeriesFixedSchema(
 		//     timestamp=XXX, labels=<the map, which is `values`>, floatValue=YYY
 		// So we have to write `values` as many time as there is couple timestamp/floatValue
 		for range s.Samples {
-			_, err = labelsKeyWriter.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, defLevels, repLevels)
+			byteArrayWriter, ok := labelsKeyWriter.(*file.ByteArrayColumnChunkWriter)
+			if !ok {
+				return 0,
+					0,
+					0,
+					fmt.Errorf("%w: want *file.ByteArrayColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+			}
+
+			_, err = byteArrayWriter.WriteBatch(values, defLevels, repLevels)
 			if err != nil {
 				return 0, 0, 0, fmt.Errorf("writing labelsValue: %w", err)
 			}
@@ -663,7 +676,15 @@ func writeTimeSeriesFixedSchema(
 		//     timestamp=XXX, labels=<the map, which is `values`>, floatValue=YYY
 		// So we have to write `values` as many time as there is couple timestamp/floatValue
 		for range s.Samples {
-			_, err = labelsValueWriter.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, defLevels, repLevels)
+			byteArrayWriter, ok := labelsValueWriter.(*file.ByteArrayColumnChunkWriter)
+			if !ok {
+				return 0,
+					0,
+					0,
+					fmt.Errorf("%w: want *file.ByteArrayColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+			}
+
+			_, err = byteArrayWriter.WriteBatch(values, defLevels, repLevels)
 			if err != nil {
 				return 0, 0, 0, fmt.Errorf("writing labelsValue: %w", err)
 			}
@@ -695,7 +716,15 @@ func writeTimeSeriesFixedSchema(
 
 		tWrite := time.Now()
 
-		_, err = floatValueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		float64Writer, ok := floatValueWriter.(*file.Float64ColumnChunkWriter)
+		if !ok {
+			return 0,
+				0,
+				0,
+				fmt.Errorf("%w: want *file.Float64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+		}
+
+		_, err = float64Writer.WriteBatch(values, nil, nil)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("writing timestamp: %w", err)
 		}
