@@ -17,7 +17,6 @@
 package mutable_test
 
 import (
-	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -112,14 +111,14 @@ func TestReplaceMutableLabels(t *testing.T) {
 	}
 
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
+	provider := mutable.NewProvider(t.Context(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotMatchers, err := lp.ReplaceMutableLabels(context.Background(), test.matchers)
+			gotMatchers, err := lp.ReplaceMutableLabels(t.Context(), test.matchers)
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}
@@ -169,14 +168,14 @@ func TestAddMutableLabels(t *testing.T) {
 	}
 
 	store := dummy.NewMutableLabelStore(dummy.DefaultMutableLabels)
-	provider := mutable.NewProvider(context.Background(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
+	provider := mutable.NewProvider(t.Context(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	lp := mutable.NewLabelProcessor(provider, "__account_id")
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotLabels, err := lp.AddMutableLabels(context.Background(), test.labels)
+			gotLabels, err := lp.AddMutableLabels(t.Context(), test.labels)
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}

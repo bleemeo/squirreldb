@@ -1,5 +1,5 @@
 run:
-  go: "1.23"
+  go: "1.24"
   timeout: 5m
 
 linters:
@@ -15,7 +15,7 @@ linters:
     - nonamedreturns # Warn for every named return, not useful.
     - interfacebloat # Warn when an interface has too many methods, not useful.
     # Disable deprecated and replaced linter.
-    - exportloopref
+    - tenv
     # We use maintidx to lint function complexity.
     - gocyclo
     - cyclop

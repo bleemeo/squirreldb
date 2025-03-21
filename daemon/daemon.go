@@ -595,14 +595,14 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 	ctxs := make([]context.Context, len(tasks))
 	cancels := make([]context.CancelFunc, len(tasks))
-	waitChan := make([]chan interface{}, len(tasks))
+	waitChan := make([]chan any, len(tasks))
 
 	for i, task := range tasks {
 		subReadiness := make(chan error)
 
 		ctxs[i], cancels[i] = context.WithCancel(context.Background()) //nolint:fatcontext
 
-		waitChan[i] = make(chan interface{})
+		waitChan[i] = make(chan any)
 
 		go func() { //nolint:contextcheck
 			defer logger.ProcessPanic()

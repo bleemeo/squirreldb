@@ -98,7 +98,7 @@ func (c *Client) ForEachMaster(ctx context.Context, fn func(ctx context.Context,
 }
 
 // Publish dispatch Publish to either cluster of single instance client.
-func (c *Client) Publish(ctx context.Context, channel string, message interface{}) (int64, error) {
+func (c *Client) Publish(ctx context.Context, channel string, message any) (int64, error) {
 	if err := c.fixClient(ctx); err != nil {
 		return 0, err
 	}
@@ -124,7 +124,7 @@ func (c *Client) Subscribe(ctx context.Context, channel string) (*goredis.PubSub
 }
 
 // SAdd dispatch SAdd to either cluster of single instance client.
-func (c *Client) SAdd(ctx context.Context, key string, members ...interface{}) error {
+func (c *Client) SAdd(ctx context.Context, key string, members ...any) error {
 	if err := c.fixClient(ctx); err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (c *Client) SAdd(ctx context.Context, key string, members ...interface{}) e
 }
 
 // SRem dispatch SRem to either cluster of single instance client.
-func (c *Client) SRem(ctx context.Context, key string, members ...interface{}) error {
+func (c *Client) SRem(ctx context.Context, key string, members ...any) error {
 	if err := c.fixClient(ctx); err != nil {
 		return err
 	}

@@ -66,7 +66,7 @@ type metric struct {
 }
 
 // point: [timestamp float, value string]
-type point [2]interface{}
+type point [2]any
 
 func main() {
 	log.Logger = logger.NewTestLogger(false)

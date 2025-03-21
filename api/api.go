@@ -158,6 +158,9 @@ func NewPrometheus(
 	// We enable both remote-write and OTLP-write handlers, even if we don't explicitly support OTLP.
 	rwEnabled, otlpEnabled := true, true
 
+	otlpDeltaToCumulative := false
+	ctZeroIngestionEnabled := false
+
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
@@ -190,6 +193,8 @@ func NewPrometheus(
 		rwEnabled,
 		allowedProtoMsgs,
 		otlpEnabled,
+		otlpDeltaToCumulative,
+		ctZeroIngestionEnabled,
 	)
 
 	return api

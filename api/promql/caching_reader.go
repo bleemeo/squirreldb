@@ -59,7 +59,7 @@ type cachingDataSet struct {
 	nextCount int
 	set       types.MetricDataSet
 	err       error
-	seenIDs   map[types.MetricID]interface{}
+	seenIDs   map[types.MetricID]any
 	current   types.MetricData
 }
 
@@ -158,7 +158,7 @@ func (d *cachingDataSet) nextFromCache() (cacheHit bool, returnValue bool) {
 		d.current = d.rdr.cachedResult
 
 		if d.seenIDs == nil {
-			d.seenIDs = make(map[types.MetricID]interface{}, len(d.request.IDs))
+			d.seenIDs = make(map[types.MetricID]any, len(d.request.IDs))
 		}
 
 		d.seenIDs[d.current.ID] = nil

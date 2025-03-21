@@ -18,7 +18,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -476,7 +475,7 @@ func TestWriteHandler(t *testing.T) {
 				},
 			})
 
-			provider := mutable.NewProvider(context.Background(),
+			provider := mutable.NewProvider(t.Context(),
 				prometheus.NewRegistry(),
 				&dummy.LocalCluster{},
 				store,
@@ -499,7 +498,7 @@ func TestWriteHandler(t *testing.T) {
 				reg,
 			)
 			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
-			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs)
+			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs, false)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{
@@ -529,7 +528,7 @@ func TestWriteHandler(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req = req.WithContext(types.WrapContext(context.Background(), req))
+			req = req.WithContext(types.WrapContext(t.Context(), req))
 
 			if !test.skipTenantHeader {
 				req.Header.Add(types.HeaderTenant, tenantValue)
@@ -551,7 +550,7 @@ func TestWriteHandler(t *testing.T) {
 			}
 
 			if len(test.absentMatchers) > 0 {
-				metrics, err := dummyIndex.Search(context.Background(), now, now, test.absentMatchers)
+				metrics, err := dummyIndex.Search(t.Context(), now, now, test.absentMatchers)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -912,7 +911,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 			apiClient := v1.NewAPI(client)
 
-			response, warning, err := apiClient.Query(context.Background(), tt.promql, tt.time)
+			response, warning, err := apiClient.Query(t.Context(), tt.promql, tt.time)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -34,7 +34,7 @@ import (
 func TestAppenderInvalidRequest(t *testing.T) {
 	const maxConcurrentWrite = 5
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	app := remotestorage.New(nil, nil, maxConcurrentWrite, "", mockMutableLAbel{}, true, prometheus.NewRegistry())

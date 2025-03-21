@@ -749,7 +749,7 @@ func TestBatch_read(t *testing.T) { //nolint:maintidx
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 
-			got, err := b.ReadIter(context.Background(), tt.args.request)
+			got, err := b.ReadIter(t.Context(), tt.args.request)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadIter() error = %v, wantErr %v", err, tt.wantErr)
 
@@ -902,7 +902,7 @@ func TestBatch_readTemporary(t *testing.T) {
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
 
-			got, err := b.readTemporary(context.Background(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
+			got, err := b.readTemporary(t.Context(), tt.args.ids, tt.args.fromTimestamp, tt.args.toTimestamp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readTemporary() error = %v, wantErr %v", err, tt.wantErr)
 
@@ -1265,13 +1265,13 @@ func TestBatch_flush(t *testing.T) { //nolint:maintidx
 				writer:      tt.fields.writer,
 				metrics:     newMetrics(prometheus.NewRegistry()),
 			}
-			b.flush(context.Background(), tt.args.ids, tt.args.now, tt.args.shutdown)
+			b.flush(t.Context(), tt.args.ids, tt.args.now, tt.args.shutdown)
 
 			if !reflect.DeepEqual(tt.fields.writer.DumpData(), tt.wantWriter) {
 				t.Errorf("writer = %v, want = %v", tt.fields.writer.DumpData(), tt.wantWriter)
 			}
 
-			gotMemoryStore := dumpMemoryStore(context.Background(), tt.fields.memoryStore)
+			gotMemoryStore := dumpMemoryStore(t.Context(), tt.fields.memoryStore)
 			if !dataEqual(true, gotMemoryStore, tt.wantMemoryStore) {
 				t.Errorf("memory store = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 			}
@@ -1915,7 +1915,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			wantState2:      map[types.MetricID]stateData{},
 		},
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, tt := range tests {
 		ok := t.Run(tt.name, func(t *testing.T) {
@@ -2023,10 +2023,10 @@ func Test_takeover(t *testing.T) { //nolint:maintidx
 	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer1, logger1)
 	logger2 := log.With().Str("component", "batch2").Logger()
 	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, nil, writer2, logger2)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	err := batch1.write(
-		context.Background(),
+		t.Context(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest1,
@@ -2043,7 +2043,7 @@ func Test_takeover(t *testing.T) { //nolint:maintidx
 	}
 
 	err = batch2.write(
-		context.Background(),
+		t.Context(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest2,
@@ -2060,7 +2060,7 @@ func Test_takeover(t *testing.T) { //nolint:maintidx
 	}
 
 	err = batch1.write(
-		context.Background(),
+		t.Context(),
 		[]types.MetricData{
 			{
 				ID:         MetricIDTest1,

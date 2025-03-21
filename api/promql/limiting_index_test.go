@@ -17,7 +17,6 @@
 package promql
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -34,7 +33,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 	}
 
 	_, _, err := idx.LookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{Labels: labelsMetric1.Copy(), Start: now, End: now},
 			{Labels: labelsMetric2.Copy(), Start: now, End: now},
@@ -185,7 +184,7 @@ func Test_limitingIndex_Search(t *testing.T) {
 				returnedSeries: new(uint32),
 			}
 			for i, query := range tt.searches {
-				got, err := idx.Search(context.Background(), now, now, query.matchers)
+				got, err := idx.Search(t.Context(), now, now, query.matchers)
 				if (err != nil) != query.wantErr {
 					t.Fatalf("limitingIndex.Search(#%d) error = %v, wantErr %v", i, err, query.wantErr)
 

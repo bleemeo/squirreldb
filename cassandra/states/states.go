@@ -62,7 +62,7 @@ func New(ctx context.Context, options Options) (*CassandraStates, error) {
 }
 
 // Read reads value of the state from the states table.
-func (c *CassandraStates) Read(ctx context.Context, name string, value interface{}) (found bool, err error) {
+func (c *CassandraStates) Read(ctx context.Context, name string, value any) (found bool, err error) {
 	valueString, err := c.statesTableSelectState(ctx, name)
 
 	if errors.Is(err, gocql.ErrNotFound) {
@@ -98,7 +98,7 @@ func (c *CassandraStates) Read(ctx context.Context, name string, value interface
 }
 
 // Write updates the state in the states table.
-func (c *CassandraStates) Write(ctx context.Context, name string, value interface{}) error {
+func (c *CassandraStates) Write(ctx context.Context, name string, value any) error {
 	var valueString string
 
 	switch value.(type) {

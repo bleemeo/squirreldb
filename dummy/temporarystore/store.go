@@ -41,7 +41,7 @@ type storeData struct {
 }
 
 type Store struct {
-	knownMetrics     map[types.MetricID]interface{}
+	knownMetrics     map[types.MetricID]any
 	metricsStore     map[types.MetricID]storeData
 	transfertMetrics []types.MetricID
 	mutex            sync.Mutex
@@ -53,7 +53,7 @@ type Store struct {
 func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
 	store := &Store{
 		metricsStore: make(map[types.MetricID]storeData),
-		knownMetrics: make(map[types.MetricID]interface{}),
+		knownMetrics: make(map[types.MetricID]any),
 		metrics:      newMetrics(reg),
 		logger:       logger,
 	}

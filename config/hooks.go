@@ -29,14 +29,14 @@ import (
 // It assumes the following format: "k1=v1,k2=v2".
 // This is used to override map settings from environment variables.
 func stringToMapHookFunc() mapstructure.DecodeHookFuncType {
-	return func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
+	return func(source reflect.Type, target reflect.Type, data any) (any, error) {
 		if source.Kind() != reflect.String || target.Kind() != reflect.Map {
 			return data, nil
 		}
 
 		strMap, _ := data.(string)
 
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 
 		elementsList := strings.Split(strMap, ",")
 		for i, element := range elementsList {
@@ -49,7 +49,7 @@ func stringToMapHookFunc() mapstructure.DecodeHookFuncType {
 			if len(values) < 2 {
 				err := fmt.Errorf("%w: '%s'", errWrongMapFormat, strMap)
 
-				return make(map[string]interface{}), err
+				return make(map[string]any), err
 			}
 
 			result[strings.TrimLeft(values[0], " ")] = strings.TrimRight(strings.Join(values[1:], "="), " ")
@@ -61,7 +61,7 @@ func stringToMapHookFunc() mapstructure.DecodeHookFuncType {
 
 // intToTimeDurationHookFunc convert int to seconds.
 func intToTimeDurationHookFunc() mapstructure.DecodeHookFunc {
-	return func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
+	return func(source reflect.Type, target reflect.Type, data any) (any, error) {
 		if source.Kind() != reflect.Int || target != reflect.TypeOf(time.Duration(5)) {
 			return data, nil
 		}

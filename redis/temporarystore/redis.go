@@ -106,12 +106,12 @@ func New(ctx context.Context, reg prometheus.Registerer, options Options, logger
 
 func (r *Redis) initPool() {
 	r.bufferPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return new(bytes.Buffer)
 		},
 	}
 	r.serializedPointsPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return make([]serializedPoints, 1024)
 		},
 	}

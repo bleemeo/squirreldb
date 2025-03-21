@@ -151,8 +151,8 @@ type TryLocker interface {
 }
 
 type State interface {
-	Read(ctx context.Context, name string, value interface{}) (bool, error)
-	Write(ctx context.Context, name string, value interface{}) error
+	Read(ctx context.Context, name string, value any) (bool, error)
+	Write(ctx context.Context, name string, value any) error
 }
 
 // RequestContextKey is used as a key in a context to an HTTP request.

@@ -17,7 +17,6 @@
 package promql
 
 import (
-	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -36,7 +35,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 	}
 
 	ids, _, err := idx.LookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{Labels: labelsMetric1.Copy(), Start: now, End: now},
 			{Labels: labelsMetric2.Copy(), Start: now, End: now},
@@ -146,7 +145,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				matcher: tt.fields.matcher,
 			}
 
-			got, err := idx.Search(context.Background(), now, now, tt.args.matchers)
+			got, err := idx.Search(t.Context(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.Search() error = %v, wantErr %v", err, tt.wantErr)
 
@@ -277,7 +276,7 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				matcher: tt.fields.matcher,
 			}
 
-			got, err := idx.LabelValues(context.Background(), now, now, tt.args.name, tt.args.matchers)
+			got, err := idx.LabelValues(t.Context(), now, now, tt.args.name, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelValues() error = %v, wantErr %v", err, tt.wantErr)
 
@@ -388,7 +387,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 				matcher: tt.fields.matcher,
 			}
 
-			got, err := idx.LabelNames(context.Background(), now, now, tt.args.matchers)
+			got, err := idx.LabelNames(t.Context(), now, now, tt.args.matchers)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("filteringIndex.LabelNames() error = %v, wantErr %v", err, tt.wantErr)
 
