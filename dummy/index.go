@@ -283,3 +283,8 @@ outer:
 
 	return list
 }
+
+// InternalIDToLabels should only be used in tests. It allow to query the idToLabels map.
+func (idx *Index) InternalIDToLabels(id types.MetricID) labels.Labels {
+	return idx.idToLabels[id]
+}
