@@ -55,7 +55,6 @@ func NewEngine(
 		queryEngine = engine.New(engine.Opts{
 			EngineOpts:        engineOpts,
 			LogicalOptimizers: nil,
-			DisableFallback:   false,
 		})
 	} else {
 		queryEngine = promql.NewEngine(engineOpts)

@@ -8,23 +8,23 @@ before:
     - go mod download
     - go mod tidy
 builds:
-- env:
-  - CGO_ENABLED=0
-  targets:
-  - linux_amd64
-  - linux_386
-  - linux_arm_6
-  - linux_arm64
+  - env:
+      - CGO_ENABLED=0
+    targets:
+      - linux_amd64
+      - linux_386
+      - linux_arm_6
+      - linux_arm64
 archives:
-- format: binary
+  - formats: [ binary ]
 checksum:
   name_template: 'checksums.txt'
 changelog:
   sort: asc
   filters:
     exclude:
-    - '^docs:'
-    - '^test:'
+      - '^docs:'
+      - '^test:'
 release:
   # Don't try to modify Github
   disable: true

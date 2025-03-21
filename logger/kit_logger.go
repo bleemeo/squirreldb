@@ -28,8 +28,8 @@ type zerologLogger struct {
 }
 
 //nolint: zerologlint,gofmt,gofumpt,goimports
-func (l zerologLogger) Log(kv ...interface{}) error {
-	fields := make(map[string]interface{})
+func (l zerologLogger) Log(kv ...any) error {
+	fields := make(map[string]any)
 
 	for i := 0; i < len(kv); i += 2 {
 		if i+1 < len(kv) {

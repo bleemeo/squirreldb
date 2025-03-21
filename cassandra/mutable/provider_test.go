@@ -17,7 +17,6 @@
 package mutable_test
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -42,7 +41,7 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	registry := prometheus.NewRegistry()
 	initialData := generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel)
 	store := dummy.NewMutableLabelStore(initialData)
-	provider := mutable.NewProvider(context.Background(),
+	provider := mutable.NewProvider(b.Context(),
 		registry,
 		&dummy.LocalCluster{},
 		store,
@@ -79,7 +78,7 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 
 	for range b.N {
 		lbls, err := provider.GetMutable(
-			context.Background(),
+			b.Context(),
 			searchedTenant,
 			searchedNonMutableName,
 			searchedNonMutableValue,

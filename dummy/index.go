@@ -250,7 +250,7 @@ func (idx *Index) LabelNames(ctx context.Context, _, _ time.Time, matchers []*la
 }
 
 func (idx *Index) labelValues(name string, matchers []*labels.Matcher) []string {
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
@@ -282,4 +282,9 @@ outer:
 	sort.Strings(list)
 
 	return list
+}
+
+// InternalIDToLabels should only be used in tests. It allow to query the idToLabels map.
+func (idx *Index) InternalIDToLabels(id types.MetricID) labels.Labels {
+	return idx.idToLabels[id]
 }

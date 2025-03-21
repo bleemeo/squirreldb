@@ -17,7 +17,6 @@
 package telemetry
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bleemeo/squirreldb/dummy"
@@ -40,7 +39,7 @@ func TestTelemetryID(t *testing.T) {
 	}
 
 	// Get SquirrelDB 1 ID again, it should stay the same.
-	newID1, err := telemetry1.getTelemetryID(context.Background())
+	newID1, err := telemetry1.getTelemetryID(t.Context())
 	if err != nil {
 		t.Fatalf("Failed to get telemetry ID: %s", err)
 	}
@@ -96,7 +95,7 @@ func createTelemetryAndGetID(t *testing.T, lockFactory *dummy.Locks, state *dumm
 		Logger:      log.With().Str("component", "telemetry-1").Logger(),
 	})
 
-	id, err := telemetry.getTelemetryID(context.Background())
+	id, err := telemetry.getTelemetryID(t.Context())
 	if err != nil {
 		t.Fatalf("Failed to get telemetry ID: %s", err)
 	}

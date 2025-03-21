@@ -697,7 +697,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 	}
 
 	wantedPostings := make(map[labels.Label]*roaring.Bitmap)
-	labelNames := make(map[string]interface{})
+	labelNames := make(map[string]any)
 	it = localAll.Iterator()
 
 	pendingIDs := make([]types.MetricID, 0, 10000)

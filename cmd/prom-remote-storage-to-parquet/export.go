@@ -46,7 +46,10 @@ import (
 	"google.golang.org/protobuf/protoadapt"
 )
 
-var ErrUnimplemented = errors.New("not implemented")
+var (
+	errUnimplemented        = errors.New("not implemented")
+	errUnexpectedWriterType = errors.New("unexpected writer type")
+)
 
 type batchTimings struct {
 	fetch, write time.Duration
@@ -441,7 +444,12 @@ func writeTimeSeries(
 		return 0, 0, fmt.Errorf("getting timestamps column writer: %w", err)
 	}
 
-	_, err = timestampWriter.(*file.Int64ColumnChunkWriter).WriteBatch(tss, nil, nil)
+	tsWriter, ok := timestampWriter.(*file.Int64ColumnChunkWriter)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: want *file.Int64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+	}
+
+	_, err = tsWriter.WriteBatch(tss, nil, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("writing timestamp: %w", err)
 	}
@@ -483,7 +491,12 @@ func writeTimeSeries(
 			return 0, 0, fmt.Errorf("getting next column writer: %w", err)
 		}
 
-		written, err := valueWriter.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
+		valWriter, ok := valueWriter.(*file.Float64ColumnChunkWriter)
+		if !ok {
+			return 0, 0, fmt.Errorf("%w: want *file.Float64ColumnChunkWriter, got %T", errUnexpectedWriterType, valueWriter)
+		}
+
+		written, err := valWriter.WriteBatch(values, defLevels, nil)
 		if err != nil {
 			return 0, 0, fmt.Errorf("writing values: %w", err)
 		}
@@ -596,7 +609,7 @@ func writeTimeSeriesFixedSchema(
 		if len(s.Labels) == 0 {
 			// This might be done by just having repLevel = [0] and defLevel = [0], but it need testing
 			// ... and I believe this case can never occur
-			return 0, 0, 0, fmt.Errorf("%w: can't write empty labels list", ErrUnimplemented)
+			return 0, 0, 0, fmt.Errorf("%w: can't write empty labels list", errUnimplemented)
 		}
 
 		tWrite := time.Now()

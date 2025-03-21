@@ -27,7 +27,7 @@ type connectObserver struct {
 	l                 sync.Mutex
 	lastObservedError connectError
 	logger            zerolog.Logger
-	wakeRunLoop       chan interface{}
+	wakeRunLoop       chan any
 }
 
 type connectError struct {

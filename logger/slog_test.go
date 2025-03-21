@@ -18,7 +18,6 @@ package logger
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -92,7 +91,7 @@ func TestSlog2Zerolog(t *testing.T) {
 			// We override the time field to force it to have a fixed value.
 			fields := append(tc.fields, zerolog.TimestampFieldName, now) //nolint: gocritic
 
-			NewSLogger(zLogger).Log(context.Background(), tc.msgLevel, tc.msg, fields...)
+			NewSLogger(zLogger).Log(t.Context(), tc.msgLevel, tc.msg, fields...)
 
 			if diff := cmp.Diff(tc.expectedOutput, buf.String()); diff != "" {
 				t.Fatalf("Unexpected output (-want +got):\n%s", diff)

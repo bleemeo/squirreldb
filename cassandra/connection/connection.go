@@ -52,7 +52,7 @@ type Connection struct {
 	closed                    bool
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
-	wakeRunLoop               chan interface{}
+	wakeRunLoop               chan any
 	observer                  *connectObserver
 	lastConnectionEstablished time.Time
 }
@@ -120,7 +120,7 @@ func New(ctx context.Context,
 
 	runCtx, cancel := context.WithCancel(context.Background())
 
-	wakeRunLoop := make(chan interface{})
+	wakeRunLoop := make(chan any)
 
 	manager := &Connection{
 		logger:           logger,

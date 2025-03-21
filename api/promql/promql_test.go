@@ -17,7 +17,6 @@
 package promql
 
 import (
-	"context"
 	"errors"
 	"net/http/httptest"
 	"testing"
@@ -37,7 +36,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 	}
 
 	_, _, err := idx.LookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{Labels: labelsMetric1.Copy(), Start: now, End: now},
 			{Labels: labelsMetric2.Copy(), Start: now, End: now},

@@ -28,7 +28,7 @@ import (
 type flag struct {
 	name   string
 	short  string
-	value  interface{}
+	value  any
 	usage  string
 	hidden bool
 }

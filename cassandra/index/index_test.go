@@ -106,7 +106,7 @@ type mockState struct {
 	values map[string]string
 }
 
-func (m *mockState) Read(_ context.Context, name string, output interface{}) (bool, error) {
+func (m *mockState) Read(_ context.Context, name string, output any) (bool, error) {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -125,7 +125,7 @@ func (m *mockState) Read(_ context.Context, name string, output interface{}) (bo
 	return true, nil
 }
 
-func (m *mockState) Write(_ context.Context, name string, value interface{}) error {
+func (m *mockState) Write(_ context.Context, name string, value any) error {
 	m.l.Lock()
 	defer m.l.Unlock()
 
@@ -1007,14 +1007,14 @@ type mockCluster struct {
 
 	l            sync.Mutex
 	delay        time.Duration
-	callbackChan chan interface{}
+	callbackChan chan any
 	wg           *sync.WaitGroup
 }
 
 func newMockCluster(cluster *dummy.LocalCluster) *mockCluster {
 	return &mockCluster{
 		LocalCluster: cluster,
-		callbackChan: make(chan interface{}),
+		callbackChan: make(chan any),
 		wg:           &sync.WaitGroup{},
 	}
 }
@@ -1077,7 +1077,7 @@ func (c *mockCluster) ProcessMessage() {
 	delay := c.delay
 
 	c.wg = &sync.WaitGroup{}
-	c.callbackChan = make(chan interface{})
+	c.callbackChan = make(chan any)
 
 	if c.delay != 0 {
 		close(c.callbackChan)
@@ -1179,11 +1179,14 @@ func getTestLogger() zerolog.Logger {
 }
 
 func mockIndexFromMetrics(
+	t *testing.T,
 	start, end time.Time,
 	metrics map[types.MetricID]map[string]string,
 ) *CassandraIndex {
+	t.Helper()
+
 	index, err := initialize(
-		context.Background(),
+		t.Context(),
 		&mockStore{},
 		Options{
 			DefaultTimeToLive: 1 * time.Hour,
@@ -1209,7 +1212,7 @@ func mockIndexFromMetrics(
 		expirations = append(expirations, now.Add(time.Hour))
 	}
 
-	_, err = index.InternalCreateMetric(context.Background(), start, end, metricsList, ids, expirations, false)
+	_, err = index.InternalCreateMetric(t.Context(), start, end, metricsList, ids, expirations, false)
 	if err != nil {
 		panic(err)
 	}
@@ -1356,7 +1359,7 @@ func Benchmark_labelsToID(b *testing.B) {
 	}
 	for _, tt := range tests {
 		c, err := initialize(
-			context.Background(),
+			b.Context(),
 			&mockStore{},
 			Options{
 				DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -1382,7 +1385,7 @@ func Benchmark_labelsToID(b *testing.B) {
 
 // Test_interfaces make sure the CassandraIndex implement some interfaces.
 func Test_interfaces(t *testing.T) {
-	var iface interface{}
+	var iface any
 
 	index := &CassandraIndex{}
 	iface = index
@@ -1732,7 +1735,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			"userID":      "42",
 		},
 	}
-	index1 := mockIndexFromMetrics(now, now, metrics1)
+	index1 := mockIndexFromMetrics(t, now, now, metrics1)
 
 	metrics2 := make(map[types.MetricID]map[string]string)
 
@@ -1753,7 +1756,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			"instance": "localhost:900",
 		},
 	}
-	index3 := mockIndexFromMetrics(now, now, metrics3)
+	index3 := mockIndexFromMetrics(t, now, now, metrics3)
 
 	for x := 1; x < 101; x++ {
 		for y := range 100 {
@@ -1769,7 +1772,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		}
 	}
 
-	index2 := mockIndexFromMetrics(now, now, metrics2)
+	index2 := mockIndexFromMetrics(t, now, now, metrics2)
 
 	tests := []struct {
 		name     string
@@ -2549,7 +2552,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("idsForMatchers() error = %v", err)
 
@@ -2577,7 +2580,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("idsForMatchers() error = %v", err)
 
@@ -2610,7 +2613,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -2649,7 +2652,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	now := t5.Add(8 * 24 * time.Hour)
 
 	index1, err := initialize(
-		context.Background(),
+		t.Context(),
 		&mockStore{},
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -2665,7 +2668,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	metrics1IDs, _, err := index1.lookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
@@ -2826,7 +2829,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	index2, err := initialize(
-		context.Background(),
+		t.Context(),
 		&mockStore{},
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -2841,13 +2844,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Fatal(err)
 	}
 
-	metrics2IDs, _, err := index2.lookupIDs(context.Background(), requests, now)
+	metrics2IDs, _, err := index2.lookupIDs(t.Context(), requests, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	index3, err := initialize(
-		context.Background(),
+		t.Context(),
 		&mockStore{},
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -2863,7 +2866,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	metrics3IDs1, _, err := index3.lookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
@@ -2900,7 +2903,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	metrics3IDs2, _, err := index3.lookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
@@ -2937,7 +2940,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	metrics3IDs3, _, err := index3.lookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
@@ -4092,18 +4095,18 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	}
 
 	for _, tt := range tests {
-		shards, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, false)
+		shards, err := tt.index.getTimeShards(t.Context(), tt.queryStart, tt.queryEnd, false)
 		if err != nil {
 			t.Errorf("getTimeShards() error = %v", err)
 		}
 
-		shardsAll, err := tt.index.getTimeShards(context.Background(), tt.queryStart, tt.queryEnd, true)
+		shardsAll, err := tt.index.getTimeShards(t.Context(), tt.queryStart, tt.queryEnd, true)
 		if err != nil {
 			t.Errorf("getTimeShards(returnAll=true) error = %v", err)
 		}
 
 		t.Run(tt.name+" shardsAll", func(t *testing.T) {
-			got, err := tt.index.idsForMatchers(context.Background(), shardsAll, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(t.Context(), shardsAll, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -4131,7 +4134,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		})
 
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 0)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, tt.matchers, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -4158,7 +4161,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		})
 
 		t.Run(tt.name+" direct", func(t *testing.T) {
-			got, err := tt.index.idsForMatchers(context.Background(), shards, tt.matchers, 1000)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, tt.matchers, 1000)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -4192,7 +4195,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 				matchersReverse[i] = tt.matchers[len(tt.matchers)-i-1]
 			}
 
-			got, err := tt.index.idsForMatchers(context.Background(), shards, matchersReverse, 0)
+			got, err := tt.index.idsForMatchers(t.Context(), shards, matchersReverse, 0)
 			if err != nil {
 				t.Errorf("postingsForMatchers() error = %v", err)
 
@@ -4225,7 +4228,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	hadIssue, err := index1.Verifier(buffer).
 		WithNow(now).
 		WithStrictMetricCreation(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4237,7 +4240,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	hadIssue, err = index2.Verifier(buffer).
 		WithNow(now).
 		WithStrictMetricCreation(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4249,7 +4252,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	hadIssue, err = index3.Verifier(buffer).
 		WithNow(now).
 		WithStrictMetricCreation(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -4896,7 +4899,7 @@ func Test_cache(t *testing.T) {
 	t0 := time.Date(2019, 9, 17, 7, 42, 44, 0, time.UTC)
 
 	index1, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: defaultTTL,
@@ -4912,7 +4915,7 @@ func Test_cache(t *testing.T) {
 	}
 
 	index2, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: defaultTTL,
@@ -4968,7 +4971,7 @@ func Test_cache(t *testing.T) {
 			for i, idx := range tt.indexes {
 				countBefore := store.queryCount
 
-				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				_, _, err = idx.lookupIDs(t.Context(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -4980,7 +4983,7 @@ func Test_cache(t *testing.T) {
 
 				countBefore = store.queryCount
 
-				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				_, _, err = idx.lookupIDs(t.Context(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -4994,7 +4997,7 @@ func Test_cache(t *testing.T) {
 			for i, idx := range tt.indexes {
 				countBefore := store.queryCount
 
-				_, _, err = idx.lookupIDs(context.Background(), toLookupRequests(tt.labelsList, t0), t0)
+				_, _, err = idx.lookupIDs(t.Context(), toLookupRequests(tt.labelsList, t0), t0)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -5211,7 +5214,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			t.Parallel()
 
 			cluster := &dummy.LocalCluster{}
-			storeSubCtx, unblock := withBlockContext(context.Background(), "blockQuery", time.Second)
+			storeSubCtx, unblock := withBlockContext(t.Context(), "blockQuery", time.Second)
 			wrappedCluster := newMockCluster(cluster)
 
 			var usedCluster types.Cluster
@@ -5246,7 +5249,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			states := &mockState{}
 
 			index1, err := initialize(
-				context.Background(),
+				t.Context(),
 				store,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -5262,7 +5265,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			}
 
 			index2, err := initialize(
-				context.Background(),
+				t.Context(),
 				store,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -5284,14 +5287,14 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 				readIndex = index2
 			}
 
-			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write1Metrics, t0), t0)
+			_, _, err = writeIndex.lookupIDs(t.Context(), toLookupRequests(tt.write1Metrics, t0), t0)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			wrappedCluster.ProcessMessage()
 
-			group, _ := errgroup.WithContext(context.Background())
+			group, _ := errgroup.WithContext(t.Context())
 
 			group.Go(func() error {
 				_, err := readIndex.Search(storeSubCtx, t1, t1, tt.query)
@@ -5301,7 +5304,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 
 			unblock.unblockStartAndWait()
 
-			_, _, err = writeIndex.lookupIDs(context.Background(), toLookupRequests(tt.write2Metrics, t1), t1)
+			_, _, err = writeIndex.lookupIDs(t.Context(), toLookupRequests(tt.write2Metrics, t1), t1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5320,7 +5323,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 				wrappedCluster.ProcessMessage()
 			}
 
-			ids, err := readIndex.Search(context.Background(), t1, t1, tt.query)
+			ids, err := readIndex.Search(t.Context(), t1, t1, tt.query)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5339,7 +5342,7 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			// cache for labels values.
 			expectedQueryCount := previousQueryCount + 1
 
-			ids, err = readIndex.Search(context.Background(), t1, t1, tt.query)
+			ids, err = readIndex.Search(t.Context(), t1, t1, tt.query)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5439,7 +5442,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			}
 
 			index1, err := initialize(
-				context.Background(),
+				t.Context(),
 				store,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -5488,7 +5491,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			t7 := t6.Add(24 * 370 * time.Hour)
 
 			tmp, _, err := index1.lookupIDs(
-				context.Background(),
+				t.Context(),
 				toLookupRequests(
 					[]labels.Labels{
 						labels.FromMap(metrics[0]),
@@ -5504,7 +5507,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			metricsID[0] = tmp[0]
 
 			index2, err := initialize(
-				context.Background(),
+				t.Context(),
 				store,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -5520,7 +5523,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			}
 
 			tmp, _, err = index2.lookupIDs(
-				context.Background(),
+				t.Context(),
 				toLookupRequests(
 					[]labels.Labels{
 						labels.FromMap(metrics[1]),
@@ -5541,7 +5544,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			}
 
 			tmp, _, err = index1.lookupIDs(
-				context.Background(),
+				t.Context(),
 				toLookupRequests(
 					[]labels.Labels{
 						labels.FromMap(metrics[0]),
@@ -5564,7 +5567,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			}
 
 			tmp, _, err = index1.lookupIDs(
-				context.Background(),
+				t.Context(),
 				toLookupRequests(
 					[]labels.Labels{
 						labels.FromMap(metrics[0]),
@@ -5585,7 +5588,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				hadIssue, err := index1.Verifier(buffer).
 					WithNow(t0).
 					WithStrictMetricCreation(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -5606,7 +5609,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			}
 
 			tmp, _, err = index2.lookupIDs(
-				context.Background(),
+				t.Context(),
 				toLookupRequests(
 					[]labels.Labels{
 						labels.FromMap(metrics[3]),
@@ -5647,7 +5650,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 			batchSize := 100
 			workerCount := 4
-			group, _ := errgroup.WithContext(context.Background())
+			group, _ := errgroup.WithContext(t.Context())
 
 			for n := range workerCount {
 				group.Go(func() error {
@@ -5667,7 +5670,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 							idxEnd = end
 						}
 
-						_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
+						_, _, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
 						if err != nil {
 							return err
 						}
@@ -5683,12 +5686,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				t.Fatal(err)
 			}
 
-			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t4)
+			tmp, _, err = index1.lookupIDs(t.Context(), toLookupRequests(labelsList, t3), t4)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			tmp2, _, err := index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			tmp2, _, err := index2.lookupIDs(t.Context(), toLookupRequests(labelsList, t5), t5)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5697,11 +5700,11 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				t.Errorf("Index don't have the same IDs")
 			}
 
-			if err := executeRunOnce(t5, index1, 1000, t6); err != nil {
+			if err := executeRunOnce(t.Context(), t5, index1, 1000, t6); err != nil {
 				t.Fatal(err)
 			}
 
-			if err := executeRunOnce(t5, index2, 1000, t6); err != nil {
+			if err := executeRunOnce(t.Context(), t5, index2, 1000, t6); err != nil {
 				t.Fatal(err)
 			}
 
@@ -5719,12 +5722,12 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				}),
 			}
 
-			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			tmp, _, err = index1.lookupIDs(t.Context(), toLookupRequests(labelsList, t5), t5)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t5), t5)
+			tmp2, _, err = index2.lookupIDs(t.Context(), toLookupRequests(labelsList, t5), t5)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5733,25 +5736,25 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				t.Errorf("lookupIDs() = %d, want %d", tmp2[0], tmp2[0])
 			}
 
-			if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+			if err := executeRunOnce(t.Context(), t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
 				t.Fatal(err)
 			}
 
-			tmp, _, err = index1.lookupIDs(context.Background(), toLookupRequests(labelsList2, t6), t6)
+			tmp, _, err = index1.lookupIDs(t.Context(), toLookupRequests(labelsList2, t6), t6)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			_, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+			_, _, err = index2.lookupIDs(t.Context(), toLookupRequests(labelsList, t6), t6)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if err := executeRunOnce(t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
+			if err := executeRunOnce(t.Context(), t6, index2, 1000, t6.Add(24*time.Hour)); err != nil {
 				t.Fatal(err)
 			}
 
-			tmp2, _, err = index2.lookupIDs(context.Background(), toLookupRequests(labelsList, t6), t6)
+			tmp2, _, err = index2.lookupIDs(t.Context(), toLookupRequests(labelsList, t6), t6)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5770,7 +5773,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 					WithNow(t6).
 					WithStrictMetricCreation(true).
 					WithStrictExpiration(false).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -5780,7 +5783,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			if err := executeRunOnce(t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
+			if err := executeRunOnce(t.Context(), t6, index1, 1000, t6.Add(24*time.Hour)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -5789,7 +5792,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 					WithNow(t6).
 					WithStrictMetricCreation(true).
 					WithStrictExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -5801,7 +5804,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 			wrappedCluster.ProcessMessage()
 
-			if err := executeRunOnce(t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
+			if err := executeRunOnce(t.Context(), t7, index1, 1000, t7.Add(24*time.Hour)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -5810,7 +5813,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 					WithNow(t7).
 					WithStrictMetricCreation(true).
 					WithPedanticExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -5892,7 +5895,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	store := &mockStore{}
 
 	index, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: defaultTTL,
@@ -5914,7 +5917,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		labelsList[i] = labelsMapToList(m, false)
 	}
 
-	metricsID, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
+	metricsID, ttls, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList, t0), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5960,7 +5963,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		WithNow(t0).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5970,9 +5973,9 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	}
 
 	index.expire(t0)
-	_, _ = index.cassandraExpire(context.Background(), t0)
+	_, _ = index.cassandraExpire(t.Context(), t0)
 
-	allIDs, err := index.AllIDs(context.Background(), t0, t0)
+	allIDs, err := index.AllIDs(t.Context(), t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -5985,7 +5988,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		WithNow(t0).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -5996,7 +5999,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	labelsList[3] = labelsMapToList(metrics[3], false)
 
-	ids, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList[3:4], t1), t1)
+	ids, ttls, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList[3:4], t1), t1)
 	if err != nil {
 		t.Error(err)
 
@@ -6011,7 +6014,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		t.Errorf("id = %d, want %d", ids[0], metricsID[3])
 	}
 
-	index.applyExpirationUpdateRequests(context.Background(), t1)
+	index.applyExpirationUpdateRequests(t.Context(), t1)
 	// metrics[3] was moved to a new expiration slot
 	if len(store.expiration) != 5 {
 		t.Errorf("len(store.expiration) = %v, want 5", len(store.expiration))
@@ -6039,11 +6042,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	index.expire(t1)
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
-	for t := t0; t.Before(t1); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t1)
+	for ts := t0; ts.Before(t1); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t1)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(t.Context(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6055,7 +6058,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 	metrics[0][ttlLabel] = strconv.FormatInt(int64(shortTTL.Seconds()), 10)
 	labelsList[0] = labelsMapToList(metrics[0], false)
 
-	ids, ttls, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList[0:1], t2), t2)
+	ids, ttls, err = index.lookupIDs(t.Context(), toLookupRequests(labelsList[0:1], t2), t2)
 	if err != nil {
 		t.Error(err)
 
@@ -6077,11 +6080,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	index.expire(t2)
 
-	for t := t1; t.Before(t2); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t2)
+	for ts := t1; ts.Before(t2); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t2)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t2)
+	allIDs, err = index.AllIDs(t.Context(), t0, t2)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6098,11 +6101,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	index.expire(t3)
 
-	for t := t2; t.Before(t3); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t3)
+	for ts := t2; ts.Before(t3); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t3)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t3)
+	allIDs, err = index.AllIDs(t.Context(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6122,12 +6125,12 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		labelsList[n] = labelsMapToList(labels, false)
 	}
 
-	_, _, err = index.lookupIDs(context.Background(), toLookupRequests(labelsList, t3), t3)
+	_, _, err = index.lookupIDs(t.Context(), toLookupRequests(labelsList, t3), t3)
 	if err != nil {
 		t.Error(err)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t3)
+	allIDs, err = index.AllIDs(t.Context(), t0, t3)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6138,11 +6141,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	index.expire(t4)
 
-	for t := t3; t.Before(t4); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t4)
+	for ts := t3; ts.Before(t4); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t4)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t4)
+	allIDs, err = index.AllIDs(t.Context(), t0, t4)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6153,11 +6156,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	index.expire(t5)
 
-	for t := t4; t.Before(t5); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t5)
+	for ts := t4; ts.Before(t5); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t5)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t5)
+	allIDs, err = index.AllIDs(t.Context(), t0, t5)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6170,7 +6173,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		WithNow(t5).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -6181,11 +6184,11 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	index.expire(t6)
 
-	for t := t5; t.Before(t6); t = t.Add(24 * time.Hour) {
-		_, _ = index.cassandraExpire(context.Background(), t6)
+	for ts := t5; ts.Before(t6); ts = ts.Add(24 * time.Hour) {
+		_, _ = index.cassandraExpire(t.Context(), t6)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t6)
+	allIDs, err = index.AllIDs(t.Context(), t0, t6)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6198,7 +6201,7 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 		WithNow(t6).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		t.Error(err)
 	}
@@ -6237,7 +6240,7 @@ func Test_expiration_offset(t *testing.T) {
 	store := &mockStore{}
 
 	index, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: defaultTTL,
@@ -6255,7 +6258,7 @@ func Test_expiration_offset(t *testing.T) {
 	// Check that the metric is in the index.
 	labelsList := []labels.Labels{labelsMapToList(metric, false)}
 
-	metricsID, ttls, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, t0), t0)
+	metricsID, ttls, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList, t0), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6275,9 +6278,9 @@ func Test_expiration_offset(t *testing.T) {
 
 	// t0
 	index.expire(t0)
-	_, _ = index.cassandraExpire(context.Background(), t0)
+	_, _ = index.cassandraExpire(t.Context(), t0)
 
-	allIDs, err := index.AllIDs(context.Background(), t0, t0)
+	allIDs, err := index.AllIDs(t.Context(), t0, t0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6290,11 +6293,11 @@ func Test_expiration_offset(t *testing.T) {
 	index.expire(t1)
 	// each call to cassandraExpire do one day, but calling multiple time
 	// isn't an issue but it must be called at least once per day
-	for t := t0; t.Before(t1); t = t.Add(expirationCheckInterval) {
-		_, _ = index.cassandraExpire(context.Background(), t1)
+	for ts := t0; ts.Before(t1); ts = ts.Add(expirationCheckInterval) {
+		_, _ = index.cassandraExpire(t.Context(), t1)
 	}
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(t.Context(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6305,9 +6308,9 @@ func Test_expiration_offset(t *testing.T) {
 
 	// t2
 	index.expire(t2)
-	_, _ = index.cassandraExpire(context.Background(), t2)
+	_, _ = index.cassandraExpire(t.Context(), t2)
 
-	allIDs, err = index.AllIDs(context.Background(), t0, t1)
+	allIDs, err = index.AllIDs(t.Context(), t0, t1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -6461,7 +6464,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	store := &mockStore{}
 
 	index, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: defaultTTL,
@@ -6528,7 +6531,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 		})
 
 		_, _, err := index.lookupIDs(
-			context.Background(),
+			t.Context(),
 			toLookupRequests(metricToWrite, currentTime),
 			currentTime,
 		)
@@ -6536,7 +6539,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			t.Fatal(err)
 		}
 
-		index.InternalRunOnce(context.Background(), currentTime)
+		index.InternalRunOnce(t.Context(), currentTime)
 
 		writeTime := currentTime
 		currentTime = currentTime.Add(step)
@@ -6782,7 +6785,7 @@ func expirationLonglivedEndOfPhaseCheck(
 		WithNow(currentTime).
 		WithStrictMetricCreation(true).
 		WithPedanticExpiration(true).
-		Verify(context.Background())
+		Verify(t.Context())
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -7011,7 +7014,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 			t.Parallel()
 
 			index, err := initialize(
-				context.Background(),
+				t.Context(),
 				&mockStore{},
 				Options{
 					DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -7032,7 +7035,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 					newShard = append(newShard, uint64(v))
 				}
 
-				_, err := index.postingUpdate(context.Background(), postingUpdateRequest{
+				_, err := index.postingUpdate(t.Context(), postingUpdateRequest{
 					Shard: globalShardNumber,
 					Label: labels.Label{
 						Name:  existingShardsLabel,
@@ -7045,12 +7048,12 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			gotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, true)
+			gotAll, err := index.getTimeShards(t.Context(), tt.args.start, tt.args.end, true)
 			if err != nil {
 				t.Error(err)
 			}
 
-			gotNotAll, err := index.getTimeShards(context.Background(), tt.args.start, tt.args.end, false)
+			gotNotAll, err := index.getTimeShards(t.Context(), tt.args.start, tt.args.end, false)
 			if err != nil {
 				t.Error(err)
 			}
@@ -7063,7 +7066,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				t.Errorf("getTimeShards() mismatch: (-want +got)\n%s", diff)
 			}
 
-			got, err := index.getTimeShards(context.Background(), indexMinValidTime, time.Now(), true)
+			got, err := index.getTimeShards(t.Context(), indexMinValidTime, time.Now(), true)
 			if err != nil {
 				t.Error(err)
 			}
@@ -7074,7 +7077,7 @@ func Test_getTimeShards(t *testing.T) { //nolint:maintidx
 				}
 			}
 
-			got, err = index.getTimeShards(context.Background(), indexMinValidTime, time.Now(), false)
+			got, err = index.getTimeShards(t.Context(), indexMinValidTime, time.Now(), false)
 			if err != nil {
 				t.Error(err)
 			}
@@ -7096,7 +7099,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 	now := t3.Add(postingShardSize * 2)
 
 	index1, err := initialize(
-		context.Background(),
+		t.Context(),
 		&mockStore{},
 		Options{
 			DefaultTimeToLive: 365 * 24 * time.Hour,
@@ -7111,7 +7114,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 	}
 
 	_, _, err = index1.lookupIDs(
-		context.Background(),
+		t.Context(),
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
@@ -7461,7 +7464,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.index.labelValues(context.Background(), tt.start, tt.end, tt.labelName, tt.matchers)
+			got, err := tt.index.labelValues(t.Context(), tt.start, tt.end, tt.labelName, tt.matchers)
 			if err != nil {
 				t.Errorf("labelValues() error = %v", err)
 
@@ -7709,9 +7712,13 @@ func Test_timeForShard(t *testing.T) {
 	}
 }
 
-func executeRunOnce(now time.Time, index *CassandraIndex, maxRunCount int, maxTime time.Time) error {
-	ctx := context.Background()
-
+func executeRunOnce(
+	ctx context.Context,
+	now time.Time,
+	index *CassandraIndex,
+	maxRunCount int,
+	maxTime time.Time,
+) error {
 	previousLastProcessedDay, err := index.expirationLastProcessedDay(ctx)
 	if err != nil {
 		return err
@@ -8052,7 +8059,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 			store := newFailingStore(realStore, shouldFail)
 
 			index, err := initialize(
-				context.Background(),
+				t.Context(),
 				store,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -8084,7 +8091,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 				shouldFail.SetRate(run.failRateBefore, run.failRateAfter)
 
 				for i := range defaultRetryCount {
-					ctx := context.Background()
+					ctx := t.Context()
 					if i == defaultRetryCount-1 {
 						ctx = contextSkipError(ctx)
 					}
@@ -8101,7 +8108,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 
 				// Check in store that correct write happened
 				// Note: no error even if store still had 10% failure, because everything is in cache.
-				_, _, err := index.lookupIDs(context.Background(), toLookupRequests(labelsList, batch.now), batch.now)
+				_, _, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList, batch.now), batch.now)
 				if err != nil {
 					t.Fatalf("on batch %d: %v", batchIdx, err)
 				}
@@ -8118,7 +8125,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					t.Fatal(err)
 				}
 
-				if err := executeRunOnce(batch.now, index, 2000, nextNow); err != nil {
+				if err := executeRunOnce(t.Context(), batch.now, index, 2000, nextNow); err != nil {
 					t.Fatalf("on batch %d: %v", batchIdx, err)
 				}
 
@@ -8140,7 +8147,7 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 					WithNow(batch.now).
 					WithStrictMetricCreation(true).
 					WithPedanticExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -8254,7 +8261,7 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 				shouldFail2 := newRandomShouldFail(rnd.Int63(), run.err)
 
 				index1, err := initialize(
-					context.Background(),
+					t.Context(),
 					newFailingStore(realStore, shouldFail1),
 					Options{
 						DefaultTimeToLive: defaultTTL,
@@ -8270,7 +8277,7 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 				}
 
 				index2, err := initialize(
-					context.Background(),
+					t.Context(),
 					newFailingStore(realStore, shouldFail2),
 					Options{
 						DefaultTimeToLive: defaultTTL,
@@ -8335,11 +8342,11 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 					}
 				}
 
-				if err := clusterCheckSearch(context.Background(), t, currentTime, index1, realStore); err != nil {
+				if err := clusterCheckSearch(t.Context(), t, currentTime, index1, realStore); err != nil {
 					t.Error(err)
 				}
 
-				if err := clusterCheckSearch(context.Background(), t, currentTime, index2, realStore); err != nil {
+				if err := clusterCheckSearch(t.Context(), t, currentTime, index2, realStore); err != nil {
 					t.Error(err)
 				}
 
@@ -8362,11 +8369,11 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 					t.Fatal(err)
 				}
 
-				group, _ := errgroup.WithContext(context.Background())
+				group, _ := errgroup.WithContext(t.Context())
 
 				for _, index := range indexes {
 					group.Go(func() error {
-						return executeRunOnce(currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
+						return executeRunOnce(t.Context(), currentTime, index, 2000, currentTime.Add(10*24*time.Hour))
 					})
 				}
 
@@ -8393,7 +8400,7 @@ func Test_cluster_expiration_and_error(t *testing.T) { //nolint:maintidx
 					WithNow(currentTime).
 					WithStrictMetricCreation(true).
 					WithStrictExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -8466,7 +8473,7 @@ func clusterDoOneBatch(t *testing.T,
 	commonMetrics := metricToWrite[:len(metricToWrite)/3]
 	nodeSpecificMetrics := metricToWrite[len(commonMetrics):]
 
-	group, ctx := errgroup.WithContext(context.Background())
+	group, ctx := errgroup.WithContext(t.Context())
 
 	for workerID, index := range indexes {
 		group.Go(func() error {
@@ -8604,7 +8611,7 @@ func Test_concurrent_access(t *testing.T) {
 			var indexes []*CassandraIndex
 
 			index1, err := initialize(
-				context.Background(),
+				t.Context(),
 				realStore,
 				Options{
 					DefaultTimeToLive: defaultTTL,
@@ -8623,7 +8630,7 @@ func Test_concurrent_access(t *testing.T) {
 
 			if withCluster {
 				index2, err := initialize(
-					context.Background(),
+					t.Context(),
 					realStore,
 					Options{
 						DefaultTimeToLive: defaultTTL,
@@ -8641,7 +8648,7 @@ func Test_concurrent_access(t *testing.T) {
 				indexes = append(indexes, index2)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 
 			ctxTestDuration, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -8720,15 +8727,15 @@ func Test_concurrent_access(t *testing.T) {
 				t.Error(err)
 			}
 
-			tmp, err := indexes[0].expirationLastProcessedDay(context.Background())
+			tmp, err := indexes[0].expirationLastProcessedDay(t.Context())
 			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
 
-			allIDs, err := indexes[0].AllIDs(context.Background(), indexMinValidTime, indexMaxValidTime)
+			allIDs, err := indexes[0].AllIDs(t.Context(), indexMinValidTime, indexMaxValidTime)
 			if err != nil {
 				t.Error(err)
 			}
 
-			labels, err := indexes[0].lookupLabels(context.Background(), allIDs, execution.now.Now())
+			labels, err := indexes[0].lookupLabels(t.Context(), allIDs, execution.now.Now())
 			if err != nil {
 				t.Error(err)
 			}
@@ -8748,7 +8755,7 @@ func Test_concurrent_access(t *testing.T) {
 					WithNow(execution.now.Now()).
 					WithStrictMetricCreation(true).
 					WithStrictExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -8763,7 +8770,7 @@ func Test_concurrent_access(t *testing.T) {
 				indexes[0].InternalRunOnce(ctx, execution.now.Now())
 			}
 
-			tmp, err = indexes[0].expirationLastProcessedDay(context.Background())
+			tmp, err = indexes[0].expirationLastProcessedDay(t.Context())
 			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
 
 			for _, idx := range indexes {
@@ -8773,7 +8780,7 @@ func Test_concurrent_access(t *testing.T) {
 					WithNow(execution.now.Now()).
 					WithStrictMetricCreation(true).
 					WithPedanticExpiration(true).
-					Verify(context.Background())
+					Verify(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -8961,7 +8968,7 @@ func concurrentAccessReader(
 //   - Then, within the first minute of SquirrelDB's existence,
 //     we try to look the points we talked about in the first step.
 func TestLookForOldData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 	oldMetricDate := now.Add(-30 * 24 * time.Hour) // a few shards ago
 	existingMetrics := map[types.MetricID]map[string]string{
@@ -8970,7 +8977,7 @@ func TestLookForOldData(t *testing.T) {
 			"instance": "localhost:8015",
 		},
 	}
-	existingIndex := mockIndexFromMetrics(oldMetricDate, oldMetricDate, existingMetrics)
+	existingIndex := mockIndexFromMetrics(t, oldMetricDate, oldMetricDate, existingMetrics)
 
 	// Creating a new index with an empty cache, as when SquirrelDB (re)starts.
 	// The existing store is persisted, as Cassandra does.
@@ -9036,14 +9043,14 @@ func TestLookForOldData(t *testing.T) {
 //   - SquirrelDB is re-started, and write the same metrics. Index shouldn't need any
 //     update (we write in the same shard), but the bug caused update of the index.
 func TestBadInitilizationOfIdInShard(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Date(2024, 9, 16, 11, 1, 0, 0, time.UTC)
 	past := now.Add(-1 * time.Minute)
 
 	store := &mockStore{}
 
 	index, err := initialize(
-		context.Background(),
+		t.Context(),
 		store,
 		Options{
 			DefaultTimeToLive: 1 * time.Hour,
