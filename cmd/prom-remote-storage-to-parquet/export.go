@@ -46,7 +46,10 @@ import (
 	"google.golang.org/protobuf/protoadapt"
 )
 
-var errUnexpectedWriterType = errors.New("unexpected writer type")
+var (
+	errUnimplemented        = errors.New("not implemented")
+	errUnexpectedWriterType = errors.New("unexpected writer type")
+)
 
 type batchTimings struct {
 	fetch, write time.Duration
@@ -138,9 +141,21 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 	timings batchTimings,
 	err error,
 ) {
-	seriesNames, pw, err := makeParquetWriter(opts.outputFile, seriesLabels, opts.exportCompressionLevel)
-	if err != nil {
-		return 0, 0, 0, batchTimings{}, err
+	var (
+		seriesNames []string
+		pw          *file.Writer
+	)
+
+	if opts.exportUseFixedSchema {
+		pw, err = makeParquetWriterFixedSchema(opts.outputFile, opts.exportCompressionLevel)
+		if err != nil {
+			return 0, 0, 0, batchTimings{}, err
+		}
+	} else {
+		seriesNames, pw, err = makeParquetWriter(opts.outputFile, seriesLabels, opts.exportCompressionLevel)
+		if err != nil {
+			return 0, 0, 0, batchTimings{}, err
+		}
 	}
 
 	defer func() {
@@ -174,24 +189,38 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			continue
 		}
 
-		samplesBySeriesName := make(map[string][]prompb.Sample, len(series))
+		var (
+			rowsCount   int
+			pointsCount int
+		)
 
-		for _, s := range series {
-			labelsText := labelsTextFromSlice(s.Labels)
-			samplesBySeriesName[labelsText] = s.Samples
-			actualSeries[labelsText] = struct{}{}
-		}
+		if opts.exportUseFixedSchema {
+			rowsCount, pointsCount, totalSeries, err = writeTimeSeriesFixedSchema(opts, pw.AppendRowGroup(), series, &timings)
+			if err != nil {
+				return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
+			}
+		} else {
+			samplesBySeriesName := make(map[string][]prompb.Sample, len(series))
 
-		rowsCount, pointsCount, err := writeTimeSeries(opts, seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
-		if err != nil {
-			return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
+			for _, s := range series {
+				labelsText := labelsTextFromSlice(s.Labels)
+				samplesBySeriesName[labelsText] = s.Samples
+				actualSeries[labelsText] = struct{}{}
+			}
+
+			totalSeries = len(actualSeries)
+
+			rowsCount, pointsCount, err = writeTimeSeries(opts, seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
+			if err != nil {
+				return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
+			}
 		}
 
 		totalRows += int64(rowsCount)
 		totalPoints += int64(pointsCount)
 	}
 
-	return len(actualSeries), totalRows, totalPoints, timings, nil
+	return totalSeries, totalRows, totalPoints, timings, nil
 }
 
 func makeParquetWriter(outputFile string, seriesLabels []map[string]string, compressionLevel zstd.EncoderLevel) (
@@ -237,6 +266,68 @@ func makeParquetWriter(outputFile string, seriesLabels []map[string]string, comp
 	))
 
 	return allSeries, pw, nil
+}
+
+func makeParquetWriterFixedSchema(outputFile string, compressionLevel zstd.EncoderLevel) (
+	pw *file.Writer,
+	err error,
+) {
+	mapDef, err := schema.MapOf(
+		"labels",
+		schema.MustPrimitive(schema.NewPrimitiveNodeLogical(
+			"key",
+			parquet.Repetitions.Required,
+			schema.StringLogicalType{},
+			parquet.Types.ByteArray,
+			-1,
+			-1,
+		)),
+		schema.MustPrimitive(schema.NewPrimitiveNodeLogical("value",
+			parquet.Repetitions.Required,
+			schema.StringLogicalType{},
+			parquet.Types.ByteArray,
+			-1,
+			-1,
+		)),
+		parquet.Repetitions.Required,
+		-1,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("making parquet map column schema: %w", err)
+	}
+
+	fields := schema.FieldList{
+		schema.Must(schema.NewPrimitiveNodeLogical(
+			"timestamp",
+			parquet.Repetitions.Required,
+			schema.NewTimestampLogicalType(true, schema.TimeUnitMillis),
+			parquet.Types.Int64,
+			-1,
+			-1,
+		)),
+		mapDef,
+		schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+	}
+
+	schemaDef, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
+	if err != nil {
+		return nil, fmt.Errorf("making parquet schema: %w", err)
+	}
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// f will be automatically closed when closing the parquet writer.
+
+	pw = file.NewParquetWriter(f, schemaDef, file.WithWriterProps(
+		parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd), parquet.WithCompressionLevel(int(compressionLevel)),
+		),
+	))
+
+	return pw, nil
 }
 
 // fetchSeries retrieves the metric series matching the given options within the given time range from a SquirrelDB.
@@ -429,6 +520,261 @@ func writeTimeSeries(
 	timings.write += time.Since(tWrite)
 
 	return len(tss), pointsCount, nil
+}
+
+func writeTimeSeriesFixedSchema( //nolint:maintidx
+	opts options,
+	rgw file.SerialRowGroupWriter,
+	series []*prompb.TimeSeries,
+	timings *batchTimings,
+) (rowsCount, pointsCount, totalSeries int, err error) {
+	series = preProcessNaN(opts, series)
+
+	// Writing the timestamps
+	timestampWriter, err := rgw.NextColumn()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("getting timestamps column writer: %w", err)
+	}
+
+	for _, s := range series {
+		tss := make([]int64, len(s.Samples))
+
+		for i, sample := range s.Samples {
+			tss[i] = sample.Timestamp
+		}
+
+		if len(tss) == 0 {
+			continue
+		}
+
+		tWrite := time.Now()
+
+		int64Writer, ok := timestampWriter.(*file.Int64ColumnChunkWriter)
+		if !ok {
+			return 0, 0, 0, fmt.Errorf("%w: want *file.Int64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+		}
+
+		_, err = int64Writer.WriteBatch(tss, nil, nil)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("writing timestamp: %w", err)
+		}
+
+		timings.write += time.Since(tWrite)
+	}
+
+	err = timestampWriter.Close()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("closing timestamp writer: %w", err)
+	}
+
+	// Schema is
+	// required group field_id=-1 schema {
+	//   required int64 field_id=-1 timestamp (Timestamp(...);
+	//   required group field_id=-1 labels (Map) {
+	//     repeated group field_id=-1 key_value (Map) {
+	//       required byte_array field_id=-1 key (String);
+	//       required byte_array field_id=-1 value (String);
+	//     }
+	//   }
+	//   required double field_id=-1 value;
+	// }
+	//
+	// So the 2nd columns is labels.key. For this columns:
+	// * definition_level == 1 means that repeated is defined (a.k.a. their is key)
+	// * definition_level == 0 means that repeated is not defined (a.k.a. their is no key... which could
+	//   only means the Map is empty
+	// Still for this column:
+	// * repetition_level = 0 means the repeated isn't activated, i.e. is a new Map
+	// * repetition_level = 1 means the repeated is activated, i.e. it's an entry of the same Map
+	//
+	// Based on this understanding, repetition_level == 1 and definition_level == 0 should make no sense.
+	labelsKeyWriter, err := rgw.NextColumn()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("getting labelsKey column writer: %w", err)
+	}
+
+	for _, s := range series {
+		values := make([]parquet.ByteArray, len(s.Labels))
+		defLevels := make([]int16, len(s.Labels))
+		repLevels := make([]int16, len(s.Labels))
+
+		for i, lbls := range s.Labels {
+			values[i] = parquet.ByteArray(lbls.Name)
+			defLevels[i] = 1
+
+			if i == 0 {
+				// Start of a new Map
+				repLevels[i] = 0
+			} else {
+				// Continuation of the previous Map
+				repLevels[i] = 1
+			}
+		}
+
+		if len(s.Labels) == 0 {
+			// This might be done by just having repLevel = [0] and defLevel = [0], but it need testing
+			// ... and I believe this case can never occur
+			return 0, 0, 0, fmt.Errorf("%w: can't write empty labels list", errUnimplemented)
+		}
+
+		tWrite := time.Now()
+
+		// Could we optimize this ? Like say it's repeted ?
+		// At the ends we want a row:
+		//     timestamp=XXX, labels=<the map, which is `values`>, floatValue=YYY
+		// So we have to write `values` as many time as there is couple timestamp/floatValue
+		for range s.Samples {
+			byteArrayWriter, ok := labelsKeyWriter.(*file.ByteArrayColumnChunkWriter)
+			if !ok {
+				return 0,
+					0,
+					0,
+					fmt.Errorf("%w: want *file.ByteArrayColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+			}
+
+			_, err = byteArrayWriter.WriteBatch(values, defLevels, repLevels)
+			if err != nil {
+				return 0, 0, 0, fmt.Errorf("writing labelsValue: %w", err)
+			}
+		}
+
+		timings.write += time.Since(tWrite)
+	}
+
+	err = labelsKeyWriter.Close()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("closing labelsKey writer: %w", err)
+	}
+
+	labelsValueWriter, err := rgw.NextColumn()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("getting labelsValue column writer: %w", err)
+	}
+
+	for _, s := range series {
+		values := make([]parquet.ByteArray, len(s.Labels))
+		defLevels := make([]int16, len(s.Labels))
+		repLevels := make([]int16, len(s.Labels))
+
+		for i, lbls := range s.Labels {
+			values[i] = parquet.ByteArray(lbls.Value)
+			defLevels[i] = 1
+
+			if i == 0 {
+				// Start of a new Map
+				repLevels[i] = 0
+			} else {
+				// Continuation of the previous Map
+				repLevels[i] = 1
+			}
+		}
+
+		tWrite := time.Now()
+
+		// Could we optimize this ? Like say it's repeted ?
+		// At the ends we want a row:
+		//     timestamp=XXX, labels=<the map, which is `values`>, floatValue=YYY
+		// So we have to write `values` as many time as there is couple timestamp/floatValue
+		for range s.Samples {
+			byteArrayWriter, ok := labelsValueWriter.(*file.ByteArrayColumnChunkWriter)
+			if !ok {
+				return 0,
+					0,
+					0,
+					fmt.Errorf("%w: want *file.ByteArrayColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+			}
+
+			_, err = byteArrayWriter.WriteBatch(values, defLevels, repLevels)
+			if err != nil {
+				return 0, 0, 0, fmt.Errorf("writing labelsValue: %w", err)
+			}
+		}
+
+		timings.write += time.Since(tWrite)
+	}
+
+	err = labelsValueWriter.Close()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("closing labelsValue writer: %w", err)
+	}
+
+	floatValueWriter, err := rgw.NextColumn()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("getting floatValue column writer: %w", err)
+	}
+
+	for _, s := range series {
+		values := make([]float64, len(s.Samples))
+
+		for i, sample := range s.Samples {
+			values[i] = sample.Value
+		}
+
+		if len(values) == 0 {
+			continue
+		}
+
+		tWrite := time.Now()
+
+		float64Writer, ok := floatValueWriter.(*file.Float64ColumnChunkWriter)
+		if !ok {
+			return 0,
+				0,
+				0,
+				fmt.Errorf("%w: want *file.Float64ColumnChunkWriter, got %T", errUnexpectedWriterType, timestampWriter)
+		}
+
+		_, err = float64Writer.WriteBatch(values, nil, nil)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("writing timestamp: %w", err)
+		}
+
+		timings.write += time.Since(tWrite)
+
+		rowsCount += len(values)
+		pointsCount += len(values)
+		totalSeries++
+	}
+
+	err = floatValueWriter.Close()
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("closing labelsValue writer: %w", err)
+	}
+
+	return rowsCount, pointsCount, totalSeries, nil
+}
+
+// preProcessNaN do NaN pre-processing on sample, required for writeTimeSeriesFixedSchema
+// * If exportDropStaleNaNs is set, drop Sample whose value is a Stale NaN
+// * If exportDropNormalNaNs is set, drop Sample whose value NaN (but not a Stale NaN, i.e. any other NaN)
+//
+// series is mutated in-place.
+func preProcessNaN(opts options, series []*prompb.TimeSeries) []*prompb.TimeSeries {
+	if !opts.exportDropStaleNaNs && !opts.exportDropNormalNaNs {
+		// fast-path
+		return series
+	}
+
+	for _, serie := range series {
+		sampleIdx := 0
+
+		for _, sample := range serie.Samples {
+			if value.IsStaleNaN(sample.Value) {
+				if opts.exportDropStaleNaNs {
+					continue
+				}
+			} else if opts.exportDropNormalNaNs && math.IsNaN(sample.Value) {
+				continue
+			}
+
+			serie.Samples[sampleIdx] = sample
+			sampleIdx++
+		}
+
+		serie.Samples = serie.Samples[:sampleIdx]
+	}
+
+	return series
 }
 
 func labelsTextFromSlice(labels []prompb.Label) string {
