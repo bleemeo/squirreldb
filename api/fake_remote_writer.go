@@ -236,7 +236,7 @@ func backdateSeries[TimeSeries prompb.TimeSeries | writev2.TimeSeries](
 ) context.Context {
 	backdated := false
 
-	for t, s := range series {
+	for _, s := range series {
 		refSamples := reflect.ValueOf(s).FieldByName("Samples")
 		if refSamples.Len() == 0 {
 			continue
@@ -249,19 +249,31 @@ func backdateSeries[TimeSeries prompb.TimeSeries | writev2.TimeSeries](
 			continue // no need to backdate this series
 		}
 
+		backdated = true
+
+		break
+	}
+
+	if !backdated {
+		return ctx
+	}
+
+	// Apply backdating to all series, because all series will be reversed in remotestorage.writeMetrics
+	for t, s := range series {
+		refSamples := reflect.ValueOf(s).FieldByName("Samples")
+		if refSamples.Len() == 0 {
+			continue
+		}
+
 		refSeries := reflect.ValueOf(series).Index(t)
 
 		for i := range refSamples.Len() {
 			newTS := refSamples.Index(i).FieldByName("Timestamp").Int() - offsetMs
 			refSeries.FieldByName("Samples").Index(i).FieldByName("Timestamp").Set(reflect.ValueOf(newTS))
 		}
-
-		backdated = true
 	}
 
-	if backdated {
-		ctx = context.WithValue(ctx, types.BackdateContextKey{}, offsetMs)
-	}
+	ctx = context.WithValue(ctx, types.BackdateContextKey{}, offsetMs)
 
 	return ctx
 }
