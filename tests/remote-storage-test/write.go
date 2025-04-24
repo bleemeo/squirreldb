@@ -26,7 +26,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			err := writeWorker(ctx, workChannel, writeURL, tenant)
 
 			// make sure workChannel is drained
-			for range workChannel { //nolint:revive
+			for range workChannel {
 			}
 
 			return err
@@ -205,7 +205,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 			return err
 		}
 
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 
 	return ctx.Err()

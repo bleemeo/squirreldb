@@ -166,7 +166,7 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 	// Ensure we read the whole response to avoid "Connection reset by peer" on server
 	// and ensure the HTTP connection can be reused
 	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // The telemetry ID is stored both as a lock and in the state.

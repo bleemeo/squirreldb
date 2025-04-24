@@ -436,7 +436,7 @@ func (c *CassandraIndex) shardPrecreate(ctx context.Context, now time.Time) {
 		defer c.lookupIDMutex.Unlock()
 
 		for _, update := range updates {
-			entry, ok := c.labelsToID[update.idData.unsortedLabels.Hash()]
+			entry, ok := c.labelsToID[update.unsortedLabels.Hash()]
 			if !ok {
 				continue
 			}
@@ -1491,7 +1491,7 @@ func (c *CassandraIndex) lookupIDs(
 			return nil, nil, errors.New("unexpected error in lookup ID: metric with ID = 0 was assigned")
 		}
 
-		if entry.idData.cassandraEntryExpiration.IsZero() {
+		if entry.cassandraEntryExpiration.IsZero() {
 			return nil, nil, errors.New("unexpected error in lookup ID: metric with expiration = 0")
 		}
 
@@ -1504,8 +1504,8 @@ func (c *CassandraIndex) lookupIDs(
 		cassandraExpiration = cassandraExpiration.Add(jitterDur)
 		// The 3*backgroundCheckInterval is to be slightly larger than 2*backgroundCheckInterval used in lookupIDsFromCache.
 		// It ensure that live metrics stay in cache.
-		needTTLUpdate := entry.idData.cassandraEntryExpiration.Before(wantedEntryExpiration) ||
-			entry.idData.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
+		needTTLUpdate := entry.cassandraEntryExpiration.Before(wantedEntryExpiration) ||
+			entry.cassandraEntryExpiration.Before(now.Add(3*backgroundCheckInterval))
 
 		if needTTLUpdate {
 			if err := c.refreshExpiration(ctx, entry.id, entry.cassandraEntryExpiration, cassandraExpiration); err != nil {

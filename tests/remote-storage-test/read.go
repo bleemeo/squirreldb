@@ -51,7 +51,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 			mutex.Unlock()
 
 			// make sure workChannel is drained
-			for range workChannel { //nolint:revive
+			for range workChannel {
 			}
 
 			return err
@@ -395,7 +395,7 @@ func readWorker(
 			return count, newErr
 		}
 
-		response.Body.Close()
+		_ = response.Body.Close()
 
 		uncompressed, newErr := snappy.Decode(nil, content)
 		if newErr != nil {

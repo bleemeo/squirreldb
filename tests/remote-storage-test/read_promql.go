@@ -50,7 +50,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			mutex.Unlock()
 
 			// make sure workChannel is drained
-			for range workChannel { //nolint:revive
+			for range workChannel {
 			}
 
 			return err

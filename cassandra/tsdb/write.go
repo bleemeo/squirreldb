@@ -91,8 +91,8 @@ func (c *CassandraTSDB) InternalWrite(ctx context.Context, metrics []types.Metri
 // The metric points must be sorted in ascending order.
 func (c *CassandraTSDB) writeMetrics(ctx context.Context, metrics []types.MetricData, writingTimestamp int64) {
 	for _, data := range metrics {
-		retry.Print(func() error {
-			return c.writeRawData(ctx, data, writingTimestamp) //nolint:scopelint
+		_ = retry.Print(func() error {
+			return c.writeRawData(ctx, data, writingTimestamp)
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			c.logger,
 			"write points to Cassandra",

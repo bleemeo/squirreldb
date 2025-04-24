@@ -514,13 +514,13 @@ func Test_EncodeAggregate(t *testing.T) {
 					want[i].Timestamp = p.Timestamp
 
 					switch function {
-					case "min", "min_over_time":
+					case "min", "min_over_time": //nolint: goconst
 						want[i].Value = p.Min
-					case "max", "max_over_time":
+					case "max", "max_over_time": //nolint: goconst
 						want[i].Value = p.Max
-					case "avg", "avg_over_time":
+					case "avg", "avg_over_time": //nolint: goconst
 						want[i].Value = p.Average
-					case "count", "count_over_time":
+					case "count", "count_over_time": //nolint: goconst
 						want[i].Value = p.Count
 					}
 				}

@@ -407,23 +407,23 @@ func SetTestEnvironment() {
 	if _, ok := os.LookupEnv("SQUIRRELDB_CASSANDRA_KEYSPACE"); !ok {
 		// If not explicitly changed, use squirreldb_test as keyspace. We do
 		// not want to touch real data
-		os.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb_test")
+		_ = os.Setenv("SQUIRRELDB_CASSANDRA_KEYSPACE", "squirreldb_test")
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_REDIS_KEYSPACE"); !ok {
 		// If not explicitly changed, use test: as namespace. We do
 		// not want to touch real data
-		os.Setenv("SQUIRRELDB_REDIS_KEYSPACE", "test:")
+		_ = os.Setenv("SQUIRRELDB_REDIS_KEYSPACE", "test:")
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
 		// If not explicitly set, use a dynamic port.
-		os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
+		_ = os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_TELEMETRY_ENABLED"); !ok {
 		// If not explicitly set, disable telemetry.
-		os.Setenv("SQUIRRELDB_TELEMETRY_ENABLED", "false")
+		_ = os.Setenv("SQUIRRELDB_TELEMETRY_ENABLED", "false")
 	}
 
 	// Initialize the logger temporarily before loading the config.

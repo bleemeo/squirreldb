@@ -115,7 +115,7 @@ func run(ctx context.Context) error {
 		}
 
 		cluster, err := squirreldb.Cluster(ctx)
-		cluster.Close()
+		_ = cluster.Close()
 
 		if err != nil {
 			log.Printf("connection to Redis failed: %s", err)

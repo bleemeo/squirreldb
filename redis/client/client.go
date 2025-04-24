@@ -60,11 +60,11 @@ func (c *Client) Close() {
 	defer c.l.Unlock()
 
 	if c.clusterClient != nil {
-		c.clusterClient.Close()
+		_ = c.clusterClient.Close()
 	}
 
 	if c.singleClient != nil {
-		c.singleClient.Close()
+		_ = c.singleClient.Close()
 	}
 
 	c.clusterClient = nil
