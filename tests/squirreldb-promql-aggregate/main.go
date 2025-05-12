@@ -295,7 +295,7 @@ func writeSeries(ctx context.Context, req prompb.WriteRequest, squirrelDBURL str
 		return err
 	}
 
-	response.Body.Close()
+	_ = response.Body.Close()
 
 	return nil
 }

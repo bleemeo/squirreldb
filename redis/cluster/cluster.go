@@ -243,7 +243,7 @@ func (c *Cluster) run(ctx context.Context, pubsub *goredis.PubSub) {
 		}
 	}
 
-	pubsub.Close()
+	_ = pubsub.Close()
 }
 
 func (c *Cluster) Size() int {
@@ -372,8 +372,8 @@ func encode(topic string, message []byte) (string, error) {
 		return "", err
 	}
 
-	snapWriter.Close()
-	b64w.Close()
+	_ = snapWriter.Close()
+	_ = b64w.Close()
 
 	return result.String(), nil
 }

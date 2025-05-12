@@ -381,7 +381,7 @@ func (l *Lock) Unlock() {
 
 	start := time.Now()
 
-	retry.Print(func() error {
+	_ = retry.Print(func() error {
 		cassStart := time.Now()
 
 		ctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
@@ -420,7 +420,7 @@ func (l *Lock) updateLock(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			retry.Print(func() error {
+			_ = retry.Print(func() error {
 				start := time.Now()
 
 				err := l.locksTableUpdateLock(ctx)

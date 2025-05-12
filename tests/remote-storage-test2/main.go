@@ -483,7 +483,7 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 			return err
 		}
 
-		response.Body.Close()
+		_ = response.Body.Close()
 
 		s.l.Lock()
 
@@ -547,7 +547,7 @@ func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.Read
 			return err
 		}
 
-		response.Body.Close()
+		_ = response.Body.Close()
 
 		uncompressed, err := snappy.Decode(nil, content)
 		if err != nil {

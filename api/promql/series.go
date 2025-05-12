@@ -127,7 +127,7 @@ func (s *seriesSample) Next() chunkenc.ValueType {
 // has no effect. If a sample has been found, Seek returns the type of
 // its value. Otherwise, it returns ValNone, after with the iterator is
 // exhausted.
-func (s *seriesSample) Seek(t int64) chunkenc.ValueType {
+func (s *seriesSample) Seek(t int64) chunkenc.ValueType { //nolint: govet
 	for ; s.offset < len(s.data.Points); s.offset++ {
 		if s.data.Points[s.offset].Timestamp >= t {
 			return chunkenc.ValFloat

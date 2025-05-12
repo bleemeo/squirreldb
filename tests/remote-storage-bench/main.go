@@ -186,7 +186,7 @@ func (w *Writer) Run(ctx context.Context, workChannel chan prompb.WriteRequest) 
 			return err
 		}
 
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 
 	return nil

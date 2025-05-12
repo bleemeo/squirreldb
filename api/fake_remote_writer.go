@@ -78,10 +78,10 @@ type writeHandler struct {
 func parseProtoMsg(h *writeHandler, contentType string) (config.RemoteWriteProtoMsg, error)
 
 //go:linkname write github.com/prometheus/prometheus/storage/remote.(*writeHandler).write
-func write(h *writeHandler, ctx context.Context, req *prompb.WriteRequest) error //nolint: revive
+func write(h *writeHandler, ctx context.Context, req *prompb.WriteRequest) error
 
 //go:linkname writeV2 github.com/prometheus/prometheus/storage/remote.(*writeHandler).writeV2
-func writeV2(h *writeHandler, ctx context.Context, req *writev2.Request) (remote.WriteResponseStats, int, error) //nolint: revive,lll
+func writeV2(h *writeHandler, ctx context.Context, req *writev2.Request) (remote.WriteResponseStats, int, error) //nolint: lll
 
 type fakeWriteHandler struct {
 	futurePointsBackdateOffset time.Duration
@@ -121,7 +121,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enc := r.Header.Get("Content-Encoding")
-	if enc == "" { //nolint: revive
+	if enc == "" {
 		// Don't break yolo 1.0 clients if not needed. This is similar to what we did before 2.0.
 		// We could give http.StatusUnsupportedMediaType, but let's assume snappy by default.
 	} else if enc != string(remote.SnappyBlockCompression) {

@@ -73,7 +73,7 @@ func TestSlog2Zerolog(t *testing.T) {
 		},
 	}
 
-	now := time.Date(2024, 12, 31, 17, 57, 37, 0, time.Local)
+	now := time.Date(2024, 12, 31, 17, 57, 37, 0, time.Local) //nolint: gosmopolitan
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

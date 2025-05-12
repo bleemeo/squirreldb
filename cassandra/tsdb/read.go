@@ -591,7 +591,6 @@ func demuxAggregate(values []byte, function string) ([]byte, error) {
 
 // Return the function type for a PromQL function.
 func promqlFunctionToType(function string) promqlFunctionType {
-	//nolint:goconst
 	switch function {
 	case "min", "min_over_time":
 		return promqlFunctionMin

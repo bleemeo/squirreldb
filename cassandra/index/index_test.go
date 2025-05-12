@@ -9159,16 +9159,16 @@ func TestStableLabelsToText(t *testing.T) {
 		{
 			lbls: labels.FromMap(map[string]string{
 				"__name__": "utf8_values",
-				"key":      "value with unicode ☃︎ éß是 and quote \"'`",
+				"key":      "value with unicode ☃︎ éß是 and quote \"'`", //nolint: gosmopolitan
 			}),
-			want: "{__name__=\"utf8_values\", key=\"value with unicode ☃︎ éß是 and quote \\\"'`\"}",
+			want: "{__name__=\"utf8_values\", key=\"value with unicode ☃︎ éß是 and quote \\\"'`\"}", //nolint: gosmopolitan
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
 				"__name__": "utf8_key",
-				"key with unicode ☃︎ éß是 and quote \"'`": "value",
+				"key with unicode ☃︎ éß是 and quote \"'`": "value", //nolint: gosmopolitan
 			}),
-			want: "{__name__=\"utf8_key\", \"key with unicode ☃︎ éß是 and quote \\\"'`\"=\"value\"}",
+			want: "{__name__=\"utf8_key\", \"key with unicode ☃︎ éß是 and quote \\\"'`\"=\"value\"}", //nolint: gosmopolitan
 		},
 		{
 			lbls: labels.FromMap(map[string]string{

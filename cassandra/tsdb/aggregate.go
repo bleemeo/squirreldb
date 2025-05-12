@@ -151,8 +151,8 @@ func (c *CassandraTSDB) InternalWriteAggregated(
 			defer wg.Done()
 
 			for _, data := range metrics[startIndex:endIndex] {
-				retry.Print(func() error {
-					return c.writeAggregateData(ctx, data, writingTimestamp) //nolint:scopelint
+				_ = retry.Print(func() error {
+					return c.writeAggregateData(ctx, data, writingTimestamp)
 				}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 					c.logger,
 					"write aggregated points to Cassandra",
@@ -217,7 +217,7 @@ func (c *CassandraTSDB) ForcePreAggregation(
 				rangeStart := time.Now()
 				currentTo := currentFrom.Add(aggregateSize)
 
-				retry.Print(func() error {
+				_ = retry.Print(func() error {
 					var err error
 
 					if matchers != nil {
@@ -236,7 +236,7 @@ func (c *CassandraTSDB) ForcePreAggregation(
 					break
 				}
 
-				retry.Print(func() error {
+				_ = retry.Print(func() error {
 					var err error
 
 					rangePointsCount, err = c.doAggregation(
@@ -344,7 +344,7 @@ func (c *CassandraTSDB) aggregateShard(
 	{
 		var fromTimeStr string
 
-		retry.Print(func() error {
+		_ = retry.Print(func() error {
 			_, err := c.state.Read(ctx, name, &fromTimeStr)
 
 			return err //nolint:wrapcheck
@@ -365,7 +365,7 @@ func (c *CassandraTSDB) aggregateShard(
 	if fromTime.IsZero() {
 		fromTime = maxTime
 
-		retry.Print(func() error {
+		_ = retry.Print(func() error {
 			return c.state.Write(ctx, name, fromTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			c.logger,
@@ -391,7 +391,7 @@ func (c *CassandraTSDB) aggregateShard(
 
 	var ids []types.MetricID
 
-	retry.Print(func() error {
+	_ = retry.Print(func() error {
 		var err error
 		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
@@ -423,7 +423,7 @@ func (c *CassandraTSDB) aggregateShard(
 		c.logger.Debug().Msgf("Aggregated shard %d from [%v] to [%v] and read %d points in %v",
 			shard, fromTime, toTime, count, time.Since(start))
 
-		retry.Print(func() error {
+		_ = retry.Print(func() error {
 			return c.state.Write(ctx, name, toTime.Format(time.RFC3339))
 		}, retry.NewExponentialBackOff(ctx, retryMaxDelay),
 			c.logger,

@@ -1,76 +1,81 @@
+version: "2"
+
 run:
   go: "1.24"
   timeout: 5m
 
 linters:
-  enable-all: true
+  default: all
   disable:
-    # Base linters disabled for all projects.
+    - cyclop # We use maintidx to lint function complexity.
+    - err113
+    - exhaustruct
+    - funcorder # Would force us to reorganize hundreds of functions.
     - funlen
-    - mnd  # Too picky. For example it says that 1000 (used in number of ms in one second) is a magic number.
-    - exhaustruct # Same as above.
-    - gci # Conflicts with gofumpt.
-    - varnamelen # I think there is too many false-positive.
-    - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
-    - nonamedreturns # Warn for every named return, not useful.
+    - gocognit # We use maintidx to lint function complexity.
+    - gocyclo # We use maintidx to lint function complexity.
     - interfacebloat # Warn when an interface has too many methods, not useful.
-    # Disable deprecated and replaced linter.
-    - tenv
-    # We use maintidx to lint function complexity.
-    - gocyclo
-    - cyclop
-    - gocognit
-
-    # Project specific disable.
-    - wrapcheck # too many errors. Partially done and should be completed
-    - err113 # Requires to refactor how we return error. But would be useful
-    # Requires to review all our tests. Should be done
+    - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
+    - mnd # Too picky. For example it says that 1000 (used in number of ms in one second) is a magic number.
+    - nonamedreturns # Warn for every named return, not useful.
     - paralleltest
-    - tparallel
     - testpackage
+    - tparallel
+    - varnamelen
+    - wrapcheck
 
-linters-settings:
-  nolintlint:
-    # Ensure that nolint directives don't have a leading space.
-    allow-leading-space: false
-    # Require nolint directives to mention the specific linter being suppressed.
-    require-specific: true
-
-  tagliatelle:
-    # Check struct tag name case.
-    case:
-      # Use the struct field name to check the name of the struct tag.
+  settings:
+    depguard:
       rules:
-        json: snake
-        yaml: snake
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: ioutil is deprecated starting with Go 1.16
+    gomoddirectives:
+      # List of allowed `replace` directives. Needed because go.mod doesn't support nolint comments.
+      replace-allow-list:
+        - cloud.google.com/go
+    nolintlint:
+      # Require nolint directives to mention the specific linter being suppressed.
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    tagliatelle:
+      case:
+        # Use the struct field name to check the name of the struct tag.
+        rules:
+          json: snake
+          yaml: snake
 
-  depguard:
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - std-error-handling
     rules:
-      main:
-        deny:
-          - pkg: "io/ioutil"
-            desc: "ioutil is deprecated starting with Go 1.16"
-
-  # Project specific settings.
-  gomoddirectives:
-    # List of allowed `replace` directives. Needed because go.mod doesn't support nolint comments.
-    replace-allow-list:
-      - cloud.google.com/go
+      - linters:
+          - dupl
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
-
-  include: # the list of ids of default excludes to include
-    - EXC0005 # ineffective break statement
-    - EXC0009 # create files/directories with minimum permissions
-    # - EXC0011 # TODO: should have a package comment|comment should be of the form
-    # - EXC0012 # TODO: exported var/functions should have a comment
-    - EXC0013 # package comment should be of the form
-    - EXC0014 # comment on exported var should be of the form
-
   max-issues-per-linter: 0
   max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

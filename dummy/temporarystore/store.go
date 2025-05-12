@@ -124,7 +124,7 @@ func (s *Store) getSetPointsAndOffset(
 
 		oldData[i] = storeData.MetricData
 
-		s.metrics.PointsTotal.Add(float64(len(data.Points) - len(storeData.MetricData.Points)))
+		s.metrics.PointsTotal.Add(float64(len(data.Points) - len(storeData.Points)))
 
 		storeData.MetricData = data
 		storeData.expirationTime = expirationTime
