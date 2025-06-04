@@ -72,6 +72,8 @@ type writeHandler struct {
 	samplesAppendedWithoutMetadata prometheus.Counter
 
 	acceptedProtoMsgs map[config.RemoteWriteProtoMsg]struct{}
+
+	ingestCTZeroSample bool
 }
 
 //go:linkname parseProtoMsg github.com/prometheus/prometheus/storage/remote.(*writeHandler).parseProtoMsg
