@@ -260,8 +260,8 @@ func (c *CassandraTSDB) ForcePreAggregation(
 				rangeCount++
 
 				l.Lock()
-				pointsCount += rangePointsCount
-				l.Unlock()
+				pointsCount += rangePointsCount //nolint: wsl_v5
+				l.Unlock()                      //nolint: wsl_v5
 
 				delta := time.Since(rangeStart)
 
@@ -393,6 +393,7 @@ func (c *CassandraTSDB) aggregateShard(
 
 	_ = retry.Print(func() error {
 		var err error
+
 		ids, err = c.index.AllIDs(ctx, fromTime, toTime)
 
 		return err //nolint:wrapcheck

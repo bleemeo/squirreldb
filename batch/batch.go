@@ -234,11 +234,13 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		}
 
 		b.mutex.Lock()
+
 		for id, deadline := range metrics {
 			b.states[id] = stateData{
 				flushDeadline: deadline,
 			}
 		}
+
 		b.mutex.Unlock()
 
 		b.metrics.TransferOwner.Add(float64(len(metrics)))
@@ -246,6 +248,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 		if len(metrics) < transferredOwnershipLimit {
 			break
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -256,11 +259,13 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 	ids := make([]types.MetricID, 0)
 
 	b.mutex.Lock()
+
 	for id, data := range b.states {
 		if now.After(data.flushDeadline) || force || shutdown {
 			ids = append(ids, id)
 		}
 	}
+
 	b.mutex.Unlock()
 
 	for startIndex := 0; startIndex < len(ids); startIndex += flushMetricLimit {
@@ -345,6 +350,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 		ids[i] = id
 		i++
 	}
+
 	b.mutex.Unlock()
 
 	err := b.flush(ctx, ids, now, false)
@@ -531,6 +537,7 @@ func (b *Batch) flush(
 
 	err := retry.Print(func() error {
 		var err error
+
 		metrics, offsets, err = b.memoryStore.ReadPointsAndOffset(ctx, ids)
 
 		return err //nolint:wrapcheck
@@ -612,6 +619,7 @@ func (b *Batch) flush(
 	newDeadlines := make(map[types.MetricID]time.Time)
 
 	b.mutex.Lock()
+
 	for i, hasPoint := range results {
 		id := ids[i]
 
@@ -626,6 +634,7 @@ func (b *Batch) flush(
 			}
 		}
 	}
+
 	b.mutex.Unlock()
 
 	err = retry.Print(func() error {
@@ -686,6 +695,7 @@ func (b *Batch) flush(
 			delete(b.states, id)
 		}
 	}
+
 	b.mutex.Unlock()
 
 	return nil

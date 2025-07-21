@@ -46,8 +46,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			count, err := readPromQLWorker(ctx, workChannel, promQLURL, tenant)
 
 			mutex.Lock()
-			reqCount += count
-			mutex.Unlock()
+			reqCount += count //nolint: wsl_v5
+			mutex.Unlock()    //nolint: wsl_v5
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -356,6 +356,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 
 type headerClient struct {
 	api.Client
+
 	SquirrelDBTenantHeader string
 }
 

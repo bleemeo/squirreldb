@@ -147,14 +147,14 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 		"version":             t.opts.Version,
 	})
 
-	req, _ := http.NewRequest(http.MethodPost, t.opts.URL, bytes.NewBuffer(body))
-
-	req.Header.Set("Content-Type", "application/json")
-
 	ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := http.DefaultClient.Do(req.WithContext(ctx2))
+	req, _ := http.NewRequestWithContext(ctx2, http.MethodPost, t.opts.URL, bytes.NewBuffer(body))
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.opts.Logger.Err(err).Msg("Failed to post telemetry")
 

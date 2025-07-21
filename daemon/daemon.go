@@ -945,6 +945,7 @@ func (s *SquirrelDB) temporaryStoreTask(ctx context.Context, readiness chan erro
 		} else {
 			mem := temporarystore.New(s.MetricRegistry, s.Logger.With().Str("component", "temporary_store").Logger())
 			s.temporaryStore = mem
+
 			readiness <- nil
 
 			mem.Run(ctx)
@@ -974,6 +975,7 @@ func (s *SquirrelDB) batchStoreTask(ctx context.Context, readiness chan error) {
 		err := <-subReady
 		if err != nil {
 			cancel()
+
 			readiness <- err
 
 			wg.Wait()

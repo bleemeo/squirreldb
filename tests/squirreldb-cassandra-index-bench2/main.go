@@ -349,9 +349,11 @@ func sentInsertRequest(
 
 		// wait for exec of request
 		counter.cond.L.Lock()
+
 		for counter.reqCount < totalRequests && ctx.Err() == nil {
 			counter.cond.Wait()
 		}
+
 		counter.cond.L.Unlock()
 
 		time.Sleep(*sleepDelay)

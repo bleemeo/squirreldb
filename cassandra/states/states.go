@@ -64,7 +64,6 @@ func New(ctx context.Context, options Options) (*CassandraStates, error) {
 // Read reads value of the state from the states table.
 func (c *CassandraStates) Read(ctx context.Context, name string, value any) (found bool, err error) {
 	valueString, err := c.statesTableSelectState(ctx, name)
-
 	if errors.Is(err, gocql.ErrNotFound) {
 		return false, nil
 	}

@@ -175,10 +175,12 @@ func (r *RemoteStorage) metricsFromTimeSeries(
 
 		if tMin < time.Now().Add(-tsdb.MaxPastDelay).Unix()*1000 {
 			r.lastLogPointInPastLock.Lock()
+
 			if time.Since(r.lastLogPointInPastAt) > pointInPastLogPeriod {
 				log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(tMin/1000, 0))
 				r.lastLogPointInPastAt = time.Now()
 			}
+
 			r.lastLogPointInPastLock.Unlock()
 		}
 

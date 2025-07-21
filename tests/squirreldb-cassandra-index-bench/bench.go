@@ -416,6 +416,7 @@ func sentInsertRequest(
 			}
 
 			pendingRequest++
+
 			workChannel <- requests[startIndex:endIndex]
 		}
 
@@ -440,6 +441,7 @@ func loadBalancer(input chan []types.LookupRequest, outputs []chan []types.Looku
 
 		go func(n int, w []types.LookupRequest) {
 			defer wg.Done()
+
 			outputs[n] <- w
 		}(n, w)
 
@@ -471,6 +473,7 @@ func worker(ctx context.Context, localIndex types.Index, workChanel chan []types
 			}
 
 			result <- len(work)
+
 			token <- true
 		}()
 	}

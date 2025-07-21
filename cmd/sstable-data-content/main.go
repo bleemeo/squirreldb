@@ -201,7 +201,6 @@ func run(writeCSV bool, writeHeader bool) error {
 
 	for {
 		err := decoder.Decode(&line)
-
 		if errors.Is(err, io.EOF) {
 			break
 		}

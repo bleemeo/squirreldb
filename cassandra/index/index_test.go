@@ -4140,7 +4140,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 				return
 			}
-			if tt.wantLen == 0 { //nolint: wsl
+
+			if tt.wantLen == 0 {
 				// Avoid requirement to set tt.wantLen on simple test
 				tt.wantLen = len(tt.want)
 			}
@@ -8860,6 +8861,7 @@ func concurrentAccessWriter(
 
 	for {
 		execution.c.L.Lock()
+
 		if execution.stopWorker {
 			execution.c.L.Unlock()
 
@@ -8907,6 +8909,7 @@ func concurrentAccessReader(
 
 	for {
 		execution.c.L.Lock()
+
 		if execution.stopWorker {
 			execution.c.L.Unlock()
 

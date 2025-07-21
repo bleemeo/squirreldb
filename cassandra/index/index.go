@@ -566,6 +566,7 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 			_, _ = bitmap.RemoveN(deleteIDs...)
 			c.idInShard[shard] = bitmap
 		}
+
 		c.lookupIDMutex.Unlock()
 	}
 }
@@ -587,8 +588,8 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 					}
 
 					l.Lock()
-					results[shard] = tmp
-					l.Unlock()
+					results[shard] = tmp //nolint: wsl_v5
+					l.Unlock()           //nolint: wsl_v5
 
 					return nil
 				}
@@ -1151,7 +1152,6 @@ func (c *CassandraIndex) postingsLocked(
 		tmp = roaring.NewBTreeBitmap()
 
 		buffer, err := c.store.SelectPostingByNameValue(ctx, shard, name, value)
-
 		if errors.Is(err, gocql.ErrNotFound) {
 			err = nil
 		} else if err == nil {
@@ -1850,12 +1850,13 @@ func findFreeID(bitmap *roaring.Bitmap) (id uint64) {
 }
 
 type lookupEntry struct {
+	idData
+
 	sortedLabelsString string
 	sortedLabels       labels.Labels
 	wantedShards       []int32
-	idData
-	labelsKey uint64
-	ttl       int64
+	labelsKey          uint64
+	ttl                int64
 }
 
 // createMetrics creates a new metric IDs associated with provided request
@@ -2163,6 +2164,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 			}
 		}
+
 		c.lookupIDMutex.Unlock()
 
 		if len(shardCacheMiss) > 0 {
@@ -2181,6 +2183,7 @@ func (c *CassandraIndex) updatePostingShards(
 	keysToInvalidate := make([]postingsCacheKey, 0)
 
 	c.lookupIDMutex.Lock()
+
 	for _, entry := range pending {
 		for _, shard := range entry.wantedShards {
 			c.idInShardLastAccess[shard] = now
@@ -2251,6 +2254,7 @@ func (c *CassandraIndex) updatePostingShards(
 			precense[shard] = req
 		}
 	}
+
 	c.lookupIDMutex.Unlock()
 
 	c.invalidatePostings(ctx, keysToInvalidate)
@@ -2380,7 +2384,6 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 			for _, req := range maybePresent {
 				task := func() error {
 					_, err := c.postingUpdate(ctx, req)
-
 					if errors.Is(err, errBitmapEmpty) {
 						err = nil
 					}
@@ -2408,7 +2411,6 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 			for _, req := range updates {
 				task := func() error {
 					_, err := c.postingUpdate(ctx, req)
-
 					if errors.Is(err, errBitmapEmpty) {
 						err = nil
 					}
@@ -4456,6 +4458,7 @@ func (s cassandraStore) SelectExpiration(ctx context.Context, day time.Time) ([]
 	).WithContext(ctx)
 
 	var buffer []byte
+
 	err = query.Scan(&buffer)
 
 	return buffer, err
