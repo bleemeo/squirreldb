@@ -69,6 +69,7 @@ func WrapEngine(engine promql.QueryEngine, logger zerolog.Logger) WrapperEngine 
 
 type WrapperEngine struct {
 	promql.QueryEngine
+
 	logger zerolog.Logger
 }
 
@@ -134,6 +135,7 @@ func (e WrapperEngine) NewRangeQuery(
 
 type wrapperQuery struct {
 	promql.Query
+
 	logMessage string
 	logger     zerolog.Logger
 }

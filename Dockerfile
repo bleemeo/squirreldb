@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM alpine:3.21 AS build
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS build
 
 ARG TARGETARCH
 
@@ -8,7 +8,7 @@ COPY dist/squirreldb_linux_arm_6/squirreldb /squirreldb.arm
 
 RUN cp -p /squirreldb.$TARGETARCH /squirreldb
 
-FROM alpine:3.21
+FROM alpine:3.22
 
 LABEL maintainer="Bleemeo Docker Maintainers <packaging-team@bleemeo.com>"
 

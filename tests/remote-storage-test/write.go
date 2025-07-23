@@ -53,6 +53,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			},
 		},
 	}
+
 	workChannel <- prompb.WriteRequest{
 		Timeseries: []prompb.TimeSeries{
 			{
@@ -71,6 +72,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			},
 		},
 	}
+
 	workChannel <- prompb.WriteRequest{
 		Timeseries: []prompb.TimeSeries{
 			{
@@ -88,6 +90,7 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			},
 		},
 	}
+
 	workChannel <- prompb.WriteRequest{
 		Timeseries: []prompb.TimeSeries{
 			{

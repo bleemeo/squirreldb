@@ -362,7 +362,6 @@ func (r *Redis) ReadPointsAndOffset(
 
 	for i, id := range ids {
 		values, err := metricCommands[i].Bytes()
-
 		if (err != nil) && (!errors.Is(err, goredis.Nil)) {
 			return nil, nil, fmt.Errorf("redis: %w", err)
 		}
@@ -382,7 +381,6 @@ func (r *Redis) ReadPointsAndOffset(
 		}
 
 		writeOffsets[i], err = offsetCommands[i].Int()
-
 		if (err != nil) && (!errors.Is(err, goredis.Nil)) {
 			return nil, nil, fmt.Errorf("update bitmap: %w", err)
 		}

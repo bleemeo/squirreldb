@@ -186,8 +186,8 @@ func TestLoad(t *testing.T) {
 			Files: []string{"testdata/bad_wrong_type.conf"},
 			WantWarnings: []string{
 				"'cassandra.addresses[0]' expected type 'string', got unconvertible " +
-					"type 'map[string]interface {}', value: 'map[a:b]'",
-				`cannot parse 'cassandra.replication_factor' as int: strconv.ParseInt: parsing "bad": invalid syntax`,
+					"type 'map[string]interface {}'",
+				`'cassandra.replication_factor' cannot parse value as 'int': strconv.ParseInt: invalid syntax`,
 			},
 			WantConfig: Config{
 				Cassandra: Cassandra{
@@ -200,7 +200,7 @@ func TestLoad(t *testing.T) {
 			Name:  "invalid yaml",
 			Files: []string{"testdata/bad_yaml.conf"},
 			WantWarnings: []string{
-				"line 1: cannot unmarshal !!str `bad:bad` into map[string]interface {}",
+				"failed to load 'testdata/bad_yaml.conf': yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `bad:bad` into map[string]interface {}", //nolint: lll
 			},
 		},
 		{

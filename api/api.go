@@ -286,6 +286,7 @@ func (a *API) init() {
 			a.l.Unlock()
 
 			t0 := time.Now()
+
 			defer func() {
 				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
 			}()

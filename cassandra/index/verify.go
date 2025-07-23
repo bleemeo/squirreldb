@@ -46,6 +46,7 @@ type verifier struct {
 
 type verifierExecution struct {
 	verifier
+
 	bulkDeleter *deleter
 	// allPosting is the content of the special posting globalAllPostingLabel
 	allPosting *roaring.Bitmap
@@ -1001,7 +1002,6 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				for _, req := range updates {
 					task := func() error {
 						_, err := ve.index.postingUpdate(ctx, req)
-
 						if errors.Is(err, errBitmapEmpty) {
 							err = nil
 						}

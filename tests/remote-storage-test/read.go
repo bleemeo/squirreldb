@@ -47,8 +47,8 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 			count, err := readWorker(ctx, workChannel, readURL, tenant)
 
 			mutex.Lock()
-			reqCount += count
-			mutex.Unlock()
+			reqCount += count //nolint: wsl_v5
+			mutex.Unlock()    //nolint: wsl_v5
 
 			// make sure workChannel is drained
 			for range workChannel {
@@ -157,6 +157,7 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 			},
 		},
 	}
+
 	workChannel <- readRequest{
 		name: "multiple-query",
 		request: prompb.ReadRequest{

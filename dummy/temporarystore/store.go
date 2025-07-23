@@ -34,10 +34,11 @@ const expiratorInterval = 60
 const defaultTTL = 24 * time.Hour
 
 type storeData struct {
+	types.MetricData
+
 	flushDeadline  time.Time
 	expirationTime time.Time
-	types.MetricData
-	WriteOffset int
+	WriteOffset    int
 }
 
 type Store struct {

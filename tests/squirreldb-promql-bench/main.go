@@ -16,6 +16,7 @@ import (
 
 type headerClient struct {
 	api.Client
+
 	SquirrelDBTenantHeader string
 }
 

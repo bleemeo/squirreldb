@@ -45,7 +45,6 @@ func Print(o backoff.Operation, b backoff.BackOff, logger zerolog.Logger, action
 			logger.Info().Msgf("|__ Retry in %v", duration)
 		}
 	})
-
 	if tried && err == nil {
 		logger.Info().Msgf("Resolved %s", action)
 	}

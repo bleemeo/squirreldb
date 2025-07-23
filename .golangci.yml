@@ -17,12 +17,14 @@ linters:
     - interfacebloat # Warn when an interface has too many methods, not useful.
     - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
     - mnd # Too picky. For example it says that 1000 (used in number of ms in one second) is a magic number.
+    - noinlineerr # Why couldn't we inline errors ?
     - nonamedreturns # Warn for every named return, not useful.
     - paralleltest
     - testpackage
     - tparallel
     - varnamelen
     - wrapcheck
+    - wsl # Superseded by wsl_v5
 
   settings:
     depguard:

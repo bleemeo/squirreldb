@@ -219,6 +219,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, id := range d.deleteIDs {
 				id := types.MetricID(id) //nolint:gosec
+
 				task := func() error {
 					err := d.c.store.DeleteID2Labels(ctx, id)
 					if err != nil && !errors.Is(err, gocql.ErrNotFound) {
@@ -291,11 +292,13 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 					}
 
 					d.c.lookupIDMutex.Lock()
+
 					if bitmap == nil || errors.Is(err, errBitmapEmpty) {
 						delete(d.c.idInShard, req.Shard)
 					} else {
 						d.c.idInShard[req.Shard] = bitmap
 					}
+
 					d.c.lookupIDMutex.Unlock()
 
 					return nil
