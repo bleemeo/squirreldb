@@ -351,7 +351,7 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 
 	serverStopped := make(chan error)
 
-	ln, err := net.Listen("tcp", a.ListenAddress)
+	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", a.ListenAddress)
 	if err != nil {
 		readiness <- err
 

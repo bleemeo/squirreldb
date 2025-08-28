@@ -103,7 +103,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	msgType, err := parseProtoMsg(fwh.originalWriteHandler, contentType)
 	if err != nil {
-		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
+		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 
 		return
@@ -118,7 +118,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return ret
 		}())
 
-		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
+		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 	}
 
@@ -132,14 +132,14 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			enc, remote.SnappyBlockCompression,
 		)
 
-		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err)
+		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 	}
 
 	// Read the request body.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		fwh.originalWriteHandler.logger.Error("Error decoding remote write request", "err", err.Error())
+		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -147,7 +147,8 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	decompressed, err := snappy.Decode(nil, body)
 	if err != nil {
-		fwh.originalWriteHandler.logger.Error("Error decompressing remote write request", "err", err.Error())
+		fwh.originalWriteHandler.logger.
+			ErrorContext(r.Context(), "Error decompressing remote write request", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -160,7 +161,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req prompb.WriteRequest
 		if err := proto.Unmarshal(decompressed, &req); err != nil {
 			fwh.originalWriteHandler.logger.
-				Error("Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
+				ErrorContext(r.Context(), "Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -179,7 +180,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			default:
 				fwh.originalWriteHandler.logger.
-					Error("Error while remote writing the v1 request", "err", err.Error())
+					ErrorContext(r.Context(), "Error while remote writing the v1 request", "err", err.Error())
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 
 				return
@@ -195,7 +196,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req writev2.Request
 	if err := proto.Unmarshal(decompressed, &req); err != nil {
 		fwh.originalWriteHandler.logger.
-			Error("Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
+			ErrorContext(r.Context(), "Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -210,7 +211,7 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errHTTPCode/5 == 100 { // 5xx
 			fwh.originalWriteHandler.logger.
-				Error("Error while remote writing the v2 request", "err", err.Error())
+				ErrorContext(r.Context(), "Error while remote writing the v2 request", "err", err.Error())
 		}
 
 		http.Error(w, err.Error(), errHTTPCode)
