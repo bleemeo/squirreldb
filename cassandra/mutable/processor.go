@@ -249,13 +249,13 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 	// Find the tenant.
 	var tenant string
 
-	for _, label := range lbls {
+	lbls.Range(func(label labels.Label) {
 		if label.Name == lp.tenantLabelName {
 			tenant = label.Value
 
-			break
+			return
 		}
-	}
+	})
 
 	// Mutable labels are disabled when no tenant is found.
 	if tenant == "" {
@@ -265,10 +265,13 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 	builder := labels.NewBuilder(lbls)
 
 	// Search for mutable labels associated to these labels.
-	for _, label := range lbls {
+	var rangeErr error
+
+	lbls.Range(func(label labels.Label) {	
 		isMutable, err := lp.IsMutableLabel(ctx, tenant, label.Name)
 		if err != nil {
-			return nil, err
+			rangeErr = err
+			return
 		}
 
 		// Remove mutable labels present in the input.
@@ -280,15 +283,20 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 		newMutableLabels, err := lp.labelProvider.GetMutable(ctx, tenant, label.Name, label.Value)
 		if err != nil {
 			if errors.Is(err, errNoResult) {
-				continue
+				return
 			}
 
-			return nil, err
+			rangeErr = err
+			return
 		}
-
-		for _, label := range newMutableLabels {
+		
+		newMutableLabels.Range(func(label labels.Label) {
 			builder.Set(label.Name, label.Value)
-		}
+		})
+	})
+
+	if rangeErr != nil {
+		return labels.EmptyLabels(), rangeErr
 	}
 
 	return builder.Labels(), nil

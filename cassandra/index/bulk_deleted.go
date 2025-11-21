@@ -50,30 +50,27 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
 	d.deleteIDs = append(d.deleteIDs, uint64(id)) //nolint:gosec
 
-	if sortedLabels != nil && !skipLabels2Id {
+	if sortedLabels != labels.EmptyLabels() && !skipLabels2Id {
 		sortedLabelsString := sortedLabels.String()
 		d.deleteLabels = append(d.deleteLabels, sortedLabelsString)
 	}
 
-	for _, lbl := range sortedLabels {
+	sortedLabels.Range(func(lbl labels.Label) {
 		d.invalidateKey = append(d.invalidateKey, postingsCacheKey{
 			Shard: globalShardNumber,
 			Name:  lbl.Name,
 			Value: lbl.Value,
 		})
-	}
+	})
+	builder := labels.NewBuilder(sortedLabels)
+	
 
-	labelsList := make(labels.Labels, 0, len(sortedLabels)*2)
-	labelsList = append(labelsList, sortedLabels...)
+	sortedLabels.Range(func(label labels.Label) {
+		builder.Set(postinglabelName, label.Name)
+	})
+	labelsList := builder.Labels()
 
-	for _, label := range sortedLabels {
-		labelsList = append(labelsList, labels.Label{
-			Name:  postinglabelName,
-			Value: label.Name,
-		})
-	}
-
-	for _, label := range labelsList {
+	labelsList.Range(func(label labels.Label) {	
 		idx, ok := d.labelToPostingUpdates[label]
 		if !ok {
 			idx = len(d.unshardedPostingUpdates)
@@ -84,7 +81,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 		}
 
 		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id)) //nolint:gosec
-	}
+	})
 }
 
 // Delete perform the deletion and REQUIRE the newMetricGlobalLock.

@@ -946,8 +946,8 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			allPosting.Contains(uint64(id)), //nolint:gosec
 		)
 
-		sortedLabels := sortLabels(lbls)
-		sortedLabelsString := sortedLabels.String()
+		// sortedLabels := sortLabels(lbls)
+		sortedLabelsString := lbls.String()
 
 		resp, err := c.store.SelectLabelsList2ID(ctx, []string{sortedLabelsString})
 		if err != nil {
@@ -1003,15 +1003,22 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		if len(labelsMap) > 0 && (inPosting || inMaybe) {
 			missingPostings := make([]string, 0)
 
-			for _, l := range lbls {
+			var rangeErr error
+
+			lbls.Range(func(l labels.Label) {
 				posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false) //nolint:gosec
 				if err != nil {
-					return err
+					rangeErr = err
+					return
 				}
 
 				if !posting.Contains(uint64(id)) { //nolint:gosec
 					missingPostings = append(missingPostings, fmt.Sprintf("%s=%s", l.Name, l.Value))
 				}
+			})
+
+			if rangeErr != nil {
+				return rangeErr
 			}
 
 			if len(missingPostings) > 0 {
@@ -1184,7 +1191,7 @@ func (c *CassandraIndex) lookupLabels(
 
 	labelList := c.idsToLabels.MGet(now, ids)
 	for i, lbls := range labelList {
-		if lbls == nil {
+		if lbls == labels.EmptyLabels() {
 			idToQuery = append(idToQuery, ids[i])
 			miss[i] = true
 		}
@@ -1367,7 +1374,7 @@ func (c *CassandraIndex) lookupIDs(
 	}()
 
 	for _, req := range requests {
-		if len(req.Labels) == 0 {
+		if req.Labels.Len() == 0 {
 			return nil, nil, errors.New("empty labels set")
 		}
 	}
@@ -1584,10 +1591,10 @@ func (c *CassandraIndex) lookupIDsFromCache(
 		}
 
 		if !found {
-			sortedLabels := sortLabels(req.Labels)
-			sortedLabelsString := sortedLabels.String()
+			// sortedLabels := sortLabels(req.Labels)
+			sortedLabelsString := req.Labels.String()
 
-			entries[i].sortedLabels = sortedLabels
+			entries[i].sortedLabels = req.Labels
 			entries[i].sortedLabelsString = sortedLabelsString
 
 			labelsToIndices[sortedLabelsString] = append(labelsToIndices[sortedLabelsString], i)
@@ -1634,12 +1641,9 @@ func (c *CassandraIndex) updateShardExpiration(
 
 // labelsForShardExpiration returns the labels for the shard expiration metric.
 func labelsForShardExpiration(shard int32) labels.Labels {
-	return labels.Labels{
-		{
-			Name:  expirationShardLabel,
-			Value: strconv.Itoa(int(shard)),
-		},
-	}
+	builder := labels.NewBuilder(labels.EmptyLabels())
+	builder.Set(expirationShardLabel, strconv.Itoa(int(shard)))
+	return builder.Labels()
 }
 
 // getShardExpiration returns the expiration and metric ID for a shard.
@@ -2205,23 +2209,25 @@ func (c *CassandraIndex) updatePostingShards(
 			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
 			maybePresent[shard] = req
 
-			labelsList := make(labels.Labels, 0, len(entry.unsortedLabels)*2)
-			labelsList = append(labelsList, entry.unsortedLabels...)
+			builder := labels.NewBuilder(labels.EmptyLabels())
+			
+			entry.unsortedLabels.Range(func(unsortedLabel labels.Label) {
+				builder.Set(unsortedLabel.Name, unsortedLabel.Value)
+			})
 
-			for _, lbl := range entry.unsortedLabels {
-				labelsList = append(labelsList, labels.Label{
-					Name:  postinglabelName,
-					Value: lbl.Name,
-				})
+			entry.unsortedLabels.Range(func(lbl labels.Label) {
+				builder.Set(postinglabelName, lbl.Name)
 
 				keysToInvalidate = append(keysToInvalidate, postingsCacheKey{
 					Shard: shard,
 					Name:  lbl.Name,
 					Value: lbl.Value,
 				})
-			}
+			})
 
-			for _, lbl := range labelsList {
+			labelsList := builder.Labels()
+
+			labelsList.Range(func(lbl labels.Label) {
 				m, ok := shardToLabelToIndex[shard]
 				if !ok {
 					m = make(map[labels.Label]int)
@@ -2239,7 +2245,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 
 				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id)) //nolint:gosec
-			}
+			})
 
 			req, ok = precense[shard]
 			if !ok {
@@ -2551,7 +2557,7 @@ func (l *metricsLabels) Next() bool {
 	for l.next < len(l.ids) {
 		l.next++
 
-		if l.labelsList[l.next-1] == nil {
+		if l.labelsList[l.next-1] == labels.EmptyLabels() {
 			continue
 		}
 
@@ -3073,7 +3079,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 			// Cleanup this metric from all posting if ever it's present in this list.
 			c.metrics.ExpireGhostMetric.Inc()
 
-			bulkDelete.PrepareDelete(id, nil, false)
+			bulkDelete.PrepareDelete(id, labels.EmptyLabels(), false)
 
 			continue
 		case labelsToID[idToLabels[id].String()] != id:
@@ -3472,7 +3478,7 @@ func (c *CassandraIndex) idsForMatchers(
 		for i, id := range ids {
 			lbls := result.labelsList[i]
 
-			if lbls != nil && matcherMatches(matchers, lbls) {
+			if lbls != labels.EmptyLabels() && matcherMatches(matchers, lbls) {
 				newIDs = append(newIDs, id)
 				newLabels = append(newLabels, lbls)
 			}
@@ -4015,7 +4021,7 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 // sortLabels returns the labels.Label list sorted by name.
 func sortLabels(labelList labels.Labels) labels.Labels {
 	sortedLabels := labelList.Copy()
-	sort.Sort(sortedLabels)
+	// sort.Sort(sortedLabels)
 
 	return sortedLabels
 }

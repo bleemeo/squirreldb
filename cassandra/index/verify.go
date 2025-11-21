@@ -397,7 +397,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			hadIssue = true
 
 			if ve.doFix {
-				ve.bulkDeleter.PrepareDelete(id, nil, false)
+				ve.bulkDeleter.PrepareDelete(id, labels.EmptyLabels(), false)
 			}
 		}
 
@@ -493,7 +493,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			lbls2 := tmp[id2]
 			expiration2, ok := tmp2[id2]
 
-			if !ok && lbls2 != nil {
+			if !ok && lbls2 != labels.EmptyLabels() {
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify",
@@ -507,7 +507,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			}
 
 			switch {
-			case lbls2 == nil:
+			case lbls2 == labels.EmptyLabels():
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
@@ -728,7 +728,9 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 		}
 
 		for id, lbls := range tmp {
-			for _, lbl := range lbls {
+			var rangeErr error
+
+			lbls.Range(func(lbl labels.Label) {
 				labelNames[lbl.Name] = nil
 
 				bitset := wantedPostings[lbl]
@@ -738,7 +740,8 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 
 				_, err = bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
-					return true, fmt.Errorf("update bitmap: %w", err)
+					rangeErr = fmt.Errorf("update bitmap: %w", err)
+					return
 				}
 
 				wantedPostings[lbl] = bitset
@@ -755,10 +758,15 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 
 				_, err = bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
-					return true, fmt.Errorf("update bitmap: %w", err)
+					rangeErr = fmt.Errorf("update bitmap: %w", err)
+					return
 				}
 
 				wantedPostings[lbl2] = bitset
+			})
+
+			if rangeErr != nil {
+				return true, rangeErr
 			}
 		}
 	}

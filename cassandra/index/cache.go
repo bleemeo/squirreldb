@@ -146,13 +146,13 @@ func (c *labelsLookupCache) Drop(ids []uint64) int {
 func (c *labelsLookupCache) get(now time.Time, id types.MetricID) labels.Labels {
 	entry := c.cache[id]
 	if entry.cassandraExpire.IsZero() {
-		return nil
+		return labels.EmptyLabels()
 	}
 
 	if entry.cassandraExpire.Before(now) {
 		delete(c.cache, id)
 
-		return nil
+		return labels.EmptyLabels()
 	}
 
 	return entry.value.Copy()

@@ -347,8 +347,10 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 
 	mutableNames, err := cp.mutableNames(ctx, tenant, name)
 	if err != nil {
-		return nil, err
+		return labels.EmptyLabels(), err
 	}
+
+	builder := labels.NewBuilder(mutableLabels)
 
 	for _, mutableName := range mutableNames {
 		mutableValue, err := cp.getMutableValue(ctx, tenant, mutableName, value)
@@ -357,16 +359,12 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 				continue
 			}
 
-			return nil, err
+			return labels.EmptyLabels(), err
 		}
 
-		mutableLabel := labels.Label{
-			Name:  mutableName,
-			Value: mutableValue,
-		}
-
-		mutableLabels = append(mutableLabels, mutableLabel)
+		builder.Set(mutableName, mutableValue)
 	}
+	mutableLabels = builder.Labels()
 
 	cp.cache.SetMutableLabels(tenant, name, value, mutableLabels)
 

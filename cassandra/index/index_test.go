@@ -1255,47 +1255,27 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	}{
 		{
 			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
 			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
 			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1314,47 +1294,27 @@ func Benchmark_labelsToID(b *testing.B) {
 	}{
 		{
 			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
 			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
 			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1419,66 +1379,30 @@ func Test_sortLabels(t *testing.T) {
 		{
 			name: "sorted",
 			args: args{
-				labels: labels.Labels{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
+				labels: labels.FromStrings("__name__", "up", "monitor", "codelab"),
 			},
-			want: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
+			want: labels.FromStrings("__name__", "up", "monitor", "codelab"),
 		},
 		{
 			name: "no_sorted",
 			args: args{
-				labels: labels.Labels{
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
+				labels: labels.FromStrings("monitor", "codelab", "__name__", "up"),
 			},
-			want: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
+			want: labels.FromStrings("__name__", "up", "monitor", "codelab"),
 		},
 		{
 			name: "labels_empty",
 			args: args{
-				labels: labels.Labels{},
+				labels: labels.EmptyLabels(),
 			},
-			want: labels.Labels{},
+			want: labels.EmptyLabels(),
 		},
 		{
 			name: "labels_nil",
 			args: args{
 				labels: nil,
 			},
-			want: labels.Labels{},
+			want: labels.EmptyLabels(),
 		},
 	}
 
@@ -1497,40 +1421,12 @@ func Test_stringFromLabelsCollision(t *testing.T) {
 		input2 labels.Labels
 	}{
 		{
-			input1: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1",
-				},
-				{
-					Name:  "label2",
-					Value: "value2",
-				},
-			},
-			input2: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1,label2=value2",
-				},
-			},
+			input1: labels.FromStrings("label1", "value1", "label2", "value2"),
+			input2: labels.FromStrings("label1", "value1,label2=value2"),
 		},
 		{
-			input1: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1",
-				},
-				{
-					Name:  "label2",
-					Value: "value2",
-				},
-			},
-			input2: labels.Labels{
-				{
-					Name:  "label1",
-					Value: `value1",label2="value2`,
-				},
-			},
+			input1: labels.FromStrings("label1", "value1", "label2", "value2"),
+			input2: labels.FromStrings("label1", `value1",label2="value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1554,39 +1450,27 @@ func Test_stringFromLabels(t *testing.T) {
 	}{
 		{
 			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			labels: labels.FromStrings("test", "value"),
 			want: `{test="value"}`,
 		},
 		{
 			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 			want: `{label1="value1", label2="value2"}`,
 		},
 		{
 			name: "two-unordered",
-			labels: labels.Labels{
-				{Name: "label2", Value: "value2"},
-				{Name: "label1", Value: "value1"},
-			},
+			labels: labels.FromStrings("label2", "value2", "label1", "value1"),
 			want: `{label2="value2", label1="value1"}`,
 		},
 		{
 			name: "need-quoting",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1",label2="value2`},
-			},
+			labels: labels.FromStrings("label1", "value1,label2=value2"),
 			want: `{label1="value1\",label2=\"value2"}`,
 		},
 		{
 			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 			want: `{label1="value1\\\",label2=\\\"value2"}`,
 		},
 	}
@@ -1606,47 +1490,27 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}{
 		{
 			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			labels: labels.FromStrings("test", "value"),,
 		},
 		{
 			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
 			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
