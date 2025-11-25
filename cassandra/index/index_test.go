@@ -294,8 +294,9 @@ func (s *mockStore) verifyStore(
 
 		labelsInStore := s.id2labels[id]
 
-		if diff := cmp.Diff(metricLabels, labelsInStore); diff != "" {
-			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
+
+		if equal := labels.Equal(metricLabels, labelsInStore); equal != true {
+			return fmt.Errorf("id2labels mismatch: (-want +got)")
 		}
 
 		if expiration[i].IsZero() {
@@ -1140,22 +1141,16 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 }
 
 func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
-	results := make(labels.Labels, 0, len(m))
+	builder := labels.NewBuilder(labels.EmptyLabels())
 
 	for k, v := range m {
 		if dropSpecialLabel && (k == ttlLabel) {
 			continue
 		}
-
-		results = append(results, labels.Label{
-			Name:  k,
-			Value: v,
-		})
+		builder.Set(k, v)
 	}
 
-	sort.Sort(results)
-
-	return results
+	return builder.Labels()
 }
 
 // getTestLogger return a logger suitable for test.
@@ -1397,13 +1392,6 @@ func Test_sortLabels(t *testing.T) {
 			},
 			want: labels.EmptyLabels(),
 		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: labels.EmptyLabels(),
-		},
 	}
 
 	for _, tt := range tests {
@@ -1461,7 +1449,7 @@ func Test_stringFromLabels(t *testing.T) {
 		{
 			name: "two-unordered",
 			labels: labels.FromStrings("label2", "value2", "label1", "value1"),
-			want: `{label2="value2", label1="value1"}`,
+			want: `{label1="value1", label2="value2"}`,
 		},
 		{
 			name: "need-quoting",
@@ -1490,7 +1478,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}{
 		{
 			name: "simple",
-			labels: labels.FromStrings("test", "value"),,
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
 			name: "two",
@@ -5241,7 +5229,11 @@ func cmpMetricsSetByLabels(ids types.MetricsSet, want []labels.Labels) (string, 
 		return labels.Compare(a, b) < 0
 	})
 
-	return cmp.Diff(got, want, sorter), nil
+	labelsComparer := cmp.Comparer(func(a, b labels.Labels) bool {
+		return labels.Equal(a, b)
+	})
+
+	return cmp.Diff(got, want, sorter, labelsComparer), nil
 }
 
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
@@ -8869,16 +8861,7 @@ func TestLookForOldData(t *testing.T) {
 		{
 			Start: reqTime,
 			End:   reqTime,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8935,16 +8918,7 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 		{
 			Start: past,
 			End:   past,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8978,16 +8952,7 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 		{
 			Start: now,
 			End:   now,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
