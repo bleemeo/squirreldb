@@ -736,7 +736,6 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				TenantLabelName:             config.DefaultConfig().TenantLabelName,
 				MutableLabelDetector:        labelProcessor,
 				RequireTenantHeader:         config.DefaultConfig().RequireTenantHeader,
-				UseThanosPromQLEngine:       config.DefaultConfig().Internal.UseThanosPromQLEngine,
 				MetricRegistry:              promReqitry,
 				Logger:                      log.With().Logger(),
 				FuturePointsBackdateOffset:  config.DefaultConfig().MaxAllowedTimeInFuture,

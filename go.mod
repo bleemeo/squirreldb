@@ -33,7 +33,6 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/spf13/pflag v1.0.10
-	github.com/thanos-io/promql-engine v0.0.0-20251117105526-bcec363c24e6
 	golang.org/x/sync v0.18.0
 	golang.org/x/sys v0.38.0
 	google.golang.org/protobuf v1.36.10
@@ -75,7 +74,6 @@ require (
 	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
-	github.com/efficientgo/core v1.0.0-rc.3 // indirect
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -190,7 +188,6 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.39.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	gonum.org/v1/gonum v0.16.0 // indirect
 	google.golang.org/api v0.256.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
 	google.golang.org/grpc v1.77.0 // indirect

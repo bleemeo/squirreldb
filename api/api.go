@@ -90,7 +90,6 @@ type API struct {
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
 	RequireTenantHeader   bool
-	UseThanosPromQLEngine bool
 	Logger                zerolog.Logger
 
 	ready      int32
@@ -121,12 +120,11 @@ func NewPrometheus(
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
-	useThanosPromQLEngine bool,
 	apiLogger zerolog.Logger,
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
-	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
+	queryEngine := promql.NewEngine(queryLogger, metricRegistry)
 	queryEngine = promql.WrapEngine(queryEngine, apiLogger)
 
 	scrapePoolRetrieverFunc := func(_ context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
@@ -268,7 +266,6 @@ func (a *API) init() {
 		appendable,
 		maxConcurrent,
 		a.MetricRegistry,
-		a.UseThanosPromQLEngine,
 		a.Logger,
 	)
 

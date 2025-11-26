@@ -27,12 +27,10 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/rs/zerolog"
-	"github.com/thanos-io/promql-engine/engine"
 )
 
 func NewEngine(
 	queryLogger zerolog.Logger,
-	useThanosPromQLEngine bool,
 	metricRegistry prometheus.Registerer,
 ) promql.QueryEngine {
 	engineOpts := promql.EngineOpts{
@@ -49,16 +47,7 @@ func NewEngine(
 
 	var queryEngine promql.QueryEngine
 
-	if useThanosPromQLEngine {
-		queryLogger.Info().Msg("Using Thanos PromQL engine")
-
-		queryEngine = engine.New(engine.Opts{
-			EngineOpts:        engineOpts,
-			LogicalOptimizers: nil,
-		})
-	} else {
-		queryEngine = promql.NewEngine(engineOpts)
-	}
+	queryEngine = promql.NewEngine(engineOpts)
 
 	return queryEngine
 }

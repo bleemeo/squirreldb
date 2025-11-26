@@ -92,7 +92,6 @@ func DefaultConfig() Config {
 			States:                "cassandra",
 			Store:                 "batcher",
 			MutableLabelsProvider: "cassandra",
-			UseThanosPromQLEngine: false,
 			DisablePreAggregation: false,
 		},
 		MaxRequestBodySize:     64, // MiB
