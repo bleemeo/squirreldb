@@ -731,6 +731,11 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 			var rangeErr error
 
 			lbls.Range(func(lbl labels.Label) {
+				if err != nil {
+					rangeErr = fmt.Errorf("update bitmap: %w", err)
+
+					return
+				}
 				labelNames[lbl.Name] = nil
 
 				bitset := wantedPostings[lbl]

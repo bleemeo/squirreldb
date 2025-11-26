@@ -777,7 +777,11 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				return labels.Compare(a.Labels, b.Labels) < 0
 			}
 
-			if diff := cmp.Diff(test.writtenPoints, metricsInStore, cmpopts.SortSlices(lessFunc)); diff != "" {
+			cmpFunc := func(a, b labels.Labels) bool {
+				return labels.Equal(a, b)
+			}
+
+			if diff := cmp.Diff(test.writtenPoints, metricsInStore, cmpopts.SortSlices(lessFunc), cmp.Comparer(cmpFunc)); diff != "" {
 				t.Errorf("MetricsFromStore mismatch (-want +got)\n%s", diff)
 			}
 		})
