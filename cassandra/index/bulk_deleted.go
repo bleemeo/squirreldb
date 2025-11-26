@@ -50,7 +50,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
 	d.deleteIDs = append(d.deleteIDs, uint64(id)) //nolint:gosec
 
-	if sortedLabels != labels.EmptyLabels() && !skipLabels2Id {
+	if !sortedLabels.IsEmpty() && !skipLabels2Id {
 		sortedLabelsString := sortedLabels.String()
 		d.deleteLabels = append(d.deleteLabels, sortedLabelsString)
 	}

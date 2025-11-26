@@ -1191,7 +1191,7 @@ func (c *CassandraIndex) lookupLabels(
 
 	labelList := c.idsToLabels.MGet(now, ids)
 	for i, lbls := range labelList {
-		if lbls == labels.EmptyLabels() {
+		if lbls.IsEmpty() {
 			idToQuery = append(idToQuery, ids[i])
 			miss[i] = true
 		}
@@ -2557,7 +2557,7 @@ func (l *metricsLabels) Next() bool {
 	for l.next < len(l.ids) {
 		l.next++
 
-		if l.labelsList[l.next-1] == labels.EmptyLabels() {
+		if l.labelsList[l.next-1].IsEmpty() {
 			continue
 		}
 
@@ -3478,7 +3478,7 @@ func (c *CassandraIndex) idsForMatchers(
 		for i, id := range ids {
 			lbls := result.labelsList[i]
 
-			if lbls != labels.EmptyLabels() && matcherMatches(matchers, lbls) {
+			if !lbls.IsEmpty() && matcherMatches(matchers, lbls) {
 				newIDs = append(newIDs, id)
 				newLabels = append(newLabels, lbls)
 			}

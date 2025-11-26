@@ -493,7 +493,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			lbls2 := tmp[id2]
 			expiration2, ok := tmp2[id2]
 
-			if !ok && lbls2 != labels.EmptyLabels() {
+			if !ok && !lbls2.IsEmpty() {
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) found in ID2labels but not for expiration! You may need to took the lock to verify",
@@ -507,7 +507,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			}
 
 			switch {
-			case lbls2 == labels.EmptyLabels():
+			case lbls2.IsEmpty():
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) conflict with ID %d (which is a partial write! THIS SHOULD NOT HAPPEN.)\n",
