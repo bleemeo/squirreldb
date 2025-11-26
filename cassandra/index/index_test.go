@@ -1453,7 +1453,7 @@ func Test_stringFromLabels(t *testing.T) {
 		},
 		{
 			name: "need-quoting",
-			labels: labels.FromStrings("label1", "value1,label2=value2"),
+			labels: labels.FromStrings("label1", `value1",label2="value2`),
 			want: `{label1="value1\",label2=\"value2"}`,
 		},
 		{
