@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -524,10 +523,6 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 		}
 
 		promLabel := labels.FromMap(labelsMap)
-
-		if *sortInsert {
-			sort.Sort(promLabel)
-		}
 
 		request := types.LookupRequest{
 			Start:  now,

@@ -514,22 +514,20 @@ func sortedCopySample(v []prompb.Sample) []prompb.Sample {
 }
 
 func cmpLabels(a, b []prompb.Label) int {
-	a2 := make([]labels.Label, len(a))
-	b2 := make([]labels.Label, len(b))
+	buildera := labels.NewBuilder(labels.EmptyLabels())
+	
+	for _, x := range a {
+		buildera.Set(x.Name, x.Value)
+	}
+	a2 := buildera.Labels()
 
-	for i, x := range a {
-		a2[i] = labels.Label{
-			Name:  x.Name,
-			Value: x.Value,
-		}
+	builderb := labels.NewBuilder(labels.EmptyLabels())
+
+	for _, x := range b {
+		builderb.Set(x.Name, x.Value)
 	}
 
-	for i, x := range b {
-		b2[i] = labels.Label{
-			Name:  x.Name,
-			Value: x.Value,
-		}
-	}
+	b2 := builderb.Labels()
 
 	return labels.Compare(a2, b2)
 }
