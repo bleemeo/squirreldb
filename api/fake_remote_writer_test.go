@@ -100,7 +100,7 @@ func TestFakeRemoteWriter(t *testing.T) {
 				t.Parallel()
 
 				appendable := new(dummyAppendable)
-				api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), false, zlog)
+				api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog)
 				router := route.New()
 
 				patchRemoteWriteHandler(api, tc.backdateOffset)
@@ -165,7 +165,7 @@ func TestWriterHandlerLogger(t *testing.T) {
 	)
 
 	appendable := new(dummyAppendable)
-	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), false, zlog)
+	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog)
 	router := route.New()
 
 	patchRemoteWriteHandler(api, time.Hour)
