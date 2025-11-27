@@ -294,9 +294,12 @@ func (s *mockStore) verifyStore(
 
 		labelsInStore := s.id2labels[id]
 
+		labelsComparer := cmp.Comparer(func(a, b labels.Labels) bool {
+			return labels.Equal(a, b)
+		})
 
-		if equal := labels.Equal(metricLabels, labelsInStore); equal != true {
-			return fmt.Errorf("id2labels mismatch: (-want +got)")
+		if diff := cmp.Diff(metricLabels, labelsInStore, labelsComparer); diff != "" {
+			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
 		}
 
 		if expiration[i].IsZero() {

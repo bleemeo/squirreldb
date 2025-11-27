@@ -1639,9 +1639,7 @@ func (c *CassandraIndex) updateShardExpiration(
 
 // labelsForShardExpiration returns the labels for the shard expiration metric.
 func labelsForShardExpiration(shard int32) labels.Labels {
-	builder := labels.NewBuilder(labels.EmptyLabels())
-	builder.Set(expirationShardLabel, strconv.Itoa(int(shard)))
-	return builder.Labels()
+	return labels.FromStrings(expirationShardLabel, strconv.Itoa(int(shard)))
 }
 
 // getShardExpiration returns the expiration and metric ID for a shard.
