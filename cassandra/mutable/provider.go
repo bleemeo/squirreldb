@@ -350,7 +350,7 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 		return labels.EmptyLabels(), err
 	}
 
-	builder := labels.NewBuilder(mutableLabels)
+	labelSlice := make([]labels.Label, 0, len(mutableNames))
 
 	for _, mutableName := range mutableNames {
 		mutableValue, err := cp.getMutableValue(ctx, tenant, mutableName, value)
@@ -362,9 +362,13 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 			return labels.EmptyLabels(), err
 		}
 
-		builder.Set(mutableName, mutableValue)
+		labelSlice = append(labelSlice, labels.Label{
+			Name:  mutableName,
+			Value: mutableValue,
+		})
 	}
-	mutableLabels = builder.Labels()
+
+	mutableLabels = labels.New(labelSlice...)
 
 	cp.cache.SetMutableLabels(tenant, name, value, mutableLabels)
 

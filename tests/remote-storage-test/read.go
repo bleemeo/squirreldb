@@ -514,22 +514,21 @@ func sortedCopySample(v []prompb.Sample) []prompb.Sample {
 }
 
 func cmpLabels(a, b []prompb.Label) int {
-	buildera := labels.NewBuilder(labels.EmptyLabels())
-	
-	for _, x := range a {
-		buildera.Set(x.Name, x.Value)
+	labelsA := prompbLabelsToLabels(a)
+	labelsB := prompbLabelsToLabels(b)
+
+	return labels.Compare(labelsA, labelsB)
+}
+
+func prompbLabelsToLabels(pb []prompb.Label) labels.Labels {
+	lbls := make([]labels.Label, len(pb))
+	for i, x := range pb {
+		lbls[i] = labels.Label{
+			Name:  x.Name,
+			Value: x.Value,
+		}
 	}
-	a2 := buildera.Labels()
-
-	builderb := labels.NewBuilder(labels.EmptyLabels())
-
-	for _, x := range b {
-		builderb.Set(x.Name, x.Value)
-	}
-
-	b2 := builderb.Labels()
-
-	return labels.Compare(a2, b2)
+	return labels.New(lbls...)
 }
 
 func sortTimeseries(v []*prompb.TimeSeries) []*prompb.TimeSeries {

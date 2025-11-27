@@ -1144,16 +1144,19 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 }
 
 func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
-	builder := labels.NewBuilder(labels.EmptyLabels())
+	labelSlice := make([]labels.Label, 0, len(m))
 
 	for k, v := range m {
 		if dropSpecialLabel && (k == ttlLabel) {
 			continue
 		}
-		builder.Set(k, v)
+		labelSlice = append(labelSlice, labels.Label{
+			Name:  k,
+			Value: v,
+		})
 	}
 
-	return builder.Labels()
+	return labels.New(labelSlice...)
 }
 
 // getTestLogger return a logger suitable for test.
@@ -1252,11 +1255,11 @@ func Benchmark_keyFromLabels(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
+			name:   "simple",
 			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
+			name:   "two",
 			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
@@ -1272,7 +1275,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
+			name:   "need-quoting2",
 			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
@@ -1291,11 +1294,11 @@ func Benchmark_labelsToID(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
+			name:   "simple",
 			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
+			name:   "two",
 			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
@@ -1311,7 +1314,7 @@ func Benchmark_labelsToID(b *testing.B) {
 				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
+			name:   "need-quoting2",
 			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
@@ -1398,29 +1401,29 @@ func Test_stringFromLabels(t *testing.T) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
+			name:   "simple",
 			labels: labels.FromStrings("test", "value"),
-			want: `{test="value"}`,
+			want:   `{test="value"}`,
 		},
 		{
-			name: "two",
+			name:   "two",
 			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
-			want: `{label1="value1", label2="value2"}`,
+			want:   `{label1="value1", label2="value2"}`,
 		},
 		{
-			name: "two-unordered",
+			name:   "two-unordered",
 			labels: labels.FromStrings("label2", "value2", "label1", "value1"),
-			want: `{label1="value1", label2="value2"}`,
+			want:   `{label1="value1", label2="value2"}`,
 		},
 		{
-			name: "need-quoting",
+			name:   "need-quoting",
 			labels: labels.FromStrings("label1", `value1",label2="value2`),
-			want: `{label1="value1\",label2=\"value2"}`,
+			want:   `{label1="value1\",label2=\"value2"}`,
 		},
 		{
-			name: "need-quoting2",
+			name:   "need-quoting2",
 			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
-			want: `{label1="value1\\\",label2=\\\"value2"}`,
+			want:   `{label1="value1\\\",label2=\\\"value2"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -1438,11 +1441,11 @@ func Benchmark_stringFromLabels(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
+			name:   "simple",
 			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
+			name:   "two",
 			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
@@ -1458,7 +1461,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
+			name:   "need-quoting2",
 			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
@@ -8820,9 +8823,9 @@ func TestLookForOldData(t *testing.T) {
 	reqTime := now.Truncate(10 * time.Second)
 	writeReqs := []types.LookupRequest{
 		{
-			Start: reqTime,
-			End:   reqTime,
-			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Start:      reqTime,
+			End:        reqTime,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8877,9 +8880,9 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 
 	writeReqs := []types.LookupRequest{
 		{
-			Start: past,
-			End:   past,
-			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Start:      past,
+			End:        past,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8911,9 +8914,9 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 
 	writeReqs = []types.LookupRequest{
 		{
-			Start: now,
-			End:   now,
-			Labels: labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Start:      now,
+			End:        now,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}

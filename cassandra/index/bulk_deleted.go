@@ -54,6 +54,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 		sortedLabelsString := sortedLabels.String()
 		d.deleteLabels = append(d.deleteLabels, sortedLabelsString)
 	}
+	labelSlice := make([]labels.Label, 0, sortedLabels.Len()*2)
 
 	sortedLabels.Range(func(lbl labels.Label) {
 		d.invalidateKey = append(d.invalidateKey, postingsCacheKey{
@@ -61,16 +62,17 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			Name:  lbl.Name,
 			Value: lbl.Value,
 		})
-	})
-	builder := labels.NewBuilder(sortedLabels)
-	
 
-	sortedLabels.Range(func(label labels.Label) {
-		builder.Set(postinglabelName, label.Name)
-	})
-	labelsList := builder.Labels()
+		labelSlice = append(labelSlice, lbl)
 
-	labelsList.Range(func(label labels.Label) {	
+		labelSlice = append(labelSlice, labels.Label{
+			Name:  postinglabelName,
+			Value: lbl.Name,
+		})
+	})
+	labelsList := labels.New(labelSlice...)
+
+	labelsList.Range(func(label labels.Label) {
 		idx, ok := d.labelToPostingUpdates[label]
 		if !ok {
 			idx = len(d.unshardedPostingUpdates)
@@ -79,8 +81,10 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			})
 			d.labelToPostingUpdates[label] = idx
 		}
-
-		d.unshardedPostingUpdates[idx].RemoveIDs = append(d.unshardedPostingUpdates[idx].RemoveIDs, uint64(id)) //nolint:gosec
+		d.unshardedPostingUpdates[idx].RemoveIDs = append(
+			d.unshardedPostingUpdates[idx].RemoveIDs,
+			uint64(id), //nolint:gosec
+		)
 	})
 }
 
