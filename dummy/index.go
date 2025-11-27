@@ -107,8 +107,6 @@ func NewIndex(metrics []types.MetricLabel) *Index {
 	for _, m := range metrics {
 		lbl := m.Labels.Copy()
 
-		// sort.Sort(lbl)
-
 		idx.idToLabels[m.ID] = lbl
 		idx.labelsToID[lbl.String()] = m.ID
 	}
@@ -175,8 +173,6 @@ func (idx *Index) LookupIDs(ctx context.Context, requests []types.LookupRequest)
 	for i, id := range ids {
 		current := requests[i].Labels
 		previous, ok := idx.idToLabels[id]
-
-		// sort.Sort(current)
 
 		if ok && !labels.Equal(previous, current) {
 			return nil, nil, fmt.Errorf("collision in ID for %v and %v", current, previous)

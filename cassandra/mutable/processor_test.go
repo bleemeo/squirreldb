@@ -179,8 +179,6 @@ func TestAddMutableLabels(t *testing.T) {
 				t.Errorf("Failed to process labels: %v", err)
 			}
 
-			// sort.Sort(gotLabels)
-
 			if !reflect.DeepEqual(test.wantLabels, gotLabels) {
 				t.Errorf("AddMutableLabels() = %v, want %v", gotLabels, test.wantLabels)
 			}
