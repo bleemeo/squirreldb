@@ -734,6 +734,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				if rangeErr != nil {
 					return
 				}
+
 				labelNames[lbl.Name] = nil
 
 				bitset := wantedPostings[lbl]
@@ -744,6 +745,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				_, err := bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
 					rangeErr = fmt.Errorf("update bitmap: %w", err)
+
 					return
 				}
 
@@ -762,6 +764,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				_, err = bitset.AddN(uint64(id)) //nolint:gosec
 				if err != nil {
 					rangeErr = fmt.Errorf("update bitmap: %w", err)
+
 					return
 				}
 

@@ -164,10 +164,7 @@ func (c *CassandraTSDB) writeAggregateRow(
 
 	maxTS := aggregatedData.Points[len(aggregatedData.Points)-1].Timestamp
 
-	age := time.Now().Unix() - maxTS/1000
-	if age < 0 {
-		age = 0
-	}
+	age := max(time.Now().Unix()-maxTS/1000, 0)
 
 	if age >= aggregatedData.TimeToLive {
 		return nil
@@ -262,10 +259,7 @@ func (c *CassandraTSDB) writeRawPartitionData(
 
 	maxTS := data.Points[len(data.Points)-1].Timestamp
 
-	age := time.Now().Unix() - maxTS/1000
-	if age < 0 {
-		age = 0
-	}
+	age := max(time.Now().Unix()-maxTS/1000, 0)
 
 	if age >= data.TimeToLive {
 		return nil

@@ -92,6 +92,7 @@ func (w *writeMetrics) Append(_ storage.SeriesRef, l labels.Labels, t int64, v f
 			isMutable, err := w.mutableLabelDetector.IsMutableLabel(context.Background(), w.tenantLabel.Value, label.Name)
 			if err != nil {
 				rangeErr = err
+
 				return
 			}
 
@@ -185,22 +186,34 @@ func validateLabels(ls labels.Labels) error {
 	var validationErr error
 
 	ls.Range(func(l labels.Label) {
+		if validationErr != nil {
+			return
+		}
+
 		if l.Name == model.MetricNameLabel {
-			if !model.IsValidMetricName(model.LabelValue(l.Value)) || strings.Contains(l.Value, "|") {
-				validationErr = fmt.Errorf("%w: metric name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Value)
+			if !types.PrometheusValidationScheme.IsValidMetricName(l.Value) || strings.Contains(l.Value, "|") {
+				validationErr = fmt.Errorf(
+					"%w: metric name '%s' should be valid utf-8, without char '|'",
+					ErrInvalidMatcher,
+					l.Value,
+				)
+
 				return
 			}
-		} else if !model.LabelName(l.Name).IsValid() || strings.Contains(l.Name, "|") {
-			validationErr = fmt.Errorf("%w: label name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Name)
-			return
+		} else {
+			if !types.PrometheusValidationScheme.IsValidLabelName(l.Name) || strings.Contains(l.Name, "|") {
+				validationErr = fmt.Errorf(
+					"%w: label name '%s' should be valid utf-8, without char '|'",
+					ErrInvalidMatcher,
+					l.Name,
+				)
+
+				return
+			}
 		}
 	})
 
-	if validationErr != nil {
-		return validationErr
-	}
-
-	return nil
+	return validationErr
 }
 
 func dropEmptyValue(ls labels.Labels) labels.Labels {

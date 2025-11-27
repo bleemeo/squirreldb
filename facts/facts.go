@@ -19,6 +19,7 @@ package facts
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,9 +34,7 @@ import (
 func Facts(_ context.Context) map[string]string {
 	newFacts := make(map[string]string)
 
-	for k, v := range platformFacts() {
-		newFacts[k] = v
-	}
+	maps.Copy(newFacts, platformFacts())
 
 	newFacts["architecture"] = runtime.GOARCH
 

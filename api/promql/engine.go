@@ -45,9 +45,7 @@ func NewEngine(
 		EnablePerStepStats:   false,
 	}
 
-	var queryEngine promql.QueryEngine
-
-	queryEngine = promql.NewEngine(engineOpts)
+	queryEngine := promql.NewEngine(engineOpts)
 
 	return queryEngine
 }

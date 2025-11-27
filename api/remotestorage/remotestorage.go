@@ -178,6 +178,7 @@ func (r *RemoteStorage) metricsFromTimeSeries(
 
 			if time.Since(r.lastLogPointInPastAt) > pointInPastLogPeriod {
 				log.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(tMin/1000, 0))
+
 				r.lastLogPointInPastAt = time.Now()
 			}
 

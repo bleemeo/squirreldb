@@ -118,25 +118,17 @@ func run(ctx context.Context) error {
 				p := p
 				n := n
 
-				wg.Add(1)
-
-				go func() {
-					defer wg.Done()
-
+				wg.Go(func() {
 					stats := worker(ctx, p, t, workerSeed, &jobRunning[n], lockFactory, subLockName, lock)
 					resultChan <- stats
-				}()
+				})
 			}
 		}
 
 		if *withBlock && p == 0 {
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				blockerWorker(ctx, jobRunning, lockFactory)
-			}()
+			})
 		}
 	}
 

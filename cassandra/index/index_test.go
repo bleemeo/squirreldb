@@ -294,11 +294,7 @@ func (s *mockStore) verifyStore(
 
 		labelsInStore := s.id2labels[id]
 
-		labelsComparer := cmp.Comparer(func(a, b labels.Labels) bool {
-			return labels.Equal(a, b)
-		})
-
-		if diff := cmp.Diff(metricLabels, labelsInStore, labelsComparer); diff != "" {
+		if diff := cmp.Diff(metricLabels, labelsInStore, cmp.Comparer(labels.Equal)); diff != "" {
 			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
 		}
 
@@ -1031,11 +1027,7 @@ func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
 		delay := c.delay
 		c.l.Unlock()
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// wait for callbackGate to be closed, signifing message should be processed
 			<-callbackChan
 
@@ -1044,7 +1036,7 @@ func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
 			}
 
 			callback(in)
-		}()
+		})
 	}
 
 	c.LocalCluster.Subscribe(topic, wrappedCallback)
@@ -1150,6 +1142,7 @@ func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
 		if dropSpecialLabel && (k == ttlLabel) {
 			continue
 		}
+
 		labelSlice = append(labelSlice, labels.Label{
 			Name:  k,
 			Value: v,
@@ -4497,14 +4490,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 					t.Errorf("Had %d hole, want %d", maxPosting-count, tt.numberHole)
 				}
 
-				iterCount := 1000
-				if iterCount < 2*saveEvery {
-					iterCount = 2 * saveEvery
-				}
-
-				if iterCount < tt.numberHole+10 {
-					iterCount = tt.numberHole + 10
-				}
+				iterCount := max(max(1000, 2*saveEvery), tt.numberHole+10)
 
 				if tt.maxIter > 0 && iterCount > tt.maxIter {
 					iterCount = tt.maxIter
@@ -5193,11 +5179,7 @@ func cmpMetricsSetByLabels(ids types.MetricsSet, want []labels.Labels) (string, 
 		return labels.Compare(a, b) < 0
 	})
 
-	labelsComparer := cmp.Comparer(func(a, b labels.Labels) bool {
-		return labels.Equal(a, b)
-	})
-
-	return cmp.Diff(got, want, sorter, labelsComparer), nil
+	return cmp.Diff(got, want, sorter, cmp.Comparer(labels.Equal)), nil
 }
 
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
@@ -5486,10 +5468,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 					current := start
 					for current < end {
-						idxEnd := current + batchSize
-						if idxEnd > end {
-							idxEnd = end
-						}
+						idxEnd := min(current+batchSize, end)
 
 						_, _, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
 						if err != nil {

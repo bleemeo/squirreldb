@@ -45,7 +45,7 @@ const (
 var (
 	labelsMetric1 = labels.FromStrings("__account_id", "1234", "__name__", "disk_used", "mountpath", "/home")
 
-	labelsMetric2 = labels.FromStrings( "__name__", "disk_used", "mountpath", "/srv","__account_id", "5678")
+	labelsMetric2 = labels.FromStrings("__name__", "disk_used", "mountpath", "/srv", "__account_id", "5678")
 
 	labelsMetric3 = labels.FromStrings("__name__", "disk_free", "__account_id", "5678", "mountpath", "/srv")
 )

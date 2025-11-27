@@ -75,9 +75,8 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	}
 
 	// Don't benchmark the initial data generation.
-	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		lbls, err := provider.GetMutable(
 			b.Context(),
 			searchedTenant,
@@ -91,11 +90,16 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 		if lbls.Len() != 1 {
 			b.Fatalf("expected 1 label, got %d", lbls.Len())
 		}
-		
+
 		var firstLabel labels.Label
+
+		first := true
+
 		lbls.Range(func(l labels.Label) {
-			firstLabel = l
-			return // Return the first label
+			if first {
+				firstLabel = l
+				first = false
+			}
 		})
 
 		if firstLabel.Name != searchedMutableName {

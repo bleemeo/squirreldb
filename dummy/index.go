@@ -265,7 +265,7 @@ outer:
 		}
 
 		if name == postinglabelName {
-			lbs.Range(func(l labels.Label) {	
+			lbs.Range(func(l labels.Label) {
 				results[l.Name] = nil
 			})
 		} else if v := lbs.Get(name); v != "" {

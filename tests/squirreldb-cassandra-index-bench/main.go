@@ -24,7 +24,6 @@ var (
 	expiredFaction    = flag.Int("expired-fraction", 2, "one part over N of the metric will be expired")
 	defaultTimeToLive = flag.Duration("index.ttl", 365*24*time.Hour, "Default time to live")
 	seed              = flag.Int64("bench.seed", 42, "Seed used in random generator")
-	sortInsert        = flag.Bool("bench.insert-sorted", false, "Keep label sorted at insertion time (Prometheus do it)")
 	queryCount        = flag.Int("bench.query", 100, "Number of query to run")
 	skipWrite         = flag.Bool("bench.skip-write", false, "Do not insert into index for benchmark. Useful with -no-drop and a previous run that filled index")
 	skipValid         = flag.Bool("skip-validation", false, "Do not run the validation and only run benchmark")

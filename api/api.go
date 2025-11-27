@@ -27,6 +27,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec,gci
 	"net/url"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,8 +90,8 @@ type API struct {
 	MutableLabelDetector     remotestorage.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
-	RequireTenantHeader   bool
-	Logger                zerolog.Logger
+	RequireTenantHeader bool
+	Logger              zerolog.Logger
 
 	ready      int32
 	router     http.Handler
@@ -193,10 +194,10 @@ func NewPrometheus(
 		otlpEnabled,
 		otlpDeltaToCumulative,
 		ctZeroIngestionEnabled,
-		false,           // ctZeroIngestionEnabled 
+		false,            // ctZeroIngestionEnabled
 		time.Duration(0), // lookbackDelta
-		false,           // enableTypeAndUnitLabels
-		nil,             // OverrideErrorCode
+		false,            // enableTypeAndUnitLabels
+		nil,              // OverrideErrorCode
 	)
 
 	return api
@@ -972,13 +973,11 @@ func (a *API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Re
 			return
 		}
 
-		for _, value := range label.AssociatedValues {
-			if value == "" {
-				errMsg := "associated values can't contain an empty string: %#v"
-				http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+		if slices.Contains(label.AssociatedValues, "") {
+			errMsg := "associated values can't contain an empty string: %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
 
-				return
-			}
+			return
 		}
 	}
 

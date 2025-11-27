@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
@@ -168,27 +169,29 @@ type BackdateContextKey struct{}
 
 // HTTP headers available to dynamically change settings on PromQL and remote read.
 const (
-	// Add one matcher to limit the evaluated series.
+	// HeaderForcedMatcher Add one matcher to limit the evaluated series.
 	HeaderForcedMatcher = "X-SquirrelDB-Forced-Matcher"
-	// Limit the number of series that can be evaluated by a request.
+	// HeaderMaxEvaluatedSeries Limit the number of series that can be evaluated by a request.
 	// A limit of 0 means unlimited.
 	HeaderMaxEvaluatedSeries = "X-SquirrelDB-Max-Evaluated-Series"
-	// Limit the number of points that can be evaluated by a request.
+	// HeaderMaxEvaluatedPoints Limit the number of points that can be evaluated by a request.
 	// A limit of 0 means unlimited.
 	HeaderMaxEvaluatedPoints = "X-SquirrelDB-Max-Evaluated-Points"
-	// Force using pre-aggregated data instead of raw points. Default for
+	// HeaderForcePreAggregated Force using pre-aggregated data instead of raw points. Default for
 	// query is raw data. Default for query_range depends on step value.
 	HeaderForcePreAggregated = "X-SquirrelDB-ForcePreAggregated"
-	// Force using raw data instead of pre-aggregated points. If both ForcePreAggregated
+	// HeaderForceRaw Force using raw data instead of pre-aggregated points. If both ForcePreAggregated
 	// and ForceRaw are true, ForceRaw has priority. Default for query is raw data.
 	// Default for query_range depends on step value.
 	HeaderForceRaw = "X-SquirrelDB-ForceRaw"
-	// Only match metrics from this tenant. Metrics written with this header
+	// HeaderTenant Only match metrics from this tenant. Metrics written with this header
 	// are associated to this tenant (a tenant label is added to the metric labels).
 	HeaderTenant = "X-SquirrelDB-Tenant"
-	// Set the metric Time To Live when writing.
+	// HeaderTimeToLive Set the metric Time To Live when writing.
 	HeaderTimeToLive = "X-SquirrelDB-TTL"
-	// Enable debugging information printed in SquirrelDB server log about a query.
+	// HeaderQueryDebug Enable debugging information printed in SquirrelDB server log about a query.
 	HeaderQueryDebug        = "X-SquirrelDB-Query-Debug"
 	HeaderQueryVerboseDebug = "X-SquirrelDB-Query-Verbose-Debug"
 )
+
+const PrometheusValidationScheme = model.UTF8Validation

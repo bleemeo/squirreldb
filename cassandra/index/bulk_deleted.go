@@ -54,6 +54,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 		sortedLabelsString := sortedLabels.String()
 		d.deleteLabels = append(d.deleteLabels, sortedLabelsString)
 	}
+
 	labelSlice := make([]labels.Label, 0, sortedLabels.Len()*2)
 
 	sortedLabels.Range(func(lbl labels.Label) {
@@ -70,6 +71,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			Value: lbl.Name,
 		})
 	})
+
 	labelsList := labels.New(labelSlice...)
 
 	labelsList.Range(func(label labels.Label) {
@@ -81,6 +83,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			})
 			d.labelToPostingUpdates[label] = idx
 		}
+
 		d.unshardedPostingUpdates[idx].RemoveIDs = append(
 			d.unshardedPostingUpdates[idx].RemoveIDs,
 			uint64(id), //nolint:gosec

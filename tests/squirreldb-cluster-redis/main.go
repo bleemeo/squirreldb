@@ -86,13 +86,9 @@ func run(ctx context.Context) error {
 	firstDeadline := time.Now().Add(*runTime)
 
 	for i, cl := range clients {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			cl.Run(ctx, firstDeadline, i)
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -241,7 +237,7 @@ func (b *BenchClient) thread(ctx context.Context, deadline time.Time, processID 
 	t0 := time.Now()
 
 	for ctx.Err() == nil && time.Now().Before(deadline) {
-		payload := []byte(fmt.Sprintf("%d-%d-%d", processID, workerID, counter1+counter2))
+		payload := fmt.Appendf(nil, "%d-%d-%d", processID, workerID, counter1+counter2)
 
 		if rand.Float64() < 0.5 { //nolint:gosec
 			err = b.cluster.Publish(ctx, "topic1", payload)

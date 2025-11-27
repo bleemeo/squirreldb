@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"math/rand"
 	"regexp/syntax"
@@ -999,41 +1000,48 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			inMaybe,
 		)
 
-		if len(labelsMap) > 0 && (inPosting || inMaybe) {
-			missingPostings := make([]string, 0)
+		if len(labelsMap) == 0 {
+			return nil
+		}
 
-			var rangeErr error
+		if !inPosting && !inMaybe {
+			return nil
+		}
 
-			lbls.Range(func(l labels.Label) {
-				posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false) //nolint:gosec
-				if err != nil {
-					rangeErr = err
-					return
-				}
+		missingPostings := make([]string, 0)
 
-				if !posting.Contains(uint64(id)) { //nolint:gosec
-					missingPostings = append(missingPostings, fmt.Sprintf("%s=%s", l.Name, l.Value))
-				}
-			})
+		var rangeErr error
 
-			if rangeErr != nil {
-				return rangeErr
+		lbls.Range(func(l labels.Label) {
+			posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false) //nolint:gosec
+			if err != nil {
+				rangeErr = err
+
+				return
 			}
 
-			if len(missingPostings) > 0 {
-				fmt.Fprintf(
-					w,
-					"Shard %s: the following postings are missing: %s\n",
-					timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
-					strings.Join(missingPostings, ", "),
-				)
-			} else {
-				fmt.Fprintf(
-					w,
-					"Shard %s: all postings are present\n",
-					timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
-				)
+			if !posting.Contains(uint64(id)) { //nolint:gosec
+				missingPostings = append(missingPostings, fmt.Sprintf("%s=%s", l.Name, l.Value))
 			}
+		})
+
+		if rangeErr != nil {
+			return rangeErr
+		}
+
+		if len(missingPostings) > 0 {
+			fmt.Fprintf(
+				w,
+				"Shard %s: the following postings are missing: %s\n",
+				timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+				strings.Join(missingPostings, ", "),
+			)
+		} else {
+			fmt.Fprintf(
+				w,
+				"Shard %s: all postings are present\n",
+				timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+			)
 		}
 	}
 
@@ -3239,10 +3247,7 @@ func (c *CassandraIndex) deletePostingsByNames(
 		concurrentDelete,
 		func(ctx context.Context, work chan<- func() error) error {
 			for start := 0; start < len(names); start += maxCQLInValue {
-				end := start + maxCQLInValue
-				if end > len(names) {
-					end = len(names)
-				}
+				end := min(start+maxCQLInValue, len(names))
 
 				subNames := names[start:end]
 
@@ -3907,10 +3912,7 @@ func (c *CassandraIndex) selectLabelsList2ID(
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
 			for start := 0; start < len(sortedLabelsListString); start += maxCQLInValue {
-				end := start + maxCQLInValue
-				if end > len(sortedLabelsListString) {
-					end = len(sortedLabelsListString)
-				}
+				end := min(start+maxCQLInValue, len(sortedLabelsListString))
 
 				subSortedLabelsListString := sortedLabelsListString[start:end]
 
@@ -3925,9 +3927,7 @@ func (c *CassandraIndex) selectLabelsList2ID(
 					if len(results) == 0 {
 						results = tmp
 					} else {
-						for k, v := range tmp {
-							results[k] = v
-						}
+						maps.Copy(results, tmp)
 					}
 
 					l.Unlock()
@@ -3968,10 +3968,7 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 		concurrentRead,
 		func(ctx context.Context, work chan<- func() error) error {
 			for start := 0; start < len(ids); start += maxCQLInValue {
-				end := start + maxCQLInValue
-				if end > len(ids) {
-					end = len(ids)
-				}
+				end := min(start+maxCQLInValue, len(ids))
 
 				subIDs := ids[start:end]
 				task := func() error {
@@ -3985,17 +3982,13 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 					if len(results) == 0 {
 						results = tmp
 					} else {
-						for k, v := range tmp {
-							results[k] = v
-						}
+						maps.Copy(results, tmp)
 					}
 
 					if len(results2) == 0 {
 						results2 = tmp2
 					} else {
-						for k, v := range tmp2 {
-							results2[k] = v
-						}
+						maps.Copy(results2, tmp2)
 					}
 
 					l.Unlock()
@@ -4084,7 +4077,7 @@ func (i *cassandraByteIter) Close() {
 	}
 }
 
-// createTables create all Cassandra tables.
+// Init createTables create all Cassandra tables.
 func (s cassandraStore) Init(ctx context.Context) error {
 	s.schemaLock.Lock()
 	defer s.schemaLock.Unlock()

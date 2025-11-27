@@ -170,6 +170,7 @@ func main() {
 		"Allow empty reply. By default it's a fatal error to have an empty response",
 	)
 	tenant := flag.String("tenant", "", "SquirrelDB tenant header")
+
 	flag.Parse()
 
 	API := initAPI(*urlAPI, *tenant)

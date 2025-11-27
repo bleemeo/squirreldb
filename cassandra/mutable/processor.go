@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"regexp"
 	"regexp/syntax"
+	"slices"
 	"sort"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -103,10 +104,8 @@ func (lp *LabelProcessor) IsMutableLabel(ctx context.Context, tenant, name strin
 		return false, err
 	}
 
-	for _, mutName := range mutableLabelNames {
-		if name == mutName {
-			return true, nil
-		}
+	if slices.Contains(mutableLabelNames, name) {
+		return true, nil
 	}
 
 	return false, nil
@@ -267,10 +266,11 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 	// Search for mutable labels associated to these labels.
 	var rangeErr error
 
-	lbls.Range(func(label labels.Label) {	
+	lbls.Range(func(label labels.Label) {
 		isMutable, err := lp.IsMutableLabel(ctx, tenant, label.Name)
 		if err != nil {
 			rangeErr = err
+
 			return
 		}
 
@@ -287,9 +287,10 @@ func (lp *LabelProcessor) AddMutableLabels(ctx context.Context, lbls labels.Labe
 			}
 
 			rangeErr = err
+
 			return
 		}
-		
+
 		newMutableLabels.Range(func(label labels.Label) {
 			builder.Set(label.Name, label.Value)
 		})

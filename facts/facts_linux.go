@@ -30,8 +30,7 @@ import (
 func decodeOsRelease(data string) (map[string]string, error) {
 	result := make(map[string]string)
 
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(data, "\n") {
 		if line == "" || !strings.Contains(line, "=") {
 			continue
 		}

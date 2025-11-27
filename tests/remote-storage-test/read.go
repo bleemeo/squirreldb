@@ -528,6 +528,7 @@ func prompbLabelsToLabels(pb []prompb.Label) labels.Labels {
 			Value: x.Value,
 		}
 	}
+
 	return labels.New(lbls...)
 }
 

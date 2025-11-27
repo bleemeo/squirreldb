@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"time"
 
@@ -393,10 +394,8 @@ func (cp *Provider) getMutableValue(ctx context.Context, tenant, mutableName, no
 			return "", err
 		}
 
-		for _, value := range nonMutableLabels.Values {
-			if nonMutableValue == value {
-				return mutableValue, nil
-			}
+		if slices.Contains(nonMutableLabels.Values, nonMutableValue) {
+			return mutableValue, nil
 		}
 	}
 

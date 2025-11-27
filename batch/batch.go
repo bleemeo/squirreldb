@@ -269,10 +269,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 	b.mutex.Unlock()
 
 	for startIndex := 0; startIndex < len(ids); startIndex += flushMetricLimit {
-		endIndex := startIndex + flushMetricLimit
-		if endIndex > len(ids) {
-			endIndex = len(ids)
-		}
+		endIndex := min(startIndex+flushMetricLimit, len(ids))
 
 		err := b.flush(ctx, ids[startIndex:endIndex], now, shutdown)
 		if err != nil {
@@ -1023,10 +1020,7 @@ func (b *Batch) write(
 		}
 
 		for startIndex := 0; startIndex < len(tmp); startIndex += flushMetricLimit {
-			endIndex := startIndex + flushMetricLimit
-			if endIndex > len(tmp) {
-				endIndex = len(tmp)
-			}
+			endIndex := min(startIndex+flushMetricLimit, len(tmp))
 
 			err = b.flush(ctx, tmp[startIndex:endIndex], now, false)
 			if err != nil {
