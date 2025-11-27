@@ -194,10 +194,10 @@ func NewPrometheus(
 		otlpEnabled,
 		otlpDeltaToCumulative,
 		ctZeroIngestionEnabled,
-		false,            // ctZeroIngestionEnabled
-		time.Duration(0), // lookbackDelta
-		false,            // enableTypeAndUnitLabels
-		nil,              // OverrideErrorCode
+		false, // ctZeroIngestionEnabled
+		time.Duration(time.Duration(5).Minutes()), // lookbackDelta
+		false, // enableTypeAndUnitLabels
+		nil,   // OverrideErrorCode
 	)
 
 	return api

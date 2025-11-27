@@ -1381,7 +1381,7 @@ func (c *CassandraIndex) lookupIDs(
 	}()
 
 	for _, req := range requests {
-		if req.Labels.Len() == 0 {
+		if req.Labels.IsEmpty() {
 			return nil, nil, errors.New("empty labels set")
 		}
 	}
@@ -2230,9 +2230,7 @@ func (c *CassandraIndex) updatePostingShards(
 				})
 			})
 
-			labelsList := labels.New(labelSlice...)
-
-			labelsList.Range(func(lbl labels.Label) {
+			for _, lbl := range labelSlice {
 				m, ok := shardToLabelToIndex[shard]
 				if !ok {
 					m = make(map[labels.Label]int)
@@ -2250,7 +2248,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 
 				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id)) //nolint:gosec
-			})
+			}
 
 			req, ok = precense[shard]
 			if !ok {

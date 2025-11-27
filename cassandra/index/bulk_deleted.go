@@ -72,9 +72,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 		})
 	})
 
-	labelsList := labels.New(labelSlice...)
-
-	labelsList.Range(func(label labels.Label) {
+	for _, label := range labelSlice {
 		idx, ok := d.labelToPostingUpdates[label]
 		if !ok {
 			idx = len(d.unshardedPostingUpdates)
@@ -88,7 +86,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 			d.unshardedPostingUpdates[idx].RemoveIDs,
 			uint64(id), //nolint:gosec
 		)
-	})
+	}
 }
 
 // Delete perform the deletion and REQUIRE the newMetricGlobalLock.
