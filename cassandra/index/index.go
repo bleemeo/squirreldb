@@ -2209,14 +2209,15 @@ func (c *CassandraIndex) updatePostingShards(
 			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
 			maybePresent[shard] = req
 
-			builder := labels.NewBuilder(labels.EmptyLabels())
-			
-			entry.unsortedLabels.Range(func(unsortedLabel labels.Label) {
-				builder.Set(unsortedLabel.Name, unsortedLabel.Value)
-			})
+			labelSlice := make([]labels.Label, 0, entry.unsortedLabels.Len()*2)
 
 			entry.unsortedLabels.Range(func(lbl labels.Label) {
-				builder.Set(postinglabelName, lbl.Name)
+				labelSlice = append(labelSlice, lbl)
+
+				labelSlice = append(labelSlice, labels.Label{
+					Name:  postinglabelName,
+					Value: lbl.Name,
+				})
 
 				keysToInvalidate = append(keysToInvalidate, postingsCacheKey{
 					Shard: shard,
@@ -2225,7 +2226,7 @@ func (c *CassandraIndex) updatePostingShards(
 				})
 			})
 
-			labelsList := builder.Labels()
+			labelsList := labels.New(labelSlice...)
 
 			labelsList.Range(func(lbl labels.Label) {
 				m, ok := shardToLabelToIndex[shard]
