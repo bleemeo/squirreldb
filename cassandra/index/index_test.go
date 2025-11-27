@@ -278,7 +278,7 @@ func (s *mockStore) verifyStore(
 	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
 
 	for i, metricLabels := range metrics {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		wantMinExpire := expiration[i]
@@ -374,7 +374,7 @@ func (s *mockStore) verifyShard(
 	}
 
 	for _, metricLabels := range metricsPresent {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		if !ok {
@@ -403,7 +403,7 @@ func (s *mockStore) verifyShard(
 	}
 
 	for _, metricLabels := range metricsAbsent {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		if !ok {
@@ -1358,48 +1358,6 @@ func Test_interfaces(t *testing.T) {
 	_, ok = iface.(types.Index)
 	if !ok {
 		t.Error("index isn't a Index")
-	}
-}
-
-func Test_sortLabels(t *testing.T) {
-	type args struct {
-		labels labels.Labels
-	}
-
-	tests := []struct {
-		name string
-		args args
-		want labels.Labels
-	}{
-		{
-			name: "sorted",
-			args: args{
-				labels: labels.FromStrings("__name__", "up", "monitor", "codelab"),
-			},
-			want: labels.FromStrings("__name__", "up", "monitor", "codelab"),
-		},
-		{
-			name: "no_sorted",
-			args: args{
-				labels: labels.FromStrings("monitor", "codelab", "__name__", "up"),
-			},
-			want: labels.FromStrings("__name__", "up", "monitor", "codelab"),
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: labels.EmptyLabels(),
-			},
-			want: labels.EmptyLabels(),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SortLabels() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 

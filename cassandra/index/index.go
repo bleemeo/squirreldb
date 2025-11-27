@@ -946,7 +946,6 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			allPosting.Contains(uint64(id)), //nolint:gosec
 		)
 
-		// sortedLabels := sortLabels(lbls)
 		sortedLabelsString := lbls.String()
 
 		resp, err := c.store.SelectLabelsList2ID(ctx, []string{sortedLabelsString})
@@ -1591,7 +1590,6 @@ func (c *CassandraIndex) lookupIDsFromCache(
 		}
 
 		if !found {
-			// sortedLabels := sortLabels(req.Labels)
 			sortedLabelsString := req.Labels.String()
 
 			entries[i].sortedLabels = req.Labels
@@ -4017,14 +4015,6 @@ func (c *CassandraIndex) selectIDS2LabelsAndExpiration(
 			return nil
 		},
 	)
-}
-
-// sortLabels returns the labels.Label list sorted by name.
-func sortLabels(labelList labels.Labels) labels.Labels {
-	sortedLabels := labelList.Copy()
-	// sort.Sort(sortedLabels)
-
-	return sortedLabels
 }
 
 func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
