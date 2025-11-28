@@ -4199,9 +4199,15 @@ func (s cassandraStore) InsertID2Labels(
 
 	defer session.Close()
 
+	// Convert labels.Labels to Cassandra list<tuple<text,text>> representation.
+	sortedLabelsTuple := make([][2]string, 0, sortedLabels.Len())
+	sortedLabels.Range(func(l labels.Label) {
+		sortedLabelsTuple = append(sortedLabelsTuple, [2]string{l.Name, l.Value})
+	})
+
 	return session.Query(
 		"INSERT INTO index_id2labels (id, labels, expiration_date) VALUES (?, ?, ?)",
-		id, sortedLabels, expiration,
+		id, sortedLabelsTuple, expiration,
 	).WithContext(ctx).Exec()
 }
 
@@ -4406,7 +4412,7 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(
 	).WithContext(ctx).Iter()
 
 	var (
-		lbls       labels.Labels
+		lblsTuples [][2]string
 		expiration time.Time
 		id         int64
 	)
@@ -4414,8 +4420,13 @@ func (s cassandraStore) SelectIDS2LabelsAndExpiration(
 	results := make(map[types.MetricID]labels.Labels, len(ids))
 	results2 := make(map[types.MetricID]time.Time, len(ids))
 
-	for iter.Scan(&id, &lbls, &expiration) {
-		results[types.MetricID(id)] = lbls
+	for iter.Scan(&id, &lblsTuples, &expiration) {
+		b := labels.NewBuilder(labels.EmptyLabels())
+		for _, t := range lblsTuples {
+			b.Set(t[0], t[1])
+		}
+
+		results[types.MetricID(id)] = b.Labels()
 		results2[types.MetricID(id)] = expiration
 	}
 
