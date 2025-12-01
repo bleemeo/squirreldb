@@ -92,16 +92,10 @@ func Test_metricsFromTimeSeries(t *testing.T) {
 			args: args{
 				promTimeseries: []timeSeries{
 					{
-						Labels: labels.Labels{
-							{
-								Name:  "__name__",
-								Value: "up",
-							},
-							{
-								Name:  "monitor",
-								Value: "codelab",
-							},
-						},
+						Labels: labels.FromStrings(
+							"__name__", "up",
+							"monitor", "codelab",
+						),
 						Samples: []types.MetricPoint{
 							{
 								Value:     10,
@@ -208,100 +202,48 @@ func Test_validateLabels(t *testing.T) {
 	}{
 		{
 			name: "validMetricName",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "__name__",
-					Value: "Up",
-				},
-				{
-					Name:  "__name__",
-					Value: "__987daDp:fez",
-				},
-				{
-					Name:  "__name__",
-					Value: ":8_987daDp:fez",
-				},
-				{
-					Name:  "__name__",
-					Value: "utilisation mémoire",
-				},
-			},
+			labels: labels.FromStrings(
+				"__name__", "up",
+				"__name__", "Up",
+				"__name__", "__987daDp:fez",
+				"__name__", ":8_987daDp:fez",
+				"__name__", "utilisation mémoire",
+			),
 			wantErr: false,
 		},
 		{
 			name: "validLabelName",
-			labels: []labels.Label{
-				{
-					Name:  "instance",
-					Value: "localhost:8000",
-				},
-				{
-					Name:  "__bleemeo_account__",
-					Value: "320663cd-8c99-4c6a-878a-012bebeff9b1",
-				},
-				{
-					Name:  "A1_",
-					Value: "a",
-				},
-				{
-					Name:  "système",
-					Value: "a-b",
-				},
-			},
+			labels: labels.FromStrings(
+				"instance", "localhost:8000",
+				"__bleemeo_account__", "320663cd-8c99-4c6a-878a-012bebeff9b1",
+				"A1_", "a",
+				"système", "a-b",
+			),
 			wantErr: false,
 		},
 		{
-			name: "invalidMetricNameEmpty",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "",
-				},
-			},
+			name:    "invalidMetricNameEmpty",
+			labels:  labels.FromStrings("__name__", ""),
 			wantErr: true,
 		},
 		{
-			name: "invalidMetricNameNotUTF8",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "\xC0",
-				},
-			},
+			name:    "invalidMetricNameNotUTF8",
+			labels:  labels.FromStrings("__name__", "\xC0"),
 			wantErr: true,
 		},
 		{
-			name: "invalidMetricNameContainsPipeChar",
-			labels: []labels.Label{
-				{
-					Name:  "__name__",
-					Value: "one|two",
-				},
-			},
+			name:    "invalidMetricNameContainsPipeChar",
+			labels:  labels.FromStrings("__name__", "one|two"),
 			wantErr: true,
 		},
 		{
-			name: "invalidLabelNameNotUTF8",
-			labels: []labels.Label{
-				{
-					Name:  "label-\xC0",
-					Value: "value",
-				},
-			},
+			name:    "invalidLabelNameNotUTF8",
+			labels:  labels.FromStrings("label-\xC0", "value"),
 			wantErr: true,
 		},
 		{
-			name: "invalidLabelNameContainsPipeChar",
-			labels: []labels.Label{
-				{
-					Name:  "one|two",
-					Value: "value",
-				},
-			},
+			name:    "invalidLabelNameContainsPipeChar",
+			labels:  labels.FromStrings("one|two", "value"),
 			wantErr: true,
 		},
 	}

@@ -1683,7 +1683,6 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 
 			engine := NewEngine(
 				zlog,
-				useThanos,
 				prometheus.NewRegistry(),
 			)
 

@@ -433,7 +433,7 @@ func (c *cache) MutableLabels(tenant, name, value string) (lbls labels.Labels, f
 
 	entry, found := c.mutableLabelsCache[key]
 	if !found {
-		return nil, false
+		return labels.EmptyLabels(), false
 	}
 
 	// Update last access.

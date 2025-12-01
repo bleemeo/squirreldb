@@ -736,7 +736,6 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				TenantLabelName:             config.DefaultConfig().TenantLabelName,
 				MutableLabelDetector:        labelProcessor,
 				RequireTenantHeader:         config.DefaultConfig().RequireTenantHeader,
-				UseThanosPromQLEngine:       config.DefaultConfig().Internal.UseThanosPromQLEngine,
 				MetricRegistry:              promReqitry,
 				Logger:                      log.With().Logger(),
 				FuturePointsBackdateOffset:  config.DefaultConfig().MaxAllowedTimeInFuture,
@@ -778,7 +777,9 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				return labels.Compare(a.Labels, b.Labels) < 0
 			}
 
-			if diff := cmp.Diff(test.writtenPoints, metricsInStore, cmpopts.SortSlices(lessFunc)); diff != "" {
+			if diff := cmp.Diff(
+				test.writtenPoints, metricsInStore, cmpopts.SortSlices(lessFunc),
+				cmp.Comparer(labels.Equal)); diff != "" {
 				t.Errorf("MetricsFromStore mismatch (-want +got)\n%s", diff)
 			}
 		})

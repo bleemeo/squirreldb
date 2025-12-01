@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -151,13 +152,7 @@ func metricstoTimeseries(metrics []metric) ([]prompb.TimeSeries, error) {
 }
 
 func isExcludedLabel(name string) bool {
-	for _, excludedName := range *excludeLabels {
-		if name == excludedName {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(*excludeLabels, name)
 }
 
 func writeTimeseries(timeseries []prompb.TimeSeries) error {

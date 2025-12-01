@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 	"sync"
@@ -437,9 +438,7 @@ func addTenantIfNotEmptyPromQL(metric model.Metric, tenant string) model.Metric 
 	if tenant != "" {
 		newMetric := make(model.Metric, len(metric)+1)
 
-		for k, v := range metric {
-			newMetric[k] = v
-		}
+		maps.Copy(newMetric, metric)
 
 		newMetric[tenantLabelName] = model.LabelValue(tenant)
 

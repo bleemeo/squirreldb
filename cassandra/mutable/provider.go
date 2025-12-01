@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"time"
 
@@ -347,8 +348,10 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 
 	mutableNames, err := cp.mutableNames(ctx, tenant, name)
 	if err != nil {
-		return nil, err
+		return labels.EmptyLabels(), err
 	}
+
+	labelSlice := make([]labels.Label, 0, len(mutableNames))
 
 	for _, mutableName := range mutableNames {
 		mutableValue, err := cp.getMutableValue(ctx, tenant, mutableName, value)
@@ -357,16 +360,16 @@ func (cp *Provider) GetMutable(ctx context.Context, tenant, name, value string) 
 				continue
 			}
 
-			return nil, err
+			return labels.EmptyLabels(), err
 		}
 
-		mutableLabel := labels.Label{
+		labelSlice = append(labelSlice, labels.Label{
 			Name:  mutableName,
 			Value: mutableValue,
-		}
-
-		mutableLabels = append(mutableLabels, mutableLabel)
+		})
 	}
+
+	mutableLabels = labels.New(labelSlice...)
 
 	cp.cache.SetMutableLabels(tenant, name, value, mutableLabels)
 
@@ -391,10 +394,8 @@ func (cp *Provider) getMutableValue(ctx context.Context, tenant, mutableName, no
 			return "", err
 		}
 
-		for _, value := range nonMutableLabels.Values {
-			if nonMutableValue == value {
-				return mutableValue, nil
-			}
+		if slices.Contains(nonMutableLabels.Values, nonMutableValue) {
+			return mutableValue, nil
 		}
 	}
 

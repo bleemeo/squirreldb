@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -37,6 +38,7 @@ import (
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
+	"github.com/prometheus/prometheus/util/compression"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
@@ -124,14 +126,15 @@ func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	enc := r.Header.Get("Content-Encoding")
 	if enc == "" {
-		// Don't break yolo 1.0 clients if not needed. This is similar to what we did before 2.0.
+		//nolint:lll
+		// Don't break yolo 1.0 clients if not needed. This is similar to what we did before 2.0:
+		// https://github.com/prometheus/prometheus/blob/d78253319daa62c8f28ed47e40bafcad2dd8b586/storage/remote/write_handler.go#L62
 		// We could give http.StatusUnsupportedMediaType, but let's assume snappy by default.
-	} else if enc != string(remote.SnappyBlockCompression) {
+	} else if strings.ToLower(enc) != compression.Snappy {
 		err := fmt.Errorf(
 			"%v encoding (compression) is not accepted by this server; only %v is acceptable",
-			enc, remote.SnappyBlockCompression,
+			enc, compression.Snappy,
 		)
-
 		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 	}

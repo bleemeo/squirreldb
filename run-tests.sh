@@ -3,7 +3,7 @@
 set -e
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v2.11.2"
+GORELEASER_VERSION="v2.12.7"
 
 while [ ! -z "$1" ]; do
     case "$1" in
@@ -65,8 +65,8 @@ elif [ "${WITH_SCYLLADB}" = "1" ]; then
     docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
-    export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.IPAddress }}'):9042
-    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.IPAddress }}'):6379
+    export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
+    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
 else
     echo
@@ -75,8 +75,8 @@ else
     docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
-    export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
-    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.IPAddress }}'):6379
+    export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
+    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
 fi
 

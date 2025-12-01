@@ -278,7 +278,7 @@ func (s *mockStore) verifyStore(
 	updateDelay := cassandraTTLUpdateDelay + cassandraTTLUpdateJitter + time.Second
 
 	for i, metricLabels := range metrics {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		wantMinExpire := expiration[i]
@@ -294,7 +294,7 @@ func (s *mockStore) verifyStore(
 
 		labelsInStore := s.id2labels[id]
 
-		if diff := cmp.Diff(metricLabels, labelsInStore); diff != "" {
+		if diff := cmp.Diff(metricLabels, labelsInStore, cmp.Comparer(labels.Equal)); diff != "" {
 			return fmt.Errorf("id2labels mismatch: (-want +got): %s", diff)
 		}
 
@@ -373,7 +373,7 @@ func (s *mockStore) verifyShard(
 	}
 
 	for _, metricLabels := range metricsPresent {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		if !ok {
@@ -402,7 +402,7 @@ func (s *mockStore) verifyShard(
 	}
 
 	for _, metricLabels := range metricsAbsent {
-		key := sortLabels(metricLabels).String()
+		key := metricLabels.String()
 		id, ok := s.labels2id[key]
 
 		if !ok {
@@ -1027,11 +1027,7 @@ func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
 		delay := c.delay
 		c.l.Unlock()
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// wait for callbackGate to be closed, signifing message should be processed
 			<-callbackChan
 
@@ -1040,7 +1036,7 @@ func (c *mockCluster) Subscribe(topic string, callback func([]byte)) {
 			}
 
 			callback(in)
-		}()
+		})
 	}
 
 	c.LocalCluster.Subscribe(topic, wrappedCallback)
@@ -1140,22 +1136,20 @@ func dropTTLFromMetricList(input []labels.Labels) []labels.Labels {
 }
 
 func labelsMapToList(m map[string]string, dropSpecialLabel bool) labels.Labels {
-	results := make(labels.Labels, 0, len(m))
+	labelSlice := make([]labels.Label, 0, len(m))
 
 	for k, v := range m {
 		if dropSpecialLabel && (k == ttlLabel) {
 			continue
 		}
 
-		results = append(results, labels.Label{
+		labelSlice = append(labelSlice, labels.Label{
 			Name:  k,
 			Value: v,
 		})
 	}
 
-	sort.Sort(results)
-
-	return results
+	return labels.New(labelSlice...)
 }
 
 // getTestLogger return a logger suitable for test.
@@ -1254,48 +1248,28 @@ func Benchmark_keyFromLabels(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			name:   "simple",
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			name:   "two",
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			name:   "need-quoting2",
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1313,48 +1287,28 @@ func Benchmark_labelsToID(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			name:   "simple",
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			name:   "two",
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			name:   "need-quoting2",
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1406,131 +1360,18 @@ func Test_interfaces(t *testing.T) {
 	}
 }
 
-func Test_sortLabels(t *testing.T) {
-	type args struct {
-		labels labels.Labels
-	}
-
-	tests := []struct {
-		name string
-		args args
-		want labels.Labels
-	}{
-		{
-			name: "sorted",
-			args: args{
-				labels: labels.Labels{
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-				},
-			},
-			want: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "no_sorted",
-			args: args{
-				labels: labels.Labels{
-					{
-						Name:  "monitor",
-						Value: "codelab",
-					},
-					{
-						Name:  "__name__",
-						Value: "up",
-					},
-				},
-			},
-			want: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "up",
-				},
-				{
-					Name:  "monitor",
-					Value: "codelab",
-				},
-			},
-		},
-		{
-			name: "labels_empty",
-			args: args{
-				labels: labels.Labels{},
-			},
-			want: labels.Labels{},
-		},
-		{
-			name: "labels_nil",
-			args: args{
-				labels: nil,
-			},
-			want: labels.Labels{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sortLabels(tt.args.labels); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SortLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_stringFromLabelsCollision(t *testing.T) {
 	tests := []struct {
 		input1 labels.Labels
 		input2 labels.Labels
 	}{
 		{
-			input1: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1",
-				},
-				{
-					Name:  "label2",
-					Value: "value2",
-				},
-			},
-			input2: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1,label2=value2",
-				},
-			},
+			input1: labels.FromStrings("label1", "value1", "label2", "value2"),
+			input2: labels.FromStrings("label1", "value1,label2=value2"),
 		},
 		{
-			input1: labels.Labels{
-				{
-					Name:  "label1",
-					Value: "value1",
-				},
-				{
-					Name:  "label2",
-					Value: "value2",
-				},
-			},
-			input2: labels.Labels{
-				{
-					Name:  "label1",
-					Value: `value1",label2="value2`,
-				},
-			},
+			input1: labels.FromStrings("label1", "value1", "label2", "value2"),
+			input2: labels.FromStrings("label1", `value1",label2="value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -1553,41 +1394,29 @@ func Test_stringFromLabels(t *testing.T) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
-			want: `{test="value"}`,
+			name:   "simple",
+			labels: labels.FromStrings("test", "value"),
+			want:   `{test="value"}`,
 		},
 		{
-			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
-			want: `{label1="value1", label2="value2"}`,
+			name:   "two",
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
+			want:   `{label1="value1", label2="value2"}`,
 		},
 		{
-			name: "two-unordered",
-			labels: labels.Labels{
-				{Name: "label2", Value: "value2"},
-				{Name: "label1", Value: "value1"},
-			},
-			want: `{label2="value2", label1="value1"}`,
+			name:   "two-unordered",
+			labels: labels.FromStrings("label2", "value2", "label1", "value1"),
+			want:   `{label1="value1", label2="value2"}`,
 		},
 		{
-			name: "need-quoting",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1",label2="value2`},
-			},
-			want: `{label1="value1\",label2=\"value2"}`,
+			name:   "need-quoting",
+			labels: labels.FromStrings("label1", `value1",label2="value2`),
+			want:   `{label1="value1\",label2=\"value2"}`,
 		},
 		{
-			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
-			want: `{label1="value1\\\",label2=\\\"value2"}`,
+			name:   "need-quoting2",
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
+			want:   `{label1="value1\\\",label2=\\\"value2"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -1605,48 +1434,28 @@ func Benchmark_stringFromLabels(b *testing.B) {
 		labels labels.Labels
 	}{
 		{
-			name: "simple",
-			labels: labels.Labels{
-				{Name: "test", Value: "value"},
-			},
+			name:   "simple",
+			labels: labels.FromStrings("test", "value"),
 		},
 		{
-			name: "two",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-			},
+			name:   "two",
+			labels: labels.FromStrings("label1", "value1", "label2", "value2"),
 		},
 		{
 			name: "ten-labels",
-			labels: labels.Labels{
-				{Name: "label1", Value: "value1"},
-				{Name: "label2", Value: "value2"},
-				{Name: "label3", Value: "value3"},
-				{Name: "label4", Value: "value4"},
-				{Name: "label5", Value: "value5"},
-				{Name: "label6", Value: "value6"},
-				{Name: "label7", Value: "value7"},
-				{Name: "label8", Value: "value8"},
-				{Name: "label9", Value: "value9"},
-				{Name: "label0", Value: "value0"},
-			},
+			labels: labels.FromStrings("label1", "value1", "label2", "value2", "label3", "value3",
+				"label4", "value4", "label5", "value5", "label6", "value6", "label7", "value7",
+				"label8", "value8", "label9", "value9", "label0", "value0"),
 		},
 		{
 			name: "five-longer-labels",
-			labels: labels.Labels{
-				{Name: "the-label-one", Value: "the-first-value"},
-				{Name: "the-second-label", Value: "another-value"},
-				{Name: "the-label-after-two", Value: "all-value-are-different"},
-				{Name: "the-label-four", Value: "sort"},
-				{Name: "the-last-label", Value: "but-most-of-the-time-value-is-long"},
-			},
+			labels: labels.FromStrings("the-label-one", "the-first-value", "the-second-label", "another-value",
+				"the-label-after-two", "all-value-are-different", "the-label-four", "sort",
+				"the-last-label", "but-most-of-the-time-value-is-long"),
 		},
 		{
-			name: "need-quoting2",
-			labels: labels.Labels{
-				{Name: "label1", Value: `value1\",label2=\"value2`},
-			},
+			name:   "need-quoting2",
+			labels: labels.FromStrings("label1", `value1\",label2=\"value2`),
 		},
 	}
 	for _, tt := range tests {
@@ -4681,14 +4490,7 @@ func Test_freeFreeID(t *testing.T) { //nolint:maintidx
 					t.Errorf("Had %d hole, want %d", maxPosting-count, tt.numberHole)
 				}
 
-				iterCount := 1000
-				if iterCount < 2*saveEvery {
-					iterCount = 2 * saveEvery
-				}
-
-				if iterCount < tt.numberHole+10 {
-					iterCount = tt.numberHole + 10
-				}
+				iterCount := max(max(1000, 2*saveEvery), tt.numberHole+10)
 
 				if tt.maxIter > 0 && iterCount > tt.maxIter {
 					iterCount = tt.maxIter
@@ -5377,7 +5179,7 @@ func cmpMetricsSetByLabels(ids types.MetricsSet, want []labels.Labels) (string, 
 		return labels.Compare(a, b) < 0
 	})
 
-	return cmp.Diff(got, want, sorter), nil
+	return cmp.Diff(got, want, sorter, cmp.Comparer(labels.Equal)), nil
 }
 
 // Test_cluster will run a small scenario on the index to check cluster SquirrelDB.
@@ -5666,10 +5468,7 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 					current := start
 					for current < end {
-						idxEnd := current + batchSize
-						if idxEnd > end {
-							idxEnd = end
-						}
+						idxEnd := min(current+batchSize, end)
 
 						_, _, err := index.lookupIDs(t.Context(), toLookupRequests(labelsList[current:idxEnd], t3), t3)
 						if err != nil {
@@ -9003,18 +8802,9 @@ func TestLookForOldData(t *testing.T) {
 	reqTime := now.Truncate(10 * time.Second)
 	writeReqs := []types.LookupRequest{
 		{
-			Start: reqTime,
-			End:   reqTime,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Start:      reqTime,
+			End:        reqTime,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -9069,18 +8859,9 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 
 	writeReqs := []types.LookupRequest{
 		{
-			Start: past,
-			End:   past,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Start:      past,
+			End:        past,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -9112,18 +8893,9 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 
 	writeReqs = []types.LookupRequest{
 		{
-			Start: now,
-			End:   now,
-			Labels: labels.Labels{
-				{
-					Name:  "__name__",
-					Value: "cpu_used",
-				},
-				{
-					Name:  "instance",
-					Value: "localhost:8015",
-				},
-			},
+			Start:      now,
+			End:        now,
+			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}

@@ -27,6 +27,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec,gci
 	"net/url"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,9 +90,8 @@ type API struct {
 	MutableLabelDetector     remotestorage.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
-	RequireTenantHeader   bool
-	UseThanosPromQLEngine bool
-	Logger                zerolog.Logger
+	RequireTenantHeader bool
+	Logger              zerolog.Logger
 
 	ready      int32
 	router     http.Handler
@@ -121,12 +121,11 @@ func NewPrometheus(
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
-	useThanosPromQLEngine bool,
 	apiLogger zerolog.Logger,
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
-	queryEngine := promql.NewEngine(queryLogger, useThanosPromQLEngine, metricRegistry)
+	queryEngine := promql.NewEngine(queryLogger, metricRegistry)
 	queryEngine = promql.WrapEngine(queryEngine, apiLogger)
 
 	scrapePoolRetrieverFunc := func(_ context.Context) v1.ScrapePoolsRetriever { return mockScrapePoolRetriever{} }
@@ -195,6 +194,10 @@ func NewPrometheus(
 		otlpEnabled,
 		otlpDeltaToCumulative,
 		ctZeroIngestionEnabled,
+		false, // ctZeroIngestionEnabled
+		time.Duration(time.Duration(5).Minutes()), // lookbackDelta
+		false, // enableTypeAndUnitLabels
+		nil,   // OverrideErrorCode
 	)
 
 	return api
@@ -264,7 +267,6 @@ func (a *API) init() {
 		appendable,
 		maxConcurrent,
 		a.MetricRegistry,
-		a.UseThanosPromQLEngine,
 		a.Logger,
 	)
 
@@ -971,13 +973,11 @@ func (a *API) mutableLabelValuesWriteHandler(w http.ResponseWriter, req *http.Re
 			return
 		}
 
-		for _, value := range label.AssociatedValues {
-			if value == "" {
-				errMsg := "associated values can't contain an empty string: %#v"
-				http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
+		if slices.Contains(label.AssociatedValues, "") {
+			errMsg := "associated values can't contain an empty string: %#v"
+			http.Error(w, fmt.Sprintf(errMsg, label), http.StatusBadRequest)
 
-				return
-			}
+			return
 		}
 	}
 

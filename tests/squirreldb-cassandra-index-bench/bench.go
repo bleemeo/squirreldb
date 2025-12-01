@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -126,17 +125,13 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 		channels := make([]chan []types.LookupRequest, *workerProcesses)
 
 		if *fairLB {
-			for n := 0; n < len(channels); n++ {
+			for n := range channels {
 				channels[n] = make(chan []types.LookupRequest)
 			}
 
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				loadBalancer(workChannel, channels)
-			}()
+			})
 		}
 
 		for p := range *workerProcesses {
@@ -157,17 +152,13 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 				return err
 			}
 
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				if *fairLB {
 					worker(ctx, localIndex, channels[p], resultChan)
 				} else {
 					worker(ctx, localIndex, workChannel, resultChan)
 				}
-			}()
+			})
 		}
 
 		start := time.Now()
@@ -374,10 +365,7 @@ func sentInsertRequest(
 		requests := makeInsertRequests(now, shardStr, rnd)
 
 		for startIndex := 0; startIndex < len(requests); startIndex += *insertBatchSize {
-			endIndex := startIndex + *insertBatchSize
-			if endIndex > len(requests) {
-				endIndex = len(requests)
-			}
+			endIndex := min(startIndex+*insertBatchSize, len(requests))
 
 			for {
 				var r int
@@ -524,10 +512,6 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 		}
 
 		promLabel := labels.FromMap(labelsMap)
-
-		if *sortInsert {
-			sort.Sort(promLabel)
-		}
 
 		request := types.LookupRequest{
 			Start:  now,

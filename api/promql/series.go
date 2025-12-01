@@ -85,7 +85,7 @@ func (i *seriesIter) Warnings() annotations.Annotations {
 }
 
 type series struct {
-	labels []labels.Label
+	labels labels.Labels
 	data   types.MetricData
 }
 

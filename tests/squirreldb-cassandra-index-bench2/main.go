@@ -206,7 +206,7 @@ func bench(ctx context.Context, cfg config.Config, clock *fakeClock) error {
 		cond: *sync.NewCond(&sync.Mutex{}),
 	}
 
-	for n := 0; n < len(channels); n++ {
+	for n := range channels {
 		channels[n] = make(chan []types.LookupRequest)
 	}
 
@@ -588,18 +588,14 @@ func mergeChannels(ctx context.Context, target chan []types.LookupRequest, sourc
 	var wg sync.WaitGroup
 
 	for _, ch := range sources {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for msg := range ch {
 				select {
 				case target <- msg:
 				case <-ctx.Done():
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -629,14 +625,10 @@ func worker(
 	for work := range workChanel {
 		now := clock.Now()
 		if now.Sub(previousRunOnce) >= backgroundCheckInterval {
-			wg.Add(1)
-
 			// The InternalRunOnce is running inside a gorouting has this
 			// is closer to what really happen. RunOnce is executed concurrently
 			// with LookupIDs
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				start := time.Now()
 
 				localIndex.InternalRunOnce(ctx, clock.Now())
@@ -645,7 +637,7 @@ func worker(
 
 				duration := time.Since(start)
 				stats.RunOnceDurations = append(stats.RunOnceDurations, DurationAndTime{Duration: duration, At: clock.Now()})
-			}()
+			})
 		}
 
 		start := time.Now()

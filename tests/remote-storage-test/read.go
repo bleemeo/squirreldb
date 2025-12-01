@@ -514,24 +514,22 @@ func sortedCopySample(v []prompb.Sample) []prompb.Sample {
 }
 
 func cmpLabels(a, b []prompb.Label) int {
-	a2 := make([]labels.Label, len(a))
-	b2 := make([]labels.Label, len(b))
+	labelsA := prompbLabelsToLabels(a)
+	labelsB := prompbLabelsToLabels(b)
 
-	for i, x := range a {
-		a2[i] = labels.Label{
+	return labels.Compare(labelsA, labelsB)
+}
+
+func prompbLabelsToLabels(pb []prompb.Label) labels.Labels {
+	lbls := make([]labels.Label, len(pb))
+	for i, x := range pb {
+		lbls[i] = labels.Label{
 			Name:  x.Name,
 			Value: x.Value,
 		}
 	}
 
-	for i, x := range b {
-		b2[i] = labels.Label{
-			Name:  x.Name,
-			Value: x.Value,
-		}
-	}
-
-	return labels.Compare(a2, b2)
+	return labels.New(lbls...)
 }
 
 func sortTimeseries(v []*prompb.TimeSeries) []*prompb.TimeSeries {

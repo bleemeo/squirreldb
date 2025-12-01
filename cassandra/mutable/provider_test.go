@@ -29,6 +29,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 func BenchmarkGetMutableSmall(b *testing.B)  { benchmarkGetMutable(b, 100, 10, 10) }
@@ -74,9 +75,8 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 	}
 
 	// Don't benchmark the initial data generation.
-	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		lbls, err := provider.GetMutable(
 			b.Context(),
 			searchedTenant,
@@ -87,16 +87,27 @@ func benchmarkGetMutable(b *testing.B, nbUsers, nbLabelsPerUser, nbValuesPerLabe
 			b.Fatal(err)
 		}
 
-		if len(lbls) != 1 {
-			b.Fatalf("expected 1 label, got %d", len(lbls))
+		if lbls.Len() != 1 {
+			b.Fatalf("expected 1 label, got %d", lbls.Len())
 		}
 
-		if lbls[0].Name != searchedMutableName {
-			b.Fatalf("expected name %s, got %s", searchedMutableName, lbls[0].Name)
+		var firstLabel labels.Label
+
+		first := true
+
+		lbls.Range(func(l labels.Label) {
+			if first {
+				firstLabel = l
+				first = false
+			}
+		})
+
+		if firstLabel.Name != searchedMutableName {
+			b.Fatalf("expected name %s, got %s", searchedMutableName, firstLabel.Name)
 		}
 
-		if lbls[0].Value != searchedMutableValue {
-			b.Fatalf("expected value %s, got %s", searchedMutableValue, lbls[0].Value)
+		if firstLabel.Value != searchedMutableValue {
+			b.Fatalf("expected value %s, got %s", searchedMutableValue, firstLabel.Value)
 		}
 	}
 }

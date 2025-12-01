@@ -18,7 +18,6 @@ package mutable_test
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
@@ -179,8 +178,6 @@ func TestAddMutableLabels(t *testing.T) {
 			if err != nil {
 				t.Errorf("Failed to process labels: %v", err)
 			}
-
-			sort.Sort(gotLabels)
 
 			if !reflect.DeepEqual(test.wantLabels, gotLabels) {
 				t.Errorf("AddMutableLabels() = %v, want %v", gotLabels, test.wantLabels)

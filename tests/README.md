@@ -24,8 +24,8 @@ docker run --name squirreldb-test-redis -d redis
 
 And tell test programs to use this Cassandra and Redis:
 ```
-export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.IPAddress }}'):9042
-export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.IPAddress }}'):6379
+export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
+export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
 ```
 
 Note: some test will clear store (Cassandra or Redis) before processing.

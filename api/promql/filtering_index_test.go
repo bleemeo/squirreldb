@@ -18,7 +18,6 @@ package promql
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 	"time"
 
@@ -48,11 +47,6 @@ func Test_filteringIndex_Search(t *testing.T) {
 
 	sortedLabels1 := labelsMetric1.Copy()
 	sortedLabels2 := labelsMetric2.Copy()
-	sortedLabels3 := labelsMetric3.Copy()
-
-	sort.Sort(sortedLabels1)
-	sort.Sort(sortedLabels2)
-	sort.Sort(sortedLabels3)
 
 	type fields struct {
 		index   types.Index

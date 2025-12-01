@@ -221,11 +221,7 @@ func (s *Store) GetTransfert(_ context.Context, count int) (map[types.MetricID]t
 	defer s.mutex.Unlock()
 
 	results := make(map[types.MetricID]time.Time, count)
-	endIndex := count
-
-	if endIndex >= len(s.transfertMetrics) {
-		endIndex = len(s.transfertMetrics)
-	}
+	endIndex := min(count, len(s.transfertMetrics))
 
 	for i := range endIndex {
 		id := s.transfertMetrics[i]

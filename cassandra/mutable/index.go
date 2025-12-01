@@ -232,7 +232,7 @@ func (i *indexWrapper) DumpByLabels(
 	return errNotImplemented
 }
 
-// Verify implements the IndexVerifier interface used by the API.
+// Verifier Verify implements the IndexVerifier interface used by the API.
 func (i *indexWrapper) Verifier(w io.Writer) types.IndexVerifier {
 	if verifier, ok := i.index.(types.VerifiableIndex); ok {
 		return verifier.Verifier(w)
@@ -290,7 +290,7 @@ func (i *indexWrapper) InternalForceExpirationTimestamp(ctx context.Context, val
 	return errNotImplemented
 }
 
-// RunOnce implements the IndexRunner interface used in tests.
+// InternalRunOnce implements the IndexRunner interface used in tests.
 func (i *indexWrapper) InternalRunOnce(ctx context.Context, now time.Time) bool {
 	if runner, ok := i.index.(types.IndexRunner); ok {
 		return runner.InternalRunOnce(ctx, now)

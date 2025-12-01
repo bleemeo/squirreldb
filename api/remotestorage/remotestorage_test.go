@@ -27,6 +27,7 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 // TestAppenderInvalidRequest tests that the appender still works after a lot of invalid requests.
@@ -46,7 +47,7 @@ func TestAppenderInvalidRequest(t *testing.T) {
 
 		appender := app.Appender(subCtx)
 
-		_, err := appender.Append(0, nil, 0, 0)
+		_, err := appender.Append(0, labels.EmptyLabels(), 0, 0)
 		if !errors.Is(err, remotestorage.ErrMissingTenantHeader) {
 			t.Fatalf("Expected ErrMissingTenantHeader, got %s", err)
 		}
@@ -62,7 +63,7 @@ func TestAppenderInvalidRequest(t *testing.T) {
 
 		appender := app.Appender(subCtx)
 
-		_, err := appender.Append(0, nil, 0, 0)
+		_, err := appender.Append(0, labels.EmptyLabels(), 0, 0)
 		if !errors.Is(err, remotestorage.ErrParseTTLHeader) {
 			t.Fatalf("Expected ErrMissingTenantHeader, got %s", err)
 		}

@@ -86,15 +86,23 @@ func (w *writeMetrics) Append(_ storage.SeriesRef, l labels.Labels, t int64, v f
 		// Remove the mutable labels.
 		// Mutable labels should not be written because they can't be searched
 		// as the index replaces them by real labels when querying a metric.
-		for _, label := range l {
+		var rangeErr error
+
+		l.Range(func(label labels.Label) {
 			isMutable, err := w.mutableLabelDetector.IsMutableLabel(context.Background(), w.tenantLabel.Value, label.Name)
 			if err != nil {
-				return 0, err
+				rangeErr = err
+
+				return
 			}
 
 			if isMutable {
 				builder.Del(label.Name)
 			}
+		})
+
+		if rangeErr != nil {
+			return 0, rangeErr
 		}
 
 		l = builder.Labels()
@@ -175,34 +183,51 @@ func (w *writeMetrics) SetOptions(*storage.AppendOptions) {}
 // while not containing the '|' character.
 // https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 func validateLabels(ls labels.Labels) error {
-	for _, l := range ls {
-		if l.Name == model.MetricNameLabel {
-			if !model.IsValidMetricName(model.LabelValue(l.Value)) || strings.Contains(l.Value, "|") {
-				return fmt.Errorf("%w: metric name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Value)
-			}
-		} else if !model.LabelName(l.Name).IsValid() || strings.Contains(l.Name, "|") {
-			return fmt.Errorf("%w: label name '%s' should be valid utf-8, without char '|'", ErrInvalidMatcher, l.Name)
-		}
-	}
+	var validationErr error
 
-	return nil
+	ls.Range(func(l labels.Label) {
+		if validationErr != nil {
+			return
+		}
+
+		if l.Name == model.MetricNameLabel {
+			if !types.PrometheusValidationScheme.IsValidMetricName(l.Value) || strings.Contains(l.Value, "|") {
+				validationErr = fmt.Errorf(
+					"%w: metric name '%s' should be valid utf-8, without char '|'",
+					ErrInvalidMatcher,
+					l.Value,
+				)
+
+				return
+			}
+		} else {
+			if !types.PrometheusValidationScheme.IsValidLabelName(l.Name) || strings.Contains(l.Name, "|") {
+				validationErr = fmt.Errorf(
+					"%w: label name '%s' should be valid utf-8, without char '|'",
+					ErrInvalidMatcher,
+					l.Name,
+				)
+
+				return
+			}
+		}
+	})
+
+	return validationErr
 }
 
 func dropEmptyValue(ls labels.Labels) labels.Labels {
-	i := 0
+	finalLs := make([]labels.Label, 0, ls.Len())
 
-	for _, l := range ls {
+	ls.Range(func(l labels.Label) {
 		if l.Value == "" {
-			continue
+			return
 		}
 
-		ls[i] = l
-		i++
-	}
+		finalLs = append(finalLs, l)
+	})
 
-	ls = ls[:i]
-
-	return ls
+	return labels.New(finalLs...)
 }
 
 // AppendExemplar adds an exemplar for the given series labels, should never be called.

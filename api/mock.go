@@ -71,13 +71,17 @@ func (mockAlertmanagerRetriever) DroppedAlertmanagers() []*url.URL { return nil 
 // mockTSDBAdminStat implements v1.TSDBAdminStats.
 type mockTSDBAdminStat struct{}
 
-func (mockTSDBAdminStat) CleanTombstones() error { return errNotImplemented }
+func (mockTSDBAdminStat) CleanTombstones() error {
+	return errNotImplemented
+}
 
 func (mockTSDBAdminStat) Delete(_ context.Context, _, _ int64, _ ...*labels.Matcher) error {
 	return errNotImplemented
 }
 
-func (mockTSDBAdminStat) Snapshot(_ string, _ bool) error { return errNotImplemented }
+func (mockTSDBAdminStat) Snapshot(_ string, _ bool) error {
+	return errNotImplemented
+}
 
 func (mockTSDBAdminStat) Stats(_ string, _ int) (*tsdb.Stats, error) {
 	return nil, errNotImplemented
@@ -85,6 +89,10 @@ func (mockTSDBAdminStat) Stats(_ string, _ int) (*tsdb.Stats, error) {
 
 func (mockTSDBAdminStat) WALReplayStatus() (tsdb.WALReplayStatus, error) {
 	return tsdb.WALReplayStatus{}, errNotImplemented
+}
+
+func (mockTSDBAdminStat) BlockMetas() ([]tsdb.BlockMeta, error) {
+	return nil, errNotImplemented
 }
 
 // mockRulesRetriever implements v1.RulesRetriever.
