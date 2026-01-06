@@ -58,9 +58,9 @@ func decodeOsRelease(data string) (map[string]string, error) {
 }
 
 func bytesToString(buffer []byte) string {
-	n := bytes.IndexByte(buffer, 0)
+	before, _, _ := bytes.Cut(buffer, []byte{0})
 
-	return string(buffer[:n])
+	return string(before)
 }
 
 func platformFacts() map[string]string {

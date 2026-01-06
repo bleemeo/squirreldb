@@ -43,7 +43,7 @@ var (
 // end of the program to flush the events to Sentry.
 func setupSentryLogger(cfg config.Config) io.Closer {
 	consoleWriter := logger.NewConsoleWriter(cfg.Log.DisableColor)
-	logLevel := zerolog.Level(cfg.Log.Level) //nolint:gosec
+	logLevel := zerolog.Level(cfg.Log.Level)
 	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))
 
 	if cfg.Sentry.DSN == "" {
