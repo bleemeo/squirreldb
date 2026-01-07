@@ -217,7 +217,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 				break
 			}
 
-			metricID := types.MetricID(id) //nolint:gosec
+			metricID := types.MetricID(id)
 
 			count++
 
@@ -257,7 +257,7 @@ func (ve *verifierExecution) verify(ctx context.Context) (hadIssue bool, err err
 	}
 
 	for _, shard := range shards.Slice() {
-		shard := int32(shard) //nolint:gosec
+		shard := int32(shard)
 		fmt.Fprintf(ve.output, "Checking shard %s (ID %d)\n", timeForShard(shard).Format(shardDateFormat), shard)
 
 		shardHadIssue, err := ve.verifyShard(ctx, shard)
@@ -307,7 +307,7 @@ func (ve *verifierExecution) verifyMissingShard(
 				return 0, shards, err
 			}
 
-			if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) { //nolint:gosec
+			if it != nil && it.Any() && !shards.Contains(uint64(queryShard[0])) {
 				errorCount++
 
 				fmt.Fprintf(
@@ -318,7 +318,7 @@ func (ve *verifierExecution) verifyMissingShard(
 				)
 
 				if ve.doFix {
-					_, err = shards.AddN(uint64(queryShard[0])) //nolint:gosec
+					_, err = shards.AddN(uint64(queryShard[0]))
 					if err != nil {
 						return 0, shards, fmt.Errorf("update bitmap: %w", err)
 					}
@@ -335,7 +335,7 @@ func (ve *verifierExecution) verifyMissingShard(
 			return 0, shards, ctx.Err()
 		}
 
-		shard := int32(shard) //nolint:gosec
+		shard := int32(shard)
 
 		it, err := ve.index.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 		if err != nil {
@@ -352,7 +352,7 @@ func (ve *verifierExecution) verifyMissingShard(
 			)
 
 			if ve.doFix {
-				_, err = shards.RemoveN(uint64(shard)) //nolint:gosec
+				_, err = shards.RemoveN(uint64(shard))
 				if err != nil {
 					return 0, shards, fmt.Errorf("update bitmap: %w", err)
 				}
@@ -402,7 +402,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 		}
 
 		if !ok {
-			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil { //nolint:gosec
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
 				return false, err
 			}
 
@@ -424,7 +424,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 		}
 
 		if !ok {
-			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil { //nolint:gosec
+			if _, err := ve.expectedUnknowDate.AddN(uint64(id)); err != nil {
 				return false, err
 			}
 
@@ -463,7 +463,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			it = roaring.NewBTreeBitmap()
 		}
 
-		if _, err := it.AddN(uint64(id)); err != nil { //nolint:gosec
+		if _, err := it.AddN(uint64(id)); err != nil {
 			return false, err
 		}
 
@@ -523,7 +523,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 					ve.bulkDeleter.PrepareDelete(id2, lbls, false)
 					ve.bulkDeleter.PrepareDelete(id, lbls, false)
 				}
-			case !ve.allPosting.Contains(uint64(id2)): //nolint:gosec
+			case !ve.allPosting.Contains(uint64(id2)):
 				fmt.Fprintf(
 					ve.output,
 					"ID %10d (%v) conflict with ID %d (which isn't listed in all posting! THIS SHOULD NOT HAPPEN.)\n",
@@ -574,7 +574,7 @@ func (ve *verifierExecution) verifyBulk( //nolint:maintidx
 			continue
 		}
 
-		_, err = ve.allGoodIDs.AddN(uint64(id)) //nolint:gosec
+		_, err = ve.allGoodIDs.AddN(uint64(id))
 		if err != nil {
 			return hadIssue, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -712,7 +712,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 				break
 			}
 
-			pendingIDs = append(pendingIDs, types.MetricID(id)) //nolint:gosec
+			pendingIDs = append(pendingIDs, types.MetricID(id))
 			if len(pendingIDs) > 1000 {
 				break
 			}
@@ -742,7 +742,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 					bitset = roaring.NewBTreeBitmap()
 				}
 
-				_, err := bitset.AddN(uint64(id)) //nolint:gosec
+				_, err := bitset.AddN(uint64(id))
 				if err != nil {
 					rangeErr = fmt.Errorf("update bitmap: %w", err)
 
@@ -761,7 +761,7 @@ func (ve *verifierExecution) verifyShard( //nolint:maintidx
 					bitset = roaring.NewBTreeBitmap()
 				}
 
-				_, err = bitset.AddN(uint64(id)) //nolint:gosec
+				_, err = bitset.AddN(uint64(id))
 				if err != nil {
 					rangeErr = fmt.Errorf("update bitmap: %w", err)
 
@@ -1251,12 +1251,12 @@ func truncatedIDList(bitmap *roaring.Bitmap, maxItem int) string {
 
 		if len(buffer) == maxItem {
 			elipsis = true
-			numberMore = int(bitmap.Count()) - maxItem //nolint:gosec
+			numberMore = int(bitmap.Count()) - maxItem
 
 			break
 		}
 
-		buffer = append(buffer, strconv.FormatInt(int64(id), 10)) //nolint:gosec
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
 	}
 
 	if len(buffer) == 0 {
@@ -1284,7 +1284,7 @@ func truncatedSliceIDList(ids []uint64, maxItem int) string {
 			break
 		}
 
-		buffer = append(buffer, strconv.FormatInt(int64(id), 10)) //nolint:gosec
+		buffer = append(buffer, strconv.FormatInt(int64(id), 10))
 	}
 
 	if len(buffer) == 0 {

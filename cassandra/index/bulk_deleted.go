@@ -48,7 +48,7 @@ func newBulkDeleter(c *CassandraIndex) *deleter {
 // sortedLabels may be nil if labels are unknown (so only ID is deleted from all postings).
 // Skipping labels2id is used by index fix. It shouldn't be used in normal condition.
 func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, skipLabels2Id bool) {
-	d.deleteIDs = append(d.deleteIDs, uint64(id)) //nolint:gosec
+	d.deleteIDs = append(d.deleteIDs, uint64(id))
 
 	if !sortedLabels.IsEmpty() && !skipLabels2Id {
 		sortedLabelsString := sortedLabels.String()
@@ -84,7 +84,7 @@ func (d *deleter) PrepareDelete(id types.MetricID, sortedLabels labels.Labels, s
 
 		d.unshardedPostingUpdates[idx].RemoveIDs = append(
 			d.unshardedPostingUpdates[idx].RemoveIDs,
-			uint64(id), //nolint:gosec
+			uint64(id),
 		)
 	}
 }
@@ -162,7 +162,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 	allDeleteIDs := roaring.NewBitmap(d.deleteIDs...)
 
 	for _, shard := range shards.Slice() {
-		shard := int32(shard) //nolint:gosec
+		shard := int32(shard)
 
 		it := maybePresent[shard]
 		if it == nil || !it.Any() {
@@ -170,7 +170,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 			// This usually occur if a Cassandra error happen after deleting from maybePresence and before
 			// deleting it from existingShardsLabel.
 			// Cleanup entry in existingShardsLabel
-			shardDeleter.ShardsListUpdate.RemoveIDs = append(shardDeleter.ShardsListUpdate.RemoveIDs, uint64(shard)) //nolint:gosec,lll
+			shardDeleter.ShardsListUpdate.RemoveIDs = append(shardDeleter.ShardsListUpdate.RemoveIDs, uint64(shard))
 
 			continue
 		}
@@ -220,7 +220,7 @@ func (d *deleter) Delete(ctx context.Context) error {
 		concurrentDelete,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, id := range d.deleteIDs {
-				id := types.MetricID(id) //nolint:gosec
+				id := types.MetricID(id)
 
 				task := func() error {
 					err := d.c.store.DeleteID2Labels(ctx, id)
@@ -364,7 +364,7 @@ func (d *postingsInShardDeleter) Delete(ctx context.Context) error {
 					// it is nil iff it's empty (or an error occure)
 					if it == nil || errors.Is(err, errBitmapEmpty) {
 						d.l.Lock()
-						d.ShardsListUpdate.RemoveIDs = append(d.ShardsListUpdate.RemoveIDs, uint64(req.Shard)) //nolint:gosec
+						d.ShardsListUpdate.RemoveIDs = append(d.ShardsListUpdate.RemoveIDs, uint64(req.Shard))
 						d.l.Unlock()
 					}
 

@@ -266,7 +266,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		}
 
 		if metrics.Err() != nil {
-			log.Fatalf("Search(%s) failed: %v", tt.Name, err)
+			log.Fatalf("Search(%s) failed: %v", tt.Name, metrics.Err())
 		}
 
 		if !reflect.DeepEqual(wantIDToIndex, gotIDToIndex) {

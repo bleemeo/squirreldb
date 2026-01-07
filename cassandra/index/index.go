@@ -545,7 +545,7 @@ func (c *CassandraIndex) deleteIDsFromCache(deleteIDs []uint64) {
 		deleteIDsMap := make(map[types.MetricID]bool, len(deleteIDs))
 
 		for _, id := range deleteIDs {
-			deleteIDsMap[types.MetricID(id)] = true //nolint:gosec
+			deleteIDsMap[types.MetricID(id)] = true
 		}
 
 		for key, idsData := range c.labelsToID {
@@ -581,7 +581,7 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 		concurrentPostingRead,
 		func(ctx context.Context, work chan<- func() error) error {
 			for _, shard := range shards {
-				shard := int32(shard) //nolint:gosec
+				shard := int32(shard)
 				task := func() error {
 					tmp, err := c.postings(ctx, []int32{shard}, maybePostingLabel, maybePostingLabel, false)
 					if err != nil {
@@ -759,7 +759,7 @@ func (c *CassandraIndex) dumpPostings(ctx context.Context, w *csv.Writer, postin
 
 		n := 0
 		for id, eof := iter.Next(); !eof && n < expireBatchSize; id, eof = iter.Next() {
-			pendingIDs[n] = types.MetricID(id) //nolint:gosec
+			pendingIDs[n] = types.MetricID(id)
 			n++
 		}
 
@@ -842,7 +842,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		}
 
 		postingShard, err := c.postings(ctx,
-			[]int32{int32(shard)}, //nolint:gosec
+			[]int32{int32(shard)},
 			allPostingLabel,
 			allPostingLabel,
 			false,
@@ -852,7 +852,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		}
 
 		maybepostingShard, err := c.postings(ctx,
-			[]int32{int32(shard)}, //nolint:gosec
+			[]int32{int32(shard)},
 			maybePostingLabel,
 			maybePostingLabel,
 			false,
@@ -862,7 +862,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		}
 
 		labelNamesCount := 0
-		iter := c.store.SelectPostingByName(ctx, int32(shard), postinglabelName) //nolint:gosec
+		iter := c.store.SelectPostingByName(ctx, int32(shard), postinglabelName)
 
 		for iter.HasNext() {
 			labelNamesCount++
@@ -870,7 +870,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 
 		iter.Close()
 
-		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard)) //nolint:gosec
+		shardExpiration, _, err := c.getShardExpirationFromStore(ctx, int32(shard))
 
 		// Some shard expiration metrics may not exist if the shard were created before the
 		// expiration was introduced. In this case the expiration will be shown at 0001-01-01 00:00:00.
@@ -881,7 +881,7 @@ func (c *CassandraIndex) InfoGlobal(ctx context.Context, w io.Writer) error {
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has %d metrics (and %d in maybePosting), %d label names and expires at %s\n",
-			timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			postingShard.Count(),
 			maybepostingShard.Count(),
@@ -934,7 +934,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 	var lbls labels.Labels
 
 	if len(labelsMap) == 0 {
-		fmt.Fprintf(w, "Metric ID %d not found in id2labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id))) //nolint:gosec,lll
+		fmt.Fprintf(w, "Metric ID %d not found in id2labels and isInGlobal=%v\n", id, allPosting.Contains(uint64(id))) //nolint:lll
 	} else {
 		lbls = labelsMap[id]
 
@@ -944,7 +944,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			id,
 			lbls,
 			expiration[id],
-			allPosting.Contains(uint64(id)), //nolint:gosec
+			allPosting.Contains(uint64(id)),
 		)
 
 		sortedLabelsString := lbls.String()
@@ -969,7 +969,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		}
 
 		postingShard, err := c.postings(ctx,
-			[]int32{int32(shard)}, //nolint:gosec
+			[]int32{int32(shard)},
 			allPostingLabel,
 			allPostingLabel,
 			false,
@@ -979,7 +979,7 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		}
 
 		maybepostingShard, err := c.postings(ctx,
-			[]int32{int32(shard)}, //nolint:gosec
+			[]int32{int32(shard)},
 			maybePostingLabel,
 			maybePostingLabel,
 			false,
@@ -988,13 +988,13 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			return err
 		}
 
-		inPosting := postingShard.Contains(uint64(id))    //nolint:gosec
-		inMaybe := maybepostingShard.Contains(uint64(id)) //nolint:gosec
+		inPosting := postingShard.Contains(uint64(id))
+		inMaybe := maybepostingShard.Contains(uint64(id))
 
 		fmt.Fprintf(
 			w,
 			"Shard %s (ID %d) has the metric in posting=%v, maybePosting=%v\n",
-			timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+			timeForShard(int32(shard)).Format(shardDateFormat),
 			shard,
 			inPosting,
 			inMaybe,
@@ -1013,14 +1013,14 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 		var rangeErr error
 
 		lbls.Range(func(l labels.Label) {
-			posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false) //nolint:gosec
+			posting, err := c.postings(ctx, []int32{int32(shard)}, l.Name, l.Value, false)
 			if err != nil {
 				rangeErr = err
 
 				return
 			}
 
-			if !posting.Contains(uint64(id)) { //nolint:gosec
+			if !posting.Contains(uint64(id)) {
 				missingPostings = append(missingPostings, fmt.Sprintf("%s=%s", l.Name, l.Value))
 			}
 		})
@@ -1033,14 +1033,14 @@ func (c *CassandraIndex) InfoByID(ctx context.Context, w io.Writer, id types.Met
 			fmt.Fprintf(
 				w,
 				"Shard %s: the following postings are missing: %s\n",
-				timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+				timeForShard(int32(shard)).Format(shardDateFormat),
 				strings.Join(missingPostings, ", "),
 			)
 		} else {
 			fmt.Fprintf(
 				w,
 				"Shard %s: all postings are present\n",
-				timeForShard(int32(shard)).Format(shardDateFormat), //nolint:gosec
+				timeForShard(int32(shard)).Format(shardDateFormat),
 			)
 		}
 	}
@@ -1579,7 +1579,7 @@ func (c *CassandraIndex) lookupIDsFromCache(
 				return nil, nil, err
 			}
 
-			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id)) //nolint:gosec
+			possibleInvalidIDs = append(possibleInvalidIDs, uint64(data.id))
 			found = false
 		}
 
@@ -1789,12 +1789,12 @@ func (c *CassandraIndex) refreshExpiration(
 
 	req := c.expirationUpdateRequests[previousDay.Unix()]
 
-	req.RemoveIDs = append(req.RemoveIDs, uint64(id)) //nolint:gosec
+	req.RemoveIDs = append(req.RemoveIDs, uint64(id))
 	c.expirationUpdateRequests[previousDay.Unix()] = req
 
 	req = c.expirationUpdateRequests[newDay.Unix()]
 
-	req.AddIDs = append(req.AddIDs, uint64(id)) //nolint:gosec
+	req.AddIDs = append(req.AddIDs, uint64(id))
 	c.expirationUpdateRequests[newDay.Unix()] = req
 
 	return nil
@@ -1942,13 +1942,13 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 
 		c.metrics.LookupIDConcurrentNew.Inc()
 
-		if !allPosting.Contains(uint64(id)) { //nolint:gosec
+		if !allPosting.Contains(uint64(id)) {
 			c.logger.Error().Int64("id", int64(id)).Msg("already registered ID is not present in allPosting!")
 
 			// Add the bad ID to next expiration, so it could be cleanup if possible
 			today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 			expReq := expirationUpdateRequests[today.Unix()]
-			expReq.AddIDs = append(expReq.AddIDs, uint64(id)) //nolint:gosec
+			expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 			expirationUpdateRequests[today.Unix()] = expReq
 
 			// Do not use this ID. A new ID will be allocated.
@@ -1976,7 +1976,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 				// Add the bad ID to next expiration, so it could be cleanup if possible
 				today := c.options.InternalNowFunction().Truncate(24 * time.Hour)
 				expReq := expirationUpdateRequests[today.Unix()]
-				expReq.AddIDs = append(expReq.AddIDs, uint64(id)) //nolint:gosec
+				expReq.AddIDs = append(expReq.AddIDs, uint64(id))
 				expirationUpdateRequests[today.Unix()] = expReq
 
 				// Do not use this ID. A new ID will be allocated.
@@ -2002,14 +2002,14 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 			// This case is only used during test, where we want to force ID value
 			newID = entry.id
 		default:
-			newID = types.MetricID(findFreeID(allPosting)) //nolint:gosec
+			newID = types.MetricID(findFreeID(allPosting))
 		}
 
 		if newID == 0 {
 			return nil, errors.New("too many metrics registered, unable to find a free ID")
 		}
 
-		_, err = allPosting.AddN(uint64(newID)) //nolint:gosec
+		_, err = allPosting.AddN(uint64(newID))
 		if err != nil {
 			return nil, fmt.Errorf("update bitmap: %w", err)
 		}
@@ -2030,7 +2030,7 @@ func (c *CassandraIndex) createMetrics( //nolint:maintidx
 		day := cassandraExpiration.Truncate(24 * time.Hour)
 		expReq := expirationUpdateRequests[day.Unix()]
 
-		expReq.AddIDs = append(expReq.AddIDs, uint64(newID)) //nolint:gosec
+		expReq.AddIDs = append(expReq.AddIDs, uint64(newID))
 
 		expirationUpdateRequests[day.Unix()] = expReq
 	}
@@ -2197,7 +2197,7 @@ func (c *CassandraIndex) updatePostingShards(
 			c.idInShardLastAccess[shard] = now
 
 			it := c.idInShard[shard]
-			if it != nil && it.Contains(uint64(entry.id)) { //nolint:gosec
+			if it != nil && it.Contains(uint64(entry.id)) {
 				continue
 			}
 
@@ -2210,7 +2210,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 			}
 
-			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
+			req.AddIDs = append(req.AddIDs, uint64(entry.id))
 			maybePresent[shard] = req
 
 			labelSlice := make([]labels.Label, 0, entry.unsortedLabels.Len()*2)
@@ -2247,7 +2247,7 @@ func (c *CassandraIndex) updatePostingShards(
 					m[lbl] = idx
 				}
 
-				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id)) //nolint:gosec
+				updates[idx].AddIDs = append(updates[idx].AddIDs, uint64(entry.id))
 			}
 
 			req, ok = precense[shard]
@@ -2259,7 +2259,7 @@ func (c *CassandraIndex) updatePostingShards(
 				}
 			}
 
-			req.AddIDs = append(req.AddIDs, uint64(entry.id)) //nolint:gosec
+			req.AddIDs = append(req.AddIDs, uint64(entry.id))
 			precense[shard] = req
 		}
 	}
@@ -2358,7 +2358,7 @@ func (c *CassandraIndex) applyUpdatePostingShards(
 	newShard := make([]uint64, 0, len(maybePresent))
 
 	for shard := range maybePresent {
-		newShard = append(newShard, uint64(shard)) //nolint:gosec
+		newShard = append(newShard, uint64(shard))
 	}
 
 	_, err := c.postingUpdate(ctx, postingUpdateRequest{
@@ -3055,7 +3055,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 
 	metricIDs := make([]types.MetricID, len(ids))
 	for i, intID := range ids {
-		metricIDs[i] = types.MetricID(intID) //nolint:gosec
+		metricIDs[i] = types.MetricID(intID)
 	}
 
 	idToLabels, expires, err := c.selectIDS2LabelsAndExpiration(ctx, metricIDs)
@@ -3105,7 +3105,7 @@ func (c *CassandraIndex) cassandraCheckExpire(ctx context.Context, ids []uint64,
 				dayToExpireUpdates[expireDay.Unix()] = idx
 			}
 
-			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id)) //nolint:gosec
+			expireUpdates[idx].AddIDs = append(expireUpdates[idx].AddIDs, uint64(id))
 
 			continue
 		}
@@ -3214,7 +3214,7 @@ func (c *CassandraIndex) deleteShard(ctx context.Context, shard int32) error {
 			Name:  existingShardsLabel,
 			Value: existingShardsLabel,
 		},
-		RemoveIDs: []uint64{uint64(shard)}, //nolint:gosec
+		RemoveIDs: []uint64{uint64(shard)},
 	}
 
 	_, err = c.postingUpdate(ctx, updateRequest)
@@ -3523,7 +3523,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 		// With postings filtering, we do one Cassandra query per matchers.
 		// With explicit matching on labels, we do one Cassandra query per IDs BUT this query will be done anyway if the
 		// series would be kept.
-		if results != nil && results.Count() <= uint64(directCheckThreshold) { //nolint:gosec
+		if results != nil && results.Count() <= uint64(directCheckThreshold) {
 			needCheckMatches = true
 
 			break
@@ -3572,7 +3572,7 @@ func (c *CassandraIndex) postingsForMatchers( //nolint:gocognit
 			return nil, false, ctx.Err()
 		}
 
-		if results != nil && results.Count() <= uint64(directCheckThreshold) { //nolint:gosec
+		if results != nil && results.Count() <= uint64(directCheckThreshold) {
 			needCheckMatches = true
 
 			break
@@ -3832,7 +3832,7 @@ func (c *CassandraIndex) cassandraGetExpirationList(ctx context.Context, day tim
 func shardForTime(ts int64) int32 {
 	shardSize := int32(postingShardSize.Hours())
 
-	return (int32(ts/3600) / shardSize) * shardSize //nolint:gosec
+	return (int32(ts/3600) / shardSize) * shardSize
 }
 
 // timeForShard return the time for given shard ID.
@@ -3863,12 +3863,12 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 			return nil, err
 		}
 
-		if minShard, ok := existingShards.Min(); ok && startShard < int32(minShard) { //nolint:gosec
-			startShard = int32(minShard) //nolint:gosec
+		if minShard, ok := existingShards.Min(); ok && startShard < int32(minShard) {
+			startShard = int32(minShard)
 		}
 
-		if maxShard := existingShards.Max(); endShard > int32(maxShard) { //nolint:gosec
-			endShard = int32(maxShard) //nolint:gosec
+		if maxShard := existingShards.Max(); endShard > int32(maxShard) {
+			endShard = int32(maxShard)
 		}
 	}
 
@@ -3880,7 +3880,7 @@ func (c *CassandraIndex) getTimeShards(ctx context.Context, start, end time.Time
 	current := startShard
 
 	for current <= endShard {
-		if returnAll || existingShards.Contains(uint64(current)) { //nolint:gosec
+		if returnAll || existingShards.Contains(uint64(current)) {
 			results = append(results, current)
 		}
 
@@ -4015,7 +4015,7 @@ func bitsetToIDs(it *roaring.Bitmap) []types.MetricID {
 	results := make([]types.MetricID, len(resultInts))
 
 	for i, v := range resultInts {
-		results[i] = types.MetricID(v) //nolint:gosec
+		results[i] = types.MetricID(v)
 	}
 
 	return results
