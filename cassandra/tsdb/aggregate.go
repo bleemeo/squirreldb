@@ -260,8 +260,8 @@ func (c *CassandraTSDB) ForcePreAggregation(
 				rangeCount++
 
 				l.Lock()
-				pointsCount += rangePointsCount //nolint: wsl_v5
-				l.Unlock()                      //nolint: wsl_v5
+				pointsCount += rangePointsCount
+				l.Unlock()
 
 				delta := time.Since(rangeStart)
 

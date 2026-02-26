@@ -80,7 +80,7 @@ func quotedToBinary(s string) ([]byte, error) {
 					return nil, err
 				}
 
-				result = append(result, byte(v))
+				result = append(result, byte(v)) //nolint:gosec
 			default:
 				return nil, fmt.Errorf("unknown escape char, got %q", escapeChar)
 			}

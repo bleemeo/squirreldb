@@ -154,7 +154,7 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec
 	if err != nil {
 		t.opts.Logger.Err(err).Msg("Failed to post telemetry")
 
@@ -192,7 +192,7 @@ func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
 
 	defer lock.Unlock()
 
-	var telemetryIDs []string
+	telemetryIDs := make([]string, 0, 1)
 
 	_, err := t.opts.State.Read(ctx, "telemetry-ids", &telemetryIDs)
 	if err != nil {

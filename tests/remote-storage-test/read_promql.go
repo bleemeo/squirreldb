@@ -47,8 +47,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			count, err := readPromQLWorker(ctx, workChannel, promQLURL, tenant)
 
 			mutex.Lock()
-			reqCount += count //nolint: wsl_v5
-			mutex.Unlock()    //nolint: wsl_v5
+			reqCount += count
+			mutex.Unlock()
 
 			// make sure workChannel is drained
 			for range workChannel {

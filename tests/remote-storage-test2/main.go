@@ -1,3 +1,4 @@
+//nolint:gosec
 package main
 
 import (
@@ -257,7 +258,7 @@ func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteReque
 
 		s.l.Unlock()
 
-		ts := []prompb.TimeSeries{}
+		ts := make([]prompb.TimeSeries, 0, len(s.activeAgent)*2)
 
 		for i, name := range s.activeAgent {
 			ts = append(ts, prompb.TimeSeries{

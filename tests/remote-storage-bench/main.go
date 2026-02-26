@@ -167,7 +167,7 @@ func (w *Writer) Run(ctx context.Context, workChannel chan prompb.WriteRequest) 
 		request.Header.Set("X-Prometheus-Remote-Read-Version", "2.0.0")
 		request.Header.Set(types.HeaderTimeToLive, ttlString)
 
-		response, err := http.DefaultClient.Do(request)
+		response, err := http.DefaultClient.Do(request) //nolint:gosec
 		if err != nil {
 			return err
 		}

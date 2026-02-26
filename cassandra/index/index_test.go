@@ -2598,7 +2598,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		t.Error(err)
 	}
 
-	requests := make([]types.LookupRequest, 0)
+	requests := make([]types.LookupRequest, 0, 100*100)
 
 	for x := range 100 {
 		var start, end time.Time
@@ -6392,7 +6392,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			// End of phase 1
 			oldestShard := shardForTime(baseTime.Unix())
 
-			var present []labels.Labels
+			present := make([]labels.Labels, 0, len(metricsLongTTL)+len(metricsLongToShortTTL))
 
 			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
 			// are currently still in the shard because the shard only expires when all metrics in it
@@ -6426,7 +6426,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 			// End of phase 2
 			oldestShard := shardForTime(baseTime.Unix())
 
-			var present []labels.Labels
+			present := make([]labels.Labels, 0, len(metricsLongTTL)+len(metricsLongToShortTTL))
 
 			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
 			// are currently still in the shard because the shard only expires when all metrics in it
@@ -6465,7 +6465,7 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 				)
 			}
 
-			var present []labels.Labels
+			present := make([]labels.Labels, 0, len(metricsLongTTL)+len(metricsLongToShortTTL))
 
 			// metricsShortTTL, metricsShortestTTL and metricsShortToLongTTL have expired, but they
 			// are currently still in the shard because the shard only expires when all metrics in it

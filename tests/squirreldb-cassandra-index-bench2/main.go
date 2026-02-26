@@ -490,53 +490,21 @@ func makeInsertRequests(
 ) [][]types.LookupRequest {
 	results := make([][]types.LookupRequest, 0, len(serverNamesAndTenant))
 
+	metricNames := []string{"cpu_used", "mem_used_perc", "mem_total", "swap_used_perc", "system_load1"}
+
 	for _, serverID := range serverNamesAndTenant {
-		oneSet := []types.LookupRequest{
-			{
+		oneSet := make([]types.LookupRequest, 0, len(metricNames)+3+2+2)
+
+		for _, name := range metricNames {
+			oneSet = append(oneSet, types.LookupRequest{
 				Start: now,
 				End:   now,
 				Labels: labels.FromMap(map[string]string{
-					"__name__":      "cpu_used",
+					"__name__":      name,
 					"instance":      serverID.name,
 					tenantLabelName: serverID.tenant,
 				}),
-			},
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.FromMap(map[string]string{
-					"__name__":      "mem_used_perc",
-					"instance":      serverID.name,
-					tenantLabelName: serverID.tenant,
-				}),
-			},
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.FromMap(map[string]string{
-					"__name__":      "mem_total",
-					"instance":      serverID.name,
-					tenantLabelName: serverID.tenant,
-				}),
-			},
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.FromMap(map[string]string{
-					"__name__":      "swap_used_perc",
-					"instance":      serverID.name,
-					tenantLabelName: serverID.tenant,
-				}),
-			},
-			{
-				Start: now,
-				End:   now,
-				Labels: labels.FromMap(map[string]string{
-					"__name__":      "system_load1",
-					"instance":      serverID.name,
-					tenantLabelName: serverID.tenant,
-				}),
-			},
+			})
 		}
 
 		for _, fsPath := range []string{"/", "/srv", "/home"} {
