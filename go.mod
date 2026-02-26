@@ -2,6 +2,10 @@ module github.com/bleemeo/squirreldb
 
 go 1.25.0
 
+replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.307.3
+
+replace github.com/redis/go-redis/v9 => github.com/redis/go-redis/v9 v9.14.1
+
 require (
 	dario.cat/mergo v1.0.2
 	github.com/apache/arrow-go/v18 v18.5.1
@@ -27,8 +31,8 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.67.5
-	github.com/prometheus/procfs v0.19.2
-	github.com/prometheus/prometheus v0.307.3
+	github.com/prometheus/procfs v0.20.0
+	github.com/prometheus/prometheus v1.99.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/rs/zerolog v1.34.0
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -182,7 +186,7 @@ require (
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260213145524-e0ab670178e1 // indirect
 	golang.org/x/text v0.34.0 // indirect
