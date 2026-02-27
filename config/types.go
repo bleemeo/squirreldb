@@ -88,7 +88,7 @@ type RemoteStorage struct {
 type Redis struct {
 	Addresses   []string `yaml:"addresses"`
 	Username    string   `yaml:"username"`
-	Password    string   `yaml:"password"`
+	Password    string   `yaml:"password"` //nolint:gosec
 	SSL         bool     `yaml:"ssl"`
 	SSLInsecure bool     `yaml:"ssl_insecure"`
 	CertPath    string   `yaml:"cert_path"`
@@ -106,7 +106,7 @@ type Cassandra struct {
 	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`
 	Username               string        `yaml:"username"`
-	Password               string        `yaml:"password"`
+	Password               string        `yaml:"password"` //nolint:gosec
 	CertPath               string        `yaml:"cert_path"`
 	KeyPath                string        `yaml:"key_path"`
 	CAPath                 string        `yaml:"ca_path"`

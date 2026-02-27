@@ -143,7 +143,7 @@ func generateData(nbUsers, nbLabelsPerUser, nbValuesPerLabel int) dummy.MutableL
 			for j := range nbLabelsPerUser {
 				mutableValue := fmt.Sprintf("%s-%d", name, j)
 
-				var nonMutableValues []string
+				nonMutableValues := make([]string, 0, nbValuesPerLabel)
 				for range nbValuesPerLabel {
 					nonMutableValues = append(nonMutableValues, randomString(20))
 				}

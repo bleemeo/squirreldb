@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:gosec
 package index
 
 import (
@@ -589,8 +590,8 @@ func (c *CassandraIndex) getMaybePresent(ctx context.Context, shards []uint64) (
 					}
 
 					l.Lock()
-					results[shard] = tmp //nolint: wsl_v5
-					l.Unlock()           //nolint: wsl_v5
+					results[shard] = tmp
+					l.Unlock()
 
 					return nil
 				}

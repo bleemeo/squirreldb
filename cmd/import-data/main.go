@@ -184,7 +184,7 @@ func writeTimeseries(timeseries []prompb.TimeSeries) error {
 		request.Header.Set(types.HeaderTenant, *tenant)
 	}
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(request) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("%w: %w", errRequestFailed, err)
 	}
