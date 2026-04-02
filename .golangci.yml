@@ -1,7 +1,7 @@
 version: "2"
 
 run:
-  go: "1.25"
+  go: "1.26"
   timeout: 5m
 
 linters:
@@ -37,6 +37,8 @@ linters:
       # List of allowed `replace` directives. Needed because go.mod doesn't support nolint comments.
       replace-allow-list:
         - cloud.google.com/go
+        - github.com/prometheus/prometheus
+        - github.com/redis/go-redis/v9
     nolintlint:
       # Require nolint directives to mention the specific linter being suppressed.
       require-specific: true

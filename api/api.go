@@ -93,7 +93,7 @@ type API struct {
 	RequireTenantHeader bool
 	Logger              zerolog.Logger
 
-	ready      int32
+	ready      atomic.Int32
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
@@ -403,12 +403,11 @@ func (a *API) ListenPort() int {
 
 // Ready mark the system as ready to access requests.
 func (a *API) Ready() {
-	atomic.StoreInt32(&a.ready, 1)
+	a.ready.Store(1)
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	v := atomic.LoadInt32(&a.ready)
-	if v > 0 {
+	if a.ready.Load() > 0 {
 		a.router.ServeHTTP(w, req)
 
 		return
@@ -567,9 +566,9 @@ func (a *API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	if idx, ok := a.Index.(types.VerifiableIndex); ok { //nolint:nestif
-		doFix := req.FormValue("fix") != ""
-		acquireLock := req.FormValue("lock") != ""
-		strict := req.FormValue("strict") != ""
+		doFix := req.URL.Query().Get("fix") != ""
+		acquireLock := req.URL.Query().Get("lock") != ""
+		strict := req.URL.Query().Get("strict") != ""
 
 		nowList := req.URL.Query()["now"]
 		if len(nowList) > 1 {

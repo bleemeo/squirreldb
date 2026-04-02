@@ -379,7 +379,7 @@ func readWorker(
 			request.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
 		}
 
-		response, newErr := http.DefaultClient.Do(request) //nolint:gosec
+		response, newErr := http.DefaultClient.Do(request)
 		if newErr != nil {
 			log.Printf("read failed: %v", newErr)
 

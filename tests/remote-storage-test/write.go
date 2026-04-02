@@ -187,7 +187,7 @@ func writeWorker(ctx context.Context, workChannel chan prompb.WriteRequest, writ
 			request.Header.Set("X-SquirrelDB-Tenant", tenant) //nolint:canonicalheader
 		}
 
-		response, err := http.DefaultClient.Do(request) //nolint:gosec
+		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			log.Printf("write failed: %v", err)
 

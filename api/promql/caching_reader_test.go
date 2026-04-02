@@ -17,6 +17,7 @@
 package promql
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -1438,7 +1439,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 				prometheus.NewRegistry(),
 			)
 
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 
 			cachingCtx, err := store.ContextFromRequest(req)
 			if err != nil {
@@ -1702,7 +1703,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 			for _, req := range tests {
 				countBefore := countingReader.PointsRead()
 
-				testReq := httptest.NewRequest(http.MethodGet, "/", nil)
+				testReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 
 				reqCtx, err := store.ContextFromRequest(testReq)
 				if err != nil {
