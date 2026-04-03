@@ -17,6 +17,7 @@
 package promql
 
 import (
+	"context"
 	"errors"
 	"net/http/httptest"
 	"testing"
@@ -509,7 +510,7 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 				DefaultMaxEvaluatedSeries: tt.fields.MaxEvaluatedSeries,
 			}
 
-			r := httptest.NewRequest("", "/", nil)
+			r := httptest.NewRequestWithContext(context.Background(), "", "/", nil)
 
 			for k, v := range tt.reqHeader {
 				r.Header.Add(k, v)
@@ -575,7 +576,7 @@ func TestPromQL_InvalidForcedMatcher(t *testing.T) {
 		Reader: reader,
 	}
 
-	r := httptest.NewRequest("", "/", nil)
+	r := httptest.NewRequestWithContext(context.Background(), "", "/", nil)
 	r.Header.Add(types.HeaderForcedMatcher, "invalid")
 
 	_, err := queryable.ContextFromRequest(r)

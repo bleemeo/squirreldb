@@ -154,7 +154,7 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.opts.Logger.Err(err).Msg("Failed to post telemetry")
 

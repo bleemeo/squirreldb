@@ -18,6 +18,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -182,7 +183,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 				reader = bytes.NewReader(body)
 			}
 
-			req := httptest.NewRequest(method, url, reader)
+			req := httptest.NewRequestWithContext(context.Background(), method, url, reader)
 
 			for k, v := range headers {
 				req.Header.Add(k, v)

@@ -174,7 +174,7 @@ func (l *Lock) tryLock(ctx context.Context) bool { //nolint:contextcheck
 	l.acquired = true
 	l.cassAcquired = true
 
-	subCtx, cancel := context.WithCancel(context.Background())
+	subCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec
 
 	l.cancel = cancel
 

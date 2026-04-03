@@ -941,7 +941,7 @@ func (b *Batch) write(
 	b.mutex.Lock()
 
 	for i, count := range pointsCount {
-		addedCount := len(metrics[i].Points)
+		addedCount := len(metrics[i].Points) //nolint:gosec
 		previousCount := count - addedCount
 		writtenPointsCount += addedCount
 
@@ -952,22 +952,22 @@ func (b *Batch) write(
 		}
 
 		if previousCount == 0 {
-			b.states[metrics[i].ID] = stateData{
-				flushDeadline: flushTimestamp(metrics[i].ID, now, b.batchSize),
+			b.states[metrics[i].ID] = stateData{ //nolint:gosec
+				flushDeadline: flushTimestamp(metrics[i].ID, now, b.batchSize), //nolint:gosec
 			}
 
-			ownerShipInitialPoints = append(ownerShipInitialPoints, metrics[i])
+			ownerShipInitialPoints = append(ownerShipInitialPoints, metrics[i]) //nolint:gosec
 		}
 
 		// Yes we compare number of point with time. This test only here
 		// to avoid unbounded grow of temporary store when processing backlog
 		// of data.
 		if count > int(b.batchSize.Seconds()) {
-			_, isOwner := b.states[metrics[i].ID]
+			_, isOwner := b.states[metrics[i].ID] //nolint:gosec
 			n := count / int(b.batchSize.Seconds())
 
 			if isOwner {
-				metricToFlush[metrics[i].ID] = nil
+				metricToFlush[metrics[i].ID] = nil //nolint:gosec
 			} else if n > 1 && previousCount < n*int(b.batchSize.Seconds()) {
 				// If the number of points crossed a multiple of our b.batchSize
 				// (that is count > b.batchSize and previousCount < N*b.batchSize)
@@ -975,7 +975,7 @@ func (b *Batch) write(
 				//
 				// This will catch case where the current owner is dead, but give him
 				// the first threshold to act.
-				metricToFlush[metrics[i].ID] = nil
+				metricToFlush[metrics[i].ID] = nil //nolint:gosec
 
 				b.metrics.NonOwnerWrite.Inc()
 			}
