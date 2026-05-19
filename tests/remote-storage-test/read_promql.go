@@ -73,9 +73,9 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"__name__": "large_write",
-						"nowStr":   model.LabelValue(*nowStr),
-						"size":     "week",
+						labelName:   valLargeWrite,
+						labelNowStr: model.LabelValue(*nowStr),
+						labelSize:   valWeek,
 					},
 					tenant,
 				),
@@ -104,8 +104,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"nowStr": model.LabelValue(*nowStr),
-						"size":   "week",
+						labelNowStr: model.LabelValue(*nowStr),
+						labelSize:   valWeek,
 					},
 					tenant,
 				),
@@ -133,8 +133,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"nowStr": model.LabelValue(*nowStr),
-						"size":   "week",
+						labelNowStr: model.LabelValue(*nowStr),
+						labelSize:   valWeek,
 					},
 					tenant,
 				),
@@ -162,8 +162,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"nowStr": model.LabelValue(*nowStr),
-						"size":   "week",
+						labelNowStr: model.LabelValue(*nowStr),
+						labelSize:   valWeek,
 					},
 					tenant,
 				),
@@ -192,8 +192,8 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"__name__": "sub_second",
-						"nowStr":   model.LabelValue(*nowStr),
+						labelName:   "sub_second",
+						labelNowStr: model.LabelValue(*nowStr),
 					},
 					tenant,
 				),
@@ -222,7 +222,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"nowStr": model.LabelValue(*nowStr),
+						labelNowStr: model.LabelValue(*nowStr),
 					},
 					tenant,
 				),
@@ -266,9 +266,9 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 				&model.SampleStream{
 					Metric: addTenantIfNotEmptyPromQL(
 						model.Metric{
-							"nowStr": model.LabelValue(*nowStr),
-							"batch":  "yes",
-							"scale":  model.LabelValue(strconv.FormatInt(int64(n), 10)),
+							labelNowStr: model.LabelValue(*nowStr),
+							labelBatch:  valYes,
+							labelScale:  model.LabelValue(strconv.FormatInt(int64(n), 10)),
 						},
 						tenant,
 					),
@@ -298,9 +298,9 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 					&model.SampleStream{
 						Metric: addTenantIfNotEmptyPromQL(
 							model.Metric{
-								"nowStr": model.LabelValue(*nowStr),
-								"batch":  "yes",
-								"scale":  model.LabelValue(strconv.FormatInt(int64(n), 10)),
+								labelNowStr: model.LabelValue(*nowStr),
+								labelBatch:  valYes,
+								labelScale:  model.LabelValue(strconv.FormatInt(int64(n), 10)),
 							},
 							tenant,
 						),
@@ -331,7 +331,7 @@ func readPromQL(ctx context.Context, now time.Time, promQLURL string, tenant str
 			&model.SampleStream{
 				Metric: addTenantIfNotEmptyPromQL(
 					model.Metric{
-						"nowStr": model.LabelValue(*nowStr),
+						labelNowStr: model.LabelValue(*nowStr),
 					},
 					tenant,
 				),

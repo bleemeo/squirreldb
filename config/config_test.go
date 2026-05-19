@@ -38,7 +38,7 @@ func TestStructuredConfig(t *testing.T) {
 			Aggregate: Aggregate{
 				IntendedDuration: 60 * time.Second,
 			},
-			Username:               "cassandra",
+			Username:               backendCassandra,
 			Password:               "pass",
 			CertPath:               "/cert.pem",
 			KeyPath:                "/key.pem",
@@ -76,18 +76,18 @@ func TestStructuredConfig(t *testing.T) {
 			DSN: "my_dsn",
 		},
 		Internal: Internal{
-			Index:                   "cassandra",
+			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       1,
 			Installation: Installation{
 				Format: "manual",
 			},
-			TSDB:                  "cassandra",
+			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 "cassandra",
-			States:                "cassandra",
+			Locks:                 backendCassandra,
+			States:                backendCassandra,
 			Store:                 "batcher",
-			MutableLabelsProvider: "cassandra",
+			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: true,
 		},
 		Telemetry: Telemetry{

@@ -66,9 +66,9 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 					StartTimestampMs: time2Millisecond(now.Add(-time.Hour * 24 * 7)),
 					EndTimestampMs:   time2Millisecond(now),
 					Matchers: []*prompb.LabelMatcher{
-						{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-						{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "large_write"},
-						{Type: prompb.LabelMatcher_EQ, Name: "size", Value: "week"},
+						{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+						{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: valLargeWrite},
+						{Type: prompb.LabelMatcher_EQ, Name: labelSize, Value: valWeek},
 					},
 				},
 			},
@@ -80,9 +80,9 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						{
 							Labels: addTenantIfNotEmpty(
 								[]prompb.Label{
-									{Name: "__name__", Value: "large_write"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "size", Value: "week"},
+									{Name: labelName, Value: valLargeWrite},
+									{Name: labelNowStr, Value: *nowStr},
+									{Name: labelSize, Value: valWeek},
 								},
 								tenant,
 							),
@@ -108,8 +108,8 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 					StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
 					EndTimestampMs:   time2Millisecond(now),
 					Matchers: []*prompb.LabelMatcher{
-						{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-						{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "large_write"},
+						{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+						{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: valLargeWrite},
 					},
 				},
 			},
@@ -121,9 +121,9 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						{
 							Labels: addTenantIfNotEmpty(
 								[]prompb.Label{
-									{Name: "__name__", Value: "large_write"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "size", Value: "hour"},
+									{Name: labelName, Value: valLargeWrite},
+									{Name: labelNowStr, Value: *nowStr},
+									{Name: labelSize, Value: "hour"},
 								},
 								tenant,
 							),
@@ -138,9 +138,9 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						{
 							Labels: addTenantIfNotEmpty(
 								[]prompb.Label{
-									{Name: "__name__", Value: "large_write"},
-									{Name: "nowStr", Value: *nowStr},
-									{Name: "size", Value: "week"},
+									{Name: labelName, Value: valLargeWrite},
+									{Name: labelNowStr, Value: *nowStr},
+									{Name: labelSize, Value: valWeek},
 								},
 								tenant,
 							),
@@ -166,16 +166,16 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 					StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
 					EndTimestampMs:   time2Millisecond(now),
 					Matchers: []*prompb.LabelMatcher{
-						{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-						{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "sub_second"},
+						{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+						{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: "sub_second"},
 					},
 				},
 				{
 					StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
 					EndTimestampMs:   time2Millisecond(now),
 					Matchers: []*prompb.LabelMatcher{
-						{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-						{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "high_precision"},
+						{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+						{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: "high_precision"},
 					},
 				},
 			},
@@ -187,8 +187,8 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						{
 							Labels: addTenantIfNotEmpty(
 								[]prompb.Label{
-									{Name: "__name__", Value: "sub_second"},
-									{Name: "nowStr", Value: *nowStr},
+									{Name: labelName, Value: "sub_second"},
+									{Name: labelNowStr, Value: *nowStr},
 								},
 								tenant,
 							),
@@ -207,8 +207,8 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						{
 							Labels: addTenantIfNotEmpty(
 								[]prompb.Label{
-									{Name: "__name__", Value: "high_precision"},
-									{Name: "nowStr", Value: *nowStr},
+									{Name: labelName, Value: "high_precision"},
+									{Name: labelNowStr, Value: *nowStr},
 								},
 								tenant,
 							),
@@ -242,10 +242,10 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						StartTimestampMs: time2Millisecond(now.Add(-time.Minute)),
 						EndTimestampMs:   time2Millisecond(now),
 						Matchers: []*prompb.LabelMatcher{
-							{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-							{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "filler"},
-							{Type: prompb.LabelMatcher_EQ, Name: "batch", Value: "yes"},
-							{Type: prompb.LabelMatcher_EQ, Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+							{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+							{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: labelFiller},
+							{Type: prompb.LabelMatcher_EQ, Name: labelBatch, Value: valYes},
+							{Type: prompb.LabelMatcher_EQ, Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
 						},
 					},
 				},
@@ -257,10 +257,10 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 							{
 								Labels: addTenantIfNotEmpty(
 									[]prompb.Label{
-										{Name: "__name__", Value: "filler"},
-										{Name: "batch", Value: "yes"},
-										{Name: "nowStr", Value: *nowStr},
-										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+										{Name: labelName, Value: labelFiller},
+										{Name: labelBatch, Value: valYes},
+										{Name: labelNowStr, Value: *nowStr},
+										{Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
 									},
 									tenant,
 								),
@@ -281,9 +281,9 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 						StartTimestampMs: time2Millisecond(now.Add(-time.Minute).Add(10 * time.Second * time.Duration(i))),
 						EndTimestampMs:   time2Millisecond(now.Add(-time.Minute).Add(10 * time.Second * time.Duration(i))),
 						Matchers: []*prompb.LabelMatcher{
-							{Type: prompb.LabelMatcher_EQ, Name: "nowStr", Value: *nowStr},
-							{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "filler"},
-							{Type: prompb.LabelMatcher_EQ, Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+							{Type: prompb.LabelMatcher_EQ, Name: labelNowStr, Value: *nowStr},
+							{Type: prompb.LabelMatcher_EQ, Name: labelName, Value: labelFiller},
+							{Type: prompb.LabelMatcher_EQ, Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
 						},
 					},
 				},
@@ -295,10 +295,10 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 							{
 								Labels: addTenantIfNotEmpty(
 									[]prompb.Label{
-										{Name: "__name__", Value: "filler"},
-										{Name: "batch", Value: "no"},
-										{Name: "nowStr", Value: *nowStr},
-										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+										{Name: labelName, Value: labelFiller},
+										{Name: labelBatch, Value: "no"},
+										{Name: labelNowStr, Value: *nowStr},
+										{Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
 									},
 									tenant,
 								),
@@ -307,10 +307,10 @@ func read(ctx context.Context, now time.Time, readURL, tenant string) error { //
 							{
 								Labels: addTenantIfNotEmpty(
 									[]prompb.Label{
-										{Name: "__name__", Value: "filler"},
-										{Name: "batch", Value: "yes"},
-										{Name: "nowStr", Value: *nowStr},
-										{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
+										{Name: labelName, Value: labelFiller},
+										{Name: labelBatch, Value: valYes},
+										{Name: labelNowStr, Value: *nowStr},
+										{Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
 									},
 									tenant,
 								),

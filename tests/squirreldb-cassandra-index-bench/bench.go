@@ -204,7 +204,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
-					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchEqual, labelName, names[rnd.Intn(len(names))]),
 				}
 			},
 		},
@@ -212,7 +212,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Name: "name=X shard=N",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchEqual, labelName, names[rnd.Intn(len(names))]),
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
 				}
 			},
@@ -222,7 +222,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
-					labels.MustNewMatcher(labels.MatchNotEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchNotEqual, labelName, names[rnd.Intn(len(names))]),
 				}
 			},
 		},
@@ -231,7 +231,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
-					labels.MustNewMatcher(labels.MatchRegexp, "__name__", names[rnd.Intn(len(names))][:6]+".*"),
+					labels.MustNewMatcher(labels.MatchRegexp, labelName, names[rnd.Intn(len(names))][:6]+".*"),
 				}
 			},
 		},
@@ -242,7 +242,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
 					labels.MustNewMatcher(
 						labels.MatchRegexp,
-						"__name__",
+						labelName,
 						fmt.Sprintf("(%s|%s)", names[rnd.Intn(len(names))], names[rnd.Intn(len(names))]),
 					),
 				}
@@ -253,8 +253,8 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
-					labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_.*"),
-					labels.MustNewMatcher(labels.MatchNotEqual, "__name__", "node_netstat_Udp_InErrors"),
+					labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_.*"),
+					labels.MustNewMatcher(labels.MatchNotEqual, labelName, "node_netstat_Udp_InErrors"),
 				}
 			},
 		},
@@ -262,7 +262,7 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 			Name: "shard=N name=X randomID=\"\"",
 			Fun: func(_ int) []*labels.Matcher {
 				return []*labels.Matcher{
-					labels.MustNewMatcher(labels.MatchEqual, "__name__", names[rnd.Intn(len(names))]),
+					labels.MustNewMatcher(labels.MatchEqual, labelName, names[rnd.Intn(len(names))]),
 					labels.MustNewMatcher(labels.MatchEqual, "shardID", fmt.Sprintf("shard%06d", rnd.Intn(shardCount)+*shardStart)),
 					labels.MustNewMatcher(labels.MatchEqual, "randomID", ""),
 				}
@@ -492,7 +492,7 @@ func makeInsertRequests(now time.Time, shardID string, rnd *rand.Rand) []types.L
 	for n := range *shardSize {
 		userID := strconv.FormatInt(rnd.Int63n(100000), 10)
 		labelsMap := map[string]string{
-			"__name__":                               names[rnd.Intn(len(names))],
+			labelName:                                names[rnd.Intn(len(names))],
 			"shardID":                                shardID,
 			"randomID":                               userID,
 			fmt.Sprintf("random%03d", rnd.Intn(100)): userID,

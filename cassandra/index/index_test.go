@@ -67,6 +67,50 @@ const (
 	MetricIDTest15
 )
 
+// Label keys.
+const (
+	lblName        = "__name__"
+	lblJob         = "job"
+	lblInstance    = "instance"
+	lblCPU         = "cpu"
+	lblMode        = "mode"
+	lblDevice      = "device"
+	lblMountpoint  = "mountpoint"
+	lblEnvironment = "environment"
+	lblValue       = "value"
+	lblItem        = "item"
+	lblDescription = "description"
+	lblAccountID   = "account_id"
+	lblFstype      = "fstype"
+)
+
+// Metric names.
+const (
+	metricNodeCPUSecondsTotal = "node_cpu_seconds_total"
+	metricNodeFilesystemAvail = "node_filesystem_avail_bytes"
+	metricUp2                 = "up2"
+	metricCounterTotal        = "counter_total"
+	metricDiskUsed            = "disk_used"
+	metricCPUUsed             = "cpu_used"
+)
+
+// Label values.
+const (
+	valNodeExporter  = "node_exporter"
+	valLocalhost     = "localhost:9100"
+	valRemotehost    = "remotehost:9100"
+	valUser          = "user"
+	valExt4          = "ext4"
+	valDevMapper     = "/dev/mapper/vg0-data"
+	valSrvData       = "/srv/data"
+	valRemote        = "remote:9100"
+	valProduction    = "production"
+	valItem2         = "item2"
+	valPrometheus    = "prometheus"
+	valLocalhost9090 = "localhost:9090"
+	valItem1         = "item1"
+)
+
 var errNotImplemented = errors.New("not implemented")
 
 type mockTime struct {
@@ -1249,7 +1293,7 @@ func Benchmark_keyFromLabels(b *testing.B) {
 	}{
 		{
 			name:   "simple",
-			labels: labels.FromStrings("test", "value"),
+			labels: labels.FromStrings("test", lblValue),
 		},
 		{
 			name:   "two",
@@ -1288,7 +1332,7 @@ func Benchmark_labelsToID(b *testing.B) {
 	}{
 		{
 			name:   "simple",
-			labels: labels.FromStrings("test", "value"),
+			labels: labels.FromStrings("test", lblValue),
 		},
 		{
 			name:   "two",
@@ -1395,7 +1439,7 @@ func Test_stringFromLabels(t *testing.T) {
 	}{
 		{
 			name:   "simple",
-			labels: labels.FromStrings("test", "value"),
+			labels: labels.FromStrings("test", lblValue),
 			want:   `{test="value"}`,
 		},
 		{
@@ -1435,7 +1479,7 @@ func Benchmark_stringFromLabels(b *testing.B) {
 	}{
 		{
 			name:   "simple",
-			labels: labels.FromStrings("test", "value"),
+			labels: labels.FromStrings("test", lblValue),
 		},
 		{
 			name:   "two",
@@ -1472,76 +1516,76 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 	shards := []int32{shardForTime(now.Unix())}
 	metrics1 := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
-			"__name__": "up",
-			"job":      "prometheus",
-			"instance": "localhost:9090",
+			lblName:     "up",
+			lblJob:      valPrometheus,
+			lblInstance: valLocalhost9090,
 		},
 		MetricIDTest2: {
-			"__name__": "up",
-			"job":      "node_exporter",
-			"instance": "localhost:9100",
+			lblName:     "up",
+			lblJob:      valNodeExporter,
+			lblInstance: valLocalhost,
 		},
 		MetricIDTest3: {
-			"__name__": "up",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
+			lblName:     "up",
+			lblJob:      valNodeExporter,
+			lblInstance: valRemotehost,
 		},
 		MetricIDTest4: {
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "0",
-			"mode":     "idle",
+			lblName:     metricNodeCPUSecondsTotal,
+			lblJob:      valNodeExporter,
+			lblInstance: valRemotehost,
+			lblCPU:      "0",
+			lblMode:     "idle",
 		},
 		MetricIDTest5: {
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "0",
-			"mode":     "user",
+			lblName:     metricNodeCPUSecondsTotal,
+			lblJob:      valNodeExporter,
+			lblInstance: valRemotehost,
+			lblCPU:      "0",
+			lblMode:     valUser,
 		},
 		MetricIDTest6: {
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "1",
-			"mode":     "user",
+			lblName:     metricNodeCPUSecondsTotal,
+			lblJob:      valNodeExporter,
+			lblInstance: valRemotehost,
+			lblCPU:      "1",
+			lblMode:     valUser,
 		},
 		MetricIDTest7: {
-			"__name__":   "node_filesystem_avail_bytes",
-			"job":        "node_exporter",
-			"instance":   "localhost:9100",
-			"device":     "/dev/mapper/vg0-root",
-			"fstype":     "ext4",
-			"mountpoint": "/",
+			lblName:       metricNodeFilesystemAvail,
+			lblJob:        valNodeExporter,
+			lblInstance:   valLocalhost,
+			lblDevice:     "/dev/mapper/vg0-root",
+			lblFstype:     valExt4,
+			lblMountpoint: "/",
 		},
 		MetricIDTest8: {
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "localhost:9100",
-			"device":      "/dev/mapper/vg0-data",
-			"fstype":      "ext4",
-			"mountpoint":  "/srv/data",
-			"environment": "devel",
+			lblName:        metricNodeFilesystemAvail,
+			lblJob:         valNodeExporter,
+			lblInstance:    valLocalhost,
+			lblDevice:      valDevMapper,
+			lblFstype:      valExt4,
+			lblMountpoint:  valSrvData,
+			lblEnvironment: "devel",
 		},
 		MetricIDTest9: {
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "remote:9100",
-			"device":      "/dev/mapper/vg0-data",
-			"fstype":      "ext4",
-			"mountpoint":  "/srv/data",
-			"environment": "production",
+			lblName:        metricNodeFilesystemAvail,
+			lblJob:         valNodeExporter,
+			lblInstance:    valRemote,
+			lblDevice:      valDevMapper,
+			lblFstype:      valExt4,
+			lblMountpoint:  valSrvData,
+			lblEnvironment: valProduction,
 		},
 		MetricIDTest10: {
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "remote:9100",
-			"device":      "/dev/mapper/vg0-data",
-			"fstype":      "ext4",
-			"mountpoint":  "/srv/data",
-			"environment": "production",
-			"userID":      "42",
+			lblName:        metricNodeFilesystemAvail,
+			lblJob:         valNodeExporter,
+			lblInstance:    valRemote,
+			lblDevice:      valDevMapper,
+			lblFstype:      valExt4,
+			lblMountpoint:  valSrvData,
+			lblEnvironment: valProduction,
+			"userID":       "42",
 		},
 	}
 	index1 := mockIndexFromMetrics(t, now, now, metrics1)
@@ -1550,19 +1594,19 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 	metrics3 := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
-			"__name__": "up",
-			"job":      "prometheus",
-			"instance": "localhost:9090",
+			lblName:     "up",
+			lblJob:      valPrometheus,
+			lblInstance: valLocalhost9090,
 		},
 		math.MaxUint32: {
-			"__name__": "metric_id",
-			"value":    "exactly-32bits",
-			"instance": "localhost:900",
+			lblName:     "metric_id",
+			lblValue:    "exactly-32bits",
+			lblInstance: "localhost:900",
 		},
 		math.MaxInt64: {
-			"__name__": "metric_id",
-			"value":    "largest-id",
-			"instance": "localhost:900",
+			lblName:     "metric_id",
+			lblValue:    "largest-id",
+			lblInstance: "localhost:900",
 		},
 	}
 	index3 := mockIndexFromMetrics(t, now, now, metrics3)
@@ -1571,7 +1615,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		for y := range 100 {
 			id := types.MetricID(x*100 + y)
 			metrics2[id] = map[string]string{
-				"__name__":   fmt.Sprintf("generated_%03d", x),
+				lblName:      fmt.Sprintf("generated_%03d", x),
 				"label_x":    fmt.Sprintf("%03d", x),
 				"label_y":    fmt.Sprintf("%03d", y),
 				"multiple_2": strconv.FormatBool(y%2 == 0),
@@ -1596,7 +1640,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -1612,13 +1656,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -1632,13 +1676,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -1651,12 +1695,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -1670,7 +1714,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 				labels.MustNewMatcher(
@@ -1687,12 +1731,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -1708,7 +1752,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"u.",
 				),
 			},
@@ -1724,12 +1768,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_cpu_.*",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"mode",
+					lblMode,
 					"^u.*",
 				),
 			},
@@ -1744,12 +1788,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_(cpu|disk)_seconds_total",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"mode",
+					lblMode,
 					"u\\wer",
 				),
 			},
@@ -1763,12 +1807,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 			},
@@ -1782,12 +1826,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 			},
@@ -1803,12 +1847,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -1825,12 +1869,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -1842,12 +1886,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"(|devel)",
 				),
 			},
@@ -1862,17 +1906,17 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"devel",
 				),
 			},
@@ -1886,13 +1930,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -1910,17 +1954,17 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -1932,17 +1976,17 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -1957,7 +2001,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -1977,8 +2021,8 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 			},
 			want: []types.MetricID{
@@ -1998,13 +2042,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"up|node_cpu_seconds_total",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"instance",
-					"remotehost:9100",
+					lblInstance,
+					valRemotehost,
 				),
 			},
 			want: []types.MetricID{
@@ -2020,13 +2064,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"(up|node_cpu_seconds_total)",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"instance",
-					"remotehost:9100",
+					lblInstance,
+					valRemotehost,
 				),
 			},
 			want: []types.MetricID{
@@ -2042,13 +2086,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"up|does_not_exist|node_cpu_seconds_total",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"instance",
-					"remotehost:9100",
+					lblInstance,
+					valRemotehost,
 				),
 			},
 			want: []types.MetricID{
@@ -2064,13 +2108,13 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"(up|node_cpu_seconds_tota\\w)",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"instance",
-					"remotehost:9100",
+					lblInstance,
+					valRemotehost,
 				),
 			},
 			want: []types.MetricID{
@@ -2086,12 +2130,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"(up|node_filesystem_avail_bytes)",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"mountpoint",
+					lblMountpoint,
 					"(/|)",
 				),
 			},
@@ -2108,12 +2152,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"(up|node_filesystem_avail_bytes)",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"mountpoint",
+					lblMountpoint,
 					"(/+|)",
 				),
 			},
@@ -2136,7 +2180,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"this_name_does_not_exists",
 				),
 			},
@@ -2160,22 +2204,22 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"devel",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_.*total$",
 				),
 			},
@@ -2187,7 +2231,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 			},
@@ -2205,7 +2249,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 				labels.MustNewMatcher(
@@ -2269,12 +2313,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 				labels.MustNewMatcher(
@@ -2302,12 +2346,12 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"__name__",
+					lblName,
 					"(generated_04(0|2)|)",
 				),
 				labels.MustNewMatcher(
@@ -2335,7 +2379,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"value",
+					lblValue,
 					"exactly-32bits",
 				),
 			},
@@ -2349,7 +2393,7 @@ func Test_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"value",
+					lblValue,
 					"largest-id",
 				),
 			},
@@ -2481,112 +2525,112 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     "up",
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "node_exporter",
-					"instance": "localhost:9100",
+					lblName:     "up",
+					lblJob:      valNodeExporter,
+					lblInstance: valLocalhost,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "node_exporter",
-					"instance": "remotehost:9100",
+					lblName:     "up",
+					lblJob:      valNodeExporter,
+					lblInstance: valRemotehost,
 				}),
 				Start: t1,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "node_cpu_seconds_total",
-					"job":      "node_exporter",
-					"instance": "remotehost:9100",
-					"cpu":      "0",
-					"mode":     "idle",
+					lblName:     metricNodeCPUSecondsTotal,
+					lblJob:      valNodeExporter,
+					lblInstance: valRemotehost,
+					lblCPU:      "0",
+					lblMode:     "idle",
 				}),
 				Start: t0,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "node_cpu_seconds_total",
-					"job":      "node_exporter",
-					"instance": "remotehost:9100",
-					"cpu":      "0",
-					"mode":     "user",
+					lblName:     metricNodeCPUSecondsTotal,
+					lblJob:      valNodeExporter,
+					lblInstance: valRemotehost,
+					lblCPU:      "0",
+					lblMode:     valUser,
 				}),
 				Start: t1,
 				End:   t2,
 			},
 			{ // index = 5
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "node_cpu_seconds_total",
-					"job":      "node_exporter",
-					"instance": "remotehost:9100",
-					"cpu":      "1",
-					"mode":     "user",
+					lblName:     metricNodeCPUSecondsTotal,
+					lblJob:      valNodeExporter,
+					lblInstance: valRemotehost,
+					lblCPU:      "1",
+					lblMode:     valUser,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "node_filesystem_avail_bytes",
-					"job":        "node_exporter",
-					"instance":   "localhost:9100",
-					"device":     "/dev/mapper/vg0-root",
-					"fstype":     "ext4",
-					"mountpoint": "/",
+					lblName:       metricNodeFilesystemAvail,
+					lblJob:        valNodeExporter,
+					lblInstance:   valLocalhost,
+					lblDevice:     "/dev/mapper/vg0-root",
+					lblFstype:     valExt4,
+					lblMountpoint: "/",
 				}),
 				Start: t1,
 				End:   t5,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":    "node_filesystem_avail_bytes",
-					"job":         "node_exporter",
-					"instance":    "localhost:9100",
-					"device":      "/dev/mapper/vg0-data",
-					"fstype":      "ext4",
-					"mountpoint":  "/srv/data",
-					"environment": "devel",
+					lblName:        metricNodeFilesystemAvail,
+					lblJob:         valNodeExporter,
+					lblInstance:    valLocalhost,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: "devel",
 				}),
 				Start: t0,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":    "node_filesystem_avail_bytes",
-					"job":         "node_exporter",
-					"instance":    "remote:9100",
-					"device":      "/dev/mapper/vg0-data",
-					"fstype":      "ext4",
-					"mountpoint":  "/srv/data",
-					"environment": "production",
+					lblName:        metricNodeFilesystemAvail,
+					lblJob:         valNodeExporter,
+					lblInstance:    valRemote,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: valProduction,
 				}),
 				Start: t0,
 				End:   t5,
 			},
 			{ // index == 9
 				Labels: labels.FromMap(map[string]string{
-					"__name__":    "node_filesystem_avail_bytes",
-					"job":         "node_exporter",
-					"instance":    "remote:9100",
-					"device":      "/dev/mapper/vg0-data",
-					"fstype":      "ext4",
-					"mountpoint":  "/srv/data",
-					"environment": "production",
-					"userID":      "42",
+					lblName:        metricNodeFilesystemAvail,
+					lblJob:         valNodeExporter,
+					lblInstance:    valRemote,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: valProduction,
+					"userID":       "42",
 				}),
 				Start: t2,
 				End:   t4,
@@ -2624,7 +2668,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 
 			requests = append(requests, types.LookupRequest{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   fmt.Sprintf("generated_%03d", x),
+					lblName:      fmt.Sprintf("generated_%03d", x),
 					"label_x":    fmt.Sprintf("%03d", x),
 					"label_y":    fmt.Sprintf("%03d", y),
 					"multiple_2": strconv.FormatBool(y%2 == 0),
@@ -2679,27 +2723,27 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     "up",
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up2",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     metricUp2,
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up2",
-					"job":      "prometheus2",
-					"instance": "localhost:9090",
+					lblName:     metricUp2,
+					lblJob:      "prometheus2",
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t0,
@@ -2716,27 +2760,27 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     "up",
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up2",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     metricUp2,
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t1,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up3",
-					"job":      "prometheus2",
-					"instance": "localhost:9090",
+					lblName:     "up3",
+					lblJob:      "prometheus2",
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t1,
 				End:   t1,
@@ -2753,27 +2797,27 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     "up",
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t3,
 				End:   t3,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up2",
-					"job":      "prometheus",
-					"instance": "localhost:9090",
+					lblName:     metricUp2,
+					lblJob:      valPrometheus,
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t3,
 				End:   t3,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__": "up3",
-					"job":      "prometheus2",
-					"instance": "localhost:9090",
+					lblName:     "up3",
+					lblJob:      "prometheus2",
+					lblInstance: valLocalhost9090,
 				}),
 				Start: t4,
 				End:   t5,
@@ -2822,7 +2866,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -2839,7 +2883,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -2857,7 +2901,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -2873,7 +2917,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -2887,13 +2931,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -2909,13 +2953,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -2930,13 +2974,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -2951,13 +2995,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_cpu_seconds_total",
+					lblName,
+					metricNodeCPUSecondsTotal,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"mode",
-					"user",
+					lblMode,
+					valUser,
 				),
 			},
 			want: []types.MetricID{
@@ -2972,12 +3016,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -2993,12 +3037,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3014,12 +3058,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3033,12 +3077,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3056,12 +3100,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3078,12 +3122,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3101,12 +3145,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3123,7 +3167,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"u.",
 				),
 			},
@@ -3141,12 +3185,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_cpu_.*",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"mode",
+					lblMode,
 					"^u.*",
 				),
 			},
@@ -3163,12 +3207,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_(cpu|disk)_seconds_total",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"mode",
+					lblMode,
 					"u\\wer",
 				),
 			},
@@ -3184,12 +3228,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 			},
@@ -3205,12 +3249,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 			},
@@ -3228,12 +3272,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -3252,12 +3296,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"node_filesystem_avail_bytes$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -3271,12 +3315,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"(|devel)",
 				),
 			},
@@ -3293,17 +3337,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"environment",
+					lblEnvironment,
 					"^$",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"devel",
 				),
 			},
@@ -3319,13 +3363,13 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
@@ -3345,17 +3389,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3369,17 +3413,17 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"node_filesystem_avail_bytes",
+					lblName,
+					metricNodeFilesystemAvail,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"environment",
+					lblEnvironment,
 					".*",
 				),
 			},
@@ -3396,7 +3440,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"environment",
+					lblEnvironment,
 					"",
 				),
 			},
@@ -3418,8 +3462,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"environment",
-					"production",
+					lblEnvironment,
+					valProduction,
 				),
 			},
 			want: []types.MetricID{
@@ -3441,7 +3485,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 			},
@@ -3461,7 +3505,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 			},
@@ -3481,7 +3525,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 			},
@@ -3496,7 +3540,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 				labels.MustNewMatcher(
@@ -3611,12 +3655,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 				labels.MustNewMatcher(
@@ -3646,12 +3690,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotEqual,
-					"__name__",
+					lblName,
 					"generated_042",
 				),
 				labels.MustNewMatcher(
@@ -3681,12 +3725,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"__name__",
+					lblName,
 					"(generated_04(0|2)|)",
 				),
 				labels.MustNewMatcher(
@@ -3716,12 +3760,12 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchRegexp,
-					"__name__",
+					lblName,
 					"generated_04.",
 				),
 				labels.MustNewMatcher(
 					labels.MatchNotRegexp,
-					"__name__",
+					lblName,
 					"(generated_04(0|2)|)",
 				),
 				labels.MustNewMatcher(
@@ -3751,7 +3795,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -3767,7 +3811,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -3783,7 +3827,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -3797,7 +3841,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -3813,7 +3857,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up",
 				),
 			},
@@ -3829,8 +3873,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"up2",
+					lblName,
+					metricUp2,
 				),
 			},
 			want: []types.MetricID{
@@ -3845,8 +3889,8 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"up2",
+					lblName,
+					metricUp2,
 				),
 			},
 			want: []types.MetricID{
@@ -3861,7 +3905,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up3",
 				),
 			},
@@ -3877,7 +3921,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up3",
 				),
 			},
@@ -3893,7 +3937,7 @@ func Test_sharded_postingsForMatchers(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"up3",
 				),
 			},
@@ -4736,8 +4780,8 @@ func Test_cache(t *testing.T) {
 	labelsList := make([]labels.Labels, 3000)
 	for n := range labelsList {
 		lbls := map[string]string{
-			"__name__": "filler",
-			"id":       strconv.FormatInt(int64(n), 10),
+			lblName: "filler",
+			"id":    strconv.FormatInt(int64(n), 10),
 		}
 
 		if n >= 2000 {
@@ -4866,27 +4910,27 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			clusterMessageBehavior: clusterSynchronious,
 			write1Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 			},
 			write2Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 			query: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, metricCounterTotal),
 			},
 			want: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 		},
@@ -4896,27 +4940,27 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			clusterMessageBehavior: clusterSynchronious,
 			write1Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 			},
 			write2Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 			query: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, metricCounterTotal),
 			},
 			want: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 		},
@@ -4926,27 +4970,27 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			clusterMessageBehavior: clusterFast,
 			write1Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 			},
 			write2Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 			query: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, metricCounterTotal),
 			},
 			want: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 		},
@@ -4956,27 +5000,27 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			clusterMessageBehavior: clusterDelay,
 			write1Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 			},
 			write2Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 			query: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, metricCounterTotal),
 			},
 			want: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 		},
@@ -4986,27 +5030,27 @@ func Test_cache_bug_posting_invalidation(t *testing.T) { //nolint:maintidx
 			clusterMessageBehavior: clusterDelay,
 			write1Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 			},
 			write2Metrics: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 			query: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "counter_total"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, metricCounterTotal),
 			},
 			want: []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item1",
+					lblName: metricCounterTotal,
+					lblItem: valItem1,
 				}),
 				labels.FromMap(map[string]string{
-					"__name__": "counter_total",
-					"item":     "item2",
+					lblName: metricCounterTotal,
+					lblItem: valItem2,
 				}),
 			},
 		},
@@ -5262,24 +5306,24 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 			metrics := []map[string]string{
 				{
-					"__name__":    "up",
-					"instance":    "index1",
-					"description": "Metrics created by index1",
+					lblName:        "up",
+					lblInstance:    "index1",
+					lblDescription: "Metrics created by index1",
 				},
 				{
-					"__name__":    "up",
-					"instance":    "index2",
-					"description": "Metrics created by index2",
+					lblName:        "up",
+					lblInstance:    "index2",
+					lblDescription: "Metrics created by index2",
 				},
 				{
-					"__name__":    "up2",
-					"instance":    "index1",
-					"description": "index1, one month later",
+					lblName:        metricUp2,
+					lblInstance:    "index1",
+					lblDescription: "index1, one month later",
 				},
 				{
-					"__name__":    "up2",
-					"instance":    "index2",
-					"description": "index2, two month later",
+					lblName:        metricUp2,
+					lblInstance:    "index2",
+					lblDescription: "index2, two month later",
 				},
 			}
 			metricsID := make([]types.MetricID, len(metrics))
@@ -5445,8 +5489,8 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 			labelsList := make([]labels.Labels, 10000)
 			for n := range labelsList {
 				lbls := map[string]string{
-					"__name__": "filler",
-					"id":       strconv.FormatInt(int64(n), 10),
+					lblName: "filler",
+					"id":    strconv.FormatInt(int64(n), 10),
 				}
 				labelsList[n] = labels.FromMap(lbls)
 			}
@@ -5510,15 +5554,15 @@ func Test_cluster(t *testing.T) { //nolint:maintidx
 
 			labelsList = []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "expiration_conflict",
-					ttlLabel:   "60",
+					lblName:  "expiration_conflict",
+					ttlLabel: "60",
 				}),
 			}
 
 			labelsList2 := []labels.Labels{
 				labels.FromMap(map[string]string{
-					"__name__": "expiration_conflict2",
-					ttlLabel:   "60",
+					lblName:  "expiration_conflict2",
+					ttlLabel: "60",
 				}),
 			}
 
@@ -5657,27 +5701,27 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	metrics := []map[string]string{
 		{
-			"__name__":    "up",
-			"description": "The metrics without TTL that use default TTL",
+			lblName:        "up",
+			lblDescription: "The metrics without TTL that use default TTL",
 		},
 		{
-			"__name__":    "ttl",
-			"unit":        "month",
-			"value":       "13",
-			"description": "The metrics with TTL set to 13 months",
+			lblName:        "ttl",
+			"unit":         "month",
+			lblValue:       "13",
+			lblDescription: "The metrics with TTL set to 13 months",
 		},
 		{
-			"__name__":    "ttl",
-			"unit":        "day",
-			"value":       "2",
-			"description": "The metrics with TTL set to 2 months",
+			lblName:        "ttl",
+			"unit":         "day",
+			lblValue:       "2",
+			lblDescription: "The metrics with TTL set to 2 months",
 		},
 		{
-			"__name__":    "ttl",
-			"unit":        "day",
-			"value":       "2",
-			"updated":     "yes",
-			"description": "The metrics with TTL set to 2 months",
+			lblName:        "ttl",
+			"unit":         "day",
+			lblValue:       "2",
+			"updated":      "yes",
+			lblDescription: "The metrics with TTL set to 2 months",
 		},
 	}
 	metricsTTL := []time.Duration{
@@ -5918,9 +5962,9 @@ func Test_expiration(t *testing.T) { //nolint:maintidx
 
 	for n := range expireBatchSize + 10 {
 		labels := map[string]string{
-			"__name__": "filler",
-			"id":       strconv.FormatInt(int64(n), 10),
-			ttlLabel:   strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+			lblName:  "filler",
+			"id":     strconv.FormatInt(int64(n), 10),
+			ttlLabel: strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		}
 		labelsList[n] = labelsMapToList(labels, false)
 	}
@@ -6029,12 +6073,12 @@ func Test_expiration_offset(t *testing.T) {
 	t2 := t1.Add(time.Second)
 
 	metric := map[string]string{
-		"__name__":    "ttl",
-		"unit":        "day",
-		"value":       "2",
-		"updated":     "yes",
-		"description": "The metrics with TTL set to 2 months",
-		ttlLabel:      strconv.FormatInt(int64(shortTTL.Seconds()), 10),
+		lblName:        "ttl",
+		"unit":         "day",
+		lblValue:       "2",
+		"updated":      "yes",
+		lblDescription: "The metrics with TTL set to 2 months",
+		ttlLabel:       strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 	}
 
 	store := &mockStore{}
@@ -6161,12 +6205,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 	metricsLongTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_used",
-			"item", "/",
+			lblName, metricDiskUsed,
+			lblItem, "/",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName1",
+			lblName, "uniqueName1",
 			"uniqueLabel1", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
@@ -6174,35 +6218,35 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 	metricsRandomTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_used",
-			"item", "/dev/urandom",
+			lblName, metricDiskUsed,
+			lblItem, "/dev/urandom",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueNameRnd",
+			lblName, "uniqueNameRnd",
 			"uniqueLabelRnd", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "more_random",
-			"device", "one",
+			lblName, "more_random",
+			lblDevice, "one",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "more_random",
-			"device", "two",
+			lblName, "more_random",
+			lblDevice, "two",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 	}
 
 	metricsShortTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_used",
-			"item", "/home",
+			lblName, metricDiskUsed,
+			lblItem, "/home",
 			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName2",
+			lblName, "uniqueName2",
 			"uniqueLabel2", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
@@ -6210,12 +6254,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 	metricsShortestTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_used",
-			"item", "/home2",
+			lblName, metricDiskUsed,
+			lblItem, "/home2",
 			ttlLabel, strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName0",
+			lblName, "uniqueName0",
 			"uniqueLabel0", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(shortestTTL.Seconds()), 10),
 		),
@@ -6224,12 +6268,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 	// TTL change switch between short & long TTL
 	metricsLongToShortTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_free",
-			"item", "/",
+			lblName, "disk_free",
+			lblItem, "/",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName3",
+			lblName, "uniqueName3",
 			"uniqueLabel3", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
@@ -6237,12 +6281,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 	metricsShortToLongTTL := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_free",
-			"item", "/home",
+			lblName, "disk_free",
+			lblItem, "/home",
 			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName4",
+			lblName, "uniqueName4",
 			"uniqueLabel4", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
@@ -6250,12 +6294,12 @@ func Test_expiration_longlived(t *testing.T) { //nolint:maintidx
 
 	metricsTemporary := []labels.Labels{
 		labels.FromStrings(
-			"__name__", "disk_total",
-			"item", "/srv",
+			lblName, "disk_total",
+			lblItem, "/srv",
 			ttlLabel, strconv.FormatInt(int64(longTTL.Seconds()), 10),
 		),
 		labels.FromStrings(
-			"__name__", "uniqueName5",
+			lblName, "uniqueName5",
 			"uniqueLabel5", "samevalue",
 			ttlLabel, strconv.FormatInt(int64(shortTTL.Seconds()), 10),
 		),
@@ -6918,106 +6962,106 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 		[]types.LookupRequest{
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "up",
-					"account_id": "1",
-					"job":        "prometheus",
-					"instance":   "localhost:9090",
+					lblName:      "up",
+					lblAccountID: "1",
+					lblJob:       valPrometheus,
+					lblInstance:  valLocalhost9090,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "up",
-					"account_id": "2",
-					"job":        "node_exporter",
-					"instance":   "localhost:9100",
+					lblName:      "up",
+					lblAccountID: "2",
+					lblJob:       valNodeExporter,
+					lblInstance:  valLocalhost,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "up",
-					"account_id": "2",
-					"job":        "node_exporter",
-					"instance":   "remotehost:9100",
+					lblName:      "up",
+					lblAccountID: "2",
+					lblJob:       valNodeExporter,
+					lblInstance:  valRemotehost,
 				}),
 				Start: t1,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "node_cpu_seconds_total",
-					"account_id": "3",
-					"job":        "node_exporter",
-					"instance":   "remotehost:9100",
-					"cpu":        "0",
-					"mode":       "idle",
+					lblName:      metricNodeCPUSecondsTotal,
+					lblAccountID: "3",
+					lblJob:       valNodeExporter,
+					lblInstance:  valRemotehost,
+					lblCPU:       "0",
+					lblMode:      "idle",
 				}),
 				Start: t0,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "node_cpu_seconds_total",
-					"account_id": "3",
-					"job":        "node_exporter",
-					"instance":   "remotehost:9100",
-					"mode":       "user",
+					lblName:      metricNodeCPUSecondsTotal,
+					lblAccountID: "3",
+					lblJob:       valNodeExporter,
+					lblInstance:  valRemotehost,
+					lblMode:      valUser,
 				}),
 				Start: t1,
 				End:   t2,
 			},
 			{ // index = 5
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "node_cpu_seconds_total",
-					"account_id": "3",
-					"job":        "node_exporter",
-					"instance":   "remotehost:9100",
-					"cpu":        "1",
-					"mode":       "user",
+					lblName:      metricNodeCPUSecondsTotal,
+					lblAccountID: "3",
+					lblJob:       valNodeExporter,
+					lblInstance:  valRemotehost,
+					lblCPU:       "1",
+					lblMode:      valUser,
 				}),
 				Start: t0,
 				End:   t0,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":   "node_filesystem_avail_bytes",
-					"account_id": "3",
-					"job":        "node_exporter",
-					"instance":   "localhost:9100",
-					"device":     "/dev/mapper/vg0-root",
-					"fstype":     "ext4",
-					"mountpoint": "/",
+					lblName:       metricNodeFilesystemAvail,
+					lblAccountID:  "3",
+					lblJob:        valNodeExporter,
+					lblInstance:   valLocalhost,
+					lblDevice:     "/dev/mapper/vg0-root",
+					lblFstype:     valExt4,
+					lblMountpoint: "/",
 				}),
 				Start: t1,
 				End:   t2,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":    "node_filesystem_avail_bytes",
-					"account_id":  "3",
-					"job":         "node_exporter",
-					"instance":    "localhost:9100",
-					"device":      "/dev/mapper/vg0-data",
-					"fstype":      "ext4",
-					"mountpoint":  "/srv/data",
-					"environment": "devel",
+					lblName:        metricNodeFilesystemAvail,
+					lblAccountID:   "3",
+					lblJob:         valNodeExporter,
+					lblInstance:    valLocalhost,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: "devel",
 				}),
 				Start: t0,
 				End:   t1,
 			},
 			{
 				Labels: labels.FromMap(map[string]string{
-					"__name__":     "node_filesystem_avail_bytes",
-					"account_id":   "4",
-					"job":          "node_exporter",
-					"instance":     "remote:9100",
-					"device":       "/dev/mapper/vg0-data",
-					"fstype":       "ext4",
-					"mountpoint":   "/srv/data",
-					"environment":  "production",
+					lblName:        metricNodeFilesystemAvail,
+					lblAccountID:   "4",
+					lblJob:         valNodeExporter,
+					lblInstance:    valRemote,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: valProduction,
 					"custom_label": "secret",
 				}),
 				Start: t0,
@@ -7025,15 +7069,15 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			},
 			{ // index == 9
 				Labels: labels.FromMap(map[string]string{
-					"__name__":    "node_filesystem_avail_bytes",
-					"job":         "node_exporter",
-					"instance":    "remote:9100",
-					"device":      "/dev/mapper/vg0-data",
-					"fstype":      "ext4",
-					"mountpoint":  "/srv/data",
-					"environment": "production",
-					"userID":      "42",
-					"secret_name": "secret_value",
+					lblName:        metricNodeFilesystemAvail,
+					lblJob:         valNodeExporter,
+					lblInstance:    valRemote,
+					lblDevice:      valDevMapper,
+					lblFstype:      valExt4,
+					lblMountpoint:  valSrvData,
+					lblEnvironment: valProduction,
+					"userID":       "42",
+					"secret_name":  "secret_value",
 				}),
 				Start: t2,
 				End:   t2,
@@ -7062,12 +7106,12 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"1",
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "instance", "job"},
+			want:      []string{lblName, lblAccountID, lblInstance, lblJob},
 		},
 		{
 			name:  "names-account1-t1",
@@ -7077,7 +7121,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"1",
 				),
 			},
@@ -7092,12 +7136,12 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"2",
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "instance", "job"},
+			want:      []string{lblName, lblAccountID, lblInstance, lblJob},
 		},
 		{
 			name:  "names-account2-t1",
@@ -7107,12 +7151,12 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"2",
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "instance", "job"},
+			want:      []string{lblName, lblAccountID, lblInstance, lblJob},
 		},
 		{
 			name:  "names-account3",
@@ -7122,13 +7166,13 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
 			labelName: postinglabelName,
 			want: []string{
-				"__name__", "account_id", "cpu", "device", "environment", "fstype", "instance", "job", "mode", "mountpoint",
+				lblName, lblAccountID, lblCPU, lblDevice, lblEnvironment, lblFstype, lblInstance, lblJob, lblMode, lblMountpoint,
 			},
 		},
 		{
@@ -7139,14 +7183,14 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
 			labelName: postinglabelName,
 			want: []string{
-				"__name__", "account_id", "cpu", "device", "environment",
-				"fstype", "instance", "job", "mode", "mountpoint",
+				lblName, lblAccountID, lblCPU, lblDevice, lblEnvironment,
+				lblFstype, lblInstance, lblJob, lblMode, lblMountpoint,
 			},
 		},
 		{
@@ -7157,12 +7201,12 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
 			labelName: postinglabelName,
-			want:      []string{"__name__", "account_id", "device", "fstype", "instance", "job", "mode", "mountpoint"},
+			want:      []string{lblName, lblAccountID, lblDevice, lblFstype, lblInstance, lblJob, lblMode, lblMountpoint},
 		},
 		{
 			name:  "names-account3-t3",
@@ -7172,7 +7216,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
@@ -7187,8 +7231,8 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers:  nil,
 			labelName: postinglabelName,
 			want: []string{
-				"__name__", "account_id", "cpu", "custom_label", "device", "environment", "fstype",
-				"instance", "job", "mode", "mountpoint", "secret_name", "userID",
+				lblName, lblAccountID, lblCPU, "custom_label", lblDevice, lblEnvironment, lblFstype,
+				lblInstance, lblJob, lblMode, lblMountpoint, "secret_name", "userID",
 			},
 		},
 		{
@@ -7197,8 +7241,8 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			start:     t0,
 			end:       t3,
 			matchers:  nil,
-			labelName: "__name__",
-			want:      []string{"node_cpu_seconds_total", "node_filesystem_avail_bytes", "up"},
+			labelName: lblName,
+			want:      []string{metricNodeCPUSecondsTotal, metricNodeFilesystemAvail, "up"},
 		},
 		{
 			name:  "value-__name__-account3",
@@ -7208,12 +7252,12 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
-			labelName: "__name__",
-			want:      []string{"node_cpu_seconds_total", "node_filesystem_avail_bytes"},
+			labelName: lblName,
+			want:      []string{metricNodeCPUSecondsTotal, metricNodeFilesystemAvail},
 		},
 		{
 			name:  "value-mountpoint-account2",
@@ -7223,11 +7267,11 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"2",
 				),
 			},
-			labelName: "mountpoint",
+			labelName: lblMountpoint,
 			want:      nil,
 		},
 		{
@@ -7238,11 +7282,11 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"invalid",
 				),
 			},
-			labelName: "__name__",
+			labelName: lblName,
 			want:      nil,
 		},
 		{
@@ -7253,7 +7297,7 @@ func Test_FilteredLabelValues(t *testing.T) { //nolint:maintidx
 			matchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"account_id",
+					lblAccountID,
 					"3",
 				),
 			},
@@ -7344,18 +7388,18 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "2-values",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"cpu_used|mem_used_perc",
 			),
 			wantedMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"cpu_used",
+					lblName,
+					metricCPUUsed,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"mem_used_perc",
 				),
 			},
@@ -7364,18 +7408,18 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "2-values-capture",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"(cpu_used|mem_used_perc)",
 			),
 			wantedMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"cpu_used",
+					lblName,
+					metricCPUUsed,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"mem_used_perc",
 				),
 			},
@@ -7384,23 +7428,23 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "3-values-capture",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"(cpu_used|mem_used_perc|swap_used_perc)",
 			),
 			wantedMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
-					"cpu_used",
+					lblName,
+					metricCPUUsed,
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"mem_used_perc",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"swap_used_perc",
 				),
 			},
@@ -7409,18 +7453,18 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "2-values-same-prefix",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success",
 			),
 			wantedMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"probe_ssl_last_chain_expiry_timestamp_seconds",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"probe_ssl_validation_success",
 				),
 			},
@@ -7429,18 +7473,18 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "2-values-capture-same-prefix",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"(probe_ssl_last_chain_expiry_timestamp_seconds|probe_ssl_validation_success)",
 			),
 			wantedMatchers: []*labels.Matcher{
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"probe_ssl_last_chain_expiry_timestamp_seconds",
 				),
 				labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					lblName,
 					"probe_ssl_validation_success",
 				),
 			},
@@ -7449,7 +7493,7 @@ func TestSimplifyRegex(t *testing.T) {
 			name: "cant-simplify",
 			inputMatcher: labels.MustNewMatcher(
 				labels.MatchRegexp,
-				"__name__",
+				lblName,
 				"(cpu_used|i*)",
 			),
 			wantErr: errNotASimpleRegex,
@@ -7604,82 +7648,82 @@ func Test_store_errors(t *testing.T) { //nolint:maintidx
 	t5 := t4.Add(defaultTTL + 72*time.Hour)
 	metrics := []map[string]string{
 		{
-			"__name__": "up",
+			lblName: "up",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/",
+			lblName: metricDiskUsed,
+			lblItem: "/",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/home",
+			lblName: metricDiskUsed,
+			lblItem: "/home",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/srv",
+			lblName: metricDiskUsed,
+			lblItem: "/srv",
 		},
 		{
-			"__name__": "cpu_used",
+			lblName: metricCPUUsed,
 		},
 	}
 	metrics2 := []map[string]string{
 		{
-			"__name__": "up",
+			lblName: "up",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/",
+			lblName: metricDiskUsed,
+			lblItem: "/",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/home",
+			lblName: metricDiskUsed,
+			lblItem: "/home",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/mnt",
+			lblName: metricDiskUsed,
+			lblItem: "/mnt",
 		},
 		{
-			"__name__": "cpu_used",
+			lblName: metricCPUUsed,
 		},
 	}
 	metrics3 := []map[string]string{
 		{
-			"__name__": "up",
+			lblName: "up",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/",
+			lblName: metricDiskUsed,
+			lblItem: "/",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/maison",
+			lblName: metricDiskUsed,
+			lblItem: "/maison",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/mnt",
+			lblName: metricDiskUsed,
+			lblItem: "/mnt",
 		},
 		{
-			"__name__": "cpu_used",
+			lblName: metricCPUUsed,
 		},
 	}
 	metrics4 := []map[string]string{
 		{
-			"__name__": "up",
+			lblName: "up",
 		},
 		{
-			"__name__": "disk_free",
-			"item":     "/",
+			lblName: "disk_free",
+			lblItem: "/",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/maison",
+			lblName: metricDiskUsed,
+			lblItem: "/maison",
 		},
 		{
-			"__name__": "disk_used",
-			"item":     "/mnt",
+			lblName: metricDiskUsed,
+			lblItem: "/mnt",
 		},
 		{
-			"__name__": "cpu_used",
+			lblName: metricCPUUsed,
 		},
 	}
 
@@ -8250,9 +8294,9 @@ func clusterDoOneBatch(t *testing.T,
 
 	for n := range metricsNew {
 		lbls := map[string]string{
-			"__name__": "filler",
-			"id":       strconv.FormatInt(int64(n), 10),
-			"ts":       currentTime.Format("2006-01-02T15"),
+			lblName: "filler",
+			"id":    strconv.FormatInt(int64(n), 10),
+			"ts":    currentTime.Format("2006-01-02T15"),
 		}
 
 		if rnd.Float64() < 0.5 {
@@ -8347,7 +8391,7 @@ func clusterCheckSearch(
 	matchers := make([]*labels.Matcher, 0, 2)
 	matchers = append(matchers, labels.MustNewMatcher(
 		labels.MatchEqual,
-		"__name__",
+		lblName,
 		"filler",
 	))
 	matchers = append(matchers, labels.MustNewMatcher(
@@ -8364,7 +8408,7 @@ func clusterCheckSearch(
 	for result.Next() {
 		item := result.At()
 
-		if !matchers[0].Matches(item.Labels.Get("__name__")) {
+		if !matchers[0].Matches(item.Labels.Get(lblName)) {
 			return fmt.Errorf("metric ID=%d: %s shouldn't be in Search()", item.ID, item.Labels)
 		}
 
@@ -8603,8 +8647,8 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "common",
-				"item":     "low-ttl",
+				lblName: "common",
+				lblItem: "low-ttl",
 			}),
 			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
 		},
@@ -8612,8 +8656,8 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "common",
-				"item":     "medium-ttl",
+				lblName: "common",
+				lblItem: "medium-ttl",
 			}),
 			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
 		},
@@ -8621,8 +8665,8 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "common",
-				"item":     "high-ttl",
+				lblName: "common",
+				lblItem: "high-ttl",
 			}),
 			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
 		},
@@ -8630,9 +8674,9 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "not_common",
-				"item":     "low-ttl",
-				"unique":   strconv.FormatInt(rnd.Int63(), 10),
+				lblName:  "not_common",
+				lblItem:  "low-ttl",
+				"unique": strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 7 * time.Hour).Seconds()),
 		},
@@ -8640,9 +8684,9 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "not_common",
-				"item":     "medium-ttl",
-				"unique":   strconv.FormatInt(rnd.Int63(), 10),
+				lblName:  "not_common",
+				lblItem:  "medium-ttl",
+				"unique": strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 90 * time.Hour).Seconds()),
 		},
@@ -8650,9 +8694,9 @@ func concurrentAccessWriter(
 			Start: execution.now.Now(),
 			End:   execution.now.Now(),
 			Labels: labels.FromMap(map[string]string{
-				"__name__": "not_common",
-				"item":     "high-ttl",
-				"unique":   strconv.FormatInt(rnd.Int63(), 10),
+				lblName:  "not_common",
+				lblItem:  "high-ttl",
+				"unique": strconv.FormatInt(rnd.Int63(), 10),
 			}),
 			TTLSeconds: int64((24 * 365 * time.Hour).Seconds()),
 		},
@@ -8731,11 +8775,11 @@ func concurrentAccessReader(
 		switch rnd.Intn(4) {
 		case 0:
 			matchers = []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "common"),
+				labels.MustNewMatcher(labels.MatchEqual, lblName, "common"),
 			}
 		case 1:
 			matchers = []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "item", "(medium-ttl|low-ttl)"),
+				labels.MustNewMatcher(labels.MatchRegexp, lblItem, "(medium-ttl|low-ttl)"),
 			}
 		case 2:
 			matchers = []*labels.Matcher{
@@ -8775,8 +8819,8 @@ func TestLookForOldData(t *testing.T) {
 	oldMetricDate := now.Add(-30 * 24 * time.Hour) // a few shards ago
 	existingMetrics := map[types.MetricID]map[string]string{
 		MetricIDTest1: {
-			"__name__": "cpu_used",
-			"instance": "localhost:8015",
+			lblName:     metricCPUUsed,
+			lblInstance: "localhost:8015",
 		},
 	}
 	existingIndex := mockIndexFromMetrics(t, oldMetricDate, oldMetricDate, existingMetrics)
@@ -8804,7 +8848,7 @@ func TestLookForOldData(t *testing.T) {
 		{
 			Start:      reqTime,
 			End:        reqTime,
-			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Labels:     labels.FromStrings(lblName, metricCPUUsed, lblInstance, "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8816,7 +8860,7 @@ func TestLookForOldData(t *testing.T) {
 	}
 
 	matchers := []*labels.Matcher{
-		labels.MustNewMatcher(labels.MatchEqual, "__name__", "cpu_used"),
+		labels.MustNewMatcher(labels.MatchEqual, lblName, metricCPUUsed),
 	}
 	// Now looking for old points, like the one we wrote earlier ...
 	metricSet, err := index.Search(ctx, oldMetricDate, oldMetricDate.Add(10*time.Minute), matchers)
@@ -8861,7 +8905,7 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 		{
 			Start:      past,
 			End:        past,
-			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Labels:     labels.FromStrings(lblName, metricCPUUsed, lblInstance, "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8895,7 +8939,7 @@ func TestBadInitilizationOfIdInShard(t *testing.T) {
 		{
 			Start:      now,
 			End:        now,
-			Labels:     labels.FromStrings("__name__", "cpu_used", "instance", "localhost:8015"),
+			Labels:     labels.FromStrings(lblName, metricCPUUsed, lblInstance, "localhost:8015"),
 			TTLSeconds: 0,
 		},
 	}
@@ -8921,42 +8965,42 @@ func TestStableLabelsToText(t *testing.T) {
 	}{
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "cpu_used",
+				lblName: metricCPUUsed,
 			}),
 			want: "{__name__=\"cpu_used\"}",
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "cpu_utilisé",
+				lblName: "cpu_utilisé",
 			}),
 			want: "{__name__=\"cpu_utilisé\"}",
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "utf8_values",
-				"key":      "value with unicode ☃︎ éß是 and quote \"'`", //nolint: gosmopolitan
+				lblName: "utf8_values",
+				"key":   "value with unicode ☃︎ éß是 and quote \"'`", //nolint: gosmopolitan
 			}),
 			want: "{__name__=\"utf8_values\", key=\"value with unicode ☃︎ éß是 and quote \\\"'`\"}", //nolint: gosmopolitan
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "utf8_key",
-				"key with unicode ☃︎ éß是 and quote \"'`": "value", //nolint: gosmopolitan
+				lblName: "utf8_key",
+				"key with unicode ☃︎ éß是 and quote \"'`": lblValue, //nolint: gosmopolitan
 			}),
 			want: "{__name__=\"utf8_key\", \"key with unicode ☃︎ éß是 and quote \\\"'`\"=\"value\"}", //nolint: gosmopolitan
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "conflict1?",
-				"key":      "value",
+				lblName: "conflict1?",
+				"key":   lblValue,
 			}),
 			want: "{__name__=\"conflict1?\", key=\"value\"}",
 		},
 		{
 			lbls: labels.FromMap(map[string]string{
-				"__name__": "conflict3?",
-				"key1é":    "value",
-				"key2é":    "value",
+				lblName: "conflict3?",
+				"key1é": lblValue,
+				"key2é": lblValue,
 			}),
 			want: "{__name__=\"conflict3?\", \"key1é\"=\"value\", \"key2é\"=\"value\"}",
 		},
@@ -8979,33 +9023,33 @@ func TestNoLabelsToTextConflict(t *testing.T) {
 	}{
 		{
 			lblsA: labels.FromMap(map[string]string{
-				"__name__": "conflict1?",
-				"key":      "value",
+				lblName: "conflict1?",
+				"key":   lblValue,
 			}),
 			lblsB: labels.FromMap(map[string]string{
-				"__name__": "conflict1?",
-				"\"key\"":  "value",
+				lblName:   "conflict1?",
+				"\"key\"": lblValue,
 			}),
 		},
 		{
 			lblsA: labels.FromMap(map[string]string{
-				"__name__": "conflict2?",
-				"keyé":     "value",
+				lblName: "conflict2?",
+				"keyé":  lblValue,
 			}),
 			lblsB: labels.FromMap(map[string]string{
-				"__name__": "conflict2?",
-				"\"keyé\"": "value",
+				lblName:    "conflict2?",
+				"\"keyé\"": lblValue,
 			}),
 		},
 		{
 			lblsA: labels.FromMap(map[string]string{
-				"__name__": "conflict3?",
-				"key1é":    "value",
-				"key2é":    "value",
+				lblName: "conflict3?",
+				"key1é": lblValue,
+				"key2é": lblValue,
 			}),
 			lblsB: labels.FromMap(map[string]string{
-				"__name__":                   "conflict3?",
-				"key1é\"=\"value\", \"key2é": "value",
+				lblName:                      "conflict3?",
+				"key1é\"=\"value\", \"key2é": lblValue,
 			}),
 		},
 	}

@@ -40,6 +40,8 @@ var (
 	runDuration       = flag.Duration("test.run-duration", 17*time.Second, "Duration of the test")
 )
 
+const labelInstance = "instance"
+
 func main() {
 	daemon.SetTestEnvironment()
 
@@ -262,7 +264,7 @@ func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteReque
 		for i, name := range s.activeAgent {
 			ts = append(ts, prompb.TimeSeries{
 				Labels: []prompb.Label{
-					{Name: "instance", Value: name},
+					{Name: labelInstance, Value: name},
 					{Name: "__name__", Value: "process_cpu_seconds_total"},
 				},
 				Samples: []prompb.Sample{
@@ -271,7 +273,7 @@ func (s *Simulator) writeProducer(ctx context.Context, ch chan prompb.WriteReque
 			})
 			ts = append(ts, prompb.TimeSeries{
 				Labels: []prompb.Label{
-					{Name: "instance", Value: name},
+					{Name: labelInstance, Value: name},
 					{Name: "__name__", Value: "go_info"},
 				},
 				Samples: []prompb.Sample{
@@ -360,7 +362,7 @@ func (s *Simulator) readProducer(ctx context.Context, ch chan prompb.ReadRequest
 				StartTimestampMs: time2Millisecond(queryFrom),
 				EndTimestampMs:   time2Millisecond(time.Now()),
 				Matchers: []*prompb.LabelMatcher{
-					{Type: prompb.LabelMatcher_EQ, Name: "instance", Value: k},
+					{Type: prompb.LabelMatcher_EQ, Name: labelInstance, Value: k},
 					{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "process_cpu_seconds_total"},
 				},
 			})
@@ -374,7 +376,7 @@ func (s *Simulator) readProducer(ctx context.Context, ch chan prompb.ReadRequest
 					StartTimestampMs: time2Millisecond(time.Now().Add(-*readRangeSize)),
 					EndTimestampMs:   time2Millisecond(time.Now()),
 					Matchers: []*prompb.LabelMatcher{
-						{Type: prompb.LabelMatcher_EQ, Name: "instance", Value: name},
+						{Type: prompb.LabelMatcher_EQ, Name: labelInstance, Value: name},
 						{Type: prompb.LabelMatcher_EQ, Name: "__name__", Value: "process_cpu_seconds_total"},
 					},
 				})
@@ -438,7 +440,7 @@ func (s *Simulator) writeWorker(ctx context.Context, workChannel chan prompb.Wri
 
 		for _, ts := range req.Timeseries {
 			for _, lbl := range ts.Labels {
-				if lbl.Name == "instance" {
+				if lbl.Name == labelInstance {
 					seenAgent[lbl.Value] = true
 
 					break
@@ -566,7 +568,7 @@ func (s *Simulator) readWorker(ctx context.Context, workChannel chan prompb.Read
 		for _, result := range pbResponce.Results {
 			for _, ts := range result.Timeseries {
 				for _, lbl := range ts.Labels {
-					if lbl.Name == "instance" {
+					if lbl.Name == labelInstance {
 						seenAgent[lbl.Value] = true
 
 						break

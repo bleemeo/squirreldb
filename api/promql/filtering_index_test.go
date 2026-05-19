@@ -75,7 +75,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				),
 			},
 			args: args{[]*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+				labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 			}},
 			want: &dummy.MetricsLabel{
 				List: []types.MetricLabel{{ID: ids[0], Labels: sortedLabels1}},
@@ -92,7 +92,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				),
 			},
 			args: args{[]*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+				labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 			}},
 			want: &dummy.MetricsLabel{
 				List: []types.MetricLabel{{ID: ids[1], Labels: sortedLabels2}},
@@ -104,12 +104,12 @@ func Test_filteringIndex_Search(t *testing.T) {
 				index: &idx,
 				matcher: labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					labelNameName,
 					"",
 				),
 			},
 			args: args{[]*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+				labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 			}},
 			want: &dummy.MetricsLabel{},
 		},
@@ -119,7 +119,7 @@ func Test_filteringIndex_Search(t *testing.T) {
 				index: &idx,
 				matcher: labels.MustNewMatcher(
 					labels.MatchEqual,
-					"__name__",
+					labelNameName,
 					"disk_used",
 				),
 			},
@@ -189,7 +189,7 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				),
 			},
 			args: args{
-				name:     "__name__",
+				name:     labelNameName,
 				matchers: nil,
 			},
 			want: []string{"disk_used"},
@@ -205,7 +205,7 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				),
 			},
 			args: args{
-				name:     "__name__",
+				name:     labelNameName,
 				matchers: []*labels.Matcher{},
 			},
 			want: []string{"disk_free", "disk_used"},
@@ -221,7 +221,7 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				),
 			},
 			args: args{
-				name: "__name__",
+				name: labelNameName,
 				matchers: []*labels.Matcher{
 					labels.MustNewMatcher(labels.MatchEqual, "mountpath", "/srv"),
 				},
@@ -239,9 +239,9 @@ func Test_filteringIndex_LabelValues(t *testing.T) {
 				),
 			},
 			args: args{
-				name: "__name__",
+				name: labelNameName,
 				matchers: []*labels.Matcher{
-					labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_free"),
+					labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_free"),
 				},
 			},
 			want: []string{"disk_free"},
@@ -321,7 +321,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			args: args{
 				matchers: nil,
 			},
-			want: []string{"__account_id", "__name__", "mountpath"},
+			want: []string{"__account_id", labelNameName, "mountpath"},
 		},
 		{
 			name: "filter-account-id-2",
@@ -336,7 +336,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			args: args{
 				matchers: []*labels.Matcher{},
 			},
-			want: []string{"__account_id", "__name__", "mountpath"},
+			want: []string{"__account_id", labelNameName, "mountpath"},
 		},
 		{
 			name: "filter-account-id-2-more-matcher",
@@ -353,7 +353,7 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 					labels.MustNewMatcher(labels.MatchEqual, "mountpath", "/srv"),
 				},
 			},
-			want: []string{"__account_id", "__name__", "mountpath"},
+			want: []string{"__account_id", labelNameName, "mountpath"},
 		},
 		{
 			name: "filter-account-id-2-more-matcher-bis",
@@ -367,10 +367,10 @@ func Test_filteringIndex_LabelNames(t *testing.T) {
 			},
 			args: args{
 				matchers: []*labels.Matcher{
-					labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_free"),
+					labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_free"),
 				},
 			},
-			want: []string{"__account_id", "__name__", "mountpath"},
+			want: []string{"__account_id", labelNameName, "mountpath"},
 		},
 	}
 

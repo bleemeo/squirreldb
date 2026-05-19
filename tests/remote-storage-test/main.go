@@ -29,6 +29,19 @@ var (
 	nowStr    = flag.String("now", time.Now().Round(10*time.Second).Format(time.RFC3339), "Value for \"now\"")
 )
 
+const (
+	labelName   = "__name__"
+	labelNowStr = "nowStr"
+	labelSize   = "size"
+	labelFiller = "filler"
+	labelBatch  = "batch"
+	labelScale  = "scale"
+
+	valLargeWrite = "large_write"
+	valWeek       = "week"
+	valYes        = "yes"
+)
+
 func main() {
 	daemon.SetTestEnvironment()
 
