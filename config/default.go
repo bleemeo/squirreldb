@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -17,6 +17,8 @@
 package config
 
 import "time"
+
+const backendCassandra = "cassandra"
 
 // defaultPaths returns the default paths used to search for config files.
 func defaultPaths() []string {
@@ -80,18 +82,18 @@ func DefaultConfig() Config {
 			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
 		},
 		Internal: Internal{
-			Index:                   "cassandra",
+			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       0,
 			Installation: Installation{
 				Format: "Manual",
 			},
-			TSDB:                  "cassandra",
+			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 "cassandra",
-			States:                "cassandra",
+			Locks:                 backendCassandra,
+			States:                backendCassandra,
 			Store:                 "batcher",
-			MutableLabelsProvider: "cassandra",
+			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: false,
 		},
 		MaxRequestBodySize:     64, // MiB

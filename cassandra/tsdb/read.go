@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/bleemeo/squirreldb/aggregate"
@@ -692,8 +693,8 @@ func mergePoints(dst, src []types.MetricPoint) []types.MetricPoint {
 		dst = append(dst, src...)
 		copy(dst[len(src):], dst[0:len(dst)-len(src)])
 
-		for i := len(src) - 1; i >= 0; i-- {
-			dst[len(src)-i-1] = src[i]
+		for i, v := range slices.Backward(src) {
+			dst[len(src)-i-1] = v
 		}
 
 		return dst

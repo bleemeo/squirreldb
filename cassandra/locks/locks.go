@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -174,7 +174,7 @@ func (l *Lock) tryLock(ctx context.Context) bool { //nolint:contextcheck
 	l.acquired = true
 	l.cassAcquired = true
 
-	subCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec
+	subCtx, cancel := context.WithCancel(context.Background())
 
 	l.cancel = cancel
 

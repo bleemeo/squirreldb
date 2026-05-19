@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -48,37 +48,37 @@ import (
 func createTSDB() (*dummy.Index, *dummy.MemoryTSDB) {
 	metric1 := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
-			"__name__": "myname",
-			"item":     "1",
+			labelNameName: metricMyName,
+			labelItem:     "1",
 		}),
 		ID: metricID1,
 	}
 	metric2 := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
-			"__name__": "myname",
-			"item":     "2",
+			labelNameName: metricMyName,
+			labelItem:     "2",
 		}),
 		ID: metricID2,
 	}
 	metric3 := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
-			"__name__": "myname",
-			"item":     "3",
+			labelNameName: metricMyName,
+			labelItem:     "3",
 		}),
 		ID: metricID3,
 	}
 	metric4 := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
-			"__name__": "myname2",
-			"item":     "4",
+			labelNameName: "myname2",
+			labelItem:     "4",
 		}),
 		ID: metricID4,
 	}
 	metric4b := types.MetricLabel{
 		Labels: labels.FromMap(map[string]string{
-			"__name__":   "myname2",
-			"item":       "4",
-			"extraLabel": "b",
+			labelNameName: "myname2",
+			labelItem:     "4",
+			"extraLabel":  "b",
 		}),
 		ID: metricID4b,
 	}
@@ -768,7 +768,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			skipCache: true,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{metricID2},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -780,7 +780,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			skipCache: false,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{metricID2},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -792,7 +792,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			skipCache: true,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -803,7 +803,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			name: "large-metric-cache",
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -815,7 +815,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			recreateReader: true,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -827,7 +827,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			skipCache: true,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{metricID2, extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -838,7 +838,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			name: "multiple-metric-uncachable",
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					IDs:           []types.MetricID{metricID2, extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
 					ToTimestamp:   maxTime.UnixMilli(),
@@ -850,7 +850,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			skipCache: true,
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					StepMs:        300000,
 					IDs:           []types.MetricID{metricID2, extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
@@ -862,7 +862,7 @@ func Benchmark_cachingReader(b *testing.B) {
 			name: "multiple-metric-one-response-cache",
 			reqs: []types.MetricRequest{
 				{
-					Function:      "avg_over_time",
+					Function:      funcAvgOverTime,
 					StepMs:        300000,
 					IDs:           []types.MetricID{metricID2, extraMetric1},
 					FromTimestamp: minTime.UnixMilli(),
@@ -982,12 +982,12 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			maxTime: time.Date(2023, 5, 10, 13, 0, 10, 0, time.UTC),
 			actions: []action{
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   0,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
-						{Type: labels.MatchEqual, Name: "item", Value: "1"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
+						{Type: labels.MatchEqual, Name: labelItem, Value: "1"},
 					},
 				},
 				{
@@ -1005,11 +1005,11 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			maxTime: time.Date(2023, 5, 10, 13, 0, 10, 0, time.UTC),
 			actions: []action{
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   0,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1031,8 +1031,8 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   1,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
-						{Type: labels.MatchEqual, Name: "item", Value: "1"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
+						{Type: labels.MatchEqual, Name: labelItem, Value: "1"},
 					},
 				},
 				{
@@ -1040,8 +1040,8 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   2,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
-						{Type: labels.MatchEqual, Name: "item", Value: "1"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
+						{Type: labels.MatchEqual, Name: labelItem, Value: "1"},
 					},
 				},
 				{
@@ -1071,7 +1071,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   1,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1079,7 +1079,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   2,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1103,7 +1103,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   3,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1198,7 +1198,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   1,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1206,7 +1206,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   2,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1230,7 +1230,7 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 					selectIdx:   3,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1322,19 +1322,19 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			maxTime: time.Date(2023, 5, 10, 13, 0, 10, 0, time.UTC),
 			actions: []action{
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   1,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   2,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1369,19 +1369,19 @@ func Test_cachingReader_Querier(t *testing.T) { //nolint:maintidx
 			maxTime: time.Date(2023, 5, 10, 13, 0, 10, 0, time.UTC),
 			actions: []action{
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   1,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
-					description: "open select",
+					description: stepOpenSelect,
 					selectIdx:   2,
 					action:      actionCallSelect,
 					selectMatcher: []*labels.Matcher{
-						{Type: labels.MatchEqual, Name: "__name__", Value: "myname"},
+						{Type: labels.MatchEqual, Name: labelNameName, Value: metricMyName},
 					},
 				},
 				{
@@ -1767,7 +1767,7 @@ func Test_cachingReaderFromEngine(t *testing.T) {
 
 					metric := metrics.At()
 
-					if metric.Labels.Get("__name__") == "" {
+					if metric.Labels.Get(labelNameName) == "" {
 						t.Errorf("Metric ID %d had empty name. Labels=%v", metric.ID, metric.Labels)
 					}
 				}

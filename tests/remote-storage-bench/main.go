@@ -51,6 +51,11 @@ var (
 	seed            = flag.Int64("random-seed", 0, "Test random seed used to generate various uuid (of tenant, agent id...). Use 0 to pick a randomized one")
 )
 
+const (
+	labelName = "__name__"
+	labelItem = "item"
+)
+
 func main() {
 	log.Logger = logger.NewTestLogger(true)
 
@@ -225,74 +230,74 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 
 	commonList := []map[string]string{
 		{
-			"__name__": "cpu_used",
+			labelName: "cpu_used",
 		},
 		{
-			"__name__": "cpu_user",
+			labelName: "cpu_user",
 		},
 		{
-			"__name__": "cpu_system",
+			labelName: "cpu_system",
 		},
 		{
-			"__name__": "cpu_idle",
+			labelName: "cpu_idle",
 		},
 		{
-			"__name__": "mem_total",
+			labelName: "mem_total",
 		},
 		{
-			"__name__": "mem_free",
+			labelName: "mem_free",
 		},
 		{
-			"__name__": "mem_available",
+			labelName: "mem_available",
 		},
 		{
-			"__name__": "mem_available_perc",
+			labelName: "mem_available_perc",
 		},
 		{
-			"__name__": "system_load1",
+			labelName: "system_load1",
 		},
 		{
-			"__name__": "swap_used_perc",
+			labelName: "swap_used_perc",
 		},
 		{
-			"__name__": "disk_used_perc",
-			"item":     "/",
+			labelName: "disk_used_perc",
+			labelItem: "/",
 		},
 		{
-			"__name__": "io_reads",
-			"item":     "/dev/sda",
+			labelName: "io_reads",
+			labelItem: "/dev/sda",
 		},
 		{
-			"__name__": "io_writes",
-			"item":     "/dev/sda",
+			labelName: "io_writes",
+			labelItem: "/dev/sda",
 		},
 		{
-			"__name__": "disk_used_perc",
-			"item":     "/srv",
+			labelName: "disk_used_perc",
+			labelItem: "/srv",
 		},
 		{
-			"__name__": "io_reads",
-			"item":     "/dev/sdb",
+			labelName: "io_reads",
+			labelItem: "/dev/sdb",
 		},
 		{
-			"__name__": "io_writes",
-			"item":     "/dev/sdb",
+			labelName: "io_writes",
+			labelItem: "/dev/sdb",
 		},
 		{
-			"__name__": "net_bits_recv",
-			"item":     "eth0",
+			labelName: "net_bits_recv",
+			labelItem: "eth0",
 		},
 		{
-			"__name__": "net_bits_recv",
-			"item":     "enp1s0",
+			labelName: "net_bits_recv",
+			labelItem: "enp1s0",
 		},
 		{
-			"__name__": "net_bits_recv",
-			"item":     "eno1",
+			labelName: "net_bits_recv",
+			labelItem: "eno1",
 		},
 		{
-			"__name__": "net_bits_recv",
-			"item":     "vio0",
+			labelName: "net_bits_recv",
+			labelItem: "vio0",
 		},
 	}
 
@@ -312,7 +317,7 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 		// and the change is common to all agents
 		case idx < 2*len(commonList):
 			for k, v := range commonList[idx%len(commonList)] {
-				if k != "__name__" {
+				if k != labelName {
 					v += strconv.FormatInt(int64(idx), 10)
 				}
 
@@ -326,7 +331,7 @@ func makeMetrics(rnd *rand.Rand, tenantLabel string, tenantID string, agentID st
 		// on the next one, name still don't change but items is randomized
 		case idx < 3*len(commonList):
 			for k, v := range commonList[idx%len(commonList)] {
-				if k != "__name__" {
+				if k != labelName {
 					v += strconv.FormatInt(rnd.Int63(), 10)
 				}
 

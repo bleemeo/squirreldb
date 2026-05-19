@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -210,8 +210,8 @@ func getV1Series(pointTS time.Time) prompb.TimeSeries {
 				Value: "some-uuid",
 			},
 			{
-				Name:  "__name__",
-				Value: "cpu_used",
+				Name:  labelName,
+				Value: metricCPUUsed,
 			},
 		},
 		Samples: []prompb.Sample{
@@ -249,7 +249,7 @@ func makeWriteReqBody(t *testing.T, msgVersion config.RemoteWriteProtoMsg, point
 			Timeseries: []writev2.TimeSeries{getV2Series(pointTS)},
 			Symbols: []string{
 				"__bleemeo_account__", "some-uuid",
-				"__name__", "cpu_used",
+				labelName, metricCPUUsed,
 			},
 		}
 	}

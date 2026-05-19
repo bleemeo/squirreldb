@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -81,14 +81,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 3,
 					wantErr:   false,
@@ -109,14 +109,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -136,14 +136,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 1,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 					wantErr:   false,
@@ -164,14 +164,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -192,21 +192,21 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 1,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -226,14 +226,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -254,19 +254,19 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -288,19 +288,19 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -324,25 +324,25 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 1,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -365,14 +365,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -395,14 +395,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -425,14 +425,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -455,14 +455,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -487,14 +487,14 @@ func TestPromQL_queryable(t *testing.T) { //nolint:maintidx
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},

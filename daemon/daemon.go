@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -632,14 +633,14 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 
 	<-ctx.Done()
 
-	for i := len(tasks) - 1; i >= 0; i-- {
+	for i, task := range slices.Backward(tasks) {
 		if cancels[i] == nil {
 			continue
 		}
 
 		cancels[i]()
 		<-waitChan[i]
-		s.Logger.Trace().Msgf("Task %s stopped", tasks[i].Name)
+		s.Logger.Trace().Msgf("Task %s stopped", task.Name)
 	}
 
 	if s.cassandraConnection != nil {

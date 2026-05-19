@@ -39,9 +39,9 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 		Timeseries: []prompb.TimeSeries{
 			{
 				Labels: []prompb.Label{
-					{Name: "__name__", Value: "large_write"},
-					{Name: "size", Value: "week"},
-					{Name: "nowStr", Value: *nowStr},
+					{Name: labelName, Value: valLargeWrite},
+					{Name: labelSize, Value: valWeek},
+					{Name: labelNowStr, Value: *nowStr},
 				},
 				Samples: makeSample(
 					now.Add(-time.Hour*24*7),
@@ -58,9 +58,9 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 		Timeseries: []prompb.TimeSeries{
 			{
 				Labels: []prompb.Label{
-					{Name: "__name__", Value: "large_write"},
-					{Name: "size", Value: "hour"},
-					{Name: "nowStr", Value: *nowStr},
+					{Name: labelName, Value: valLargeWrite},
+					{Name: labelSize, Value: "hour"},
+					{Name: labelNowStr, Value: *nowStr},
 				},
 				Samples: makeSample(
 					now.Add(-time.Hour),
@@ -77,8 +77,8 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 		Timeseries: []prompb.TimeSeries{
 			{
 				Labels: []prompb.Label{
-					{Name: "__name__", Value: "sub_second"},
-					{Name: "nowStr", Value: *nowStr},
+					{Name: labelName, Value: "sub_second"},
+					{Name: labelNowStr, Value: *nowStr},
 				},
 				Samples: makeSample(
 					now.Add(-time.Minute),
@@ -95,8 +95,8 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 		Timeseries: []prompb.TimeSeries{
 			{
 				Labels: []prompb.Label{
-					{Name: "__name__", Value: "high_precision"},
-					{Name: "nowStr", Value: *nowStr},
+					{Name: labelName, Value: "high_precision"},
+					{Name: labelNowStr, Value: *nowStr},
 				},
 				Samples: makeSample(
 					now.Add(-time.Minute),
@@ -121,10 +121,10 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 			Timeseries: []prompb.TimeSeries{
 				{
 					Labels: []prompb.Label{
-						{Name: "__name__", Value: "filler"},
-						{Name: "batch", Value: "yes"},
-						{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
-						{Name: "nowStr", Value: *nowStr},
+						{Name: labelName, Value: labelFiller},
+						{Name: labelBatch, Value: valYes},
+						{Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
+						{Name: labelNowStr, Value: *nowStr},
 					},
 					Samples: samples,
 				},
@@ -136,10 +136,10 @@ func write(ctx context.Context, now time.Time, writeURL, tenant string) error {
 				Timeseries: []prompb.TimeSeries{
 					{
 						Labels: []prompb.Label{
-							{Name: "__name__", Value: "filler"},
-							{Name: "scale", Value: strconv.FormatInt(int64(n), 10)},
-							{Name: "nowStr", Value: *nowStr},
-							{Name: "batch", Value: "no"},
+							{Name: labelName, Value: labelFiller},
+							{Name: labelScale, Value: strconv.FormatInt(int64(n), 10)},
+							{Name: labelNowStr, Value: *nowStr},
+							{Name: labelBatch, Value: "no"},
 						},
 						Samples: samples[i : i+1],
 					},

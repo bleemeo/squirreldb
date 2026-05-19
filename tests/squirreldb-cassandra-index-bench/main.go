@@ -18,6 +18,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	labelName         = "__name__"
+	labelJob          = "job"
+	labelInstance     = "instance"
+	labelNodeExporter = "node_exporter"
+)
+
 //nolint:lll,gochecknoglobals
 var (
 	runExpiration     = flag.Bool("bench.expiration", false, "Run the expiration (should delete 1/2 of metrics")

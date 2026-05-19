@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -39,15 +39,26 @@ const (
 	metricID3  = 858
 	metricID4  = 123
 	metricID4b = 456
+
+	// labelNameName is the Prometheus metric name label.
+	labelNameName = "__name__"
+	// labelItem is a test label name used in caching reader tests.
+	labelItem = "item"
+	// funcAvgOverTime is the PromQL avg_over_time function name.
+	funcAvgOverTime = "avg_over_time"
+	// stepOpenSelect is a test step description for opening a select.
+	stepOpenSelect = "open select"
+	// metricMyName is a test metric name used in caching reader tests.
+	metricMyName = "myname"
 )
 
 //nolint:gochecknoglobals
 var (
-	labelsMetric1 = labels.FromStrings("__account_id", "1234", "__name__", "disk_used", "mountpath", "/home")
+	labelsMetric1 = labels.FromStrings("__account_id", "1234", labelNameName, "disk_used", "mountpath", "/home")
 
-	labelsMetric2 = labels.FromStrings("__name__", "disk_used", "mountpath", "/srv", "__account_id", "5678")
+	labelsMetric2 = labels.FromStrings(labelNameName, "disk_used", "mountpath", "/srv", "__account_id", "5678")
 
-	labelsMetric3 = labels.FromStrings("__name__", "disk_free", "__account_id", "5678", "mountpath", "/srv")
+	labelsMetric3 = labels.FromStrings(labelNameName, "disk_free", "__account_id", "5678", "mountpath", "/srv")
 )
 
 type mockStore struct {

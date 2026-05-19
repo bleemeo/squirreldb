@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -107,7 +107,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			ID: 1,
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1234",
-				"__name__":      "cpu_used",
+				labelName:       metricCPUUsed,
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 11},
@@ -118,7 +118,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			ID: 2,
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1234",
-				"__name__":      "disk_used",
+				labelName:       metricDiskUsed,
 				"mountpoint":    "/home",
 			}),
 			Points: []types.MetricPoint{
@@ -130,7 +130,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			ID: 3,
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1235",
-				"__name__":      "disk_used",
+				labelName:       metricDiskUsed,
 				"mountpoint":    "/home",
 			}),
 			Points: []types.MetricPoint{
@@ -142,8 +142,8 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			ID: 4,
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1236",
-				"__name__":      "uptime",
-				"instance":      "server:8015",
+				labelName:       "uptime",
+				labelInstance:   "server:8015",
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 14},
@@ -244,7 +244,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			name:                "promql-query",
 			requireTenantHeader: false,
 			makeRequest: newReqFactory(
-				"GET", urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}), nil, nil,
+				"GET", urlWithParam("/api/v1/query", map[string]string{"query": metricDiskUsed}), nil, nil,
 			),
 			validateResponse: func(t *testing.T, resp *http.Response) {
 				t.Helper()
@@ -264,7 +264,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			requireTenantHeader: false,
 			makeRequest: newReqFactory(
 				"GET",
-				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
+				urlWithParam("/api/v1/query", map[string]string{"query": metricDiskUsed}),
 				nil,
 				map[string]string{types.HeaderForcedMatcher: "__account_id=1234"},
 			),
@@ -325,7 +325,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			requireTenantHeader: true,
 			makeRequest: newReqFactory(
 				"GET",
-				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
+				urlWithParam("/api/v1/query", map[string]string{"query": metricDiskUsed}),
 				nil,
 				nil,
 			),
@@ -342,7 +342,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			requireTenantHeader: true,
 			makeRequest: newReqFactory(
 				"GET",
-				urlWithParam("/api/v1/query", map[string]string{"query": "disk_used"}),
+				urlWithParam("/api/v1/query", map[string]string{"query": metricDiskUsed}),
 				nil,
 				map[string]string{types.HeaderTenant: "1235"}),
 			validateResponse: func(t *testing.T, resp *http.Response) {
@@ -426,7 +426,7 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-metric-name",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
-				{Name: "__name__", Value: "\xC0"}, // invalid UTF-8
+				{Name: labelName, Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
 			expectedMetricsCount: 0,
@@ -435,7 +435,7 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-label-name",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
-				{Name: "__name__", Value: "name"},
+				{Name: labelName, Value: "name"},
 				{Name: "label", Value: "\xC0"}, // invalid UTF-8
 			},
 			expectStatus:         http.StatusNoContent,
@@ -444,7 +444,7 @@ func TestWriteHandler(t *testing.T) {
 		{
 			name: "missing-tenant-header",
 			labels: []prompb.Label{
-				{Name: "__name__", Value: "name"},
+				{Name: labelName, Value: "name"},
 				{Name: "label", Value: "value"},
 			},
 			expectStatus:         http.StatusBadRequest,
@@ -456,7 +456,7 @@ func TestWriteHandler(t *testing.T) {
 			name: "invalid-mutable-label",
 			labels: []prompb.Label{
 				{Name: tenantLabelName, Value: tenantValue},
-				{Name: "__name__", Value: "name"},
+				{Name: labelName, Value: "name"},
 				{Name: "group", Value: "my_group"},
 			},
 			expectStatus:         http.StatusNoContent,
@@ -474,7 +474,7 @@ func TestWriteHandler(t *testing.T) {
 			store := dummy.NewMutableLabelStore(dummy.MutableLabels{
 				AssociatedNames: map[string]map[string]string{
 					tenantValue: {
-						"group": "instance",
+						"group": labelInstance,
 					},
 				},
 			})
@@ -641,7 +641,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 						},
 					},
 					Labels: labels.FromMap(map[string]string{
-						"__name__": "single_metrics",
+						labelName: "single_metrics",
 					}),
 				},
 			},
@@ -657,7 +657,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 						},
 					},
 					Labels: labels.FromMap(map[string]string{
-						"__name__": "single_metrics",
+						labelName: "single_metrics",
 					}),
 				},
 			},
@@ -673,7 +673,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 						},
 					},
 					Labels: labels.FromMap(map[string]string{
-						"__name__": "metric1_future",
+						labelName: "metric1_future",
 					}),
 				},
 				{
@@ -684,7 +684,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 						},
 					},
 					Labels: labels.FromMap(map[string]string{
-						"__name__": "metric2_present",
+						labelName: "metric2_present",
 					}),
 				},
 				{
@@ -695,7 +695,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 						},
 					},
 					Labels: labels.FromMap(map[string]string{
-						"__name__": "metric2_past",
+						labelName: "metric2_past",
 					}),
 				},
 			},
@@ -799,11 +799,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 	}{
 		{
 			name:   "simple",
-			promql: "cpu_used",
+			promql: metricCPUUsed,
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "cpu_used",
+						labelName: metricCPUUsed,
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: t0.UnixMilli(), Value: 12},
@@ -813,7 +813,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			time: t0,
 			wantSamples: []*model.Sample{
 				{
-					Metric:    model.Metric{"__name__": "cpu_used"},
+					Metric:    model.Metric{labelName: metricCPUUsed},
 					Value:     12,
 					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
 				},
@@ -821,12 +821,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		},
 		{
 			name:   "multiple",
-			promql: "cpu_used",
+			promql: metricCPUUsed,
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "cpu_used",
-						"instance": "server1:8015",
+						labelName:     metricCPUUsed,
+						labelInstance: "server1:8015",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
@@ -835,8 +835,8 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 				},
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "cpu_used",
-						"instance": "server2:8015",
+						labelName:     metricCPUUsed,
+						labelInstance: "server2:8015",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
@@ -846,12 +846,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			time: t0,
 			wantSamples: []*model.Sample{
 				{
-					Metric:    model.Metric{"__name__": "cpu_used", "instance": "server1:8015"},
+					Metric:    model.Metric{labelName: metricCPUUsed, labelInstance: "server1:8015"},
 					Value:     10,
 					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
 				},
 				{
-					Metric:    model.Metric{"__name__": "cpu_used", "instance": "server2:8015"},
+					Metric:    model.Metric{labelName: metricCPUUsed, labelInstance: "server2:8015"},
 					Value:     9,
 					Timestamp: model.TimeFromUnixNano(t0.UnixNano()),
 				},
@@ -863,8 +863,8 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "cpu_used",
-						"instance": "server1:8015",
+						labelName:     metricCPUUsed,
+						labelInstance: "server1:8015",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
@@ -873,8 +873,8 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 				},
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "cpu_used",
-						"instance": "server2:8015",
+						labelName:     metricCPUUsed,
+						labelInstance: "server2:8015",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
@@ -896,7 +896,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "request_total",
+						labelName: "request_total",
 					}),
 					points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
@@ -926,7 +926,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "request_total",
+						labelName: "request_total",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-70 * time.Second)).UnixMilli(), Value: 500},
@@ -962,7 +962,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "request_total",
+						labelName: "request_total",
 					}),
 					points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
@@ -992,7 +992,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "request_total",
+						labelName: "request_total",
 					}),
 					points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
@@ -1022,7 +1022,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "request_total",
+						labelName: "request_total",
 					}),
 					points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
@@ -1052,7 +1052,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "squirreldb_requests_points_total",
+						labelName: "squirreldb_requests_points_total",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: 1696257630000, Value: 2.524386e+06},
@@ -1083,7 +1083,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			storeData: []metricLabelsPoints{
 				{
 					labels: labels.FromMap(map[string]string{
-						"__name__": "squirreldb_requests_points_total",
+						labelName: "squirreldb_requests_points_total",
 					}),
 					points: []types.MetricPoint{
 						{Timestamp: 1696257630000, Value: 2.524386e+06},

@@ -15,71 +15,71 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 	metrics := []map[string]string{
 		{}, // index 0 is skipped to distinguish "not found" from 0
 		{ // index 1
-			"__name__": "up",
-			"job":      "prometheus",
-			"instance": "localhost:9090",
+			labelName:     "up",
+			labelJob:      "prometheus",
+			labelInstance: "localhost:9090",
 		},
 		{ // index 2
-			"__name__": "up",
-			"job":      "node_exporter",
-			"instance": "localhost:9100",
+			labelName:     "up",
+			labelJob:      labelNodeExporter,
+			labelInstance: "localhost:9100",
 		},
 		{ // index 3
-			"__name__": "up",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
+			labelName:     "up",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remotehost:9100",
 		},
 		{ // index 4
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "0",
-			"mode":     "idle",
+			labelName:     "node_cpu_seconds_total",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remotehost:9100",
+			"cpu":         "0",
+			"mode":        "idle",
 		},
 		{ // index 5
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "0",
-			"mode":     "user",
+			labelName:     "node_cpu_seconds_total",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remotehost:9100",
+			"cpu":         "0",
+			"mode":        "user",
 		},
 		{ // index 6
-			"__name__": "node_cpu_seconds_total",
-			"job":      "node_exporter",
-			"instance": "remotehost:9100",
-			"cpu":      "1",
-			"mode":     "user",
+			labelName:     "node_cpu_seconds_total",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remotehost:9100",
+			"cpu":         "1",
+			"mode":        "user",
 		},
 		{ // index 7
-			"__name__":   "node_filesystem_avail_bytes",
-			"job":        "node_exporter",
-			"instance":   "localhost:9100",
-			"device":     "/dev/mapper/vg0-root",
-			"fstype":     "ext4",
-			"mountpoint": "/",
+			labelName:     "node_filesystem_avail_bytes",
+			labelJob:      labelNodeExporter,
+			labelInstance: "localhost:9100",
+			"device":      "/dev/mapper/vg0-root",
+			"fstype":      "ext4",
+			"mountpoint":  "/",
 		},
 		{ // index 8
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "localhost:9100",
+			labelName:     "node_filesystem_avail_bytes",
+			labelJob:      labelNodeExporter,
+			labelInstance: "localhost:9100",
 			"device":      "/dev/mapper/vg0-data",
 			"fstype":      "ext4",
 			"mountpoint":  "/srv/data",
 			"environment": "devel",
 		},
 		{ // index 9
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "remote:9100",
+			labelName:     "node_filesystem_avail_bytes",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remote:9100",
 			"device":      "/dev/mapper/vg0-data",
 			"fstype":      "ext4",
 			"mountpoint":  "/srv/data",
 			"environment": "production",
 		},
 		{ // index 10
-			"__name__":    "node_filesystem_avail_bytes",
-			"job":         "node_exporter",
-			"instance":    "remote:9100",
+			labelName:     "node_filesystem_avail_bytes",
+			labelJob:      labelNodeExporter,
+			labelInstance: "remote:9100",
 			"device":      "/dev/mapper/vg0-data",
 			"fstype":      "ext4",
 			"mountpoint":  "/srv/data",
@@ -96,14 +96,14 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "up"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "up"),
 			},
 			MatchingMetrics: []int{1, 2, 3},
 		},
 		{
 			Name: "eq-eq",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_cpu_seconds_total"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_cpu_seconds_total"),
 				labels.MustNewMatcher(labels.MatchEqual, "mode", "user"),
 			},
 			MatchingMetrics: []int{5, 6},
@@ -111,7 +111,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-neq",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_cpu_seconds_total"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_cpu_seconds_total"),
 				labels.MustNewMatcher(labels.MatchNotEqual, "mode", "user"),
 			},
 			MatchingMetrics: []int{4},
@@ -119,7 +119,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-nolabel",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchEqual, "environment", ""),
 			},
 			MatchingMetrics: []int{7},
@@ -127,7 +127,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-label",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchNotEqual, "environment", ""),
 			},
 			MatchingMetrics: []int{8, 9, 10},
@@ -135,14 +135,14 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "u."),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "u."),
 			},
 			MatchingMetrics: []int{1, 2, 3},
 		},
 		{
 			Name: "re-re",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_cpu_.*"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_cpu_.*"),
 				labels.MustNewMatcher(labels.MatchRegexp, "mode", "^u.*"),
 			},
 			MatchingMetrics: []int{5, 6},
@@ -150,7 +150,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re-nre",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_(cpu|disk)_seconds_total"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_(cpu|disk)_seconds_total"),
 				labels.MustNewMatcher(labels.MatchNotRegexp, "mode", "u\\wer"),
 			},
 			MatchingMetrics: []int{4},
@@ -158,7 +158,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re-re_nolabel",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchRegexp, "environment", "^$"),
 			},
 			MatchingMetrics: []int{7},
@@ -166,7 +166,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re-re_label",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_filesystem_avail_bytes$"),
 				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "^$"),
 			},
 			MatchingMetrics: []int{8, 9, 10},
@@ -174,7 +174,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re-re*",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_filesystem_avail_bytes$"),
 				labels.MustNewMatcher(labels.MatchRegexp, "environment", ".*"),
 			},
 			MatchingMetrics: []int{7, 8, 9, 10},
@@ -182,7 +182,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "re-nre*",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchRegexp, "__name__", "node_filesystem_avail_bytes$"),
+				labels.MustNewMatcher(labels.MatchRegexp, labelName, "node_filesystem_avail_bytes$"),
 				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", ".*"),
 			},
 			MatchingMetrics: []int{},
@@ -190,7 +190,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-nre_empty_and_devel",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "(|devel)"),
 			},
 			MatchingMetrics: []int{9, 10},
@@ -198,7 +198,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-nre-eq same label",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchNotRegexp, "environment", "^$"),
 				labels.MustNewMatcher(labels.MatchEqual, "environment", "devel"),
 			},
@@ -207,7 +207,7 @@ func test(ctx context.Context, cassandraIndex types.Index) { //nolint:maintidx
 		{
 			Name: "eq-eq-no_label",
 			Matchers: []*labels.Matcher{
-				labels.MustNewMatcher(labels.MatchEqual, "__name__", "node_filesystem_avail_bytes"),
+				labels.MustNewMatcher(labels.MatchEqual, labelName, "node_filesystem_avail_bytes"),
 				labels.MustNewMatcher(labels.MatchEqual, "environment", "production"),
 				labels.MustNewMatcher(labels.MatchEqual, "userID", ""),
 			},

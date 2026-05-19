@@ -1,4 +1,4 @@
-// Copyright 2015-2025 Bleemeo
+// Copyright 2015-2026 Bleemeo
 //
 // bleemeo.com an infrastructure monitoring solution in the Cloud
 //
@@ -69,21 +69,21 @@ func Test_limitingIndex_Search(t *testing.T) {
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantCount: 3,
 					wantErr:   false,
@@ -99,21 +99,21 @@ func Test_limitingIndex_Search(t *testing.T) {
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -128,20 +128,20 @@ func Test_limitingIndex_Search(t *testing.T) {
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantCount: 2,
 					wantErr:   false,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantErr: true,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},
@@ -156,19 +156,19 @@ func Test_limitingIndex_Search(t *testing.T) {
 			searches: []search{
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantErr: true,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchEqual, "__name__", "disk_used"),
+						labels.MustNewMatcher(labels.MatchEqual, labelNameName, "disk_used"),
 					},
 					wantErr: true,
 				},
 				{
 					matchers: []*labels.Matcher{
-						labels.MustNewMatcher(labels.MatchRegexp, "__name__", "disk_.*"),
+						labels.MustNewMatcher(labels.MatchRegexp, labelNameName, "disk_.*"),
 					},
 					wantErr: true,
 				},

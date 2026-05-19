@@ -39,6 +39,8 @@ linters:
         - cloud.google.com/go
         - github.com/prometheus/prometheus
         - github.com/redis/go-redis/v9
+    goconst:
+      min-occurrences: 6
     nolintlint:
       # Require nolint directives to mention the specific linter being suppressed.
       require-specific: true
