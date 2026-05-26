@@ -203,6 +203,11 @@ func (c *Connection) openSession(lockAlreadyHeld bool) error {
 	return nil
 }
 
+// Keyspace returns the Cassandra keyspace this connection is scoped to.
+func (c *Connection) Keyspace() string {
+	return c.cluster.Keyspace
+}
+
 // Close closes all Session still open. All Session acquired by Session() should be closed before this call.
 func (c *Connection) Close() {
 	c.l.Lock()

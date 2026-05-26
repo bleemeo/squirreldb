@@ -19,6 +19,8 @@ package mutable
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/bleemeo/squirreldb/cassandra/connection"
 
@@ -74,6 +76,12 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 
 	defer session.Close()
 
+	// mutable_label_* tables have very low write throughput (at most a few writes per week).
+	// Without memtable_flush_period_in_ms, their memtable is only flushed when the commitlog
+	// reaches its maximum size, which can block commitlog purge for days.
+	// 1 hour is more than enough given the actual write frequency.
+	const mutableMemtableFlushPeriod = 15 * time.Minute
+
 	queryMutableLabelValues := session.Query(`
 		CREATE TABLE IF NOT EXISTS mutable_label_values (
 			tenant text,
@@ -81,7 +89,8 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 			value text,
 			associated_values frozen<list<text>>,
 			PRIMARY KEY ((tenant, name), value)
-		)`,
+		)
+		WITH memtable_flush_period_in_ms = ` + strconv.FormatInt(mutableMemtableFlushPeriod.Milliseconds(), 10),
 	).WithContext(ctx)
 
 	queryMutableLabelNames := session.Query(`
@@ -90,7 +99,8 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 			name text,
 			associated_name text,
 			PRIMARY KEY (tenant, name)
-		)`,
+		)
+		WITH memtable_flush_period_in_ms = ` + strconv.FormatInt(mutableMemtableFlushPeriod.Milliseconds(), 10),
 	).WithContext(ctx)
 
 	for _, query := range []*gocql.Query{queryMutableLabelValues, queryMutableLabelNames} {
@@ -101,7 +111,59 @@ func (cp *cassandra) createTables(ctx context.Context) error {
 		}
 	}
 
+	// ALTER TABLE is needed for tables that already exist in production (CREATE TABLE IF NOT EXISTS
+	// does not update options on existing tables).
+	// We only alter if memtable_flush_period_in_ms is not already set, so that a DBA can override it.
+	for _, tableName := range []string{"mutable_label_values", "mutable_label_names"} {
+		alreadySet, err := memtableFlushPeriodIsSet(ctx, session, cp.options.Connection.Keyspace(), tableName)
+		if err != nil {
+			// memtable_flush_period_in_ms may not exist in system_schema.tables on some Cassandra versions
+			// (e.g. Cassandra 5 deprecated the option). Log and skip rather than failing startup.
+			cp.options.Logger.Warn().Err(err).Msgf(
+				"Could not check memtable_flush_period_in_ms for %s, skipping ALTER TABLE",
+				tableName,
+			)
+
+			continue
+		}
+
+		if alreadySet {
+			continue
+		}
+
+		q := (`ALTER TABLE ` +
+			tableName +
+			` WITH memtable_flush_period_in_ms = ` +
+			strconv.FormatInt(mutableMemtableFlushPeriod.Milliseconds(), 10))
+
+		if err := session.Query(q).Consistency(gocql.All).WithContext(ctx).Exec(); err != nil {
+			return fmt.Errorf("alter table %s: %w", tableName, err)
+		}
+	}
+
 	return nil
+}
+
+// memtableFlushPeriodIsSet reports whether memtable_flush_period_in_ms is already explicitly set
+// on the given table. When it is, we skip the ALTER TABLE so that a DBA can manage this value freely.
+// In Cassandra 3+, memtable_flush_period_in_ms is a direct column in system_schema.tables;
+// its default value is 0 (disabled).
+func memtableFlushPeriodIsSet(
+	ctx context.Context,
+	session *connection.SessionWrapper,
+	keyspace, tableName string,
+) (bool, error) {
+	var flushPeriodMs int
+
+	err := session.Query(
+		`SELECT memtable_flush_period_in_ms FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?`,
+		keyspace, tableName,
+	).WithContext(ctx).Scan(&flushPeriodMs)
+	if err != nil {
+		return false, fmt.Errorf("read table options for %s: %w", tableName, err)
+	}
+
+	return flushPeriodMs != 0, nil
 }
 
 // AssociatedNames return the associated names map[mutable label name] -> non mutable label name.
