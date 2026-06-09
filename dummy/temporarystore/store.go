@@ -42,6 +42,7 @@ type storeData struct {
 }
 
 type Store struct {
+	cancel           context.CancelFunc
 	knownMetrics     map[types.MetricID]any
 	metricsStore     map[types.MetricID]storeData
 	transfertMetrics []types.MetricID
@@ -52,14 +53,25 @@ type Store struct {
 
 // New creates a new Store object.
 func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	store := &Store{
 		metricsStore: make(map[types.MetricID]storeData),
 		knownMetrics: make(map[types.MetricID]any),
 		metrics:      newMetrics(reg),
 		logger:       logger,
+		cancel:       cancel,
 	}
 
+	go store.Run(ctx)
+
 	return store
+}
+
+func (s *Store) Close() error {
+	s.cancel()
+
+	return nil
 }
 
 // Append implement batch.TemporaryStore interface.

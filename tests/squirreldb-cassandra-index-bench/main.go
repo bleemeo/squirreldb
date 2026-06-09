@@ -10,6 +10,7 @@ import (
 	"runtime/pprof"
 	"time"
 
+	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -64,6 +65,20 @@ func main() {
 	}
 }
 
+func getIndex(ctx context.Context, squirreldb *daemon.SquirrelDB, dontStartIndex bool) (types.Index, error) {
+	db, err := squirreldb.TSDB(ctx, dontStartIndex, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	cassandraTSDB, ok := db.(*tsdb.CassandraTSDB)
+	if !ok {
+		return nil, errors.New("TSDB isn't Cassandra")
+	}
+
+	return cassandraTSDB.Index(), nil
+}
+
 func run(ctx context.Context) error {
 	cfg, warnings, err := daemon.Config()
 	if err != nil {
@@ -113,7 +128,7 @@ func run(ctx context.Context) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	cassandraIndex, err := squirreldb.Index(ctx, false, time.Now)
+	cassandraIndex, err := getIndex(ctx, squirreldb, false)
 	if err != nil {
 		return err
 	}
@@ -136,7 +151,7 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb2.Stop()
 
-		cassandraIndex2, err := squirreldb2.Index(ctx, false, time.Now)
+		cassandraIndex2, err := getIndex(ctx, squirreldb2, false)
 		if err != nil {
 			return err
 		}
@@ -159,7 +174,7 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb3.Stop()
 
-		idx, err := squirreldb3.Index(ctx, true, time.Now)
+		idx, err := getIndex(ctx, squirreldb3, true)
 		if err != nil {
 			return err
 		}

@@ -333,13 +333,11 @@ func (c *CassandraIndex) Start(_ context.Context) error { //nolint: contextcheck
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 
-	c.wg.Add(1)
-
-	go func() {
+	c.wg.Go(func() {
 		defer logger.ProcessPanic()
 
 		c.run(ctx)
-	}()
+	})
 
 	return nil
 }

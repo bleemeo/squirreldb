@@ -18,154 +18,527 @@ package dummy
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 
+	"github.com/bleemeo/squirreldb/appendable/fixedappender"
+	"github.com/bleemeo/squirreldb/queryable/convert"
+	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/bleemeo/squirreldb/types"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"github.com/prometheus/prometheus/util/annotations"
 )
 
 // DiscardTSDB will write metrics to /dev/null.
 type DiscardTSDB struct{}
 
-type emptyResult struct{}
-
-// ReadIter return an empty result.
-func (d DiscardTSDB) ReadIter(_ context.Context, _ types.MetricRequest) (types.MetricDataSet, error) {
-	return emptyResult{}, nil
-}
-
-// Write discard metrics.
-func (d DiscardTSDB) Write(_ context.Context, _ []types.MetricData) error {
+func (DiscardTSDB) Close(context.Context) error {
 	return nil
 }
 
-func (d DiscardTSDB) Run(ctx context.Context, readiness chan error) {
-	readiness <- nil
-
-	<-ctx.Done()
+func (db DiscardTSDB) QuerierWithOptions(_ types.QuerierOptions, mint, maxt int64) (storage.Querier, error) {
+	return db.Querier(mint, maxt)
 }
 
-func (d DiscardTSDB) Flush() {
+func (db DiscardTSDB) ChunkQuerierWithOptions(_ types.QuerierOptions, mint, maxt int64) (storage.ChunkQuerier, error) {
+	return db.ChunkQuerier(mint, maxt)
 }
 
-func (r emptyResult) Next() bool {
-	return false
+func (DiscardTSDB) AppenderWithOptions(ctx context.Context, _ types.AppenderOptions) storage.Appender {
+	return fixedappender.NewNoopAppender()
 }
 
-func (r emptyResult) At() types.MetricData {
-	panic("At() shouldn't be called on emptyResult")
+func (DiscardTSDB) Querier(mint, maxt int64) (storage.Querier, error) {
+	return fixedqueryable.NewEmptyQuerier(), nil
 }
 
-func (r emptyResult) Err() error {
+func (DiscardTSDB) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
+	return convert.NewQuerierToChunkQuerier(fixedqueryable.NewEmptyQuerier()), nil
+}
+
+func (DiscardTSDB) Flush(context.Context) error {
+	return nil
+}
+
+func (DiscardTSDB) Run(ctx context.Context) error {
 	return nil
 }
 
 // MemoryTSDB store all value in memory. Only useful in unittest.
 type MemoryTSDB struct {
-	mutex      sync.Mutex
-	Data       map[types.MetricID]types.MetricData
-	LogRequest bool
-	Reads      []types.MetricRequest
-	Writes     [][]types.MetricData
+	mutex sync.Mutex
+	data  map[uint64]Data
 }
 
-type readIter struct {
-	db      *MemoryTSDB
-	current types.MetricData
-	request types.MetricRequest
-	offset  int
+type Data struct {
+	Labels labels.Labels
+	TTL    int64
+	Points []types.MetricPoint
 }
 
-// DumpData dump to content of the TSDB. Result is ordered by MetricID.
-func (db *MemoryTSDB) DumpData() []types.MetricData {
+func (db *MemoryTSDB) Queryable(ctx context.Context) (types.QueryableWithOptions, error) {
+	return db, nil
+}
+
+func (db *MemoryTSDB) Close(context.Context) error {
+	return nil
+}
+
+func (db *MemoryTSDB) AppenderWithOptions(ctx context.Context, options types.AppenderOptions) storage.Appender {
+	return &appender{
+		pendingTimeSeries: make(map[uint64]types.Timeseries),
+		db:                db,
+		ttl:               options.WriteTTL,
+	}
+}
+
+func (db *MemoryTSDB) QuerierWithOptions(_ types.QuerierOptions, mint, maxt int64) (storage.Querier, error) {
+	return db.Querier(mint, maxt)
+}
+
+func (db *MemoryTSDB) ChunkQuerierWithOptions(_ types.QuerierOptions, mint, maxt int64) (storage.ChunkQuerier, error) {
+	return db.ChunkQuerier(mint, maxt)
+}
+
+func (db *MemoryTSDB) Querier(mint, maxt int64) (storage.Querier, error) {
+	return &querier{
+		db:   db,
+		mint: mint,
+		maxt: maxt,
+	}, nil
+}
+
+func (db *MemoryTSDB) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
+	q, err := db.Querier(mint, maxt)
+	if err != nil {
+		return nil, err
+	}
+
+	return convert.NewQuerierToChunkQuerier(q), nil
+}
+
+func (db *MemoryTSDB) AddData(data []types.Timeseries, ttl int64) {
+	metrics := make(map[uint64]types.Timeseries, len(data))
+	for _, row := range data {
+		id := row.Labels.Hash()
+		metrics[id] = row
+	}
+
+	db.write(metrics, ttl)
+}
+
+func (db *MemoryTSDB) Data() []types.Timeseries {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 
-	result := make([]types.MetricData, 0, len(db.Data))
+	result := make([]types.Timeseries, 0, len(db.data))
 
-	for _, v := range db.Data {
-		result = append(result, v)
+	for _, metric := range db.data {
+		result = append(result, types.Timeseries{
+			Points: metric.Points,
+			Labels: metric.Labels,
+		})
 	}
-
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
-	})
 
 	return result
 }
 
-// ReadIter return an empty result.
-func (db *MemoryTSDB) ReadIter(_ context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
+func (db *MemoryTSDB) CountMetrics() int {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 
-	if db.LogRequest {
-		db.Reads = append(db.Reads, request)
-	}
-
-	return &readIter{
-		request: request,
-		db:      db,
-	}, nil
+	return len(db.data)
 }
 
-// Write store in memory.
-func (db *MemoryTSDB) Write(_ context.Context, metrics []types.MetricData) error {
-	db.mutex.Lock()
-	defer db.mutex.Unlock()
+type appender struct {
+	db  *MemoryTSDB
+	ttl int64
 
-	if db.LogRequest {
-		db.Writes = append(db.Writes, metrics)
+	pendingTimeSeries map[uint64]types.Timeseries
+}
+
+func (app *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+	labelsHash := l.Hash()
+
+	ts, ok := app.pendingTimeSeries[labelsHash]
+	if !ok {
+		app.pendingTimeSeries[labelsHash] = types.Timeseries{
+			Labels: l,
+			Points: []types.MetricPoint{{
+				Timestamp: t,
+				Value:     v,
+			}},
+		}
+	} else {
+		ts.Points = append(ts.Points, types.MetricPoint{
+			Timestamp: t,
+			Value:     v,
+		})
+		app.pendingTimeSeries[labelsHash] = ts
 	}
 
-	if db.Data == nil {
-		db.Data = make(map[types.MetricID]types.MetricData)
-	}
+	return 0, nil
+}
 
-	for _, m := range metrics {
-		m.Points = append(db.Data[m.ID].Points, m.Points...)
-		db.Data[m.ID] = m
-	}
+func (app *appender) Commit() error {
+	defer func() {
+		app.pendingTimeSeries = make(map[uint64]types.Timeseries)
+	}()
+
+	app.db.write(app.pendingTimeSeries, app.ttl)
 
 	return nil
 }
 
-func (r *readIter) Next() bool {
-	r.db.mutex.Lock()
-	defer r.db.mutex.Unlock()
+func (app *appender) Rollback() error {
+	app.pendingTimeSeries = make(map[uint64]types.Timeseries)
 
-	for {
-		if r.offset >= len(r.request.IDs) {
+	return nil
+}
+
+func (app *appender) SetOptions(opts *storage.AppendOptions) {
+}
+
+func (app *appender) AppendExemplar(
+	ref storage.SeriesRef,
+	l labels.Labels,
+	e exemplar.Exemplar,
+) (storage.SeriesRef, error) {
+	return 0, errNotImplemented
+}
+
+func (app *appender) AppendHistogram(
+	ref storage.SeriesRef,
+	l labels.Labels,
+	t int64,
+	h *histogram.Histogram,
+	fh *histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
+	return 0, errNotImplemented
+}
+
+func (app *appender) AppendHistogramCTZeroSample(
+	ref storage.SeriesRef,
+	l labels.Labels,
+	t int64,
+	ct int64,
+	h *histogram.Histogram,
+	fh *histogram.FloatHistogram,
+) (storage.SeriesRef, error) {
+	return 0, errNotImplemented
+}
+
+func (app *appender) UpdateMetadata(
+	ref storage.SeriesRef,
+	l labels.Labels,
+	m metadata.Metadata,
+) (storage.SeriesRef, error) {
+	return 0, errNotImplemented
+}
+
+func (app *appender) AppendCTZeroSample(
+	ref storage.SeriesRef,
+	l labels.Labels,
+	t int64,
+	ct int64,
+) (storage.SeriesRef, error) {
+	return 0, errNotImplemented
+}
+
+type querier struct {
+	db   *MemoryTSDB
+	mint int64
+	maxt int64
+}
+
+func (q *querier) Select(
+	ctx context.Context,
+	sortSeries bool,
+	hints *storage.SelectHints,
+	matchers ...*labels.Matcher,
+) storage.SeriesSet {
+	metricIDs := q.db.filterMetricIDs(matchers, sortSeries)
+
+	return &seriesSet{
+		db:   q.db,
+		list: metricIDs,
+		minT: q.mint,
+		maxT: q.maxt,
+	}
+}
+
+func (q *querier) LabelValues(
+	ctx context.Context,
+	name string,
+	hints *storage.LabelHints,
+	matchers ...*labels.Matcher,
+) ([]string, annotations.Annotations, error) {
+	metricIDs := q.db.filterMetricIDs(matchers, false)
+	metricIDs = q.db.metricsWithData(metricIDs, q.mint, q.maxt)
+
+	labelsList := q.db.getLabels(metricIDs)
+
+	result := make(map[string]any, 0)
+
+	for _, lbl := range labelsList {
+		v := lbl.Get(name)
+		if v != "" {
+			result[v] = nil
+		}
+	}
+
+	resultSlice := slices.Collect(maps.Keys(result))
+	slices.Sort(resultSlice)
+
+	return resultSlice, nil, nil
+}
+
+func (q *querier) LabelNames(
+	ctx context.Context,
+	_ *storage.LabelHints,
+	matchers ...*labels.Matcher,
+) ([]string, annotations.Annotations, error) {
+	metricIDs := q.db.filterMetricIDs(matchers, false)
+	metricIDs = q.db.metricsWithData(metricIDs, q.mint, q.maxt)
+
+	labelsList := q.db.getLabels(metricIDs)
+
+	result := make(map[string]any, 0)
+
+	for _, lbl := range labelsList {
+		lbl.Range(func(l labels.Label) {
+			result[l.Name] = nil
+		})
+	}
+
+	resultSlice := slices.Collect(maps.Keys(result))
+	slices.Sort(resultSlice)
+
+	return resultSlice, nil, nil
+}
+
+func (q *querier) Close() error {
+	return nil
+}
+
+type seriesSet struct {
+	db      *MemoryTSDB
+	minT    int64
+	maxT    int64
+	list    []uint64
+	current series
+}
+
+func (i *seriesSet) Next() bool {
+	for len(i.list) > 0 {
+		id := i.list[0]
+		i.list = i.list[1:]
+
+		points, lbl := i.db.getPointsAndLabels(id, i.minT, i.maxT)
+		if len(points) > 0 {
+			i.current = series{
+				points: points,
+				labels: lbl,
+			}
+
+			return true
+		}
+	}
+
+	return false
+}
+
+func (i *seriesSet) At() storage.Series {
+	return i.current
+}
+
+func (i *seriesSet) Err() error {
+	return nil
+}
+
+func (i *seriesSet) Warnings() annotations.Annotations {
+	return nil
+}
+
+type series struct {
+	labels labels.Labels
+	points []types.MetricPoint
+}
+
+func (s series) Labels() labels.Labels {
+	return s.labels
+}
+
+func (s series) Iterator(chunkenc.Iterator) chunkenc.Iterator {
+	return &samplesIter{
+		data:   s.points,
+		offset: -1,
+	}
+}
+
+type samplesIter struct {
+	data   []types.MetricPoint
+	offset int
+}
+
+func (s *samplesIter) Next() chunkenc.ValueType {
+	if s.offset+1 >= len(s.data) {
+		return chunkenc.ValNone
+	}
+
+	s.offset++
+
+	return chunkenc.ValFloat
+}
+
+func (s *samplesIter) Seek(t int64) chunkenc.ValueType { //nolint: govet
+	for ; s.offset < len(s.data); s.offset++ {
+		if s.data[s.offset].Timestamp >= t {
+			return chunkenc.ValFloat
+		}
+	}
+
+	s.offset = len(s.data) - 1
+
+	return chunkenc.ValNone
+}
+
+func (s *samplesIter) At() (int64, float64) {
+	return s.data[s.offset].Timestamp, s.data[s.offset].Value
+}
+
+func (s *samplesIter) AtT() int64 {
+	return s.data[s.offset].Timestamp
+}
+
+func (s *samplesIter) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
+	return 0, nil
+}
+
+func (s *samplesIter) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	return 0, nil
+}
+
+func (s *samplesIter) Err() error {
+	return nil
+}
+
+func (db *MemoryTSDB) write(pendingTimeSeries map[uint64]types.Timeseries, ttl int64) {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	if db.data == nil {
+		db.data = make(map[uint64]Data)
+	}
+
+	for k, v := range pendingTimeSeries {
+		d, ok := db.data[k]
+		if !ok {
+			d.Labels = v.Labels.Copy()
+		}
+
+		d.TTL = max(d.TTL, ttl)
+
+		d.Points = append(d.Points, v.Points...)
+		db.data[k] = d
+	}
+}
+
+func (db *MemoryTSDB) filterMetricIDs(matchers []*labels.Matcher, sorted bool) []uint64 {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	result := make([]uint64, 0)
+
+	for id, row := range db.data {
+		if matcherMatches(matchers, row.Labels) {
+			result = append(result, id)
+		}
+	}
+
+	if sorted {
+		sort.Slice(result, func(i, j int) bool {
+			aLabels := db.data[result[i]].Labels
+			bLabels := db.data[result[j]].Labels
+
+			return labels.Compare(aLabels, bLabels) < 0
+		})
+	}
+
+	return result
+}
+
+func (db *MemoryTSDB) metricsWithData(metricIDs []uint64, minT int64, maxT int64) []uint64 {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	i := 0
+
+	for _, id := range metricIDs {
+		hadData := false
+
+		for _, pt := range db.data[id].Points {
+			if pt.Timestamp >= minT && pt.Timestamp <= maxT {
+				hadData = true
+
+				break
+			}
+		}
+
+		if hadData {
+			metricIDs[i] = id
+			i++
+		}
+	}
+
+	return metricIDs[:i]
+}
+
+func (db *MemoryTSDB) getLabels(metricIDs []uint64) []labels.Labels {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	result := make([]labels.Labels, len(metricIDs))
+	for i, id := range metricIDs {
+		result[i] = db.data[id].Labels
+	}
+
+	return result
+}
+
+func (db *MemoryTSDB) getPointsAndLabels(id uint64, minT int64, maxT int64) ([]types.MetricPoint, labels.Labels) {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	points := filterPoints(db.data[id].Points, minT, maxT)
+
+	return points, db.data[id].Labels
+}
+
+func matcherMatches(matchers []*labels.Matcher, lbls labels.Labels) bool {
+	for _, m := range matchers {
+		value := lbls.Get(m.Name)
+		if !m.Matches(value) {
 			return false
 		}
-
-		id := r.request.IDs[r.offset]
-		r.offset++
-		r.current = r.db.Data[id]
-
-		r.current.Points = filterPoints(r.current.Points, r.request)
-		if len(r.current.Points) == 0 {
-			continue
-		}
-
-		return true
 	}
+
+	return true
 }
 
-func (r *readIter) At() types.MetricData {
-	return r.current
-}
-
-func (r *readIter) Err() error {
-	return nil
-}
-
-func filterPoints(points []types.MetricPoint, request types.MetricRequest) []types.MetricPoint {
+func filterPoints(points []types.MetricPoint, mint int64, maxt int64) []types.MetricPoint {
 	// Avoid allocation if all points matches
 	needFilter := false
 
 	for _, p := range points {
-		if p.Timestamp < request.FromTimestamp || p.Timestamp > request.ToTimestamp {
+		if p.Timestamp < mint || p.Timestamp > maxt {
 			needFilter = true
 
 			break
@@ -179,7 +552,7 @@ func filterPoints(points []types.MetricPoint, request types.MetricRequest) []typ
 	result := make([]types.MetricPoint, 0, len(points))
 
 	for _, p := range points {
-		if p.Timestamp < request.FromTimestamp || p.Timestamp > request.ToTimestamp {
+		if p.Timestamp < mint || p.Timestamp > maxt {
 			continue
 		}
 

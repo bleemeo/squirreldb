@@ -20,17 +20,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/dummy/temporarystore"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/queryable/convert"
+	redisTemporarystore "github.com/bleemeo/squirreldb/redis/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/rs/zerolog"
 )
@@ -46,7 +53,8 @@ const retryMaxDelay = 30 * time.Second
 
 var (
 	errPointsEmptyValues = errors.New("empty points values")
-	errUnsupportedFormat = errors.New("unsupporter format version")
+	errUnsupportedFormat = errors.New("unsupported format version")
+	errNotImplemented    = errors.New("not implemented")
 )
 
 type Options struct {
@@ -55,6 +63,8 @@ type Options struct {
 	AggregateIntendedDuration func() time.Duration
 	ReadOnly                  bool
 	DisablePreAggregation     bool
+	BatchSize                 time.Duration
+	Redis                     config.Redis // If Redis is unset, use an in-memory store for batching
 }
 
 type lockFactory interface {
@@ -70,12 +80,14 @@ type CassandraTSDB struct {
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 
-	l                 sync.Mutex
-	fullyAggregatedAt time.Time
+	l                    sync.Mutex
+	fullyAggregatedAt    time.Time
+	lastLogPointInPastAt time.Time
 
 	index            types.Index
 	lockFactory      lockFactory
 	state            types.State
+	batcher          *batch.Batch
 	pointsBufferPool sync.Pool
 	bytesPool        sync.Pool
 	xorChunkPool     chunkenc.Pool
@@ -107,6 +119,30 @@ func New(
 		}
 	}
 
+	var temporaryStore batch.TemporaryStore
+
+	if len(options.Redis.Addresses) > 0 && options.Redis.Addresses[0] != "" {
+		var err error
+
+		temporaryStore, err = redisTemporarystore.New(
+			ctx,
+			reg,
+			redisTemporarystore.Options{
+				RedisOptions: options.Redis,
+				Keyspace:     options.Redis.Keyspace,
+			},
+			logger.With().Str("component", "temporary_store").Logger(),
+		)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		temporaryStore = temporarystore.New( //nolint:contextcheck
+			reg,
+			logger.With().Str("component", "temporary_store").Logger(),
+		)
+	}
+
 	tsdb := &CassandraTSDB{
 		connection:  connection,
 		options:     options,
@@ -115,6 +151,12 @@ func New(
 		index:       index,
 		lockFactory: lockFactory,
 		state:       state,
+		batcher: batch.New(
+			reg,
+			options.BatchSize,
+			temporaryStore,
+			logger.With().Str("component", "batch").Logger(),
+		),
 		pointsBufferPool: sync.Pool{
 			New: func() any {
 				return make([]types.MetricPoint, 15)
@@ -140,13 +182,17 @@ func (c *CassandraTSDB) Start(_ context.Context) error { //nolint: contextcheck
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 
-	c.wg.Add(1)
+	c.wg.Go(func() {
+		defer logger.ProcessPanic()
 
-	go func() {
+		c.batcher.Run(ctx, c.writerInterface())
+	})
+
+	c.wg.Go(func() {
 		defer logger.ProcessPanic()
 
 		c.run(ctx)
-	}()
+	})
 
 	return nil
 }
@@ -154,7 +200,9 @@ func (c *CassandraTSDB) Start(_ context.Context) error { //nolint: contextcheck
 // Stop stop and wait all Cassandra Index services.
 func (c *CassandraTSDB) Stop() error {
 	if c.cancel == nil {
-		return errors.New("not started")
+		c.wg.Wait()
+
+		return nil
 	}
 
 	c.cancel()
@@ -162,6 +210,85 @@ func (c *CassandraTSDB) Stop() error {
 	c.wg.Wait()
 
 	return nil
+}
+
+func (c *CassandraTSDB) AppenderWithOptions(ctx context.Context, opts types.AppenderOptions) storage.Appender {
+	return &batchingAppender{
+		c:                 c,
+		ttl:               opts.WriteTTL,
+		ctx:               ctx,
+		pendingTimeSeries: make(map[uint64]types.Timeseries),
+	}
+}
+
+func (c *CassandraTSDB) ChunkQuerierWithOptions(
+	opts types.QuerierOptions,
+	mint int64,
+	maxt int64,
+) (storage.ChunkQuerier, error) {
+	q, err := c.QuerierWithOptions(opts, mint, maxt)
+	if err != nil {
+		return nil, err
+	}
+
+	return convert.NewQuerierToChunkQuerier(q), nil
+}
+
+func (c *CassandraTSDB) QuerierWithOptions(opts types.QuerierOptions, mint, maxt int64) (storage.Querier, error) {
+	backendOption, _ := opts.BackendOptions.(querierOptions)
+
+	return &querier{
+		c:             c,
+		mint:          mint,
+		maxt:          maxt,
+		opts:          opts,
+		backendOption: backendOption,
+	}, nil
+}
+
+func (c *CassandraTSDB) Close(context.Context) error {
+	return c.Stop()
+}
+
+func (c *CassandraTSDB) Index() types.Index {
+	return c.index
+}
+
+func (c *CassandraTSDB) Flush(ctx context.Context) error {
+	return c.batcher.Flush(ctx)
+}
+
+func (c *CassandraTSDB) ParseHTTPOptions(header http.Header) (any, error) {
+	result := querierOptions{}
+
+	value := header.Get(types.HeaderForcePreAggregated)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return result, err
+		}
+
+		result.ForcePreAggregated = tmp
+	}
+
+	value = header.Get(types.HeaderForceRaw)
+	if value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return result, err
+		}
+
+		result.ForceRaw = tmp
+		if result.ForceRaw {
+			result.ForcePreAggregated = false
+		}
+	}
+
+	return result, nil
+}
+
+func (c *CassandraTSDB) Querier(mint, maxt int64) (storage.Querier, error) {
+	return c.QuerierWithOptions(types.QuerierOptions{}, mint, maxt)
 }
 
 func (c *CassandraTSDB) getPointsBuffer() []types.MetricPoint {
@@ -182,6 +309,27 @@ func (c *CassandraTSDB) putPointsBuffer(v []types.MetricPoint) {
 	}
 
 	c.pointsBufferPool.Put(&v)
+}
+
+// writerInterface do the write to the persistent storage (Cassandra) and should be
+// only used by the batcher. The write must be batched with this writer.
+func (c *CassandraTSDB) writerInterface() types.MetricWriter {
+	return &tsdbWriter{
+		c: c,
+	}
+}
+
+func (c *CassandraTSDB) warnPointTooOld(tMin int64) {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	const warnDebounceDelay = 10 * time.Second
+
+	if time.Since(c.lastLogPointInPastAt) > warnDebounceDelay {
+		c.logger.Warn().Msgf("Points with timestamp %v will be ignored by pre-aggregation", time.Unix(tMin/1000, 0))
+
+		c.lastLogPointInPastAt = time.Now()
+	}
 }
 
 func dataTableCreate(ctx context.Context, connection *connection.Connection, defaultTimeToLive time.Duration) error {

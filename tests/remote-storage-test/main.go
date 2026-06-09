@@ -86,7 +86,7 @@ func run(ctx context.Context) error {
 
 		err = squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
-			return err
+			return fmt.Errorf("fail to DropCassandraData: %w", err)
 		}
 
 		err = squirreldb.DropTemporaryStore(ctx, false)
@@ -96,7 +96,7 @@ func run(ctx context.Context) error {
 
 		err = squirreldb.Start(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("fail to Start SquirrelDB: %w", err)
 		}
 
 		squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())

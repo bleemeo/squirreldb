@@ -12,5 +12,6 @@
 __debug_bin
 
 telemetry.json
+coverage-run-tests
 coverage.html
 coverage.out

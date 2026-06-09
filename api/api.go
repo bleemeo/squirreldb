@@ -30,12 +30,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/bleemeo/squirreldb/api/promql"
-	"github.com/bleemeo/squirreldb/api/remotestorage"
+	"github.com/bleemeo/squirreldb/api/requestscoped"
+	"github.com/bleemeo/squirreldb/appendable/fixedappender"
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
@@ -48,6 +48,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/util/gate"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/rs/zerolog"
 )
@@ -66,20 +67,33 @@ var allowedProtoMsgs = []config.RemoteWriteProtoMsg{ //nolint:gochecknoglobals
 }
 
 var (
-	regexErrInvalidMatcher      = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrInvalidMatcher))
-	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", remotestorage.ErrMissingTenantHeader))
+	regexErrInvalidMatcher      = regexp.MustCompile(fmt.Sprintf("^%s", requestscoped.ErrInvalidMatcher))
+	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", requestscoped.ErrMissingTenantHeader))
+	ErrIsReadOnly               = errors.New("trying to write but read-only mode is enabled")
 )
+
+// TSDBDebugEndpoint define the (legacy) troubleshooting endpoints exposed by API.
+// Because newer backend/tsdb might not implement thing the same way (e.g. no index),
+// This should be deprecated and replaced by another approch.
+type TSDBDebugEndpoint interface {
+	ForcePreAggregation(
+		ctx context.Context,
+		threadCount int,
+		from time.Time,
+		to time.Time,
+		matchers []*labels.Matcher,
+	) error
+	Flush(ctx context.Context) error
+	Index() types.Index
+}
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
 	ListenAddress               string
 	ReadOnly                    bool
-	Index                       types.Index
-	Reader                      types.MetricReader
-	Writer                      types.MetricWriter
+	TSDB                        types.TSDB
 	MutableLabelWriter          MutableLabelInterface
-	FlushCallback               func() error
-	PreAggregateCallback        func(ctx context.Context, thread int, from, to time.Time, matchers []*labels.Matcher) error
+	DefaultTTL                  time.Duration
 	MaxConcurrentRemoteRequests int
 	// MaxRequestBodySizeBytes defines the maximum size of incoming requests body.
 	MaxRequestBodySizeBytes  int64
@@ -87,7 +101,7 @@ type API struct {
 	MetricRegistry           prometheus.Registerer
 	PromQLMaxEvaluatedSeries uint32
 	TenantLabelName          string
-	MutableLabelDetector     remotestorage.MutableLabelDetector
+	MutableLabelDetector     requestscoped.MutableLabelDetector
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
 	RequireTenantHeader bool
@@ -97,9 +111,6 @@ type API struct {
 	router     http.Handler
 	listenPort int
 	metrics    *metrics
-
-	l                   sync.Mutex
-	defaultDebugRequest bool
 
 	FuturePointsBackdateOffset time.Duration
 }
@@ -203,8 +214,40 @@ func NewPrometheus(
 	return api
 }
 
-func (a *API) init() {
+func (a *API) init(ctx context.Context) error {
 	a.metrics = newMetrics(a.MetricRegistry)
+
+	maxConcurrent := a.MaxConcurrentRemoteRequests
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.GOMAXPROCS(0) * 2
+	}
+
+	// remoteWriteGate limits the number of concurrent remote write requests. It is acquired and
+	// released in the HTTP middleware (around the whole request), so a slot is always released
+	// even if the underlying Appender's Commit/Rollback is never called.
+	remoteWriteGate := gate.New(maxConcurrent)
+
+	storeOption := requestscoped.Options{
+		DefaultMaxEvaluatedSeries: a.PromQLMaxEvaluatedSeries,
+		DefaultMaxEvaluatedPoints: a.PromQLMaxEvaluatedPoints,
+		DefaultTTL:                int64(a.DefaultTTL.Seconds()),
+		TenantLabelName:           a.TenantLabelName,
+		RequireTenantHeader:       a.RequireTenantHeader,
+		Queryable:                 a.TSDB,
+		MutableLabelDetector:      a.MutableLabelDetector,
+	}
+
+	if optParser, ok := a.TSDB.(types.HTTPOptionsParser); ok {
+		storeOption.OptionsParser = optParser
+	}
+
+	if a.ReadOnly {
+		storeOption.Appendable = fixedappender.NewErrorAppendableWithOptions(ErrIsReadOnly)
+	} else {
+		storeOption.Appendable = a.TSDB
+	}
+
+	requestScopedStore := requestscoped.NewStore(storeOption)
 
 	router := route.New()
 
@@ -221,7 +264,11 @@ func (a *API) init() {
 	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
 	router.Get("/debug/index_block", a.indexBlockHandler)
 	router.Get("/debug/index_unblock", a.indexUnblockHandler)
-	router.Get("/debug/toggle_debug_query", a.toggleDebugQueryHandler)
+	router.Get("/debug/toggle_debug_query", func(w http.ResponseWriter, r *http.Request) {
+		debugRequest := requestScopedStore.ToggleDebug()
+
+		fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
+	})
 	router.Get("/debug/preaggregate", a.aggregateHandler)
 	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
 	router.Post("/debug/mutable_import", a.mutableImportHandler)
@@ -232,39 +279,9 @@ func (a *API) init() {
 	router.Post("/mutable/values", a.mutableLabelValuesWriteHandler)
 	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
 
-	queryable := promql.NewStore(
-		a.Logger,
-		a.Index,
-		a.Reader,
-		a.TenantLabelName,
-		a.RequireTenantHeader,
-		a.PromQLMaxEvaluatedSeries,
-		a.PromQLMaxEvaluatedPoints,
-		a.MetricRegistry,
-	)
-
-	maxConcurrent := a.MaxConcurrentRemoteRequests
-	if maxConcurrent <= 0 {
-		maxConcurrent = runtime.GOMAXPROCS(0) * 2
-	}
-
-	appendable := remotestorage.NewReadOnly()
-
-	if !a.ReadOnly {
-		appendable = remotestorage.New(
-			a.Writer,
-			a.Index,
-			maxConcurrent,
-			a.TenantLabelName,
-			a.MutableLabelDetector,
-			a.RequireTenantHeader,
-			a.MetricRegistry,
-		)
-	}
-
 	api := NewPrometheus(
-		queryable,
-		appendable,
+		requestScopedStore,
+		requestScopedStore,
 		maxConcurrent,
 		a.MetricRegistry,
 		a.Logger,
@@ -279,43 +296,45 @@ func (a *API) init() {
 		h := func(rw http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(rw, r.Body, a.MaxRequestBodySizeBytes)
 
-			a.l.Lock()
-
-			if a.defaultDebugRequest {
-				r.Header.Add(types.HeaderQueryDebug, "1")
-			}
-
-			a.l.Unlock()
-
 			t0 := time.Now()
 
 			defer func() {
 				a.metrics.RequestsSeconds.WithLabelValues(operation).Observe(time.Since(t0).Seconds())
 			}()
 
-			// We must create the cachingReader at this stage
-			// so that only one is allocated per request,
-			// and thus be able to benefit from its cache.
-			ctx, err := queryable.ContextFromRequest(r)
+			ctx, debugLevel, err := requestScopedStore.ContextWithRequest(r.Context(), r, operation)
 			if err != nil {
 				a.respondError(rw, http.StatusUnprocessableEntity, err)
 
 				return
 			}
 
-			r = r.WithContext(ctx) //nolint: contextcheck
+			ctx = promql.SetDebugLevel(ctx, debugLevel)
+
+			r = r.WithContext(ctx)
 
 			// Prometheus always returns a status 500 when write fails, but if
 			// the labels are invalid we want to return a status 400, so we use the
 			// interceptor to change the returned status in this case.
 			if operation == "write" {
+				// Limit the number of concurrent remote write requests. Acquiring and releasing
+				// here (rather than in the Appender) guarantees the slot is freed when the request
+				// ends, even if the Appender's Commit/Rollback is never called.
+				if err := remoteWriteGate.Start(ctx); err != nil {
+					a.respondError(rw, http.StatusServiceUnavailable,
+						fmt.Errorf("too many concurrent remote write: %w", err))
+
+					return
+				}
+
+				defer remoteWriteGate.Done()
+
 				rw = &interceptor{OrigWriter: rw}
 			}
 
 			handler(rw, r)
 
-			enableDebug := r.Header.Get(types.HeaderQueryDebug) != ""
-			if enableDebug {
+			if debugLevel >= types.DebugLevelSimple {
 				humainURL := r.URL.Path
 
 				if r.URL.RawQuery != "" {
@@ -339,11 +358,18 @@ func (a *API) init() {
 	api.Register(apiRouter)
 
 	a.router = apiRouter
+
+	return nil
 }
 
 // Run start the HTTP api server.
 func (a *API) Run(ctx context.Context, readiness chan error) {
-	a.init()
+	err := a.init(ctx)
+	if err != nil {
+		readiness <- err
+
+		return
+	}
 
 	server := &http.Server{
 		Addr:              a.ListenAddress,
@@ -416,11 +442,11 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.Error(w, "Server not yet ready", http.StatusServiceUnavailable)
 }
 
-func (a *API) flushHandler(w http.ResponseWriter, _ *http.Request) {
+func (a *API) flushHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	if a.FlushCallback != nil {
-		err := a.FlushCallback()
+	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
+		err := tsdbDebug.Flush(r.Context())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
 
@@ -516,26 +542,59 @@ The CSV format is: metricID, labels,expirationDate
 `)
 }
 
+func (a *API) getIndexDumperOrReplyError(w http.ResponseWriter) types.IndexDumper {
+	var index types.Index
+
+	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
+		index = tsdbDebug.Index()
+	} else {
+		http.Error(w, "TSDB does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
+
+		return nil
+	}
+
+	if debugIndex, ok := index.(types.IndexDumper); ok {
+		return debugIndex
+	}
+
+	http.Error(w, "Index does not implement IndexDumper interface", http.StatusNotImplemented)
+
+	return nil
+}
+
+func (a *API) getIndexOrReplyError(w http.ResponseWriter) types.Index {
+	var index types.Index
+
+	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
+		index = tsdbDebug.Index()
+	} else {
+		http.Error(w, "TSDB does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
+
+		return nil
+	}
+
+	return index
+}
+
 func (a *API) indexInfoHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		metricIDText := req.URL.Query()["metricID"]
-
-		switch {
-		case len(metricIDText) > 0:
-			a.indexInfoIDs(ctx, w, idx, metricIDText)
-		default:
-			if err := idx.InfoGlobal(ctx, w); err != nil {
-				http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
-
-				return
-			}
-		}
-	} else {
-		http.Error(w, "Index does not implement Info*()", http.StatusNotImplemented)
-
+	debugIndex := a.getIndexDumperOrReplyError(w)
+	if debugIndex == nil {
 		return
+	}
+
+	metricIDText := req.URL.Query()["metricID"]
+
+	switch {
+	case len(metricIDText) > 0:
+		a.indexInfoIDs(ctx, w, debugIndex, metricIDText)
+	default:
+		if err := debugIndex.InfoGlobal(ctx, w); err != nil {
+			http.Error(w, fmt.Sprintf("Index info failed: %v", err), http.StatusInternalServerError)
+
+			return
+		}
 	}
 }
 
@@ -565,7 +624,12 @@ func (a *API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.VerifiableIndex); ok { //nolint:nestif
+	index := a.getIndexOrReplyError(w)
+	if index == nil {
+		return
+	}
+
+	if idx, ok := index.(types.VerifiableIndex); ok { //nolint:nestif
 		doFix := req.URL.Query().Get("fix") != ""
 		acquireLock := req.URL.Query().Get("lock") != ""
 		strict := req.URL.Query().Get("strict") != ""
@@ -614,14 +678,13 @@ func (a *API) indexVerifyHandler(w http.ResponseWriter, req *http.Request) {
 func (a *API) indexDumpHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		if err := idx.Dump(ctx, w); err != nil {
-			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+	idx := a.getIndexDumperOrReplyError(w)
+	if idx == nil {
+		return
+	}
 
-			return
-		}
-	} else {
-		http.Error(w, "Index does not implement Dump()", http.StatusNotImplemented)
+	if err := idx.Dump(ctx, w); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 		return
 	}
@@ -659,10 +722,8 @@ func (a *API) mutableImportHandler(w http.ResponseWriter, req *http.Request) {
 func (a *API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	idx, ok := a.Index.(types.IndexDumper)
-	if !ok {
-		http.Error(w, "Index does not implement DumpByLabels()", http.StatusNotImplemented)
-
+	idx := a.getIndexDumperOrReplyError(w)
+	if idx == nil {
 		return
 	}
 
@@ -711,28 +772,27 @@ func (a *API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request)
 func (a *API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		dates := req.URL.Query()["date"]
-		if len(dates) != 1 {
-			http.Error(w, `Expect one parameter "date"`, http.StatusBadRequest)
+	idx := a.getIndexDumperOrReplyError(w)
+	if idx == nil {
+		return
+	}
 
-			return
-		}
+	dates := req.URL.Query()["date"]
+	if len(dates) != 1 {
+		http.Error(w, `Expect one parameter "date"`, http.StatusBadRequest)
 
-		date, err := time.Parse("2006-01-02", dates[0])
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+		return
+	}
 
-			return
-		}
+	date, err := time.Parse("2006-01-02", dates[0])
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
 
-		if err := idx.DumpByExpirationDate(ctx, w, date); err != nil {
-			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-			return
-		}
-	} else {
-		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+	if err := idx.DumpByExpirationDate(ctx, w, date); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 		return
 	}
@@ -741,28 +801,27 @@ func (a *API) indexDumpByExpirationDateHandler(w http.ResponseWriter, req *http.
 func (a *API) indexDumpByShardHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		dates := req.URL.Query()["shard_time"]
-		if len(dates) != 1 {
-			http.Error(w, `Expect one parameter "shard_time"`, http.StatusBadRequest)
+	idx := a.getIndexDumperOrReplyError(w)
+	if idx == nil {
+		return
+	}
 
-			return
-		}
+	dates := req.URL.Query()["shard_time"]
+	if len(dates) != 1 {
+		http.Error(w, `Expect one parameter "shard_time"`, http.StatusBadRequest)
 
-		date, err := time.Parse("2006-01-02", dates[0])
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
+		return
+	}
 
-			return
-		}
+	date, err := time.Parse("2006-01-02", dates[0])
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse date: %v", err), http.StatusBadRequest)
 
-		if err := idx.DumpByShard(ctx, w, date); err != nil {
-			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-			return
-		}
-	} else {
-		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+	if err := idx.DumpByShard(ctx, w, date); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 		return
 	}
@@ -807,21 +866,20 @@ func getIndexDumpByPostingArgument(req *http.Request) (time.Time, string, string
 func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexDumper); ok {
-		date, name, value, errorMessage := getIndexDumpByPostingArgument(req)
-		if errorMessage != "" {
-			http.Error(w, errorMessage, http.StatusBadRequest)
+	idx := a.getIndexDumperOrReplyError(w)
+	if idx == nil {
+		return
+	}
 
-			return
-		}
+	date, name, value, errorMessage := getIndexDumpByPostingArgument(req)
+	if errorMessage != "" {
+		http.Error(w, errorMessage, http.StatusBadRequest)
 
-		if err := idx.DumpByPosting(ctx, w, date, name, value); err != nil {
-			http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-			return
-		}
-	} else {
-		http.Error(w, "Index does not implement DumpByExpirationDate()", http.StatusNotImplemented)
+	if err := idx.DumpByPosting(ctx, w, date, name, value); err != nil {
+		http.Error(w, fmt.Sprintf("Index dump failed: %v", err), http.StatusInternalServerError)
 
 		return
 	}
@@ -830,7 +888,12 @@ func (a *API) indexDumpByPostingHandler(w http.ResponseWriter, req *http.Request
 func (a *API) indexBlockHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexBlocker); ok {
+	index := a.getIndexOrReplyError(w)
+	if index == nil {
+		return
+	}
+
+	if idx, ok := index.(types.IndexBlocker); ok {
 		if err := idx.BlockCassandraWrite(ctx); err != nil {
 			http.Error(w, fmt.Sprintf("Index block failed: %v", err), http.StatusInternalServerError)
 
@@ -848,7 +911,12 @@ func (a *API) indexBlockHandler(w http.ResponseWriter, req *http.Request) {
 func (a *API) indexUnblockHandler(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	if idx, ok := a.Index.(types.IndexBlocker); ok {
+	index := a.getIndexOrReplyError(w)
+	if index == nil {
+		return
+	}
+
+	if idx, ok := index.(types.IndexBlocker); ok {
 		if err := idx.UnblockCassandraWrite(ctx); err != nil {
 			http.Error(w, fmt.Sprintf("Index block failed: %v", err), http.StatusInternalServerError)
 
@@ -861,17 +929,6 @@ func (a *API) indexUnblockHandler(w http.ResponseWriter, req *http.Request) {
 
 		return
 	}
-}
-
-func (a *API) toggleDebugQueryHandler(w http.ResponseWriter, _ *http.Request) {
-	a.l.Lock()
-
-	a.defaultDebugRequest = !a.defaultDebugRequest
-	debugRequest := a.defaultDebugRequest
-
-	a.l.Unlock()
-
-	fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
 }
 
 func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
@@ -930,17 +987,15 @@ func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 
 	// Flush the points from the temporary store so they can be pre-aggregated.
 	// Recent points are still kept in memory for faster reads.
-	if a.FlushCallback != nil {
-		err := a.FlushCallback()
+	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
+		err := tsdbDebug.Flush(req.Context())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}
-	}
 
-	if a.PreAggregateCallback != nil {
-		err := a.PreAggregateCallback(ctx, thread, from, to, matchers)
+		err = tsdbDebug.ForcePreAggregation(ctx, thread, from, to, matchers)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
 

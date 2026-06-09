@@ -5,6 +5,7 @@ import (
 	"flag"
 	"time"
 
+	"github.com/bleemeo/squirreldb/cassandra/backend"
 	"github.com/bleemeo/squirreldb/daemon"
 
 	"github.com/rs/zerolog/log"
@@ -49,6 +50,8 @@ func run(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, *maxWaitTime)
 	defer cancel()
 
+	var store *backend.Backend
+
 	for ctx.Err() == nil {
 		if !firstLoop {
 			select {
@@ -60,44 +63,32 @@ func run(ctx context.Context) error {
 
 		firstLoop = false
 
-		connection, err := squirreldb.CassandraConnection(ctx)
+		if store == nil {
+			tmp, err := squirreldb.CassandraBackend(ctx)
+			if err != nil {
+				log.Printf("connection to cassandra failed: %s", err)
+
+				continue
+			}
+
+			store = tmp
+
+			defer store.CloseAll(ctx)
+		}
+
+		count, err := store.StoreNodeCount(ctx)
 		if err != nil {
-			log.Printf("connection to cassandra failed: %s", err)
+			log.Printf("failed to query node count: %s", err)
 
 			continue
 		}
 
-		defer connection.Close()
-
-		session, err := connection.Session()
-		if err != nil {
-			log.Printf("connection to cassandra failed: %s", err)
-
-			continue
-		}
-
-		count := 0
-		it := session.Query("SELECT peer from system.peers").WithContext(ctx).Iter()
-
-		for it.Scan(nil) {
-			count++
-		}
-
-		if err := it.Close(); err != nil {
-			log.Printf("failed to query Cassandra peer: %s", err)
-			session.Close()
-
-			continue
-		}
-
-		// +1 because current Cassandra is not in peers
-		if count+1 < replication {
+		if count < replication {
 			log.Printf("Not enough Cassandra up. Had %d want at least %d", count+1, replication)
 
 			continue
 		}
 
-		session.Close()
 		log.Printf("Cassandra is ready")
 
 		break

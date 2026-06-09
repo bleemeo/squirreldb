@@ -138,8 +138,9 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
+    -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -e GOCOVERDIR -e GORACE \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --name squirreldb-test-shell \
     --entrypoint '' \
@@ -152,6 +153,7 @@ docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -162,7 +164,10 @@ echo
 echo "== Running squirreldb-cassandra-lock-bench (threaded)"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -173,7 +178,10 @@ echo
 echo "== Running squirreldb-cassandra-lock-bench (single thread, more processes)"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -183,7 +191,10 @@ docker run $docker_network --rm -e HOME=/go/pkg \
 echo "== Running squirreldb-cassandra-lock-bench (with blocking/unblocking from time to time)"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -194,7 +205,10 @@ echo
 echo "== Running squirreldb-cassandra-index-bench"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -205,7 +219,10 @@ echo
 echo "== Running squirreldb-cassandra-index-bench2"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -216,8 +233,10 @@ echo
 echo "== Running squirreldb-promql-aggregate"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -228,8 +247,10 @@ echo
 echo "== Running remote-storage-test"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -240,8 +261,10 @@ echo
 echo "== Running remote-storage-test2"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
@@ -252,12 +275,30 @@ echo
 echo "== Running squirreldb-cluster-redis"
 docker run $docker_network --rm -e HOME=/go/pkg \
     -e SQUIRRELDB_LOG_DISABLE_COLOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e GOCOVERDIR -e GORACE \
     -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
     --entrypoint '' \
     goreleaser/goreleaser:${GORELEASER_VERSION} \
     sh -euxc "go run $build_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
+
+echo
+echo "== Running run-test-cases"
+docker run $docker_network --rm -e HOME=/go/pkg \
+    -e SQUIRRELDB_LOG_DISABLE_COLOR \
+    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+    -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
+    -e GOCOVERDIR -e GORACE \
+    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
+    --entrypoint '' \
+    goreleaser/goreleaser:${GORELEASER_VERSION} \
+    sh -euxc "go run $build_opt ./tests/run-test-cases/"
+
 
 
 echo
@@ -268,7 +309,10 @@ fi
 if [ "${WITH_COVER}" = "1" ]; then
     docker run $docker_network --rm -e HOME=/go/pkg \
         -e SQUIRRELDB_LOG_DISABLE_COLOR \
+        -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+        -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
         -e SQUIRRELDB_REDIS_ADDRESSES \
+        -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
         -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
         --entrypoint '' \

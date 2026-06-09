@@ -57,7 +57,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				Namespace: "squirreldb",
 				Subsystem: "tsdb",
 				Name:      "requests_points_total",
-				Help:      "Total points processed by persistent TSDB",
+				Help:      "Total points processed by TSDB",
 			},
 			[]string{"operation", "type"},
 		),

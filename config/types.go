@@ -26,6 +26,7 @@ type Config struct {
 	TenantLabelName     string        `yaml:"tenant_label_name"`
 	RequireTenantHeader bool          `yaml:"require_tenant_header"`
 	RemoteStorage       RemoteStorage `yaml:"remote_storage"`
+	DefaultTimeToLive   time.Duration `yaml:"default_time_to_live"`
 	PromQL              PromQL        `yaml:"promql"`
 	Batch               Batch         `yaml:"batch"`
 	Log                 Log           `yaml:"log"`
@@ -101,7 +102,6 @@ type Cassandra struct {
 	Addresses              []string      `yaml:"addresses"`
 	Keyspace               string        `yaml:"keyspace"`
 	ReplicationFactor      int           `yaml:"replication_factor"`
-	DefaultTimeToLive      time.Duration `yaml:"default_time_to_live"`
 	PreCreateShardDuration time.Duration `yaml:"pre_create_shard_duration"`
 	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`

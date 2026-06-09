@@ -39,12 +39,12 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/retry"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -67,13 +67,11 @@ const (
 	takeoverSleepDelay = 500 * time.Millisecond
 
 	overdueThreshold = 5 * time.Minute
-
-	// over-read from memory store of this amount. This is done to skip trying read from persitent
-	// store if point timestamp and request timestamp aren't aligned.
-	memoryOverreadMs = 60000
 )
 
 const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
+
+var ErrNoData = errors.New("no data")
 
 // TemporaryStore is an interface to the temporary points associated to metrics.
 type TemporaryStore interface {
@@ -107,11 +105,22 @@ type TemporaryStore interface {
 
 	// GetAllKnownMetrics return all known metrics with their deadline
 	GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time.Time, error)
+
+	// Close free resource used by the temporary store. After this call, the temporary store shouldn't be used anymore.
+	Close() error
 }
 
 // stateData contains information about points stored in memory store for one metrics.
 type stateData struct {
 	flushDeadline time.Time
+}
+
+type flushRequest struct {
+	isForcedFlush bool
+	ids           []types.MetricID
+	// response channel will receive a single reply (the error code) and will be closed.
+	// A buffered channel (size 1) should be used, because background thread will never wait to send the reply.
+	response chan error
 }
 
 // Batch receive a stream of points and send batch for points to the writer. It use a memory store to keep points before
@@ -120,55 +129,32 @@ type stateData struct {
 type Batch struct {
 	batchSize time.Duration
 
-	states map[types.MetricID]stateData
-	mutex  sync.Mutex
+	synchroniousFlushCh chan flushRequest
+	states              map[types.MetricID]stateData
+	mutex               sync.Mutex
 
 	memoryStore TemporaryStore
-	reader      types.MetricReader
-	writer      types.MetricWriter
 	metrics     *metrics
 	logger      zerolog.Logger
 }
 
-// New creates a new Batch object.
+// New creates a new Batch object. The memoryStore is owned by the batcher and will be closed when no longer needed.
 func New(
 	reg prometheus.Registerer,
 	batchSize time.Duration,
 	memoryStore TemporaryStore,
-	reader types.MetricReader,
-	writer types.MetricWriter,
 	logger zerolog.Logger,
 ) *Batch {
 	batch := &Batch{
-		batchSize:   batchSize,
-		states:      make(map[types.MetricID]stateData),
-		memoryStore: memoryStore,
-		reader:      reader,
-		writer:      writer,
-		metrics:     newMetrics(reg),
-		logger:      logger,
+		batchSize:           batchSize,
+		states:              make(map[types.MetricID]stateData),
+		synchroniousFlushCh: make(chan flushRequest),
+		memoryStore:         memoryStore,
+		metrics:             newMetrics(reg),
+		logger:              logger,
 	}
 
 	return batch
-}
-
-type readIter struct {
-	b       *Batch
-	ctx     context.Context //nolint:containedctx
-	err     error
-	current types.MetricData
-	request types.MetricRequest
-	offset  int
-}
-
-// ReadIter returns the deduplicated and sorted points read from the temporary and persistent storage
-// according to the request.
-func (b *Batch) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
-	return &readIter{
-		b:       b,
-		ctx:     ctx,
-		request: request,
-	}, nil
 }
 
 // Write implements MetricWriter.
@@ -177,24 +163,27 @@ func (b *Batch) Write(ctx context.Context, metrics []types.MetricData) error {
 }
 
 // Run starts Batch service (e.g. flushing points after a deadline).
-func (b *Batch) Run(ctx context.Context) {
+func (b *Batch) Run(ctx context.Context, writer types.MetricWriter) {
 	tickerBackground := time.NewTicker(backgroundTaskInterval)
 	tickerTakeover := time.NewTicker(takeoverInterval)
 
+	defer b.memoryStore.Close()
 	defer tickerBackground.Stop()
 	defer tickerTakeover.Stop()
 
 	for {
 		select {
 		case <-tickerBackground.C:
-			err := b.check(ctx, time.Now(), false, false)
+			err := b.check(ctx, time.Now(), writer, false, false)
 			if err != nil {
 				b.logger.Err(err).Msg("Batch service background check failed")
 			}
+		case flushReq := <-b.synchroniousFlushCh:
+			b.processRequest(ctx, writer, flushReq, time.Now())
 		case <-tickerTakeover.C:
-			b.checkTakeover(ctx, time.Now())
+			b.checkTakeover(ctx, time.Now(), writer)
 		case <-ctx.Done():
-			err := b.check(context.Background(), time.Now(), true, true) //nolint: contextcheck
+			err := b.check(context.Background(), time.Now(), writer, true, true) //nolint: contextcheck
 			if err != nil {
 				b.logger.Err(err).Msg("Unable to shutdown batch service")
 			}
@@ -206,15 +195,51 @@ func (b *Batch) Run(ctx context.Context) {
 	}
 }
 
+func (b *Batch) processRequest(ctx context.Context, writer types.MetricWriter, flushReq flushRequest, now time.Time) {
+	var err error
+
+	if flushReq.isForcedFlush {
+		err = b.check(ctx, now, writer, true, false)
+	} else {
+		err = b.flush(ctx, writer, flushReq.ids, now, false)
+	}
+
+	select {
+	case flushReq.response <- err:
+	default:
+	}
+
+	close(flushReq.response)
+}
+
 // Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB.
-func (b *Batch) Flush() error {
-	return b.check(context.Background(), time.Now(), true, false)
+// The batcher must be running for this call to works.
+func (b *Batch) Flush(ctx context.Context) error {
+	req := flushRequest{
+		isForcedFlush: true,
+		response:      make(chan error, 1),
+	}
+
+	select {
+	case b.synchroniousFlushCh <- req:
+	case <-ctx.Done():
+	}
+
+	var err error
+
+	select {
+	case err = <-req.response:
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+
+	return err
 }
 
 // Checks the current states and flush those whose flush date has expired.
 //
 // If force is true, each state is flushed.
-func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown bool) error {
+func (b *Batch) check(ctx context.Context, now time.Time, writer types.MetricWriter, force bool, shutdown bool) error {
 	start := time.Now()
 
 	defer func() {
@@ -268,16 +293,7 @@ func (b *Batch) check(ctx context.Context, now time.Time, force bool, shutdown b
 
 	b.mutex.Unlock()
 
-	for startIndex := 0; startIndex < len(ids); startIndex += flushMetricLimit {
-		endIndex := min(startIndex+flushMetricLimit, len(ids))
-
-		err := b.flush(ctx, ids[startIndex:endIndex], now, shutdown)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return b.flush(ctx, writer, ids, now, shutdown)
 }
 
 // randomDuration return a delay with a +/- 20% jitter.
@@ -288,7 +304,7 @@ func randomDuration(target time.Duration) time.Duration {
 	return target + time.Duration(jitterFactor*float64(jitter))
 }
 
-func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
+func (b *Batch) checkTakeover(ctx context.Context, now time.Time, writer types.MetricWriter) {
 	for {
 		metrics, err := b.memoryStore.GetAllKnownMetrics(ctx)
 		if err != nil {
@@ -313,7 +329,7 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 			break
 		}
 
-		err = b.takeoverMetrics(ctx, overdue, now)
+		err = b.takeoverMetrics(ctx, writer, overdue, now)
 		if err != nil {
 			b.logger.Err(err).Msg("Unable to takeover metrics")
 
@@ -334,7 +350,12 @@ func (b *Batch) checkTakeover(ctx context.Context, now time.Time) {
 	}
 }
 
-func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]time.Time, now time.Time) error {
+func (b *Batch) takeoverMetrics(
+	ctx context.Context,
+	writer types.MetricWriter,
+	metrics map[types.MetricID]time.Time,
+	now time.Time,
+) error {
 	ids := make([]types.MetricID, len(metrics))
 	i := 0
 
@@ -350,7 +371,7 @@ func (b *Batch) takeoverMetrics(ctx context.Context, metrics map[types.MetricID]
 
 	b.mutex.Unlock()
 
-	err := b.flush(ctx, ids, now, false)
+	err := b.flush(ctx, writer, ids, now, false)
 
 	b.metrics.Takeover.WithLabelValues("in").Add(float64(len(metrics)))
 
@@ -510,8 +531,30 @@ func (b *Batch) setPointsAndOffset(
 //     that come from states)
 //   - Get + Set to memoryStore the points filtered
 //   - Update states (in-memory and in temporaryStore).
+//
+// Flush work by chunk for flushMetricLimit, use flushInner if you really need to flush larged chunk in one call.
 func (b *Batch) flush(
 	ctx context.Context,
+	writer types.MetricWriter,
+	ids []types.MetricID,
+	now time.Time,
+	shutdown bool,
+) error {
+	for startIndex := 0; startIndex < len(ids); startIndex += flushMetricLimit {
+		endIndex := min(startIndex+flushMetricLimit, len(ids))
+
+		err := b.flushInner(ctx, writer, ids[startIndex:endIndex], now, shutdown)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *Batch) flushInner(
+	ctx context.Context,
+	writer types.MetricWriter,
 	ids []types.MetricID,
 	now time.Time,
 	shutdown bool,
@@ -567,7 +610,7 @@ func (b *Batch) flush(
 	b.metrics.DuplicatedPoints.Add(float64(sortMetrics(metricsToWrite)))
 
 	err = retry.Print(func() error {
-		return b.writer.Write(ctx, metricsToWrite)
+		return writer.Write(ctx, metricsToWrite)
 	},
 		retry.NewExponentialBackOff(ctx, 30*time.Second),
 		b.logger,
@@ -734,175 +777,49 @@ func sortMetrics(input []types.MetricData) int {
 	return count
 }
 
-func (i *readIter) Err() error {
-	if i.err != nil {
-		return i.err
-	}
-
-	return i.ctx.Err()
-}
-
-func (i *readIter) At() types.MetricData {
-	return i.current
-}
-
-func (i *readIter) Next() bool {
-	start := time.Now()
-
-	defer func() {
-		i.b.metrics.RequestsSeconds.WithLabelValues("read").Observe(time.Since(start).Seconds())
-	}()
-
-	for {
-		if i.offset >= len(i.request.IDs) || i.ctx.Err() != nil {
-			return false
-		}
-
-		if i.err != nil {
-			return false
-		}
-
-		id := i.request.IDs[i.offset]
-		i.offset++
-
-		hasNext := i.tryNext(id)
-		if hasNext {
-			if i.request.EnableDebug {
-				i.b.logger.Info().Msgf(
-					"Read ID=%d: %d points",
-					id,
-					len(i.current.Points),
-				)
-			}
-
-			if i.request.EnableVerboseDebug {
-				i.b.logger.Info().Msgf("Read ID=%d, points=%v", id, i.current.Points)
-			}
-
-			return true
-		}
-	}
-}
-
-func (i *readIter) tryNext(id types.MetricID) bool {
-	idRequest := types.MetricRequest{
-		IDs:                []types.MetricID{id},
-		FromTimestamp:      i.request.FromTimestamp,
-		ToTimestamp:        i.request.ToTimestamp,
-		StepMs:             i.request.StepMs,
-		Function:           i.request.Function,
-		ForcePreAggregated: i.request.ForcePreAggregated,
-		ForceRaw:           i.request.ForceRaw,
-		EnableDebug:        i.request.EnableDebug,
-		EnableVerboseDebug: i.request.EnableVerboseDebug,
-	}
-
-	temporaryMetrics, err := i.b.readTemporary(
-		i.ctx, []types.MetricID{id}, i.request.FromTimestamp-memoryOverreadMs, i.request.ToTimestamp,
-	)
-	if err != nil {
-		i.err = err
-
-		return false
-	}
-
-	data := types.MetricData{
-		ID: id,
-	}
-
-	if len(temporaryMetrics) > 0 && len(temporaryMetrics[0].Points) > 0 {
-		temporaryData := temporaryMetrics[0]
-		idRequest.ToTimestamp = temporaryData.Points[0].Timestamp - 1
-
-		// because we over-read, we need to filter first point. They are sorted which make it simple
-		data.Points = temporaryData.Points
-		for len(data.Points) > 0 && data.Points[0].Timestamp < idRequest.FromTimestamp {
-			data.Points = data.Points[1:]
-		}
-
-		if tsdb.RequestUseAggregatedData(i.request) {
-			data = tsdb.AggregateWithFuncType(data, i.request.Function)
-		}
-	}
-
-	if idRequest.FromTimestamp <= idRequest.ToTimestamp {
-		persistentMetrics, err := i.b.reader.ReadIter(i.ctx, idRequest)
-		if err != nil {
-			i.err = err
-
-			return false
-		}
-
-		for persistentMetrics.Next() {
-			persistentData := persistentMetrics.At()
-			if persistentData.ID == id {
-				data.Points = append(persistentData.Points, data.Points...)
-
-				break
-			}
-		}
-
-		err = persistentMetrics.Err()
-		if err != nil {
-			i.err = err
-
-			return false
-		}
-	}
-
-	if len(data.Points) > 0 {
-		i.current = data
-		i.b.metrics.RequestsPoints.WithLabelValues("read").Add(float64(len(data.Points)))
-
-		return true
-	}
-
-	return false
-}
-
-// Returns the deduplicated and sorted points read from the temporary storage according to the request.
-func (b *Batch) readTemporary(
+// ReadTemporary returns the deduplicated and sorted points read from the temporary storage according to the request.
+func (b *Batch) ReadTemporary(
 	ctx context.Context,
-	ids []types.MetricID,
+	id types.MetricID,
 	fromTimestamp, toTimestamp int64,
-) ([]types.MetricData, error) {
+) (types.MetricData, error) {
+	ids := []types.MetricID{id}
+
 	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("store read fail: %w", err)
+		return types.MetricData{}, fmt.Errorf("store read fail: %w", err)
 	}
 
-	temporaryMetrics := make([]types.MetricData, 0, len(ids))
+	if len(metrics) == 0 {
+		return types.MetricData{}, ErrNoData
+	}
 
-	for _, data := range metrics {
-		var (
-			maxTS    int64
-			needSort bool
-		)
+	data := metrics[0]
 
-		temporaryData := types.MetricData{
-			ID:         data.ID,
-			TimeToLive: data.TimeToLive,
-		}
+	var (
+		maxTS    int64
+		needSort bool
+	)
 
-		for i, point := range data.Points {
-			if (point.Timestamp >= fromTimestamp) && (point.Timestamp <= toTimestamp) {
-				if i == 0 || point.Timestamp > maxTS {
-					temporaryData.Points = append(temporaryData.Points, point)
-					maxTS = point.Timestamp
-				} else {
-					temporaryData.Points = append(temporaryData.Points, point)
-					needSort = true
-				}
+	temporaryMetrics := types.MetricData{
+		ID:         id,
+		TimeToLive: data.TimeToLive,
+	}
+
+	for i, point := range data.Points {
+		if (point.Timestamp >= fromTimestamp) && (point.Timestamp <= toTimestamp) {
+			if i == 0 || point.Timestamp > maxTS {
+				temporaryMetrics.Points = append(temporaryMetrics.Points, point)
+				maxTS = point.Timestamp
+			} else {
+				temporaryMetrics.Points = append(temporaryMetrics.Points, point)
+				needSort = true
 			}
 		}
+	}
 
-		if needSort {
-			temporaryData.Points = types.DeduplicatePoints(temporaryData.Points)
-		}
-
-		if len(temporaryData.Points) > 0 {
-			temporaryMetrics = append(temporaryMetrics, temporaryData)
-		}
+	if needSort {
+		temporaryMetrics.Points = types.DeduplicatePoints(temporaryMetrics.Points)
 	}
 
 	return temporaryMetrics, nil
@@ -927,8 +844,8 @@ func (b *Batch) write(
 	}
 
 	var (
-		writtenPointsCount     int
-		ownerShipInitialPoints []types.MetricData
+		writtenPointsCount int
+		ownerInitialPoints []types.MetricData
 	)
 
 	metricToFlush := make(map[types.MetricID]any)
@@ -941,7 +858,7 @@ func (b *Batch) write(
 	b.mutex.Lock()
 
 	for i, count := range pointsCount {
-		addedCount := len(metrics[i].Points) //nolint:gosec
+		addedCount := len(metrics[i].Points)
 		previousCount := count - addedCount
 		writtenPointsCount += addedCount
 
@@ -952,22 +869,22 @@ func (b *Batch) write(
 		}
 
 		if previousCount == 0 {
-			b.states[metrics[i].ID] = stateData{ //nolint:gosec
-				flushDeadline: flushTimestamp(metrics[i].ID, now, b.batchSize), //nolint:gosec
+			b.states[metrics[i].ID] = stateData{
+				flushDeadline: flushTimestamp(metrics[i].ID, now, b.batchSize),
 			}
 
-			ownerShipInitialPoints = append(ownerShipInitialPoints, metrics[i]) //nolint:gosec
+			ownerInitialPoints = append(ownerInitialPoints, metrics[i])
 		}
 
 		// Yes we compare number of point with time. This test only here
 		// to avoid unbounded grow of temporary store when processing backlog
 		// of data.
 		if count > int(b.batchSize.Seconds()) {
-			_, isOwner := b.states[metrics[i].ID] //nolint:gosec
+			_, isOwner := b.states[metrics[i].ID]
 			n := count / int(b.batchSize.Seconds())
 
 			if isOwner {
-				metricToFlush[metrics[i].ID] = nil //nolint:gosec
+				metricToFlush[metrics[i].ID] = nil
 			} else if n > 1 && previousCount < n*int(b.batchSize.Seconds()) {
 				// If the number of points crossed a multiple of our b.batchSize
 				// (that is count > b.batchSize and previousCount < N*b.batchSize)
@@ -975,7 +892,7 @@ func (b *Batch) write(
 				//
 				// This will catch case where the current owner is dead, but give him
 				// the first threshold to act.
-				metricToFlush[metrics[i].ID] = nil //nolint:gosec
+				metricToFlush[metrics[i].ID] = nil
 
 				b.metrics.NonOwnerWrite.Inc()
 			}
@@ -984,19 +901,19 @@ func (b *Batch) write(
 
 	b.mutex.Unlock()
 
-	if len(ownerShipInitialPoints) > 0 {
-		offsets := make([]int, len(ownerShipInitialPoints))
+	if len(ownerInitialPoints) > 0 {
+		offsets := make([]int, len(ownerInitialPoints))
 
-		_, err := b.setPointsAndOffset(ctx, ownerShipInitialPoints, ownerShipInitialPoints, offsets, 0)
+		_, err := b.setPointsAndOffset(ctx, ownerInitialPoints, ownerInitialPoints, offsets, 0)
 		if err != nil {
 			return err
 		}
 
-		deadlines := make(map[types.MetricID]time.Time, len(ownerShipInitialPoints))
+		deadlines := make(map[types.MetricID]time.Time, len(ownerInitialPoints))
 
 		b.mutex.Lock()
 
-		for _, m := range ownerShipInitialPoints {
+		for _, m := range ownerInitialPoints {
 			deadlines[m.ID] = b.states[m.ID].flushDeadline
 		}
 
@@ -1019,13 +936,24 @@ func (b *Batch) write(
 			i++
 		}
 
-		for startIndex := 0; startIndex < len(tmp); startIndex += flushMetricLimit {
-			endIndex := min(startIndex+flushMetricLimit, len(tmp))
+		req := flushRequest{
+			ids:      tmp,
+			response: make(chan error, 1),
+		}
 
-			err = b.flush(ctx, tmp[startIndex:endIndex], now, false)
-			if err != nil {
-				return err
-			}
+		select {
+		case b.synchroniousFlushCh <- req:
+		case <-ctx.Done():
+		}
+
+		select {
+		case err = <-req.response:
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+
+		if err != nil {
+			return err
 		}
 	}
 

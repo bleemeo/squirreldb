@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -72,18 +71,7 @@ func TestFakeRemoteWriter(t *testing.T) {
 	}
 
 	zlog := zerolog.New(zerolog.NewTestWriter(t))
-	index := dummy.NewIndex([]types.MetricLabel{})
-	tsdb := &dummy.MemoryTSDB{}
-	store := promql.NewStore(
-		zlog,
-		index,
-		tsdb,
-		"__account_id",
-		false,
-		0,
-		0,
-		prometheus.NewRegistry(),
-	)
+	store := &dummy.MemoryTSDB{}
 
 	msgVersions := map[string]config.RemoteWriteProtoMsg{
 		"V1": config.RemoteWriteProtoMsgV1,
@@ -150,19 +138,7 @@ func TestWriterHandlerLogger(t *testing.T) {
 
 	logBuffer := bytes.NewBuffer(nil)
 	zlog := zerolog.New(logBuffer)
-
-	index := dummy.NewIndex([]types.MetricLabel{})
-	tsdb := &dummy.MemoryTSDB{}
-	store := promql.NewStore(
-		zlog,
-		index,
-		tsdb,
-		"__account_id",
-		false,
-		0,
-		0,
-		prometheus.NewRegistry(),
-	)
+	store := &dummy.MemoryTSDB{}
 
 	appendable := new(dummyAppendable)
 	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog)

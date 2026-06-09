@@ -34,7 +34,6 @@ func TestStructuredConfig(t *testing.T) {
 			},
 			Keyspace:          "squirreldb",
 			ReplicationFactor: 3,
-			DefaultTimeToLive: 4 * time.Hour,
 			Aggregate: Aggregate{
 				IntendedDuration: 60 * time.Second,
 			},
@@ -56,8 +55,9 @@ func TestStructuredConfig(t *testing.T) {
 			CAPath:      "/ca.pem",
 			Keyspace:    "squirreldb",
 		},
-		ListenAddress:   "127.0.0.1:9090",
-		TenantLabelName: "account",
+		DefaultTimeToLive: 4 * time.Hour,
+		ListenAddress:     "127.0.0.1:9090",
+		TenantLabelName:   "account",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 1,
 		},
@@ -247,6 +247,41 @@ func TestLoad(t *testing.T) {
 				Redis: Redis{
 					SSL: true,
 				},
+			},
+		},
+		{
+			Name:  "deprecated default_time_to_live from file",
+			Files: []string{"testdata/deprecated_ttl.conf"},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated, ` +
+					`please use "default_time_to_live" instead`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 4 * time.Hour,
+			},
+		},
+		{
+			Name: "deprecated default_time_to_live from env",
+			Environment: map[string]string{
+				"SQUIRRELDB_CASSANDRA_DEFAULT_TIME_TO_LIVE": "4h",
+			},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated, ` +
+					`please use "default_time_to_live" instead`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 4 * time.Hour,
+			},
+		},
+		{
+			Name:  "deprecated and new default_time_to_live both set",
+			Files: []string{"testdata/deprecated_ttl_both.conf"},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated and ignored ` +
+					`because "default_time_to_live" is also set, please remove "cassandra.default_time_to_live"`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 10 * time.Hour,
 			},
 		},
 	}

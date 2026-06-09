@@ -47,6 +47,13 @@ var (
 	ErrInvalidValue   = errors.New("invalid config value")
 )
 
+// deprecatedKeys maps a deprecated configuration key to the key that replaces it.
+// A value set under a deprecated key is moved to the new key (see migrateDeprecatedKeys),
+// so old configurations keep working while emitting a warning.
+var deprecatedKeys = map[string]string{ //nolint:gochecknoglobals
+	"cassandra.default_time_to_live": "default_time_to_live",
+}
+
 type Warnings error
 
 // Load loads the configuration from files and directories to a struct.
@@ -103,6 +110,11 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 		warnings = append(warnings, *envWarnings...)
 	}
 
+	// Migrate deprecated keys before the defaults are merged. At this point fileEnvKoanf
+	// only contains values explicitly set by the user (files and environment), so we can
+	// tell whether the replacement key was set by the user or not.
+	warnings = append(warnings, migrateDeprecatedKeys(fileEnvKoanf)...)
+
 	// Load default values.
 	k := koanf.New(delimiter)
 
@@ -132,6 +144,41 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 	return k, warnings, errors.MaybeUnwrap()
 }
 
+// migrateDeprecatedKeys moves values set under a deprecated key to its replacement key and
+// returns a deprecation warning for each migrated key. This must run before the deprecated key
+// would otherwise be rejected by ErrorUnused when unmarshalling into the Config struct.
+// If both the deprecated and the replacement keys are set, the replacement wins and the
+// deprecated value is dropped.
+func migrateDeprecatedKeys(k *koanf.Koanf) prometheus.MultiError {
+	var warnings prometheus.MultiError
+
+	for oldKey, newKey := range deprecatedKeys {
+		if !k.Exists(oldKey) {
+			continue
+		}
+
+		if k.Exists(newKey) {
+			warnings.Append(fmt.Errorf( //nolint:err113
+				"config key %q is deprecated and ignored because %q is also set, please remove %q",
+				oldKey, newKey, oldKey,
+			))
+		} else {
+			warnings.Append(fmt.Errorf( //nolint:err113
+				"config key %q is deprecated, please use %q instead",
+				oldKey, newKey,
+			))
+
+			if err := k.Set(newKey, k.Get(oldKey)); err != nil {
+				warnings.Append(err)
+			}
+		}
+
+		k.Delete(oldKey)
+	}
+
+	return warnings
+}
+
 // envToKeyFunc returns a function that converts an environment variable to a configuration key
 // and a pointer to Warnings, the warnings are filled only after koanf.Load has been called.
 // Panics if two config keys correspond to the same environment variable.
@@ -156,6 +203,12 @@ func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
 		}
 
 		envToKey[envKey] = key
+	}
+
+	// Map deprecated keys too, so their environment variables are still loaded and can then
+	// be migrated to their replacement key by migrateDeprecatedKeys.
+	for oldKey := range deprecatedKeys {
+		envToKey[toEnvKey(oldKey)] = oldKey
 	}
 
 	warnings := make(prometheus.MultiError, 0)
@@ -270,7 +323,7 @@ func unwrapErrors(errs prometheus.MultiError) prometheus.MultiError {
 			var yamlErr *yaml.TypeError
 			if errors.As(subErr, &yamlErr) {
 				for _, wrappedErr := range yamlErr.Errors {
-					unwrapped.Append(errors.New(wrappedErr)) //nolint:goerr113
+					unwrapped.Append(errors.New(wrappedErr)) //nolint:err113
 				}
 			} else {
 				unwrapped.Append(subErr)

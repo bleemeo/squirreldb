@@ -85,7 +85,7 @@ func New(ctx context.Context,
 
 	session, err := cluster.CreateSession()
 	if err != nil {
-		return nil, false, fmt.Errorf("create session: %w", err)
+		return nil, false, fmt.Errorf("create first session: %w", err)
 	}
 
 	keyspaceCreated := false

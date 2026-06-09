@@ -1,4 +1,4 @@
-# Example Prometheus configuration using SquirrelDB as persitent storage
+# Example Prometheus configuration using SquirrelDB as persistent storage
 
 global:
   scrape_interval:     15s
