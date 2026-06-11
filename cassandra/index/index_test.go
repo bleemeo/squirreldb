@@ -8574,19 +8574,13 @@ func Test_concurrent_access(t *testing.T) {
 			tmp, err := indexes[0].expirationLastProcessedDay(t.Context())
 			t.Logf("test now = %s, expirationLastProcessedDay=%v, %v", execution.now.Now(), tmp.Format(shardDateFormat), err)
 
-			allIDs, err := indexes[0].AllIDs(t.Context(), indexMinValidTime, indexMaxValidTime)
-			if err != nil {
+			var buffer bytes.Buffer
+
+			if err := indexes[0].Dump(ctx, &buffer); err != nil {
 				t.Error(err)
 			}
 
-			labels, err := indexes[0].lookupLabels(t.Context(), allIDs, execution.now.Now())
-			if err != nil {
-				t.Error(err)
-			}
-
-			for i, id := range allIDs {
-				t.Logf("ID = %d is %s", id, labels[i])
-			}
+			t.Logf("Dump:\n%s", buffer.String())
 
 			for _, idx := range indexes {
 				idx.InternalRunOnce(ctx, execution.now.Now())
