@@ -49,6 +49,7 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
 )
 
@@ -105,6 +106,15 @@ type TemporaryStore interface {
 
 	// GetAllKnownMetrics return all known metrics with their deadline
 	GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time.Time, error)
+
+	// StoreLabelsByID stores the labels of each metric ID with the given TTL, so a
+	// backend that batches by hash can recover labels at flush time (including
+	// after a takeover by another node).
+	StoreLabelsByID(ctx context.Context, ids []types.MetricID, labelsList []labels.Labels, ttl time.Duration) error
+
+	// GetLabelsByID returns the labels previously stored for each metric ID.
+	// A metric whose labels are missing (e.g. expired) gets empty labels.
+	GetLabelsByID(ctx context.Context, ids []types.MetricID) ([]labels.Labels, error)
 
 	// Close free resource used by the temporary store. After this call, the temporary store shouldn't be used anymore.
 	Close() error
@@ -783,9 +793,7 @@ func (b *Batch) ReadTemporary(
 	id types.MetricID,
 	fromTimestamp, toTimestamp int64,
 ) (types.MetricData, error) {
-	ids := []types.MetricID{id}
-
-	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, ids)
+	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, []types.MetricID{id})
 	if err != nil {
 		return types.MetricData{}, fmt.Errorf("store read fail: %w", err)
 	}
@@ -794,8 +802,40 @@ func (b *Batch) ReadTemporary(
 		return types.MetricData{}, ErrNoData
 	}
 
-	data := metrics[0]
+	return filterTemporaryPoints(id, metrics[0], fromTimestamp, toTimestamp), nil
+}
 
+// ReadTemporaryMultiple reads the temporary (not yet flushed) points of several
+// metrics in a single store call, each filtered to [fromTimestamp, toTimestamp]
+// and deduplicated. The result is aligned with ids; a metric with no temporary
+// point gets an empty MetricData.
+func (b *Batch) ReadTemporaryMultiple(
+	ctx context.Context,
+	ids []types.MetricID,
+	fromTimestamp, toTimestamp int64,
+) ([]types.MetricData, error) {
+	metrics, _, err := b.memoryStore.ReadPointsAndOffset(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("store read fail: %w", err)
+	}
+
+	result := make([]types.MetricData, len(ids))
+	for i, id := range ids {
+		if i < len(metrics) {
+			result[i] = filterTemporaryPoints(id, metrics[i], fromTimestamp, toTimestamp)
+		}
+	}
+
+	return result, nil
+}
+
+// filterTemporaryPoints keeps the points of data within [fromTimestamp,
+// toTimestamp] and deduplicates/sorts them when needed.
+func filterTemporaryPoints(
+	id types.MetricID,
+	data types.MetricData,
+	fromTimestamp, toTimestamp int64,
+) types.MetricData {
 	var (
 		maxTS    int64
 		needSort bool
@@ -822,7 +862,7 @@ func (b *Batch) ReadTemporary(
 		temporaryMetrics.Points = types.DeduplicatePoints(temporaryMetrics.Points)
 	}
 
-	return temporaryMetrics, nil
+	return temporaryMetrics
 }
 
 // Writes metrics in the temporary storage

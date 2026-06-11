@@ -32,6 +32,7 @@ import (
 	"github.com/bleemeo/squirreldb/api"
 	"github.com/bleemeo/squirreldb/cassandra/backend"
 	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	clickhousetsdb "github.com/bleemeo/squirreldb/clickhouse/tsdb"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
@@ -55,8 +56,9 @@ var (
 )
 
 const (
-	backendCassandra = "cassandra"
-	backendDummy     = "dummy"
+	backendCassandra  = "cassandra"
+	backendClickHouse = "clickhouse"
+	backendDummy      = "dummy"
 )
 
 type LockFactory interface {
@@ -491,6 +493,16 @@ type namedTasks struct {
 }
 
 func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
+	// Always go through the getter so the mutable label processor is initialized,
+	// regardless of the TSDB backend (only the Cassandra TSDB would otherwise
+	// trigger its creation as a side effect).
+	mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
+	if err != nil {
+		readiness <- fmt.Errorf("mutable label processor start fail: %w", err)
+
+		return
+	}
+
 	s.api.ListenAddress = s.Config.ListenAddress
 	s.api.ReadOnly = s.Config.Internal.ReadOnly
 	s.api.TSDB = s.persistentStore
@@ -499,7 +511,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MaxConcurrentRemoteRequests = s.Config.RemoteStorage.MaxConcurrentRequests
 	s.api.MaxRequestBodySizeBytes = s.Config.MaxRequestBodySize << 20 // MiB to B
 	s.api.TenantLabelName = s.Config.TenantLabelName
-	s.api.MutableLabelDetector = s.mutableLabelProcessor
+	s.api.MutableLabelDetector = mutableLabelProcessor
 	s.api.RequireTenantHeader = s.Config.RequireTenantHeader
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
@@ -662,6 +674,29 @@ func (s *SquirrelDB) TSDB(ctx context.Context, dontStartIndex bool, fakeTime fun
 			}
 
 			tsdb, err := cassandraBackend.TSDB(ctx, options)
+			if err != nil {
+				return nil, err
+			}
+
+			s.persistentStore = tsdb
+		case backendClickHouse:
+			options := clickhousetsdb.Options{
+				Config:            s.Config.ClickHouse,
+				Reg:               s.MetricRegistry,
+				TenantLabel:       s.Config.TenantLabelName,
+				BatchSize:         s.Config.Batch.Size,
+				DefaultTimeToLive: s.Config.DefaultTimeToLive,
+			}
+
+			if s.Config.Internal.TemporaryStore == "redis" {
+				options.Redis = s.Config.Redis
+			}
+
+			tsdb, err := clickhousetsdb.New(
+				ctx,
+				s.Logger.With().Str("backend", "clickhouse").Logger(),
+				options,
+			)
 			if err != nil {
 				return nil, err
 			}

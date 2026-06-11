@@ -21,6 +21,7 @@ import "time"
 // Config is the main structured configuration.
 type Config struct {
 	Cassandra           Cassandra     `yaml:"cassandra"`
+	ClickHouse          ClickHouse    `yaml:"clickhouse"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
 	TenantLabelName     string        `yaml:"tenant_label_name"`
@@ -116,4 +117,23 @@ type Cassandra struct {
 
 type Aggregate struct {
 	IntendedDuration time.Duration `yaml:"intended_duration"`
+}
+
+// ClickHouse holds the configuration of the ClickHouse TSDB backend.
+// It is used when internal.tsdb is set to "clickhouse".
+type ClickHouse struct {
+	// Addresses are the ClickHouse native protocol endpoints (host:port),
+	// used for SQL (table creation, and the SQL read/write path).
+	Addresses []string `yaml:"addresses"`
+	Database  string   `yaml:"database"`
+	Username  string   `yaml:"username"`
+	Password  string   `yaml:"password"`
+	// RemoteWriteURL and RemoteReadURL are the ClickHouse Prometheus protocol
+	// endpoints (a different port than Addresses), used by the remote_read/
+	// remote_write path.
+	RemoteWriteURL string `yaml:"remote_write_url"`
+	RemoteReadURL  string `yaml:"remote_read_url"`
+	// Mode selects how points are written and read: "remote" (Prometheus
+	// remote_read/remote_write) or "sql" (ClickHouse native protocol).
+	Mode string `yaml:"mode"`
 }

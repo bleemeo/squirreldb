@@ -235,6 +235,7 @@ func (a *API) init(ctx context.Context) error {
 		RequireTenantHeader:       a.RequireTenantHeader,
 		Queryable:                 a.TSDB,
 		MutableLabelDetector:      a.MutableLabelDetector,
+		MetricRegistry:            a.MetricRegistry,
 	}
 
 	if optParser, ok := a.TSDB.(types.HTTPOptionsParser); ok {

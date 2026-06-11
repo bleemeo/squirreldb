@@ -32,11 +32,15 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 )
 
+var errAssertionError = errors.New("assertion error")
+
 const (
+	defaultLabelsKeyPrefix   = "squirreldb-labels-"
 	defaultMetricKeyPrefix   = "squirreldb-metric-"
 	defaultOffsetKeyPrefix   = "squirreldb-offset-"
 	defaultDeadlineKeyPrefix = "squirreldb-flushdeadline-"
@@ -57,6 +61,7 @@ type Redis struct {
 	bufferPool           sync.Pool
 	serializedPointsPool sync.Pool
 
+	labelsKeyPrefix   string
 	metricKeyPrefix   string
 	offsetKeyPrefix   string
 	deadlineKeyPrefix string
@@ -84,6 +89,7 @@ func New(ctx context.Context, reg prometheus.Registerer, options Options, logger
 	}
 	redis.initPool()
 
+	redis.labelsKeyPrefix = options.Keyspace + defaultLabelsKeyPrefix
 	redis.metricKeyPrefix = options.Keyspace + defaultMetricKeyPrefix
 	redis.offsetKeyPrefix = options.Keyspace + defaultOffsetKeyPrefix
 	redis.deadlineKeyPrefix = options.Keyspace + defaultDeadlineKeyPrefix
@@ -552,6 +558,117 @@ func (r *Redis) GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time
 	}
 
 	return r.getFlushDeadline(ctx, result)
+}
+
+// StoreLabelsByID stores the labels of each metric ID, with the given TTL. It is
+// used by backends (e.g. ClickHouse) that batch by hash and need to recover the
+// labels at flush time, including after a takeover by another SquirrelDB node.
+func (r *Redis) StoreLabelsByID(
+	ctx context.Context,
+	ids []types.MetricID,
+	labelsList []labels.Labels,
+	ttl time.Duration,
+) error {
+	start := time.Now()
+
+	defer func() {
+		r.metrics.OperationSeconds.WithLabelValues("storeLabels").Observe(time.Since(start).Seconds())
+	}()
+
+	if len(ids) != len(labelsList) {
+		return fmt.Errorf("%w: ids & labelsList aren't the same size", errAssertionError)
+	}
+
+	if len(ids) == 0 {
+		return nil
+	}
+
+	pipe, err := r.client.Pipeline(ctx)
+	if err != nil {
+		return err
+	}
+
+	commands := make([]*goredis.StatusCmd, len(ids))
+
+	for i, id := range ids {
+		l := labelsList[i]
+		idStr := metricID2String(id)
+		labelsKey := r.labelsKeyPrefix + idStr
+
+		commands[i] = pipe.Set(ctx, labelsKey, serializeLabels(l), ttl)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
+		if r.client.ShouldRetry(ctx) {
+			_, err = pipe.Exec(ctx)
+		}
+
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return fmt.Errorf("redis: %w", err)
+		}
+	}
+
+	for i := range ids {
+		err := commands[i].Err()
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return fmt.Errorf("redis: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// GetLabelsByID returns the labels previously stored for each metric ID. A
+// metric whose labels are missing (e.g. expired) gets empty labels.
+func (r *Redis) GetLabelsByID(ctx context.Context, ids []types.MetricID) ([]labels.Labels, error) {
+	start := time.Now()
+
+	defer func() {
+		r.metrics.OperationSeconds.WithLabelValues("getLabels").Observe(time.Since(start).Seconds())
+	}()
+
+	labelsList := make([]labels.Labels, len(ids))
+
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	pipe, err := r.client.Pipeline(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	commands := make([]*goredis.StringCmd, len(ids))
+
+	for i, id := range ids {
+		idStr := metricID2String(id)
+		labelsKey := r.labelsKeyPrefix + idStr
+
+		commands[i] = pipe.Get(ctx, labelsKey)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
+		if r.client.ShouldRetry(ctx) {
+			_, err = pipe.Exec(ctx)
+		}
+
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
+		}
+	}
+
+	for i := range ids {
+		data, err := commands[i].Result()
+		if err != nil && !errors.Is(err, goredis.Nil) {
+			return nil, fmt.Errorf("redis: %w", err)
+		}
+
+		if !errors.Is(err, goredis.Nil) {
+			labelsList[i] = deserializeLabels(data)
+		}
+	}
+
+	return labelsList, nil
 }
 
 func (r *Redis) getFlushDeadline(ctx context.Context, ids []string) (map[types.MetricID]time.Time, error) {

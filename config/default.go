@@ -46,6 +46,15 @@ func DefaultConfig() Config {
 			CAPath:                 "",
 			EnableHostVerification: true,
 		},
+		ClickHouse: ClickHouse{
+			Addresses:      []string{"127.0.0.1:9000"},
+			Database:       "default",
+			Username:       "",
+			Password:       "",
+			RemoteWriteURL: "",
+			RemoteReadURL:  "",
+			Mode:           "remote",
+		},
 		Redis: Redis{
 			Addresses:   []string{},
 			Username:    "",

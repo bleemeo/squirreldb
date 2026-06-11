@@ -111,6 +111,6 @@ func main() {
 	log.Debug().Msg("SquirrelDB is stopped")
 
 	if cfg.Internal.ShowGoroutingOnShutdown {
-		pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+		_ = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
 	}
 }

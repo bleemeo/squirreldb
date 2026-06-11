@@ -29,6 +29,7 @@ import (
 	"github.com/bleemeo/squirreldb/appendable/fixedappender"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 )
@@ -36,7 +37,7 @@ import (
 // NewStore return a store (Appendable + Queryable) that handle per HTTP request configuration
 // and limits (tenant labels, maximum evaluated points/series, maximum concurrency, ...).
 func NewStore(options Options) *Store {
-	return &Store{Options: options}
+	return &Store{Options: options, metrics: newStoreMetrics(options.MetricRegistry)}
 }
 
 var (
@@ -58,6 +59,7 @@ type Options struct {
 	Appendable                types.AppendableWithOptions
 	MutableLabelDetector      MutableLabelDetector
 	OptionsParser             types.HTTPOptionsParser
+	MetricRegistry            prometheus.Registerer
 }
 
 type MutableLabelDetector interface {
@@ -67,6 +69,7 @@ type MutableLabelDetector interface {
 type Store struct {
 	Options
 
+	metrics  *storeMetrics
 	l        sync.Mutex
 	debugAll bool
 }
@@ -109,7 +112,10 @@ func (store *Store) Appender(ctx context.Context) storage.Appender {
 		return fixedappender.NewErrorAppender(ErrNoContextValue)
 	}
 
-	var options requestappender.Options
+	options := requestappender.Options{
+		IngestedPoints: store.metrics.IngestedPoints,
+		CommitSeconds:  store.metrics.WriteCommitSeconds,
+	}
 
 	if store.TenantLabelName != "" && ctxValue.Tenant != "" {
 		options.TenantLabel = labels.Label{Name: store.TenantLabelName, Value: ctxValue.Tenant}

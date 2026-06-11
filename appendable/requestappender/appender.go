@@ -21,8 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bleemeo/squirreldb/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -34,6 +36,10 @@ import (
 type Options struct {
 	TenantLabel         labels.Label
 	IgnoreLabelCallback func(ctx context.Context, tenant string, value string) (bool, error)
+	// IngestedPoints counts points forwarded to the backend (ingress); optional.
+	IngestedPoints prometheus.Counter
+	// CommitSeconds observes the backend Commit duration (SquirrelDB<->TSDB write); optional.
+	CommitSeconds prometheus.Observer
 }
 
 var ErrInvalidLabel = errors.New("invalid labels")
@@ -111,11 +117,23 @@ func (app appender) Append(
 		t += backdateOffset
 	}
 
+	if app.options.IngestedPoints != nil {
+		app.options.IngestedPoints.Inc()
+	}
+
 	return app.inner.Append(ref, l, t, v)
 }
 
 func (app appender) Commit() error {
-	return app.inner.Commit()
+	start := time.Now()
+
+	err := app.inner.Commit()
+
+	if app.options.CommitSeconds != nil {
+		app.options.CommitSeconds.Observe(time.Since(start).Seconds())
+	}
+
+	return err
 }
 
 func (app appender) Rollback() error {
