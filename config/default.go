@@ -82,6 +82,7 @@ func DefaultConfig() Config {
 			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
 		},
 		Internal: Internal{
+			ShowGoroutingOnShutdown: false,
 			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       0,

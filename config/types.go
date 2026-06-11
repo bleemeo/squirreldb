@@ -41,6 +41,7 @@ type Config struct {
 }
 
 type Internal struct {
+	ShowGoroutingOnShutdown bool         `yaml:"show_gorouting_on_shutdown"`
 	Index                   string       `yaml:"index"`
 	IndexDummyCheckConflict bool         `yaml:"index_dummy_check_conflict"`
 	IndexDummyFixedID       int          `yaml:"index_dummy_fixed_id"`

@@ -19,6 +19,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"runtime/pprof"
 
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/daemon"
@@ -107,4 +109,8 @@ func main() {
 	}
 
 	log.Debug().Msg("SquirrelDB is stopped")
+
+	if cfg.Internal.ShowGoroutingOnShutdown {
+		pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+	}
 }
