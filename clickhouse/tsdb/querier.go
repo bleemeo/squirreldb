@@ -27,48 +27,6 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 )
 
-// querier serves Select through the remote_read client and LabelValues/LabelNames
-// through SQL on the tsdb_tags table (the remote_read protocol does not support
-// label queries).
-type querier struct {
-	labelQuerier
-
-	remote storage.Querier
-}
-
-func (q *querier) Select(
-	ctx context.Context,
-	sortSeries bool,
-	hints *storage.SelectHints,
-	matchers ...*labels.Matcher,
-) storage.SeriesSet {
-	return q.remote.Select(ctx, sortSeries, hints, matchers...)
-}
-
-func (q *querier) Close() error {
-	return q.remote.Close()
-}
-
-// chunkQuerier is the ChunkQuerier counterpart of querier.
-type chunkQuerier struct {
-	labelQuerier
-
-	remote storage.ChunkQuerier
-}
-
-func (q *chunkQuerier) Select(
-	ctx context.Context,
-	sortSeries bool,
-	hints *storage.SelectHints,
-	matchers ...*labels.Matcher,
-) storage.ChunkSeriesSet {
-	return q.remote.Select(ctx, sortSeries, hints, matchers...)
-}
-
-func (q *chunkQuerier) Close() error {
-	return q.remote.Close()
-}
-
 // labelQuerier implements LabelValues/LabelNames against the tsdb_tags table.
 type labelQuerier struct {
 	conn        driver.Conn

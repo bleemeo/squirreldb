@@ -24,110 +24,13 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/prompb"
 )
 
 const secondsPerDay = 24 * 60 * 60
 
-// remoteWriter implements types.MetricWriter and is used by the batcher to flush
-// batched points to ClickHouse through Prometheus remote_write (mode "remote").
-// It rebuilds the labels from the temporary store (the batcher only keeps metric
-// IDs) and sends a single remote_write request.
-type remoteWriter struct {
-	c *ClickHouseTSDB
-}
-
-func (w *remoteWriter) Write(ctx context.Context, metrics []types.MetricData) error {
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	start := time.Now()
-	defer func() {
-		w.c.metrics.FlushSeconds.Observe(time.Since(start).Seconds())
-	}()
-
-	ids := make([]types.MetricID, len(metrics))
-	for i, m := range metrics {
-		ids[i] = m.ID
-	}
-
-	labelsList, err := w.c.temporaryStore.GetLabelsByID(ctx, ids)
-	if err != nil {
-		return fmt.Errorf("get labels: %w", err)
-	}
-
-	req := prompb.WriteRequest{
-		Timeseries: make([]prompb.TimeSeries, 0, len(metrics)),
-	}
-
-	var (
-		missingLabels int
-		points        int
-	)
-
-	for i, m := range metrics {
-		lbls := labelsList[i]
-		if lbls.Len() == 0 {
-			// Labels expired or never stored: we cannot rebuild the series, so
-			// its points would be unattributable. Drop them and warn.
-			missingLabels++
-
-			continue
-		}
-
-		promLabels := make([]prompb.Label, 0, lbls.Len())
-
-		lbls.Range(func(l labels.Label) {
-			promLabels = append(promLabels, prompb.Label{Name: l.Name, Value: l.Value})
-		})
-
-		samples := make([]prompb.Sample, len(m.Points))
-		for j, p := range m.Points {
-			samples[j] = prompb.Sample{Timestamp: p.Timestamp, Value: p.Value}
-		}
-
-		points += len(samples)
-
-		req.Timeseries = append(req.Timeseries, prompb.TimeSeries{
-			Labels:  promLabels,
-			Samples: samples,
-		})
-	}
-
-	if missingLabels > 0 {
-		w.c.logger.Warn().
-			Int("count", missingLabels).
-			Msg("Missing labels for some metrics at flush time, their points were dropped")
-	}
-
-	if len(req.Timeseries) == 0 {
-		return nil
-	}
-
-	buffer, err := proto.Marshal(&req)
-	if err != nil {
-		return fmt.Errorf("marshal remote write request: %w", err)
-	}
-
-	compressed := snappy.Encode(nil, buffer)
-
-	if _, err := w.c.writeClient.Store(ctx, compressed, 0); err != nil {
-		w.c.metrics.FlushErrorsTotal.Inc()
-
-		return fmt.Errorf("remote write to clickhouse: %w", err)
-	}
-
-	w.c.metrics.FlushPointsTotal.Add(float64(points))
-
-	return nil
-}
-
 // sqlWriter implements types.MetricWriter and is used by the batcher to flush
-// batched points to ClickHouse through SQL (mode "sql"). It inserts raw rows
+// batched points to ClickHouse through SQL. It inserts raw rows
 // into the Null-engine datapoint_input table; materialized views compute the
 // series id and fan them out into tsdb_data and tsdb_tags.
 type sqlWriter struct {

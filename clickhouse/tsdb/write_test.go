@@ -25,48 +25,15 @@ import (
 	"github.com/bleemeo/squirreldb/dummy/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
 	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/prompb"
-	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/rs/zerolog"
 )
 
-// fakeWriteClient captures the payloads sent to Store.
-type fakeWriteClient struct {
-	requests []*prompb.WriteRequest
-	err      error
-}
-
 const tenantLabelForTest = "__acme_account__"
 
-func (f *fakeWriteClient) Store(_ context.Context, req []byte, _ int) (remote.WriteResponseStats, error) {
-	if f.err != nil {
-		return remote.WriteResponseStats{}, f.err
-	}
-
-	buffer, err := snappy.Decode(nil, req)
-	if err != nil {
-		return remote.WriteResponseStats{}, err
-	}
-
-	var wr prompb.WriteRequest
-	if err := proto.Unmarshal(buffer, &wr); err != nil {
-		return remote.WriteResponseStats{}, err
-	}
-
-	f.requests = append(f.requests, &wr)
-
-	return remote.WriteResponseStats{}, nil
-}
-
-func (f *fakeWriteClient) Name() string     { return "fake" }
-func (f *fakeWriteClient) Endpoint() string { return "fake" }
-
-func newTestTSDB(t *testing.T, writeClient remote.WriteClient) *ClickHouseTSDB {
+func newTestTSDB(t *testing.T) *ClickHouseTSDB {
 	t.Helper()
 
 	reg := prometheus.NewRegistry()
@@ -75,10 +42,10 @@ func newTestTSDB(t *testing.T, writeClient remote.WriteClient) *ClickHouseTSDB {
 	return &ClickHouseTSDB{
 		temporaryStore: store,
 		batcher:        batch.New(reg, 15*time.Minute, store, zerolog.Nop()),
-		writeClient:    writeClient,
 		labelsTTL:      time.Hour,
-		metrics:        newMetrics(reg, "test"),
+		metrics:        newMetrics(reg),
 		logger:         zerolog.Nop(),
+		seenSeries:     make(map[uint64]time.Time),
 	}
 }
 
@@ -86,10 +53,15 @@ func newTestTSDB(t *testing.T, writeClient remote.WriteClient) *ClickHouseTSDB {
 // labels (for later rebuild) and the points in the temporary store.
 func TestAppenderCommit(t *testing.T) {
 	ctx := context.Background()
-	c := newTestTSDB(t, &fakeWriteClient{})
+	c := newTestTSDB(t)
 
 	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1", "item", "/")
 	id := types.MetricID(lbls.Hash())
+
+	// Pre-mark the series as seen so Commit's eager registration skips its SQL
+	// INSERT (this test has no ClickHouse connection); it validates the temporary
+	// store effects of Commit. Eager registration is covered by its own test.
+	c.markSeen([]types.Timeseries{{Labels: lbls}}, time.Now())
 
 	app := c.AppenderWithOptions(ctx, types.AppenderOptions{WriteTTL: 86400})
 
@@ -122,47 +94,6 @@ func TestAppenderCommit(t *testing.T) {
 	wantPoints := []types.MetricPoint{{Timestamp: 1000, Value: 1.5}, {Timestamp: 2000, Value: 2.5}}
 	if diff := cmp.Diff(wantPoints, data[0].Points); diff != "" {
 		t.Errorf("stored points mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestWriterWrite checks that the flush writer rebuilds labels from the
-// temporary store and sends a correct remote_write request.
-func TestWriterWrite(t *testing.T) {
-	ctx := context.Background()
-	fake := &fakeWriteClient{}
-	c := newTestTSDB(t, fake)
-
-	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1")
-	id := types.MetricID(lbls.Hash())
-
-	if err := c.temporaryStore.StoreLabelsByID(ctx, []types.MetricID{id}, []labels.Labels{lbls}, time.Hour); err != nil {
-		t.Fatalf("StoreLabelsByID: %v", err)
-	}
-
-	metrics := []types.MetricData{{
-		ID:         id,
-		Points:     []types.MetricPoint{{Timestamp: 1000, Value: 1.5}, {Timestamp: 2000, Value: 2.5}},
-		TimeToLive: 86400,
-	}}
-
-	if err := (&remoteWriter{c: c}).Write(ctx, metrics); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	if len(fake.requests) != 1 {
-		t.Fatalf("expected 1 remote write request, got %d", len(fake.requests))
-	}
-
-	want := []prompb.TimeSeries{{
-		Labels: []prompb.Label{
-			{Name: tenantLabelForTest, Value: "tenant-1"},
-			{Name: "__name__", Value: "cpu_used"},
-		},
-		Samples: []prompb.Sample{{Timestamp: 1000, Value: 1.5}, {Timestamp: 2000, Value: 2.5}},
-	}}
-
-	if diff := cmp.Diff(want, fake.requests[0].Timeseries); diff != "" {
-		t.Errorf("remote write timeseries mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -203,25 +134,4 @@ func TestSeriesToInput(t *testing.T) {
 			t.Errorf("row_ttl_days = %d, want 365 (sub-day TTL falls back)", ttlDays)
 		}
 	})
-}
-
-// TestWriterWriteMissingLabels checks that metrics whose labels are missing
-// (e.g. expired) are dropped and do not produce a remote_write request.
-func TestWriterWriteMissingLabels(t *testing.T) {
-	ctx := context.Background()
-	fake := &fakeWriteClient{}
-	c := newTestTSDB(t, fake)
-
-	metrics := []types.MetricData{{
-		ID:     types.MetricID(1234),
-		Points: []types.MetricPoint{{Timestamp: 1000, Value: 1.5}},
-	}}
-
-	if err := (&remoteWriter{c: c}).Write(ctx, metrics); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	if len(fake.requests) != 0 {
-		t.Fatalf("expected no remote write request, got %d", len(fake.requests))
-	}
 }

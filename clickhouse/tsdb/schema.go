@@ -63,38 +63,12 @@ ENGINE = AggregatingMergeTree
 PRIMARY KEY (tenant, metric_name)
 ORDER BY (tenant, metric_name, id){{TTL}}`
 
-const tsdbMetricsDDL = `
-CREATE TABLE IF NOT EXISTS tsdb_metrics
-(
-    metric_family_name String,
-    type String,
-    unit String,
-    help String
-)
-ENGINE = ReplacingMergeTree
-ORDER BY metric_family_name`
-
-const tsdbTimeSeriesDDL = `
-CREATE TABLE IF NOT EXISTS tsdb
-(
-    tenant LowCardinality(String) CODEC(ZSTD(1)),
-    timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
-    value Float64 CODEC(ZSTD(1))
-)
-ENGINE = TimeSeries
-SETTINGS tags_to_columns = {'__bleemeo_account__': 'tenant'}
-DATA tsdb_data
-METRICS tsdb_metrics
-TAGS tsdb_tags
-SETTINGS allow_experimental_time_series_table=1`
-
-// SQL write path (mode "sql"): points are inserted into the Null-engine
-// datapoint_input table, and two materialized views fan them out into the
-// explicit data and tags tables, computing the series id exactly like the
-// TimeSeries engine (reinterpretAsUUID(sipHash128(metric_name, all_tags))).
+// SQL write path: points are inserted into the Null-engine datapoint_input
+// table, and two materialized views fan them out into the data and tags tables,
+// computing the series id as reinterpretAsUUID(sipHash128(metric_name, all_tags)).
 //
-// The tenant label name is hardcoded to '__bleemeo_account__' to match the
-// tags_to_columns setting of the TimeSeries table above.
+// The tenant label name is hardcoded to '__bleemeo_account__' (it is extracted
+// from all_tags into the tenant column by mv_datapoint_tags).
 const datapointInputDDL = `
 CREATE TABLE IF NOT EXISTS datapoint_input
 (
@@ -142,8 +116,8 @@ FROM datapoint_input`
 
 // createSchema creates the ClickHouse tables if they don't exist yet.
 //
-// The sub-tables (tsdb_data, tsdb_tags, tsdb_metrics) are created before the
-// TimeSeries table that references them.
+// The data and tags tables are created before the materialized views that write
+// into them.
 //
 // Creation is idempotent (CREATE TABLE IF NOT EXISTS), so the TTL clause is
 // only applied when a table is created for the first time. Changing the
@@ -155,8 +129,6 @@ func (c *ClickHouseTSDB) createSchema(ctx context.Context) error {
 	}{
 		{"tsdb_data", c.tsdbDataStatement()},
 		{"tsdb_tags", c.withTTL(tsdbTagsDDL, "toDateTime(assumeNotNull(max_time))")},
-		{"tsdb_metrics", tsdbMetricsDDL},
-		{"tsdb", tsdbTimeSeriesDDL},
 		{"datapoint_input", datapointInputDDL},
 		{"mv_datapoint_data", mvDatapointDataDDL},
 		{"mv_datapoint_tags", mvDatapointTagsDDL},

@@ -36,21 +36,14 @@ const (
 	seenSeriesSweepInterval = time.Hour
 )
 
-// registerNewSeries inserts series not yet seen into tsdb_tags, so SQL reads can
+// registerNewSeries inserts series not yet seen into tsdb_tags, so reads can
 // resolve them (and merge their batcher points) before the batcher flushes —
 // otherwise a brand-new series would only become resolvable at its first flush.
-//
-// Only relevant in SQL mode (in remote mode the TimeSeries engine populates
-// tsdb_tags on remote_write, and point (a) is not addressed for that mode).
 //
 // The id/tenant/tags columns are computed by tsdb_tags DEFAULTs from all_tags;
 // we provide a non-null min_time/max_time (now) so the row survives the tags
 // TTL (based on max_time) until the flush refines it.
 func (c *ClickHouseTSDB) registerNewSeries(ctx context.Context, series []types.Timeseries) error {
-	if c.opts.Config.Mode != modeSQL {
-		return nil
-	}
-
 	now := time.Now()
 
 	newSeries := c.unseenSeries(series, now)

@@ -21,9 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// metrics are the Prometheus metrics of the ClickHouse backend, used to compare
-// the remote_write/remote_read and SQL modes. The "mode" const label carries the
-// configured mode so dashboards can distinguish two SquirrelDB instances.
+// metrics are the Prometheus metrics of the ClickHouse backend.
 type metrics struct {
 	FlushSeconds     prometheus.Summary
 	FlushPointsTotal prometheus.Counter
@@ -37,9 +35,7 @@ type metrics struct {
 	ReadPendingPointsTotal prometheus.Counter
 }
 
-func newMetrics(reg prometheus.Registerer, mode string) *metrics {
-	constLabels := prometheus.Labels{"mode": mode}
-
+func newMetrics(reg prometheus.Registerer) *metrics {
 	const (
 		namespace = "squirreldb"
 		subSystem = "clickhouse"
@@ -47,63 +43,55 @@ func newMetrics(reg prometheus.Registerer, mode string) *metrics {
 
 	return &metrics{
 		FlushSeconds: promauto.With(reg).NewSummary(prometheus.SummaryOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "flush_seconds",
-			Help:        "Duration of a batch flush write to ClickHouse",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "flush_seconds",
+			Help:      "Duration of a batch flush write to ClickHouse",
 		}),
 		FlushPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "flush_points_total",
-			Help:        "Total points written to ClickHouse",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "flush_points_total",
+			Help:      "Total points written to ClickHouse",
 		}),
 		FlushErrorsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "flush_errors_total",
-			Help:        "Total batch flushes that failed",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "flush_errors_total",
+			Help:      "Total batch flushes that failed",
 		}),
 		RegisterSeconds: promauto.With(reg).NewSummary(prometheus.SummaryOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "register_seconds",
-			Help:        "Duration of an eager tsdb_tags registration of new series (SQL mode)",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "register_seconds",
+			Help:      "Duration of an eager tsdb_tags registration of new series (SQL mode)",
 		}),
 		RegisteredSeriesTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "registered_series_total",
-			Help:        "Total new series eagerly registered in tsdb_tags (SQL mode)",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "registered_series_total",
+			Help:      "Total new series eagerly registered in tsdb_tags (SQL mode)",
 		}),
 		ReadSeconds: promauto.With(reg).NewSummaryVec(
 			prometheus.SummaryOpts{
-				Namespace:   namespace,
-				Subsystem:   subSystem,
-				Name:        "read_seconds",
-				Help:        "Synchronous processing time of a Select, by step (SQL mode)",
-				ConstLabels: constLabels,
+				Namespace: namespace,
+				Subsystem: subSystem,
+				Name:      "read_seconds",
+				Help:      "Synchronous processing time of a Select, by step (SQL mode)",
 			},
 			[]string{"step"},
 		),
 		ReadSeriesTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "read_series_total",
-			Help:        "Total series resolved by Select (SQL mode)",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "read_series_total",
+			Help:      "Total series resolved by Select (SQL mode)",
 		}),
 		ReadPendingPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   subSystem,
-			Name:        "read_pending_points_total",
-			Help:        "Total batcher pending points merged into reads (SQL mode)",
-			ConstLabels: constLabels,
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "read_pending_points_total",
+			Help:      "Total batcher pending points merged into reads (SQL mode)",
 		}),
 	}
 }
