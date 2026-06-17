@@ -44,8 +44,6 @@ type sqlQuerier struct {
 
 	batcher *batch.Batch
 	metrics *metrics
-	mint    int64
-	maxt    int64
 }
 
 func (q *sqlQuerier) Select(

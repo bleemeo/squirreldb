@@ -201,18 +201,18 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 
 func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) *sqlQuerier {
 	return &sqlQuerier{
-		labelQuerier: c.newLabelQuerier(),
+		labelQuerier: c.newLabelQuerier(mint, maxt),
 		batcher:      c.batcher,
 		metrics:      c.metrics,
-		mint:         mint,
-		maxt:         maxt,
 	}
 }
 
-func (c *ClickHouseTSDB) newLabelQuerier() labelQuerier {
+func (c *ClickHouseTSDB) newLabelQuerier(mint, maxt int64) labelQuerier {
 	return labelQuerier{
 		conn:        c.conn,
 		tenantLabel: c.opts.TenantLabel,
+		mint:        mint,
+		maxt:        maxt,
 	}
 }
 

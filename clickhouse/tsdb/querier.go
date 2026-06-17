@@ -32,6 +32,8 @@ import (
 type labelQuerier struct {
 	conn        driver.Conn
 	tenantLabel string
+	mint        int64
+	maxt        int64
 }
 
 // LabelValues returns the values of a label among the series matching matchers.
@@ -41,7 +43,7 @@ func (lq *labelQuerier) LabelValues(
 	hints *storage.LabelHints,
 	matchers ...*labels.Matcher,
 ) ([]string, annotations.Annotations, error) {
-	where, args := lq.buildWhere(matchers)
+	where, args := lq.whereWithTime(matchers)
 
 	var (
 		query     string
@@ -78,7 +80,7 @@ func (lq *labelQuerier) LabelNames(
 	hints *storage.LabelHints,
 	matchers ...*labels.Matcher,
 ) ([]string, annotations.Annotations, error) {
-	where, args := lq.buildWhere(matchers)
+	where, args := lq.whereWithTime(matchers)
 
 	// __name__ and the tenant label are columns, every other label lives in the
 	// tags map. One aggregate pass returns the distinct tag keys, whether any
@@ -149,6 +151,21 @@ func (lq *labelQuerier) buildWhere(matchers []*labels.Matcher) (string, []any) {
 	}
 
 	return strings.Join(conditions, " AND "), args
+}
+
+// whereWithTime is buildWhere plus a filter keeping only series active in
+// [mint, maxt] (min_time <= maxt AND max_time >= mint). The comparison is done
+// in int64 milliseconds (toUnixTimestamp64Milli on the columns) rather than
+// converting the bounds to DateTime64, which would overflow for the extreme
+// bounds the label endpoints pass. A null min/max_time never excludes a series.
+func (lq *labelQuerier) whereWithTime(matchers []*labels.Matcher) (string, []any) {
+	where, args := lq.buildWhere(matchers)
+
+	cond := "(" + where + ")" +
+		" AND (max_time IS NULL OR toUnixTimestamp64Milli(max_time) >= ?)" +
+		" AND (min_time IS NULL OR toUnixTimestamp64Milli(min_time) <= ?)"
+
+	return cond, append(args, lq.mint, lq.maxt)
 }
 
 // matcherCondition turns a single matcher into a SQL condition. The column
