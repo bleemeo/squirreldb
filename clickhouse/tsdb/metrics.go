@@ -77,7 +77,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Namespace: namespace,
 			Subsystem: subSystem,
 			Name:      "registered_series_total",
-			Help:      "Total new series eagerly registered in tsdb_tags (SQL mode)",
+			Help:      "Total series registered or refreshed in tsdb_tags",
 		}),
 		ReadSeconds: promauto.With(reg).NewSummaryVec(
 			prometheus.SummaryOpts{

@@ -45,7 +45,7 @@ func newTestTSDB(t *testing.T) *ClickHouseTSDB {
 		labelsTTL:      time.Hour,
 		metrics:        newMetrics(reg),
 		logger:         zerolog.Nop(),
-		seenSeries:     make(map[uint64]time.Time),
+		seenSeries:     make(map[uint64]seenEntry),
 	}
 }
 
@@ -58,10 +58,10 @@ func TestAppenderCommit(t *testing.T) {
 	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1", "item", "/")
 	id := types.MetricID(lbls.Hash())
 
-	// Pre-mark the series as seen so Commit's eager registration skips its SQL
-	// INSERT (this test has no ClickHouse connection); it validates the temporary
-	// store effects of Commit. Eager registration is covered by its own test.
-	c.markSeen([]types.Timeseries{{Labels: lbls}}, time.Now())
+	// Pre-register the series (nextRegister in the future) so Commit's registration
+	// skips its SQL INSERT (this test has no ClickHouse connection); it validates
+	// the temporary store effects of Commit. Registration is covered by its own test.
+	c.seenSeries[lbls.Hash()] = seenEntry{lastSeen: time.Now(), nextRegister: time.Now().Add(time.Hour)}
 
 	app := c.AppenderWithOptions(ctx, types.AppenderOptions{WriteTTL: 86400})
 
@@ -100,38 +100,39 @@ func TestAppenderCommit(t *testing.T) {
 func TestSeriesToInput(t *testing.T) {
 	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1", "item", "/")
 
-	t.Run("per-metric TTL and sorted tags", func(t *testing.T) {
-		name, tags, ttlDays := seriesToInput(lbls, 7*86400, 365)
+	t.Run("splits tenant, sorts tags, per-metric TTL", func(t *testing.T) {
+		cols := seriesToInput(lbls, tenantLabelForTest, 7*86400, 365)
 
-		if name != "cpu_used" {
-			t.Errorf("metric name = %q, want cpu_used", name)
+		if cols.metricName != "cpu_used" {
+			t.Errorf("metric name = %q, want cpu_used", cols.metricName)
 		}
 
-		// __name__ is excluded; the remaining keys must be in sorted order so the
-		// id ClickHouse computes is stable across flushes.
-		wantKeys := []string{tenantLabelForTest, "item"}
-		wantValues := []string{"tenant-1", "/"}
-
-		if diff := cmp.Diff(wantKeys, tags.keys); diff != "" {
-			t.Errorf("all_tags keys mismatch (-want +got):\n%s", diff)
+		if cols.tenant != "tenant-1" {
+			t.Errorf("tenant = %q, want tenant-1", cols.tenant)
 		}
 
-		if diff := cmp.Diff(wantValues, tags.values); diff != "" {
-			t.Errorf("all_tags values mismatch (-want +got):\n%s", diff)
+		// __name__ and the tenant label are excluded; the remaining keys must be
+		// in sorted order so the id ClickHouse computes is stable across flushes.
+		if diff := cmp.Diff([]string{"item"}, cols.tags.keys); diff != "" {
+			t.Errorf("tags keys mismatch (-want +got):\n%s", diff)
 		}
 
-		if ttlDays != 7 {
-			t.Errorf("row_ttl_days = %d, want 7", ttlDays)
+		if diff := cmp.Diff([]string{"/"}, cols.tags.values); diff != "" {
+			t.Errorf("tags values mismatch (-want +got):\n%s", diff)
+		}
+
+		if cols.rowTTLDays != 7 {
+			t.Errorf("row_ttl_days = %d, want 7", cols.rowTTLDays)
 		}
 	})
 
 	t.Run("falls back to global default when TTL is zero or sub-day", func(t *testing.T) {
-		if _, _, ttlDays := seriesToInput(lbls, 0, 365); ttlDays != 365 {
-			t.Errorf("row_ttl_days = %d, want 365 (global default)", ttlDays)
+		if cols := seriesToInput(lbls, tenantLabelForTest, 0, 365); cols.rowTTLDays != 365 {
+			t.Errorf("row_ttl_days = %d, want 365 (global default)", cols.rowTTLDays)
 		}
 
-		if _, _, ttlDays := seriesToInput(lbls, 3600, 365); ttlDays != 365 {
-			t.Errorf("row_ttl_days = %d, want 365 (sub-day TTL falls back)", ttlDays)
+		if cols := seriesToInput(lbls, tenantLabelForTest, 3600, 365); cols.rowTTLDays != 365 {
+			t.Errorf("row_ttl_days = %d, want 365 (sub-day TTL falls back)", cols.rowTTLDays)
 		}
 	})
 }

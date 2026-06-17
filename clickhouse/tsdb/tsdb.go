@@ -77,10 +77,10 @@ type ClickHouseTSDB struct {
 	metrics        *metrics
 	logger         zerolog.Logger
 
-	// seenSeries caches the labels hashes already registered in tsdb_tags (with
-	// their last-seen time), to avoid re-inserting them on every write. Entries
-	// are refreshed on write and swept after seenSeriesTTL.
-	seenSeries map[uint64]time.Time
+	// seenSeries caches the labels hashes registered in tsdb_tags, to avoid
+	// re-inserting them on every write. Entries track last-seen (for eviction)
+	// and next-register (for periodic refresh); swept after seenSeriesTTL.
+	seenSeries map[uint64]seenEntry
 	seenMu     sync.Mutex
 
 	wg     sync.WaitGroup
@@ -114,7 +114,7 @@ func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseT
 		labelsTTL:  opts.BatchSize + labelsTTLMargin,
 		metrics:    newMetrics(opts.Reg),
 		logger:     logger,
-		seenSeries: make(map[uint64]time.Time),
+		seenSeries: make(map[uint64]seenEntry),
 	}
 
 	if err := c.createSchema(ctx); err != nil {

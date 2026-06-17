@@ -109,9 +109,9 @@ func (app *appender) Commit() error {
 		return fmt.Errorf("store labels: %w", err)
 	}
 
-	// Register new series in tsdb_tags right away (SQL mode) so queries can
-	// resolve them before the batcher flushes their points (point (a)).
-	if err := app.c.registerNewSeries(app.ctx, pending); err != nil {
+	// Register new series in tsdb_tags right away so queries can resolve them
+	// before the batcher flushes their points (point (a)).
+	if err := app.c.registerSeries(app.ctx, pending, app.ttl); err != nil {
 		return fmt.Errorf("register series: %w", err)
 	}
 

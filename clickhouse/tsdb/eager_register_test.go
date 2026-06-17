@@ -25,57 +25,61 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
-func TestUnseenSeriesAndMarkSeen(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]time.Time)}
-	now := time.Unix(1000, 0)
+func TestSeriesToRegister(t *testing.T) {
+	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry)}
+	t0 := time.Unix(1000, 0)
 
-	a := types.Timeseries{Labels: labels.FromStrings("__name__", "cpu_used", "item", "/")}
-	b := types.Timeseries{Labels: labels.FromStrings("__name__", "cpu_used", "item", "/home")}
+	a := types.Timeseries{Labels: labels.FromStrings("__name__", "a")}
+	b := types.Timeseries{Labels: labels.FromStrings("__name__", "b")}
 
-	// Both are new initially.
-	if got := c.unseenSeries([]types.Timeseries{a, b}, now); len(got) != 2 {
-		t.Fatalf("unseenSeries = %d new, want 2", len(got))
+	// New series are due for registration.
+	if got := c.seriesToRegister([]types.Timeseries{a, b}, t0); len(got) != 2 {
+		t.Fatalf("new series due = %d, want 2", len(got))
 	}
 
-	// Mark only a as seen.
-	c.markSeen([]types.Timeseries{a}, now)
+	// After registering a, only b (never registered) is still due.
+	c.markRegistered([]types.Timeseries{a}, t0)
 
-	got := c.unseenSeries([]types.Timeseries{a, b}, now)
-	if len(got) != 1 {
-		t.Fatalf("unseenSeries after marking a = %d new, want 1", len(got))
+	got := c.seriesToRegister([]types.Timeseries{a, b}, t0)
+	if len(got) != 1 || !labels.Equal(got[0].Labels, b.Labels) {
+		t.Fatalf("after registering a, due = %v, want [b]", got)
 	}
 
-	if !labels.Equal(got[0].Labels, b.Labels) {
-		t.Errorf("remaining unseen = %s, want %s", got[0].Labels, b.Labels)
+	c.markRegistered([]types.Timeseries{b}, t0)
+
+	// Nothing due right after registration.
+	if got := c.seriesToRegister([]types.Timeseries{a, b}, t0); len(got) != 0 {
+		t.Fatalf("just registered, due = %d, want 0", len(got))
 	}
 
-	// After marking b too, nothing is new.
-	c.markSeen([]types.Timeseries{b}, now)
-
-	if got := c.unseenSeries([]types.Timeseries{a, b}, now); len(got) != 0 {
-		t.Errorf("unseenSeries after marking both = %d new, want 0", len(got))
+	// Both due again once the re-register interval has elapsed.
+	later := t0.Add(reRegisterGap + time.Minute)
+	if got := c.seriesToRegister([]types.Timeseries{a, b}, later); len(got) != 2 {
+		t.Fatalf("after interval, due = %d, want 2", len(got))
 	}
 }
 
 func TestSweepSeenSeries(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]time.Time)}
+	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry)}
 	start := time.Unix(1000, 0)
 
 	a := types.Timeseries{Labels: labels.FromStrings("__name__", "a")}
 	b := types.Timeseries{Labels: labels.FromStrings("__name__", "b")}
 
-	c.markSeen([]types.Timeseries{a, b}, start)
+	c.seriesToRegister([]types.Timeseries{a, b}, start)
+	c.markRegistered([]types.Timeseries{a, b}, start)
 
 	// "a" is written again just before the sweep; "b" stays idle.
 	later := start.Add(seenSeriesTTL - time.Minute)
-	c.unseenSeries([]types.Timeseries{a}, later)
+	c.seriesToRegister([]types.Timeseries{a}, later)
 
-	// Sweep at start + TTL + 1: "b" is stale (last seen at start), "a" is fresh.
 	c.sweepSeenSeries(start.Add(seenSeriesTTL + time.Second))
 
-	if got := c.unseenSeries([]types.Timeseries{a, b}, later); len(got) != 1 {
-		t.Fatalf("after sweep, unseen = %d, want 1 (b evicted)", len(got))
-	} else if !labels.Equal(got[0].Labels, b.Labels) {
-		t.Errorf("evicted series = %s, want %s", got[0].Labels, b.Labels)
+	if _, ok := c.seenSeries[a.Labels.Hash()]; !ok {
+		t.Errorf("active series a was evicted")
+	}
+
+	if _, ok := c.seenSeries[b.Labels.Hash()]; ok {
+		t.Errorf("idle series b was not evicted")
 	}
 }

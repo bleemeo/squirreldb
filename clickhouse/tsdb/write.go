@@ -81,10 +81,12 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 			continue
 		}
 
-		metricName, allTags, rowTTLDays := seriesToInput(lbls, m.TimeToLive, globalDays)
+		cols := seriesToInput(lbls, w.c.opts.TenantLabel, m.TimeToLive, globalDays)
 
 		for _, p := range m.Points {
-			if err := batch.Append(metricName, allTags, time.UnixMilli(p.Timestamp), p.Value, rowTTLDays); err != nil {
+			if err := batch.Append(
+				cols.metricName, cols.tenant, cols.tags, time.UnixMilli(p.Timestamp), p.Value, cols.rowTTLDays,
+			); err != nil {
 				_ = batch.Abort()
 
 				w.c.metrics.FlushErrorsTotal.Inc()
@@ -119,34 +121,47 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 	return nil
 }
 
-// seriesToInput maps a series' labels to the datapoint_input columns: the metric
-// name, the other labels as the all_tags map (the tenant label stays in the map;
-// the materialized view extracts it), and the per-row TTL in days. A metric
-// without an explicit TTL (or below one day) falls back to the global default.
-//
-// all_tags is built in a deterministic (sorted) key order so that the series id
-// ClickHouse computes (sipHash128(metric_name, all_tags)) is stable across
-// flushes — clickhouse-go serializes a plain Go map in random order, which would
-// otherwise yield a different id (and thus duplicate series) each flush. We rely
-// on labels.Labels being canonically sorted by name (a Prometheus invariant).
-func seriesToInput(lbls labels.Labels, ttlSeconds int64, globalDays uint16) (string, *sortedTags, uint16) {
-	metricName := lbls.Get(labels.MetricName)
+// seriesColumns are the datapoint_input / tsdb_tags columns derived from a
+// series' labels.
+type seriesColumns struct {
+	metricName string
+	tenant     string
+	tags       *sortedTags // non-__name__, non-tenant labels, in sorted key order
+	rowTTLDays uint16
+}
 
-	allTags := &sortedTags{}
+// seriesToInput splits a series' labels into the metric name, the tenant value
+// (the tenantLabel, kept out of tags), the remaining labels as the tags map, and
+// the per-row TTL in days (falling back to the global default below one day).
+//
+// tags is built in a deterministic (sorted) key order so the series id ClickHouse
+// computes (sipHash128(metric_name, tenant, tags)) is stable across flushes —
+// clickhouse-go serializes a plain Go map in random order, which would otherwise
+// yield a different id (and thus duplicate series) each flush. We rely on
+// labels.Labels being canonically sorted by name (a Prometheus invariant).
+func seriesToInput(lbls labels.Labels, tenantLabel string, ttlSeconds int64, globalDays uint16) seriesColumns {
+	cols := seriesColumns{
+		metricName: lbls.Get(labels.MetricName),
+		tags:       &sortedTags{},
+		rowTTLDays: globalDays,
+	}
 
 	lbls.Range(func(l labels.Label) {
-		if l.Name != labels.MetricName {
-			allTags.keys = append(allTags.keys, l.Name)
-			allTags.values = append(allTags.values, l.Value)
+		switch l.Name {
+		case labels.MetricName:
+		case tenantLabel:
+			cols.tenant = l.Value
+		default:
+			cols.tags.keys = append(cols.tags.keys, l.Name)
+			cols.tags.values = append(cols.tags.values, l.Value)
 		}
 	})
 
-	rowTTLDays := globalDays
 	if days := uint16(ttlSeconds / secondsPerDay); days > 0 { //nolint:gosec
-		rowTTLDays = days
+		cols.rowTTLDays = days
 	}
 
-	return metricName, allTags, rowTTLDays
+	return cols
 }
 
 // sortedTags is an ordered string->string map preserving its insertion order
