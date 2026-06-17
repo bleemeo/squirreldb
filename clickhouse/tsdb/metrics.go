@@ -23,9 +23,10 @@ import (
 
 // metrics are the Prometheus metrics of the ClickHouse backend.
 type metrics struct {
-	FlushSeconds     prometheus.Summary
-	FlushPointsTotal prometheus.Counter
-	FlushErrorsTotal prometheus.Counter
+	FlushSeconds            prometheus.Summary
+	FlushPointsTotal        prometheus.Counter
+	FlushErrorsTotal        prometheus.Counter
+	FlushDroppedPointsTotal prometheus.Counter
 
 	RegisterSeconds       prometheus.Summary
 	RegisteredSeriesTotal prometheus.Counter
@@ -59,6 +60,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Subsystem: subSystem,
 			Name:      "flush_errors_total",
 			Help:      "Total batch flushes that failed",
+		}),
+		FlushDroppedPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "flush_dropped_points_total",
+			Help:      "Total points dropped at flush because their labels were missing (expired) in the temporary store",
 		}),
 		RegisterSeconds: promauto.With(reg).NewSummary(prometheus.SummaryOpts{
 			Namespace: namespace,

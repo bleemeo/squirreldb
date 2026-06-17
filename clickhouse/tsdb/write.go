@@ -67,12 +67,16 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 	globalDays := uint16(w.c.ttlDays()) //nolint:gosec
 	rows := 0
 
-	var missingLabels int
+	var (
+		missingLabels int
+		droppedPoints int
+	)
 
 	for i, m := range metrics {
 		lbls := labelsList[i]
 		if lbls.Len() == 0 {
 			missingLabels++
+			droppedPoints += len(m.Points)
 
 			continue
 		}
@@ -92,9 +96,11 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 		}
 	}
 
-	if missingLabels > 0 {
+	if droppedPoints > 0 {
+		w.c.metrics.FlushDroppedPointsTotal.Add(float64(droppedPoints))
 		w.c.logger.Warn().
-			Int("count", missingLabels).
+			Int("series", missingLabels).
+			Int("points", droppedPoints).
 			Msg("Missing labels for some metrics at flush time, their points were dropped")
 	}
 
