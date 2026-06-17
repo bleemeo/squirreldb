@@ -73,14 +73,42 @@ func (q *sqlQuerier) Select(
 		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: read pending points: %w", err))
 	}
 
-	query, queryArgs := q.pointsQuery(sortSeries, where, args, labelsByID)
+	query, queryArgs := q.pointsQuery(where, args)
 
 	rows, err := q.conn.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: read points: %w", err))
 	}
 
-	return &sqlSeriesSet{rows: rows, labelsByID: labelsByID, pending: pending}
+	set := &sqlSeriesSet{rows: rows, labelsByID: labelsByID, pending: pending}
+
+	// The cursor (and thus the streaming set) yields series in id order. When the
+	// caller requires label order, drain and sort in memory. This is the rare
+	// path: PromQL always calls Select with sortSeries=false.
+	if sortSeries {
+		return sortedByLabels(set)
+	}
+
+	return set
+}
+
+// sortedByLabels fully reads a SeriesSet and returns it sorted by labels.
+func sortedByLabels(set storage.SeriesSet) storage.SeriesSet {
+	var series []storage.Series
+
+	for set.Next() {
+		series = append(series, set.At())
+	}
+
+	if err := set.Err(); err != nil {
+		return storage.ErrSeriesSet(err)
+	}
+
+	sort.Slice(series, func(i, j int) bool {
+		return labels.Compare(series[i].Labels(), series[j].Labels()) < 0
+	})
+
+	return &sliceSeriesSet{series: series, index: -1}
 }
 
 func (q *sqlQuerier) Close() error {
@@ -169,56 +197,20 @@ func (q *sqlQuerier) readPending(
 	return pending, nil
 }
 
-// pointsQuery builds the tsdb_data query and its arguments. The rows are ordered
-// so the series come out in the order the SeriesSet must yield them: by label
-// order when sortSeries is set (the resolved ids are sorted by labels and the
-// query orders by their position), otherwise by id.
-func (q *sqlQuerier) pointsQuery(
-	sortSeries bool,
-	where string,
-	args []any,
-	labelsByID map[uuid.UUID]labels.Labels,
-) (string, []any) {
-	const timeFilter = " AND timestamp >= fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?)"
-
-	if sortSeries {
-		idStrings := sortedIDStrings(labelsByID)
-
-		query := "SELECT id, timestamp, value FROM tsdb_data WHERE has(?, toString(id))" +
-			timeFilter + " ORDER BY indexOf(?, toString(id)), timestamp"
-
-		return query, []any{idStrings, q.mint, q.maxt, idStrings}
-	}
-
+// pointsQuery builds the tsdb_data query and its arguments. Rows are ordered by
+// id so the streaming SeriesSet can group points per series; series order does
+// not matter (the caller sorts when it requires label order, see sortedByLabels).
+func (q *sqlQuerier) pointsQuery(where string, args []any) (string, []any) {
 	query := "SELECT id, timestamp, value FROM tsdb_data" +
 		" WHERE id IN (SELECT id FROM tsdb_tags WHERE " + where + ")" +
-		timeFilter + " ORDER BY id, timestamp"
+		" AND timestamp >= fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?)" +
+		" ORDER BY id, timestamp"
 
 	queryArgs := make([]any, 0, len(args)+2)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, q.mint, q.maxt)
 
 	return query, queryArgs
-}
-
-// sortedIDStrings returns the series ids as strings, sorted by their labels so
-// the SeriesSet can yield series in label order while streaming.
-func sortedIDStrings(labelsByID map[uuid.UUID]labels.Labels) []string {
-	ids := make([]uuid.UUID, 0, len(labelsByID))
-	for id := range labelsByID {
-		ids = append(ids, id)
-	}
-
-	sort.Slice(ids, func(i, j int) bool {
-		return labels.Compare(labelsByID[ids[i]], labelsByID[ids[j]]) < 0
-	})
-
-	idStrings := make([]string, len(ids))
-	for i, id := range ids {
-		idStrings[i] = id.String()
-	}
-
-	return idStrings
 }
 
 // buildLabels reconstructs a series' label set from its tsdb_tags columns.
@@ -450,6 +442,23 @@ func (s *sqlSeriesSet) At() storage.Series { return s.current }
 func (s *sqlSeriesSet) Err() error         { return s.err }
 
 func (s *sqlSeriesSet) Warnings() annotations.Annotations { return nil }
+
+// sliceSeriesSet is an in-memory storage.SeriesSet over a pre-built slice, used
+// to return series sorted by labels (see sortedByLabels).
+type sliceSeriesSet struct {
+	series []storage.Series
+	index  int
+}
+
+func (s *sliceSeriesSet) Next() bool {
+	s.index++
+
+	return s.index < len(s.series)
+}
+
+func (s *sliceSeriesSet) At() storage.Series                { return s.series[s.index] }
+func (s *sliceSeriesSet) Err() error                        { return nil }
+func (s *sliceSeriesSet) Warnings() annotations.Annotations { return nil }
 
 // sqlSeries is one series with its buffered points.
 type sqlSeries struct {
