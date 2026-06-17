@@ -19,6 +19,7 @@ package tsdb
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -80,25 +81,52 @@ func (lq *labelQuerier) LabelNames(
 	where, args := lq.buildWhere(matchers)
 
 	// __name__ and the tenant label are columns, every other label lives in the
-	// tags map. The UNION makes the three respect the matchers: when no series
-	// matches, all branches return nothing.
-	query := "SELECT DISTINCT name FROM (" +
-		"SELECT arrayJoin(mapKeys(tags)) AS name FROM tsdb_tags WHERE " + where +
-		" UNION DISTINCT SELECT '__name__' AS name FROM tsdb_tags WHERE " + where + " LIMIT 1" +
-		" UNION DISTINCT SELECT " + quoteString(lq.tenantLabel) + " AS name " +
-		"FROM tsdb_tags WHERE (" + where + ") AND tenant != '' LIMIT 1" +
-		") ORDER BY name"
+	// tags map. One aggregate pass returns the distinct tag keys, whether any
+	// series matched (n), and whether any has a tenant; __name__ and the tenant
+	// label are then added in Go.
+	query := "SELECT groupUniqArrayArray(mapKeys(tags)) AS keys, count() AS n, max(tenant != '') AS has_tenant" +
+		" FROM tsdb_tags WHERE " + where
 
-	queryArgs := make([]any, 0, len(args)*3)
-	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, args...)
-
-	query, queryArgs = appendLimit(query, queryArgs, hints)
-
-	names, err := lq.queryStrings(ctx, query, queryArgs)
+	rows, err := lq.conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("clickhouse: label names: %w", err)
+	}
+
+	defer rows.Close()
+
+	var (
+		keys      []string
+		count     uint64
+		hasTenant uint8
+	)
+
+	if rows.Next() {
+		if err := rows.Scan(&keys, &count, &hasTenant); err != nil {
+			return nil, nil, fmt.Errorf("clickhouse: label names: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("clickhouse: label names: %w", err)
+	}
+
+	if count == 0 {
+		return nil, nil, nil
+	}
+
+	names := make([]string, 0, len(keys)+2)
+	names = append(names, labels.MetricName)
+
+	if hasTenant != 0 {
+		names = append(names, lq.tenantLabel)
+	}
+
+	names = append(names, keys...)
+
+	sort.Strings(names)
+
+	if hints != nil && hints.Limit > 0 && len(names) > hints.Limit {
+		names = names[:hints.Limit]
 	}
 
 	return names, nil, nil
@@ -196,9 +224,4 @@ func appendLimit(query string, args []any, hints *storage.LabelHints) (string, [
 // string, for ClickHouse match() which searches a substring.
 func anchorRegexp(value string) string {
 	return "^(?:" + value + ")$"
-}
-
-// quoteString renders a Go string as a ClickHouse single-quoted string literal.
-func quoteString(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }

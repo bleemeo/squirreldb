@@ -140,17 +140,3 @@ func TestBuildLabels(t *testing.T) {
 		}
 	})
 }
-
-func TestQuoteString(t *testing.T) {
-	cases := map[string]string{
-		"__bleemeo_account__": "'__bleemeo_account__'",
-		"a'b":                 `'a\'b'`,
-		`a\b`:                 `'a\\b'`,
-	}
-
-	for in, want := range cases {
-		if got := quoteString(in); got != want {
-			t.Errorf("quoteString(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
