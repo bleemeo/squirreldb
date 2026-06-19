@@ -241,6 +241,17 @@ func mergePoints(flushed, pending []types.MetricPoint) []types.MetricPoint {
 		return pending
 	}
 
+	// Fast path for the common case: pending (the recent un-flushed tail) is
+	// entirely after flushed. Concatenate with bulk copies, no per-point merge.
+	// The general path below stays correct for overlap / backdated points.
+	if flushed[len(flushed)-1].Timestamp < pending[0].Timestamp {
+		out := make([]types.MetricPoint, 0, len(flushed)+len(pending))
+		out = append(out, flushed...)
+		out = append(out, pending...)
+
+		return out
+	}
+
 	out := make([]types.MetricPoint, 0, len(flushed)+len(pending))
 
 	var (

@@ -73,3 +73,95 @@ func TestMergePoints(t *testing.T) {
 		})
 	}
 }
+
+func genPoints(startTS, count, step int64) []types.MetricPoint {
+	out := make([]types.MetricPoint, count)
+	for i := range count {
+		out[i] = types.MetricPoint{Timestamp: startTS + i*step, Value: float64(i)}
+	}
+
+	return out
+}
+
+// TestMergePointsCappedDiffersOnOutOfOrder documents why we cannot use the
+// Cassandra cap-and-concat in ClickHouse: when a flushed point is newer than the
+// earliest pending one (backdated/out-of-order), cap-and-concat drops it whereas
+// mergePoints keeps it.
+func TestMergePointsCappedDiffersOnOutOfOrder(t *testing.T) {
+	flushed := pts(1, 1, 2, 2, 5, 5) // a flushed point at ts=5
+	pending := pts(3, 30, 4, 40)     // earliest pending ts=3
+
+	merged := mergePoints(flushed, pending)
+
+	// mergePoints keeps the flushed ts=5; cap-and-concat drops it.
+	if len(merged) != 5 {
+		t.Errorf("mergePoints lost a point: got %d, want 5", len(merged))
+	}
+}
+
+// BenchmarkMergePointsCommonCase benchmarks our merge-sort+dedup on a realistic shape:
+// a 52 minutes in flushed range plus a small (8 minutes) recent
+// pending tail, disjoint.
+func BenchmarkMergePointsCommonCase(b *testing.B) {
+	const step = 10_000 // 10s in ms
+
+	flushed := genPoints(0, 52*60/10, step)              // 52 minutes of flushed points
+	pending := genPoints((52*60/10)*step, 8*60/10, step) // 8min recent tail
+	expected := len(flushed) + len(pending)
+
+	if got := len(mergePoints(flushed, pending)); got != expected {
+		b.Fatalf("setup: mergePoints = %d, want %d", got, expected)
+	}
+
+	b.Run("mergeSortDedup", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			_ = mergePoints(flushed, pending)
+		}
+	})
+}
+
+// BenchmarkMergePointsBackfillCase benchmarks our merge-sort+dedup on a backfilling case:
+// a 30 minutes in flushed range plus a same-size (30 minutes) of older datan in pending, disjoint.
+func BenchmarkMergePointsBackfillCase(b *testing.B) {
+	const step = 10_000 // 10s in ms
+
+	flushed := genPoints((30*60/10)*step, 30*60/10, step)
+	pending := genPoints(0, 30*60/10, step)
+	expected := len(flushed) + len(pending)
+
+	if got := len(mergePoints(flushed, pending)); got != expected {
+		b.Fatalf("setup: mergePoints = %d, want %d", got, expected)
+	}
+
+	b.Run("mergeSortDedup", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			_ = mergePoints(flushed, pending)
+		}
+	})
+}
+
+// BenchmarkMergePointsInterleaved benchmarks our merge-sort+dedup on a interleave case:
+// flushed & pending contains both 60 minutes, but both one points every 2 x step.
+func BenchmarkMergePointsInterleaved(b *testing.B) {
+	const step = 10_000 // 10s in ms
+
+	flushed := genPoints(0, 60*60/20, 2*step)
+	pending := genPoints(step, 60*60/20, 2*step)
+	expected := len(flushed) + len(pending)
+
+	if got := len(mergePoints(flushed, pending)); got != expected {
+		b.Fatalf("setup: mergePoints = %d, want %d", got, expected)
+	}
+
+	b.Run("mergeSortDedup", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			_ = mergePoints(flushed, pending)
+		}
+	})
+}
