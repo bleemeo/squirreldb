@@ -85,6 +85,13 @@ type ClickHouseTSDB struct {
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
+
+	// queries tracks in-flight queriers (each holds the shared conn); Close waits
+	// for them before closing the conn. closeMu guards closed so no querier is
+	// registered once Close has started (which would race queries.Add/Wait).
+	queries sync.WaitGroup
+	closeMu sync.Mutex
+	closed  bool
 }
 
 // New connects to ClickHouse, creates the schema if needed, sets up the write
@@ -123,7 +130,13 @@ func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseT
 		return nil, fmt.Errorf("clickhouse: create schema: %w", err)
 	}
 
-	c.temporaryStore = newTemporaryStore(ctx, opts, logger)
+	c.temporaryStore, err = newTemporaryStore(ctx, opts, logger)
+	if err != nil {
+		_ = conn.Close()
+
+		return nil, fmt.Errorf("clickhouse: %w", err)
+	}
+
 	c.batcher = batch.New(
 		opts.Reg,
 		opts.BatchSize,
@@ -148,7 +161,13 @@ func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseT
 
 // newTemporaryStore returns a Redis-backed store when Redis is configured, or an
 // in-memory store otherwise. The store is owned by the batcher (closed by it).
-func newTemporaryStore(ctx context.Context, opts Options, logger zerolog.Logger) batch.TemporaryStore {
+//
+// When Redis is configured it MUST succeed: we do not fall back to the in-memory
+// store on a Redis error. The in-memory store is node-local, so a silent fallback
+// would make a node's buffered labels and points invisible to the node that takes
+// over on failure — silent data loss on failover. Fail loudly instead (the
+// Cassandra backend has the same contract).
+func newTemporaryStore(ctx context.Context, opts Options, logger zerolog.Logger) (batch.TemporaryStore, error) {
 	storeLogger := logger.With().Str("component", "temporary_store").Logger()
 
 	if len(opts.Redis.Addresses) > 0 && opts.Redis.Addresses[0] != "" {
@@ -161,14 +180,14 @@ func newTemporaryStore(ctx context.Context, opts Options, logger zerolog.Logger)
 			},
 			storeLogger,
 		)
-		if err == nil {
-			return store
+		if err != nil {
+			return nil, fmt.Errorf("redis temporary store: %w", err)
 		}
 
-		logger.Err(err).Msg("Failed to use Redis temporary store, falling back to in-memory store")
+		return store, nil
 	}
 
-	return temporarystore.New(opts.Reg, storeLogger) //nolint:contextcheck
+	return temporarystore.New(opts.Reg, storeLogger), nil //nolint:contextcheck
 }
 
 func (c *ClickHouseTSDB) AppenderWithOptions(
@@ -188,7 +207,7 @@ func (c *ClickHouseTSDB) QuerierWithOptions(
 	mint int64,
 	maxt int64,
 ) (storage.Querier, error) {
-	return c.newSQLQuerier(mint, maxt), nil
+	return c.newSQLQuerier(mint, maxt)
 }
 
 func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
@@ -196,15 +215,34 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 	mint int64,
 	maxt int64,
 ) (storage.ChunkQuerier, error) {
-	return convert.NewQuerierToChunkQuerier(c.newSQLQuerier(mint, maxt)), nil
+	q, err := c.newSQLQuerier(mint, maxt)
+	if err != nil {
+		return nil, err
+	}
+
+	return convert.NewQuerierToChunkQuerier(q), nil
 }
 
-func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) *sqlQuerier {
+// newSQLQuerier builds a querier and registers it as in-flight so Close waits
+// for it to release the shared connection. The matching queries.Done runs in
+// sqlQuerier.Close (called by Prometheus once the querier is no longer used).
+// It is refused once Close has started, so the connection is never used after it.
+func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) (*sqlQuerier, error) {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+
+	if c.closed {
+		return nil, errClosed
+	}
+
+	c.queries.Add(1)
+
 	return &sqlQuerier{
 		labelQuerier: c.newLabelQuerier(mint, maxt),
 		batcher:      c.batcher,
 		metrics:      c.metrics,
-	}
+		onClose:      c.queries.Done,
+	}, nil
 }
 
 func (c *ClickHouseTSDB) newLabelQuerier(mint, maxt int64) labelQuerier {
@@ -221,7 +259,12 @@ func (c *ClickHouseTSDB) Flush(ctx context.Context) error {
 	return c.batcher.Flush(ctx)
 }
 
-func (c *ClickHouseTSDB) Close(context.Context) error {
+func (c *ClickHouseTSDB) Close(ctx context.Context) error {
+	// Stop registering new queriers, so queries.Wait below cannot race a late Add.
+	c.closeMu.Lock()
+	c.closed = true
+	c.closeMu.Unlock()
+
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -229,5 +272,29 @@ func (c *ClickHouseTSDB) Close(context.Context) error {
 	// The batcher does a final flush and closes the temporary store on shutdown.
 	c.wg.Wait()
 
+	// Wait for in-flight queries to release the shared connection before closing
+	// it, bounded by the shutdown context so a stuck query can't block forever.
+	if !c.waitInflightQueries(ctx) {
+		c.logger.Warn().Msg("Closing ClickHouse connection while queries are still in flight")
+	}
+
 	return c.conn.Close()
+}
+
+// waitInflightQueries blocks until every in-flight querier has been closed, or
+// the context is done. It returns true if all queries finished, false on timeout.
+func (c *ClickHouseTSDB) waitInflightQueries(ctx context.Context) bool {
+	done := make(chan struct{})
+
+	go func() {
+		c.queries.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

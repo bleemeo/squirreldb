@@ -19,6 +19,7 @@ package tsdb
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/bleemeo/squirreldb/types"
@@ -143,7 +144,7 @@ func seriesToInput(lbls labels.Labels, tenantLabel string, ttlSeconds int64, glo
 	cols := seriesColumns{
 		metricName: lbls.Get(labels.MetricName),
 		tags:       &sortedTags{},
-		rowTTLDays: globalDays,
+		rowTTLDays: rowTTLDays(ttlSeconds, globalDays),
 	}
 
 	lbls.Range(func(l labels.Label) {
@@ -157,11 +158,27 @@ func seriesToInput(lbls labels.Labels, tenantLabel string, ttlSeconds int64, glo
 		}
 	})
 
-	if days := uint16(ttlSeconds / secondsPerDay); days > 0 { //nolint:gosec
-		cols.rowTTLDays = days
+	return cols
+}
+
+// rowTTLDays converts a per-request TTL (seconds) to whole days for the
+// row_ttl_days column. The store's TTL granularity is one day, so the value is
+// rounded UP — a 32h TTL keeps data for 2 days, never truncated down to 1, which
+// would drop data early. A positive sub-day TTL becomes 1 day. Only a
+// non-positive TTL (none requested) falls back to the global default; a positive
+// TTL is always honored (never silently replaced by the much larger default).
+// The result is capped at the uint16 column range.
+func rowTTLDays(ttlSeconds int64, globalDays uint16) uint16 {
+	if ttlSeconds <= 0 {
+		return globalDays
 	}
 
-	return cols
+	days := (ttlSeconds + secondsPerDay - 1) / secondsPerDay // ceil
+	if days > math.MaxUint16 {
+		return math.MaxUint16
+	}
+
+	return uint16(days)
 }
 
 // sortedTags is an ordered string->string map preserving its insertion order

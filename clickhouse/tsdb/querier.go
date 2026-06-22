@@ -154,18 +154,19 @@ func (lq *labelQuerier) buildWhere(matchers []*labels.Matcher) (string, []any) {
 }
 
 // whereWithTime is buildWhere plus a filter keeping only series active in
-// [mint, maxt] (min_time <= maxt AND max_time >= mint). The comparison is done
-// in int64 milliseconds (toUnixTimestamp64Milli on the columns) rather than
-// converting the bounds to DateTime64, which would overflow for the extreme
-// bounds the label endpoints pass. A null min/max_time never excludes a series.
+// [mint, maxt] (min_time <= maxt AND max_time >= mint). The bounds are clamped
+// to the store range and bound to fromUnixTimestamp64Milli, the same way as the
+// points filter (see clampStoreTime / pointsQuery): clamping avoids overflowing
+// the conversion on the extreme bounds the label endpoints may pass. A null
+// min/max_time never excludes a series.
 func (lq *labelQuerier) whereWithTime(matchers []*labels.Matcher) (string, []any) {
 	where, args := lq.buildWhere(matchers)
 
 	cond := "(" + where + ")" +
-		" AND (max_time IS NULL OR toUnixTimestamp64Milli(max_time) >= ?)" +
-		" AND (min_time IS NULL OR toUnixTimestamp64Milli(min_time) <= ?)"
+		" AND (max_time IS NULL OR max_time >= fromUnixTimestamp64Milli(?))" +
+		" AND (min_time IS NULL OR min_time <= fromUnixTimestamp64Milli(?))"
 
-	return cond, append(args, lq.mint, lq.maxt)
+	return cond, append(args, clampStoreTime(lq.mint), clampStoreTime(lq.maxt))
 }
 
 // matcherCondition turns a single matcher into a SQL condition. The column

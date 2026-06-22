@@ -17,12 +17,44 @@
 package tsdb
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/go-cmp/cmp"
 )
+
+func TestClampStoreTime(t *testing.T) {
+	normal := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC).UnixMilli()
+	// The queryable bounds the window to [Unix(0), year 3000]; year 3000 is past
+	// the DateTime64 max and must be clamped down rather than overflow.
+	year3000 := time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	cases := []struct {
+		name string
+		in   int64
+		want int64
+	}{
+		{"in range", normal, normal},
+		{"at min", storeMinTimeMillis, storeMinTimeMillis},
+		{"at max", storeMaxTimeMillis, storeMaxTimeMillis},
+		{"below min clamps up", storeMinTimeMillis - 1, storeMinTimeMillis},
+		{"above max clamps down", storeMaxTimeMillis + 1, storeMaxTimeMillis},
+		{"queryable year 3000 sentinel", year3000, storeMaxTimeMillis},
+		{"min int64", math.MinInt64, storeMinTimeMillis},
+		{"max int64", math.MaxInt64, storeMaxTimeMillis},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampStoreTime(tc.in); got != tc.want {
+				t.Errorf("clampStoreTime(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
 
 func pts(tsValues ...int64) []types.MetricPoint {
 	out := make([]types.MetricPoint, 0, len(tsValues)/2)
@@ -71,6 +103,65 @@ func TestMergePoints(t *testing.T) {
 				t.Errorf("mergePoints mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestDedupSortedPoints(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []types.MetricPoint
+		want []types.MetricPoint
+	}{
+		{"empty", nil, nil},
+		{"single", pts(1, 10), pts(1, 10)},
+		{"no duplicate", pts(1, 10, 2, 20, 3, 30), pts(1, 10, 2, 20, 3, 30)},
+		{
+			// A re-flushed point appears twice for the same timestamp; the first
+			// (here value 10) wins and the duplicate is dropped.
+			name: "adjacent duplicate keeps first",
+			in:   pts(1, 10, 1, 99, 2, 20),
+			want: pts(1, 10, 2, 20),
+		},
+		{
+			name: "duplicate at end",
+			in:   pts(1, 10, 2, 20, 2, 21),
+			want: pts(1, 10, 2, 20),
+		},
+		{
+			name: "triple duplicate",
+			in:   pts(5, 50, 5, 51, 5, 52),
+			want: pts(5, 50),
+		},
+		{
+			name: "all duplicate then distinct",
+			in:   pts(1, 10, 1, 11, 1, 12, 2, 20, 2, 21),
+			want: pts(1, 10, 2, 20),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dedupSortedPoints(tc.in)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("dedupSortedPoints mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestMergePointsDedupedFlushed documents that the read path de-duplicates the
+// flushed slice (which tsdb_data, a plain MergeTree, can return with duplicate
+// timestamps) before merging, so PromQL never sees a duplicate sample.
+func TestMergePointsDedupedFlushed(t *testing.T) {
+	// As nextFlushed does: dedup the cursor rows, then merge with pending.
+	flushed := dedupSortedPoints(pts(1, 10, 1, 99, 2, 20)) // duplicate ts=1 from a re-flush
+	pending := pts(3, 30)
+
+	got := mergePoints(flushed, pending)
+	want := pts(1, 10, 2, 20, 3, 30)
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("merged points mismatch (-want +got):\n%s", diff)
 	}
 }
 

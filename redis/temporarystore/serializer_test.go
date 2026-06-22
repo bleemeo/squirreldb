@@ -133,6 +133,64 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 				"__replica__", "0",
 			),
 		},
+		{
+			// UTF-8 label names can be any string. A '=' in the name must not be
+			// mistaken for the name/value separator.
+			name: "name containing equals sign",
+			labels: makeLabels(
+				"__name__", "m",
+				"a=b", "value",
+			),
+		},
+		{
+			name: "name containing newline",
+			labels: makeLabels(
+				"__name__", "m",
+				"line1\nline2", "value",
+			),
+		},
+		{
+			name: "name containing backslash",
+			labels: makeLabels(
+				"__name__", "m",
+				`back\slash`, "value",
+			),
+		},
+		{
+			name: "name and value both containing equals",
+			labels: makeLabels(
+				"__name__", "m",
+				"k=ey", "va=lue",
+			),
+		},
+		{
+			name: "name is a single equals sign",
+			labels: makeLabels(
+				"=", "value",
+				"__name__", "m",
+			),
+		},
+		{
+			name: "name with equals and value starting with equals",
+			labels: makeLabels(
+				"__name__", "m",
+				"a=b", "=c",
+			),
+		},
+		{
+			name: "name with backslash-n literal (not a newline)",
+			labels: makeLabels(
+				"__name__", "m",
+				`a\nb`, "value",
+			),
+		},
+		{
+			name: "name and value with quote",
+			labels: makeLabels(
+				"__name__", "a \"name\"",
+				`a \"key'`, "the 'value\"",
+			),
+		},
 	}
 
 	for _, tc := range cases {
@@ -187,6 +245,16 @@ func TestSerializeLabelsOutput(t *testing.T) {
 			name:     "value with equals sign — not escaped",
 			labels:   makeLabels("__name__", "m", "url", "x=y"),
 			wantText: "__name__=m\nurl=x=y",
+		},
+		{
+			name:     "name with equals sign — escaped",
+			labels:   makeLabels("__name__", "m", "a=b", "v"),
+			wantText: "__name__=m\n" + `a\=b=v`,
+		},
+		{
+			name:     "name with backslash — escaped",
+			labels:   makeLabels("__name__", "m", `a\b`, "v"),
+			wantText: "__name__=m\n" + `a\\b=v`,
 		},
 	}
 
@@ -325,7 +393,7 @@ func BenchmarkSerializeLabels_WithEscaping(b *testing.B) {
 func BenchmarkDeserializeLabels_WithEscaping(b *testing.B) {
 	l := makeLabels(
 		"__name__", "log_metric",
-		"annotation", "line1\\\nline2",
+		"anno'ta\"tion", "line1\\\nline2",
 		"path", `C:\Program Files\app`,
 	)
 	s := serializeLabels(l)

@@ -59,6 +59,48 @@ func TestSeriesToRegister(t *testing.T) {
 	}
 }
 
+func TestComputeMaxExpiration(t *testing.T) {
+	storeMax := time.UnixMilli(storeMaxTimeMillis)
+
+	cases := []struct {
+		name       string
+		maxTS      int64
+		rowTTLDays uint16
+		want       time.Time
+	}{
+		{
+			// 2026-06-19 12:00 + 1 day TTL + 2h gap = 2026-06-20 14:00,
+			// rounded up to the next day = 2026-06-21 00:00 UTC.
+			name:       "rounds up to next day",
+			maxTS:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC).UnixMilli(),
+			rowTTLDays: 1,
+			want:       time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			// A point at the store max + gap + round-up exceeds the store range,
+			// so the expiration is clamped down to the store max.
+			name:       "clamped at store max (gap/round-up overflow)",
+			maxTS:      storeMaxTimeMillis,
+			rowTTLDays: 0,
+			want:       storeMax,
+		},
+		{
+			name:       "clamped at store max (far-future point + TTL)",
+			maxTS:      storeMaxTimeMillis,
+			rowTTLDays: 365,
+			want:       storeMax,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := computeMaxExpiration(tc.maxTS, tc.rowTTLDays); !got.Equal(tc.want) {
+				t.Errorf("computeMaxExpiration(%d, %d) = %s, want %s", tc.maxTS, tc.rowTTLDays, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSweepSeenSeries(t *testing.T) {
 	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry)}
 	start := time.Unix(1000, 0)

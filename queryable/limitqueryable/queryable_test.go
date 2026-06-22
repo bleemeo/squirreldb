@@ -75,6 +75,25 @@ func TestFilterMatchers(t *testing.T) {
 			wantMountpathValues: []string{"/home"},
 		},
 		{
+			name: "filter-account-id-1-query-empty-tenant",
+			options: Options{
+				ForcedMatchers: []*labels.Matcher{
+					labels.MustNewMatcher(
+						labels.MatchEqual,
+						testcases.AccountLabel,
+						"1234",
+					),
+				},
+			},
+			matcherQuery: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, testcases.LabelName, "disk_used"),
+				labels.MustNewMatcher(labels.MatchEqual, testcases.AccountLabel, ""),
+			},
+			wantSelect:          []labels.Labels{},
+			wantNames:           []string{},
+			wantMountpathValues: []string{},
+		},
+		{
 			name: "filter-account-id-2",
 			options: Options{
 				ForcedMatchers: []*labels.Matcher{

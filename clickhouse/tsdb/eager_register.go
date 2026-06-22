@@ -96,15 +96,10 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, series []types.Time
 
 		minTime := time.UnixMilli(minTS)
 		// max_time covers the gap so label queries don't exclude the series for
-		// data written until the next registration.
+		// data written until the next registration. maxTS is within the store range
+		// (writes reject out-of-range timestamps), so maxTS+gap cannot overflow.
 		maxTime := time.UnixMilli(maxTS).Add(reRegisterGap)
-		// max_expiration = last point + its TTL + gap margin, rounded up to the day
-		// (low cardinality -> better compression). The gap is added before rounding
-		// so the margin is guaranteed regardless of the rounding granularity.
-		maxExpiration := time.UnixMilli(maxTS).
-			Add(time.Duration(cols.rowTTLDays) * 24 * time.Hour).
-			Add(reRegisterGap).
-			Truncate(24 * time.Hour).Add(24 * time.Hour)
+		maxExpiration := computeMaxExpiration(maxTS, cols.rowTTLDays)
 
 		if err := batch.Append(cols.metricName, cols.tenant, cols.tags, minTime, maxTime, maxExpiration); err != nil {
 			_ = batch.Abort()
@@ -186,6 +181,30 @@ func (c *ClickHouseTSDB) sweepSeenSeries(now time.Time) {
 			delete(c.seenSeries, hash)
 		}
 	}
+}
+
+// computeMaxExpiration returns the tsdb_tags max_expiration for a series: the
+// last point's expiration (point time + per-metric TTL) plus the reRegisterGap
+// margin, rounded up to the next day (few distinct values -> better
+// compression). The gap is added before the day-rounding so the margin holds
+// regardless of the rounding granularity.
+//
+// The result is clamped to the store's max representable time: a far-future
+// point (timestamps up to ~2299 are accepted) plus the TTL, the gap and the
+// day round-up could otherwise exceed the DateTime64(3) column range. Clamping
+// is safe — at worst the index row is purged slightly early, and only for
+// timestamps far beyond any real data.
+func computeMaxExpiration(maxTS int64, rowTTLDays uint16) time.Time {
+	exp := time.UnixMilli(maxTS).
+		Add(time.Duration(rowTTLDays) * 24 * time.Hour).
+		Add(reRegisterGap).
+		Truncate(24 * time.Hour).Add(24 * time.Hour)
+
+	if storeMax := time.UnixMilli(storeMaxTimeMillis); exp.After(storeMax) {
+		return storeMax
+	}
+
+	return exp
 }
 
 // pointsRange returns the min and max timestamp (ms) of a non-empty point slice.

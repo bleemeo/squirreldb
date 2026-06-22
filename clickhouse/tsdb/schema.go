@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS tsdb_tags
     tags Map(LowCardinality(String), String),
     min_time SimpleAggregateFunction(min, Nullable(DateTime64(3))),
     max_time SimpleAggregateFunction(max, Nullable(DateTime64(3))),
-    max_expiration SimpleAggregateFunction(max, DateTime)
+    max_expiration SimpleAggregateFunction(max, DateTime64(3))
 )
 ENGINE = AggregatingMergeTree
 PRIMARY KEY (tenant, metric_name)
@@ -132,6 +132,22 @@ func (c *ClickHouseTSDB) createSchema(ctx context.Context) error {
 
 	return nil
 }
+
+// storeMinTimeMillis and storeMaxTimeMillis are the bounds, in Unix
+// milliseconds, of the timestamps the store can represent: the tsdb_data and
+// tsdb_tags timestamp columns are DateTime64(3), whose range is
+// [1900-01-01, 2299-12-31]. A point's timestamp is an int64 of milliseconds,
+// which spans a much wider range, so the boundaries matter:
+//   - reads clamp their query window to this range (clampStoreTime), since a
+//     window edge slightly outside it changes nothing;
+//   - writes reject an out-of-range timestamp (see appender.Append) rather than
+//     clamp it, which would silently store the point at the wrong time.
+//
+//nolint:gochecknoglobals
+var (
+	storeMinTimeMillis = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	storeMaxTimeMillis = time.Date(2299, 12, 31, 0, 0, 0, 0, time.UTC).UnixMilli()
+)
 
 // ttlDays returns the configured global TTL in days (0 when no TTL is configured).
 func (c *ClickHouseTSDB) ttlDays() int {

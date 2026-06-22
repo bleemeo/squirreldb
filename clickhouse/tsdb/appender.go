@@ -32,7 +32,11 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-var errNotImplemented = errors.New("not implemented")
+var (
+	errNotImplemented      = errors.New("not implemented")
+	errTimestampOutOfRange = errors.New("timestamp out of storable range")
+	errClosed              = errors.New("clickhouse tsdb is closed")
+)
 
 // appender accumulates the points of a single remote write request, keyed by
 // label hash, and on Commit hands them to the batcher. Unlike the Cassandra
@@ -54,6 +58,16 @@ func (app *appender) Append(
 	t int64,
 	v float64,
 ) (storage.SeriesRef, error) {
+	// Reject (rather than clamp) a timestamp the store cannot represent: a point
+	// timestamp is an int64 of milliseconds, a wider range than the DateTime64(3)
+	// columns. Clamping would silently store the point at the wrong time, so we
+	// surface it as an error to the writing client instead.
+	if t < storeMinTimeMillis || t > storeMaxTimeMillis {
+		return 0, fmt.Errorf(
+			"%w: %d ms is outside [%d, %d]", errTimestampOutOfRange, t, storeMinTimeMillis, storeMaxTimeMillis,
+		)
+	}
+
 	labelsHash := l.Hash()
 
 	ts, ok := app.pendingTimeSeries[labelsHash]

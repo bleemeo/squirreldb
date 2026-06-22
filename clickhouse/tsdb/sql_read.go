@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/bleemeo/squirreldb/batch"
@@ -44,6 +45,14 @@ type sqlQuerier struct {
 
 	batcher *batch.Batch
 	metrics *metrics
+	// onClose releases this querier's in-flight registration (queries.Done); see
+	// ClickHouseTSDB.newSQLQuerier. Called once, from Close.
+	onClose func()
+	// sets are the streaming sets produced by Select (a querier may be queried
+	// several times, each set consumed independently); Close releases their
+	// cursors. setsMu guards the slice against concurrent Select calls.
+	setsMu sync.Mutex
+	sets   []*sqlSeriesSet
 }
 
 func (q *sqlQuerier) Select(
@@ -80,6 +89,12 @@ func (q *sqlQuerier) Select(
 
 	set := &sqlSeriesSet{rows: rows, labelsByID: labelsByID, pending: pending}
 
+	// Track the set so Close releases its cursor even if the caller abandons the
+	// iteration early (a fully-drained cursor closes itself, see readRow). Earlier
+	// sets are left untouched — a querier may be Select-ed several times and each
+	// set is consumed independently.
+	q.trackSet(set)
+
 	// The cursor (and thus the streaming set) yields series in id order. When the
 	// caller requires label order, drain and sort in memory. This is the rare
 	// path: PromQL always calls Select with sortSeries=false.
@@ -110,7 +125,30 @@ func sortedByLabels(set storage.SeriesSet) storage.SeriesSet {
 }
 
 func (q *sqlQuerier) Close() error {
+	// Release every cursor before signalling done, so the connection is free of
+	// this querier's work by the time Close (the TSDB one) stops waiting.
+	q.setsMu.Lock()
+	sets := q.sets
+	q.sets = nil
+	q.setsMu.Unlock()
+
+	for _, set := range sets {
+		set.close()
+	}
+
+	if q.onClose != nil {
+		q.onClose()
+		q.onClose = nil
+	}
+
 	return nil
+}
+
+// trackSet records a streaming set so Close releases its cursor.
+func (q *sqlQuerier) trackSet(set *sqlSeriesSet) {
+	q.setsMu.Lock()
+	q.sets = append(q.sets, set)
+	q.setsMu.Unlock()
 }
 
 // resolveSeries returns the labels of every series matching the where clause,
@@ -195,6 +233,24 @@ func (q *sqlQuerier) readPending(
 	return pending, nil
 }
 
+// clampStoreTime clamps a millisecond timestamp to the range representable by
+// the DateTime64(3) timestamp columns (see storeMinTimeMillis/storeMaxTimeMillis).
+// Both the points filter (pointsQuery) and the activity filter (whereWithTime)
+// bind their clamped bounds to fromUnixTimestamp64Milli, which would overflow
+// and fail the query on an out-of-range value; clamping the bound rather than
+// converting the column to int64 keeps the timestamp partition/sort key usable.
+func clampStoreTime(ms int64) int64 {
+	if ms < storeMinTimeMillis {
+		return storeMinTimeMillis
+	}
+
+	if ms > storeMaxTimeMillis {
+		return storeMaxTimeMillis
+	}
+
+	return ms
+}
+
 // pointsQuery builds the tsdb_data query and its arguments. Rows are ordered by
 // id so the streaming SeriesSet can group points per series; series order does
 // not matter (the caller sorts when it requires label order, see sortedByLabels).
@@ -206,7 +262,7 @@ func (q *sqlQuerier) pointsQuery(where string, args []any) (string, []any) {
 
 	queryArgs := make([]any, 0, len(args)+2)
 	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, q.mint, q.maxt)
+	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
 
 	return query, queryArgs
 }
@@ -229,9 +285,39 @@ func (lq *labelQuerier) buildLabels(metricName, tenant string, tags map[string]s
 	return b.Labels()
 }
 
-// mergePoints merges two timestamp-sorted slices, dropping duplicate timestamps
-// (a point flushed to tsdb_data and still in the batcher); the first slice wins
-// on a tie.
+// dedupSortedPoints collapses consecutive points that share a timestamp, keeping
+// the first, in a slice already sorted by timestamp. It compacts in place (no
+// allocation) and is a no-op when there is nothing to drop.
+//
+// tsdb_data is a plain MergeTree with no deduplication, so re-flushing a point
+// (takeover, batcher last-chance re-write) can leave several rows for the same
+// (id, timestamp). The read cursor orders by (id, timestamp), so such rows are
+// adjacent; left in place they would make PromQL abort with "duplicate sample
+// for timestamp". We drop them here, on the flushed slice we just built.
+func dedupSortedPoints(points []types.MetricPoint) []types.MetricPoint {
+	if len(points) < 2 {
+		return points
+	}
+
+	w := 1
+
+	for r := 1; r < len(points); r++ {
+		if points[r].Timestamp == points[w-1].Timestamp {
+			continue
+		}
+
+		points[w] = points[r]
+		w++
+	}
+
+	return points[:w]
+}
+
+// mergePoints merges two timestamp-sorted, individually de-duplicated slices,
+// dropping duplicate timestamps across the boundary (a point flushed to
+// tsdb_data and still in the batcher); the first slice wins on a tie. Callers
+// must pass de-duplicated inputs (flushed via dedupSortedPoints, pending via the
+// batcher) — the fast paths below copy a slice through unchanged.
 func mergePoints(flushed, pending []types.MetricPoint) []types.MetricPoint {
 	if len(pending) == 0 {
 		return flushed
@@ -302,14 +388,24 @@ type sqlSeriesSet struct {
 	pending    map[uuid.UUID][]types.MetricPoint // consumed in phase 1, leftovers emitted in phase 2
 
 	started    bool
-	lookahead  sqlPoint
 	hasLook    bool
 	inPhase2   bool
+	closed     bool
+	lookahead  sqlPoint
 	leftover   []uuid.UUID
 	leftoverAt int
 
 	current sqlSeries
 	err     error
+}
+
+// close releases the cursor. It is idempotent: a fully-drained cursor is already
+// closed by readRow, and Close (via the querier) may close an abandoned one.
+func (s *sqlSeriesSet) close() {
+	if !s.closed && s.rows != nil {
+		_ = s.rows.Close()
+		s.closed = true
+	}
 }
 
 type sqlPoint struct {
@@ -389,6 +485,8 @@ func (s *sqlSeriesSet) nextFlushed() bool {
 			continue
 		}
 
+		flushed = dedupSortedPoints(flushed)
+
 		points := mergePoints(flushed, s.pending[id])
 		delete(s.pending, id)
 
@@ -425,7 +523,7 @@ func (s *sqlSeriesSet) readRow() (sqlPoint, bool) {
 			s.err = err
 		}
 
-		_ = s.rows.Close()
+		s.close()
 
 		return sqlPoint{}, false
 	}
@@ -439,7 +537,7 @@ func (s *sqlSeriesSet) readRow() (sqlPoint, bool) {
 	if err := s.rows.Scan(&id, &ts, &value); err != nil {
 		s.err = err
 
-		_ = s.rows.Close()
+		s.close()
 
 		return sqlPoint{}, false
 	}

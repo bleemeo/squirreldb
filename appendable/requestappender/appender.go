@@ -71,6 +71,16 @@ func (app appender) Append(
 ) (storage.SeriesRef, error) {
 	builder := labels.NewBuilder(l)
 
+	// Drop empty-valued labels first (Prometheus treats an empty label as
+	// absent). This MUST happen before enforcing the tenant below: otherwise a
+	// request carrying the tenant label with an empty value would delete the
+	// tenant we are about to enforce, bypassing tenant isolation.
+	l.Range(func(label labels.Label) {
+		if label.Value == "" {
+			builder.Del(label.Name)
+		}
+	})
+
 	if app.options.TenantLabel.Name != "" { //nolint:nestif
 		builder.Set(app.options.TenantLabel.Name, app.options.TenantLabel.Value)
 
@@ -95,12 +105,6 @@ func (app appender) Append(
 			}
 		}
 	}
-
-	l.Range(func(label labels.Label) {
-		if label.Value == "" {
-			builder.Del(label.Name)
-		}
-	})
 
 	l = builder.Labels()
 

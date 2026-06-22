@@ -22,6 +22,12 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
+// Labels are serialized one per line (real '\n' separates labels), each as
+// name=value. Label names AND values can be any UTF-8 string (Prometheus uses
+// the UTF-8 validation scheme), so both are escaped: '\' -> '\\' and a real
+// newline -> '\n'. Names additionally escape '=' -> '\=' so the first
+// *unescaped* '=' always marks the name/value boundary. A real '\n' byte in the
+// output is therefore always a label separator, never part of a name or value.
 func serializeLabels(l labels.Labels) string {
 	if l.Len() == 0 {
 		return ""
@@ -40,30 +46,35 @@ func serializeLabels(l labels.Labels) string {
 
 		first = false
 
-		b.WriteString(lbl.Name)
+		writeEscaped(&b, lbl.Name, true)
 		b.WriteByte('=')
-		writeEscaped(&b, lbl.Value)
+		writeEscaped(&b, lbl.Value, false)
 	})
 
 	return b.String()
 }
 
-func writeEscaped(b *strings.Builder, s string) {
-	// Fast path: most value won't need escaping.
-	if !strings.ContainsAny(s, "\\\n") {
+// writeEscaped escapes '\' and newlines; when escapeEq is set it also escapes
+// '=' (used for label names, whose '=' must not be mistaken for the separator).
+func writeEscaped(b *strings.Builder, s string, escapeEq bool) {
+	// Fast path: most strings need no escaping.
+	if !strings.ContainsAny(s, "\\\n") && !(escapeEq && strings.ContainsRune(s, '=')) { //nolint:staticcheck
 		b.WriteString(s)
 
 		return
 	}
 
 	for i := range len(s) {
-		switch s[i] {
-		case '\\':
+		switch {
+		case s[i] == '\\':
 			b.WriteByte('\\')
 			b.WriteByte('\\')
-		case '\n':
+		case s[i] == '\n':
 			b.WriteByte('\\')
 			b.WriteByte('n')
+		case escapeEq && s[i] == '=':
+			b.WriteByte('\\')
+			b.WriteByte('=')
 		default:
 			b.WriteByte(s[i])
 		}
@@ -88,21 +99,37 @@ func deserializeLabels(input string) labels.Labels {
 			input = ""
 		}
 
-		eq := strings.IndexByte(line, '=')
-		if eq <= 0 {
+		name, value, ok := splitNameValue(line)
+		if !ok || name == "" {
 			continue
 		}
 
 		result = append(result, labels.Label{
-			Name:  line[:eq],
-			Value: unescapeValue(line[eq+1:]),
+			Name:  unescape(name),
+			Value: unescape(value),
 		})
 	}
 
 	return labels.New(result...)
 }
 
-func unescapeValue(s string) string {
+// splitNameValue splits a serialized line on its first *unescaped* '=' (the
+// name/value separator), skipping escape pairs so an escaped '\=' inside the
+// name is not mistaken for it. The returned parts are still escaped.
+func splitNameValue(line string) (name, value string, ok bool) {
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '\\':
+			i++ // skip the escaped char
+		case '=':
+			return line[:i], line[i+1:], true
+		}
+	}
+
+	return "", "", false
+}
+
+func unescape(s string) string {
 	if !strings.ContainsRune(s, '\\') {
 		return s
 	}
@@ -123,6 +150,8 @@ func unescapeValue(s string) string {
 			b = append(b, '\\')
 		case 'n':
 			b = append(b, '\n')
+		case '=':
+			b = append(b, '=')
 		default:
 			b = append(b, '\\', s[i])
 		}

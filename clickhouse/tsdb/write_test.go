@@ -18,6 +18,8 @@ package tsdb
 
 import (
 	"context"
+	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -97,6 +99,47 @@ func TestAppenderCommit(t *testing.T) {
 	}
 }
 
+// TestAppenderRejectsOutOfRangeTimestamp checks that Append rejects (does not
+// clamp) timestamps outside the storable DateTime64(3) range, and accepts the
+// boundaries and in-range values.
+func TestAppenderRejectsOutOfRangeTimestamp(t *testing.T) {
+	ctx := context.Background()
+	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1")
+
+	year3000 := time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	cases := []struct {
+		name    string
+		ts      int64
+		wantErr bool
+	}{
+		{"now", time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC).UnixMilli(), false},
+		{"at min boundary", storeMinTimeMillis, false},
+		{"at max boundary", storeMaxTimeMillis, false},
+		{"just below min", storeMinTimeMillis - 1, true},
+		{"just above max", storeMaxTimeMillis + 1, true},
+		{"year 3000", year3000, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestTSDB(t) //nolint:contextcheck
+			app := c.AppenderWithOptions(ctx, types.AppenderOptions{WriteTTL: 86400})
+
+			_, err := app.Append(0, lbls, tc.ts, 1.0)
+
+			switch {
+			case tc.wantErr && err == nil:
+				t.Fatalf("Append(ts=%d) = nil, want error", tc.ts)
+			case tc.wantErr && !errors.Is(err, errTimestampOutOfRange):
+				t.Fatalf("Append(ts=%d) error = %v, want errTimestampOutOfRange", tc.ts, err)
+			case !tc.wantErr && err != nil:
+				t.Fatalf("Append(ts=%d) = %v, want nil", tc.ts, err)
+			}
+		})
+	}
+}
+
 func TestSeriesToInput(t *testing.T) {
 	lbls := labels.FromStrings("__name__", "cpu_used", tenantLabelForTest, "tenant-1", "item", "/")
 
@@ -126,13 +169,50 @@ func TestSeriesToInput(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to global default when TTL is zero or sub-day", func(t *testing.T) {
+	t.Run("TTL rounds up; sub-day stays 1 day; only zero falls back to global", func(t *testing.T) {
+		// No TTL requested: fall back to the global default.
 		if cols := seriesToInput(lbls, tenantLabelForTest, 0, 365); cols.rowTTLDays != 365 {
-			t.Errorf("row_ttl_days = %d, want 365 (global default)", cols.rowTTLDays)
+			t.Errorf("row_ttl_days(0) = %d, want 365 (global default)", cols.rowTTLDays)
 		}
 
-		if cols := seriesToInput(lbls, tenantLabelForTest, 3600, 365); cols.rowTTLDays != 365 {
-			t.Errorf("row_ttl_days = %d, want 365 (sub-day TTL falls back)", cols.rowTTLDays)
+		// A sub-day TTL is honored as 1 day, NOT silently replaced by the global.
+		if cols := seriesToInput(lbls, tenantLabelForTest, 3600, 365); cols.rowTTLDays != 1 {
+			t.Errorf("row_ttl_days(1h) = %d, want 1", cols.rowTTLDays)
+		}
+
+		// 32h rounds up to 2 days (one-day granularity, never truncated to 1).
+		if cols := seriesToInput(lbls, tenantLabelForTest, 32*3600, 365); cols.rowTTLDays != 2 {
+			t.Errorf("row_ttl_days(32h) = %d, want 2", cols.rowTTLDays)
 		}
 	})
+}
+
+func TestRowTTLDays(t *testing.T) {
+	const global = 365
+
+	cases := []struct {
+		name       string
+		ttlSeconds int64
+		want       uint16
+	}{
+		{"zero falls back to global", 0, global},
+		{"negative falls back to global", -10, global},
+		{"one hour rounds up to 1 day", 3600, 1},
+		{"just under a day rounds up to 1", 86399, 1},
+		{"exactly one day stays 1", 86400, 1},
+		{"25h rounds up to 2", 25 * 3600, 2},
+		{"32h rounds up to 2", 32 * 3600, 2},
+		{"exactly two days stays 2", 2 * 86400, 2},
+		{"seven days", 7 * 86400, 7},
+		{"365 days", 365 * 86400, 365},
+		{"overflow capped at uint16 max", int64(70000) * 86400, math.MaxUint16},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rowTTLDays(tc.ttlSeconds, global); got != tc.want {
+				t.Errorf("rowTTLDays(%d) = %d, want %d", tc.ttlSeconds, got, tc.want)
+			}
+		})
+	}
 }
