@@ -94,17 +94,60 @@ type ClickHouseTSDB struct {
 	closed  bool
 }
 
+// TestDatabase is the ClickHouse database used by tests. DropTables refuses to
+// drop tables in any other database, to guard against wiping production data.
+const TestDatabase = "squirreldb_test"
+
+// openConn opens a ClickHouse connection from the configuration (no Ping).
+func openConn(cfg config.ClickHouse) (driver.Conn, error) {
+	return clickhouse.Open(&clickhouse.Options{
+		Addr: cfg.Addresses,
+		Auth: clickhouse.Auth{
+			Database: cfg.Database,
+			Username: cfg.Username,
+			Password: cfg.Password,
+		},
+	})
+}
+
+// DropTables drops the TSDB tables (and the input materialized view). It refuses
+// unless the configured database is TestDatabase, or forceNonTestDatabase is set
+// — the same guard as the Cassandra backend's keyspace drop. The database itself
+// is left intact (it is created by ClickHouse, not by us).
+func DropTables(ctx context.Context, cfg config.ClickHouse, forceNonTestDatabase bool) error {
+	if cfg.Database != TestDatabase && !forceNonTestDatabase {
+		return fmt.Errorf("refuse to drop tables in database %q without forceNonTestDatabase", cfg.Database)
+	}
+
+	conn, err := openConn(cfg)
+	if err != nil {
+		return fmt.Errorf("clickhouse: open connection: %w", err)
+	}
+
+	defer conn.Close()
+
+	// mv_datapoint_data reads datapoint_input and writes tsdb_data, so drop it
+	// first. IF EXISTS makes the order otherwise irrelevant and the call idempotent.
+	statements := []string{
+		"DROP VIEW IF EXISTS mv_datapoint_data",
+		"DROP TABLE IF EXISTS datapoint_input",
+		"DROP TABLE IF EXISTS tsdb_data",
+		"DROP TABLE IF EXISTS tsdb_tags",
+	}
+
+	for _, stmt := range statements {
+		if err := conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("clickhouse: %s: %w", stmt, err)
+		}
+	}
+
+	return nil
+}
+
 // New connects to ClickHouse, creates the schema if needed, sets up the write
 // path (batcher + SQL writer) and returns a ready ClickHouseTSDB.
 func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseTSDB, error) {
-	conn, err := clickhouse.Open(&clickhouse.Options{
-		Addr: opts.Config.Addresses,
-		Auth: clickhouse.Auth{
-			Database: opts.Config.Database,
-			Username: opts.Config.Username,
-			Password: opts.Config.Password,
-		},
-	})
+	conn, err := openConn(opts.Config)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse: open connection: %w", err)
 	}

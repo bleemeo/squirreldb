@@ -8,6 +8,7 @@ import (
 	"github.com/bleemeo/squirreldb/cassandra/backend"
 	"github.com/bleemeo/squirreldb/daemon"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
 
@@ -36,8 +37,9 @@ func run(ctx context.Context) error {
 	}
 
 	squirreldb := &daemon.SquirrelDB{
-		Config: cfg,
-		Logger: log.With().Str("component", "daemon").Logger(),
+		Config:         cfg,
+		MetricRegistry: prometheus.NewRegistry(),
+		Logger:         log.With().Str("component", "daemon").Logger(),
 	}
 
 	replication := cfg.Cassandra.ReplicationFactor
@@ -119,5 +121,41 @@ func run(ctx context.Context) error {
 		break
 	}
 
+	if cfg.Internal.TSDB == "clickhouse" {
+		waitClickHouse(ctx, squirreldb)
+	}
+
 	return ctx.Err()
+}
+
+// waitClickHouse waits until the ClickHouse TSDB can be built (connection ping
+// and schema creation succeed). It reuses the daemon's config-driven discovery,
+// so it picks up the same addresses/database/auth as the rest of the run.
+func waitClickHouse(ctx context.Context, squirreldb *daemon.SquirrelDB) {
+	firstLoop := true
+
+	for ctx.Err() == nil {
+		if !firstLoop {
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		firstLoop = false
+
+		db, err := squirreldb.TSDB(ctx, false, nil)
+		if err != nil {
+			log.Printf("connection to ClickHouse failed: %s", err)
+
+			continue
+		}
+
+		_ = db.Close(ctx)
+
+		log.Printf("ClickHouse is ready")
+
+		break
+	}
 }

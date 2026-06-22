@@ -56,6 +56,11 @@ func run(ctx context.Context) error {
 		log.Fatal().Err(err).Msg("Failed to drop keyspace")
 	}
 
+	err = squirreldb.DropClickHouseData(ctx, false)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to drop ClickHouse tables")
+	}
+
 	err = squirreldb.DropTemporaryStore(ctx, false)
 	if err != nil {
 		return err

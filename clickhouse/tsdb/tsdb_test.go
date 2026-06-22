@@ -19,6 +19,7 @@ package tsdb
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
+
+// TestDropTablesRefusesNonTestDatabase checks the safety guard: DropTables must
+// refuse any database other than the test one unless forced, so it can never wipe
+// production tables. The guard runs before any connection, so no ClickHouse is needed.
+func TestDropTablesRefusesNonTestDatabase(t *testing.T) {
+	err := DropTables(context.Background(), config.ClickHouse{Database: "production"}, false)
+	if err == nil {
+		t.Fatal("DropTables should refuse a non-test database without forceNonTestDatabase")
+	}
+
+	// The error should name the refused database (it must not have tried to connect).
+	if !strings.Contains(err.Error(), "production") {
+		t.Errorf("error should name the refused database, got: %v", err)
+	}
+}
 
 // TestNewTemporaryStore checks the store selection contract: an in-memory store
 // only when Redis is not configured, and a hard error (never a silent in-memory

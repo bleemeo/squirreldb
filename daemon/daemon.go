@@ -369,6 +369,12 @@ func SetTestEnvironment() {
 		_ = os.Setenv("SQUIRRELDB_REDIS_KEYSPACE", "test:")
 	}
 
+	if _, ok := os.LookupEnv("SQUIRRELDB_CLICKHOUSE_DATABASE"); !ok {
+		// If not explicitly changed, use the test database (the only one
+		// DropClickHouseData will drop). We do not want to touch real data.
+		_ = os.Setenv("SQUIRRELDB_CLICKHOUSE_DATABASE", clickhousetsdb.TestDatabase)
+	}
+
 	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
 		// If not explicitly set, use a dynamic port.
 		_ = os.Setenv("SQUIRRELDB_LISTEN_ADDRESS", "127.0.0.1:0")
@@ -428,6 +434,18 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 	}
 
 	return backend.DropCassandraData(ctx, forceNonTestKeyspace)
+}
+
+// DropClickHouseData drops the ClickHouse TSDB tables. If forceNonTestDatabase
+// also drops when the database is not "squirreldb_test". It is a no-op unless
+// the TSDB backend is ClickHouse, so tests can call it unconditionally.
+// This method is intended for testing, where the database is overridden to squirreldb_test.
+func (s *SquirrelDB) DropClickHouseData(ctx context.Context, forceNonTestDatabase bool) error {
+	if s.Config.Internal.TSDB != backendClickHouse {
+		return nil
+	}
+
+	return clickhousetsdb.DropTables(ctx, s.Config.ClickHouse, forceNonTestDatabase)
 }
 
 // LockFactory return the Lock factory of SquirrelDB.

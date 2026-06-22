@@ -93,6 +93,11 @@ func run(ctx context.Context) error {
 					return err
 				}
 
+				err = squirreldb.DropClickHouseData(ctx, false)
+				if err != nil {
+					return err
+				}
+
 				err = squirreldb.DropTemporaryStore(ctx, false)
 				if err != nil {
 					return err

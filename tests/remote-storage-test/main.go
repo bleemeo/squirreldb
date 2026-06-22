@@ -73,7 +73,7 @@ func run(ctx context.Context) error {
 
 	var squirreldb *daemon.SquirrelDB
 
-	if squirrelDBURL == "" {
+	if squirrelDBURL == "" { //nolint:nestif
 		squirreldb = &daemon.SquirrelDB{
 			Config: cfg,
 			Logger: log.With().Str("component", "daemon").Logger(),
@@ -87,6 +87,11 @@ func run(ctx context.Context) error {
 		err = squirreldb.DropCassandraData(ctx, false)
 		if err != nil {
 			return fmt.Errorf("fail to DropCassandraData: %w", err)
+		}
+
+		err = squirreldb.DropClickHouseData(ctx, false)
+		if err != nil {
+			return fmt.Errorf("fail to DropClickHouseData: %w", err)
 		}
 
 		err = squirreldb.DropTemporaryStore(ctx, false)

@@ -58,6 +58,10 @@ func doTest(ctx context.Context, cfg config.Config, c testcases.ReadWriteTestCas
 		return fmt.Errorf("failed to drop keyspace: %w", err)
 	}
 
+	if err := squirreldb.DropClickHouseData(ctx, false); err != nil {
+		return fmt.Errorf("failed to drop ClickHouse tables: %w", err)
+	}
+
 	if err := squirreldb.DropTemporaryStore(ctx, false); err != nil {
 		return fmt.Errorf("failed to drop keyspace: %w", err)
 	}

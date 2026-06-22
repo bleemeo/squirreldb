@@ -11,6 +11,7 @@ WITH_COVER=0
 WITH_NOSTOP=0
 WITH_SHELL=0
 WITH_SCYLLADB=0
+WITH_CLICKHOUSE=0
 WITH_LONG=""
 
 USER_UID=$(id -u)
@@ -38,25 +39,35 @@ while [ "$#" -gt 0 ]; do
     "scylladb")
         WITH_SCYLLADB=1
         ;;
+    "clickhouse")
+        WITH_CLICKHOUSE=1
+        ;;
     *)
         cat << EOF
-Usage: $0 [cluster|race|long|nostop|scylladb]
- cluster: Run test with clustered Redis & Cassandra
-    long: Run longer test
-    race: Run test with -race
-   cover: Run test with -cover and produce coverage-run-tests/report.html report
-          You might want to clean "coverage-run-tests" folder first
-  nostop: Do not stop Cassandra & Redis at the end
-   shell: Open a shell instead of running tests. It will start Redis & Cassandra.
-          It also forward the port 9200 to a SquirrelDB running inside this shell
-          The shell container will be named "squirreldb-test-shell"
-scylladb: Use ScyllaDB instead of Cassandra
+Usage: $0 [cluster|race|long|nostop|scylladb|clickhouse]
+   cluster: Run test with clustered Redis & Cassandra
+      long: Run longer test
+      race: Run test with -race
+     cover: Run test with -cover and produce coverage-run-tests/report.html report
+            You might want to clean "coverage-run-tests" folder first
+    nostop: Do not stop Cassandra, Redis & ClickHouse at the end
+     shell: Open a shell instead of running tests. It will start Redis & Cassandra.
+            It also forward the port 9200 to a SquirrelDB running inside this shell
+            The shell container will be named "squirreldb-test-shell"
+  scylladb: Use ScyllaDB instead of Cassandra
+clickhouse: Use the ClickHouse TSDB backend (alongside Cassandra for locks/states).
+            Skips the Cassandra-index benches; the other tests run against ClickHouse.
 EOF
 
         exit 1
     esac
     shift
 done
+
+if [ "${WITH_CLICKHOUSE}" = "1" ] && [ "${WITH_CLUSTER}" = "1" ]; then
+    echo "ClickHouse is not yet supported in cluster mode with run-tests.sh"
+    exit 1
+fi
 
 GO_MOUNT_CACHE=""
 if docker volume ls | grep -q squirreldb-buildcache; then
@@ -98,6 +109,19 @@ else
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
 fi
 
+# ClickHouse is orthogonal to the store above (locks/states stay on Cassandra):
+# it only provides the TSDB backend. The database is created by the ClickHouse
+# image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
+if [ "${WITH_CLICKHOUSE}" = "1" ]; then
+    echo
+    echo "== Starting ClickHouse (TSDB backend)"
+    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
+
+    export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
+    export SQUIRRELDB_INTERNAL_TSDB=clickhouse
+    export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+fi
+
 build_opt=""
 if [ "${WITH_COVER}" = "1" ]; then
     mkdir -p coverage-run-tests/covdata
@@ -131,6 +155,27 @@ fi
 export GORACE=halt_on_error=1
 export GOCOVERDIR=coverage-run-tests/covdata
 
+# run_sqdb runs a command inside the goreleaser build container, with the store
+# discovery environment forwarded (Cassandra, Redis and, when set, ClickHouse).
+# The ClickHouse variables are only exported in ClickHouse mode; otherwise they
+# are simply unset in the container.
+run_sqdb() {
+    docker run $docker_network --rm -e HOME=/go/pkg \
+        -e SQUIRRELDB_LOG_DISABLE_COLOR \
+        -e SQUIRRELDB_CASSANDRA_ADDRESSES \
+        -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
+        -e SQUIRRELDB_REDIS_ADDRESSES \
+        -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
+        -e SQUIRRELDB_INTERNAL_TSDB \
+        -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
+        -e SQUIRRELDB_TELEMETRY_ENABLED=false \
+        -e GOCOVERDIR -e GORACE \
+        -v "$(pwd)":/src -w /src ${GO_MOUNT_CACHE} \
+        --entrypoint '' \
+        goreleaser/goreleaser:${GORELEASER_VERSION} \
+        sh -euxc "$1"
+}
+
 if [ "${WITH_SHELL}" = "1" ]; then
 
 docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
@@ -138,6 +183,9 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_ADDRESSES \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
+    -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
+    -e SQUIRRELDB_INTERNAL_TSDB \
+    -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
     -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -e GOCOVERDIR -e GORACE \
@@ -148,156 +196,53 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
 else
 
 echo "== waiting stores"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/wait-stores"
+run_sqdb "go run $build_opt ./tests/wait-stores"
 
 echo
 echo "== Running squirreldb-cassandra-lock-bench (threaded)"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -uexc "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock_opt"
+run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock_opt"
 
 echo
 echo "== Running squirreldb-cassandra-lock-bench (single thread, more processes)"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock2_opt"
+run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock2_opt"
 
 echo "== Running squirreldb-cassandra-lock-bench (with blocking/unblocking from time to time)"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock3_opt"
+run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock3_opt"
 
-echo
-echo "== Running squirreldb-cassandra-index-bench"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
+# The index benches exercise the Cassandra index, which the ClickHouse TSDB
+# backend does not use (series are indexed in tsdb_tags), so skip them there.
+if [ "${WITH_CLICKHOUSE}" = "1" ]; then
+    echo
+    echo "== Skipping squirreldb-cassandra-index-bench & index-bench2 (Cassandra index unused with ClickHouse TSDB)"
+else
+    echo
+    echo "== Running squirreldb-cassandra-index-bench"
+    run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
 
-echo
-echo "== Running squirreldb-cassandra-index-bench2"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-cassandra-index-bench2/ $index_bench2_opt"
+    echo
+    echo "== Running squirreldb-cassandra-index-bench2"
+    run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench2/ $index_bench2_opt"
+fi
 
 echo
 echo "== Running squirreldb-promql-aggregate"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-promql-aggregate/"
+run_sqdb "go run $build_opt ./tests/squirreldb-promql-aggregate/"
 
 echo
 echo "== Running remote-storage-test"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/remote-storage-test/ $remote_store_opt"
+run_sqdb "go run $build_opt ./tests/remote-storage-test/ $remote_store_opt"
 
 echo
 echo "== Running remote-storage-test2"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/remote-storage-test2/ $remote_store2_opt"
+run_sqdb "go run $build_opt ./tests/remote-storage-test2/ $remote_store2_opt"
 
 echo
 echo "== Running squirreldb-cluster-redis"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
+run_sqdb "go run $build_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
 
 echo
 echo "== Running run-test-cases"
-docker run $docker_network --rm -e HOME=/go/pkg \
-    -e SQUIRRELDB_LOG_DISABLE_COLOR \
-    -e SQUIRRELDB_CASSANDRA_ADDRESSES \
-    -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
-    -e SQUIRRELDB_REDIS_ADDRESSES \
-    -e SQUIRRELDB_TELEMETRY_ENABLED=false \
-    -e GOCOVERDIR -e GORACE \
-    -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
-    --entrypoint '' \
-    goreleaser/goreleaser:${GORELEASER_VERSION} \
-    sh -euxc "go run $build_opt ./tests/run-test-cases/"
+run_sqdb "go run $build_opt ./tests/run-test-cases/"
 
 
 
@@ -312,6 +257,8 @@ if [ "${WITH_COVER}" = "1" ]; then
         -e SQUIRRELDB_CASSANDRA_ADDRESSES \
         -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
         -e SQUIRRELDB_REDIS_ADDRESSES \
+        -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
+        -e SQUIRRELDB_INTERNAL_TSDB \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
         -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \
@@ -340,5 +287,11 @@ if [ ! "${WITH_NOSTOP}" = "1" ]; then
         fi
 
         docker rm -f squirreldb-test-redis
+    fi
+
+    if [ "${WITH_CLICKHOUSE}" = "1" ]; then
+        echo
+        echo "== Stopping ClickHouse"
+        docker rm -f squirreldb-test-clickhouse
     fi
 fi
