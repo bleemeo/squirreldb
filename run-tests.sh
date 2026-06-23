@@ -55,8 +55,9 @@ Usage: $0 [cluster|race|long|nostop|scylladb|clickhouse]
             It also forward the port 9200 to a SquirrelDB running inside this shell
             The shell container will be named "squirreldb-test-shell"
   scylladb: Use ScyllaDB instead of Cassandra
-clickhouse: Use the ClickHouse TSDB backend (alongside Cassandra for locks/states).
-            Skips the Cassandra-index benches; the other tests run against ClickHouse.
+clickhouse: Use the ClickHouse TSDB and mutable labels backends (locks/states
+            stay on Cassandra). Skips the Cassandra-index benches; the other
+            tests run against ClickHouse.
 EOF
 
         exit 1
@@ -109,16 +110,21 @@ else
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
 fi
 
-# ClickHouse is orthogonal to the store above (locks/states stay on Cassandra):
-# it only provides the TSDB backend. The database is created by the ClickHouse
-# image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
+# Cassandra is the default backend
+export SQUIRRELDB_INTERNAL_TSDB=clickhouse
+export SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER=clickhouse
+
+# ClickHouse provides the TSDB and the mutable labels backends (locks/states
+# stay on Cassandra). The database is created by the ClickHouse image
+# (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
 if [ "${WITH_CLICKHOUSE}" = "1" ]; then
     echo
-    echo "== Starting ClickHouse (TSDB backend)"
+    echo "== Starting ClickHouse (TSDB + mutable labels backends)"
     docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
 
     export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
     export SQUIRRELDB_INTERNAL_TSDB=clickhouse
+    export SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER=clickhouse
     export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
 fi
 
@@ -167,6 +173,7 @@ run_sqdb() {
         -e SQUIRRELDB_REDIS_ADDRESSES \
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
         -e SQUIRRELDB_INTERNAL_TSDB \
+        -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
         -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
@@ -185,6 +192,7 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_REDIS_ADDRESSES \
     -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
     -e SQUIRRELDB_INTERNAL_TSDB \
+    -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
     -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
     -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
@@ -259,6 +267,7 @@ if [ "${WITH_COVER}" = "1" ]; then
         -e SQUIRRELDB_REDIS_ADDRESSES \
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
         -e SQUIRRELDB_INTERNAL_TSDB \
+        -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
         -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \

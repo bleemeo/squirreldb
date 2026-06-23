@@ -44,7 +44,6 @@ import (
 	redisTemporarystore "github.com/bleemeo/squirreldb/redis/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/storage"
@@ -59,7 +58,6 @@ const labelsTTLMargin = time.Hour
 
 // Options carries the configuration needed to build a ClickHouseTSDB.
 type Options struct {
-	Config            config.ClickHouse
 	Redis             config.Redis // If unset, an in-memory store is used for batching.
 	Reg               prometheus.Registerer
 	TenantLabel       string
@@ -94,70 +92,11 @@ type ClickHouseTSDB struct {
 	closed  bool
 }
 
-// TestDatabase is the ClickHouse database used by tests. DropTables refuses to
-// drop tables in any other database, to guard against wiping production data.
-const TestDatabase = "squirreldb_test"
-
-// openConn opens a ClickHouse connection from the configuration (no Ping).
-func openConn(cfg config.ClickHouse) (driver.Conn, error) {
-	return clickhouse.Open(&clickhouse.Options{
-		Addr: cfg.Addresses,
-		Auth: clickhouse.Auth{
-			Database: cfg.Database,
-			Username: cfg.Username,
-			Password: cfg.Password,
-		},
-	})
-}
-
-// DropTables drops the TSDB tables (and the input materialized view). It refuses
-// unless the configured database is TestDatabase, or forceNonTestDatabase is set
-// — the same guard as the Cassandra backend's keyspace drop. The database itself
-// is left intact (it is created by ClickHouse, not by us).
-func DropTables(ctx context.Context, cfg config.ClickHouse, forceNonTestDatabase bool) error {
-	if cfg.Database != TestDatabase && !forceNonTestDatabase {
-		return fmt.Errorf("refuse to drop tables in database %q without forceNonTestDatabase", cfg.Database)
-	}
-
-	conn, err := openConn(cfg)
-	if err != nil {
-		return fmt.Errorf("clickhouse: open connection: %w", err)
-	}
-
-	defer conn.Close()
-
-	// mv_datapoint_data reads datapoint_input and writes tsdb_data, so drop it
-	// first. IF EXISTS makes the order otherwise irrelevant and the call idempotent.
-	statements := []string{
-		"DROP VIEW IF EXISTS mv_datapoint_data",
-		"DROP TABLE IF EXISTS datapoint_input",
-		"DROP TABLE IF EXISTS tsdb_data",
-		"DROP TABLE IF EXISTS tsdb_tags",
-	}
-
-	for _, stmt := range statements {
-		if err := conn.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("clickhouse: %s: %w", stmt, err)
-		}
-	}
-
-	return nil
-}
-
-// New connects to ClickHouse, creates the schema if needed, sets up the write
-// path (batcher + SQL writer) and returns a ready ClickHouseTSDB.
-func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseTSDB, error) {
-	conn, err := openConn(opts.Config)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse: open connection: %w", err)
-	}
-
-	if err := conn.Ping(ctx); err != nil {
-		_ = conn.Close()
-
-		return nil, fmt.Errorf("clickhouse: ping: %w", err)
-	}
-
+// New creates the schema if needed, sets up the write path (batcher + SQL
+// writer) and returns a ready ClickHouseTSDB. The connection is owned by the
+// caller (clickhouse/backend): it is shared with the other ClickHouse stores
+// and closed by the backend, not here.
+func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger, opts Options) (*ClickHouseTSDB, error) {
 	c := &ClickHouseTSDB{
 		opts:       opts,
 		conn:       conn,
@@ -168,17 +107,15 @@ func New(ctx context.Context, logger zerolog.Logger, opts Options) (*ClickHouseT
 	}
 
 	if err := c.createSchema(ctx); err != nil {
-		_ = conn.Close()
-
 		return nil, fmt.Errorf("clickhouse: create schema: %w", err)
 	}
 
-	c.temporaryStore, err = newTemporaryStore(ctx, opts, logger)
+	temporaryStore, err := newTemporaryStore(ctx, opts, logger)
 	if err != nil {
-		_ = conn.Close()
-
 		return nil, fmt.Errorf("clickhouse: %w", err)
 	}
+
+	c.temporaryStore = temporaryStore
 
 	c.batcher = batch.New(
 		opts.Reg,
@@ -315,13 +252,14 @@ func (c *ClickHouseTSDB) Close(ctx context.Context) error {
 	// The batcher does a final flush and closes the temporary store on shutdown.
 	c.wg.Wait()
 
-	// Wait for in-flight queries to release the shared connection before closing
-	// it, bounded by the shutdown context so a stuck query can't block forever.
+	// Wait for in-flight queries to finish before returning, bounded by the
+	// shutdown context so a stuck query can't block forever. The connection
+	// itself is closed by the backend (its owner), after this returns.
 	if !c.waitInflightQueries(ctx) {
-		c.logger.Warn().Msg("Closing ClickHouse connection while queries are still in flight")
+		c.logger.Warn().Msg("Stopping ClickHouse TSDB while queries are still in flight")
 	}
 
-	return c.conn.Close()
+	return nil
 }
 
 // waitInflightQueries blocks until every in-flight querier has been closed, or

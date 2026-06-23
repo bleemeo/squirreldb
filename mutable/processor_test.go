@@ -20,9 +20,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 

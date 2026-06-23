@@ -32,10 +32,10 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/api/requestscoped"
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/tests/testcases"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gogo/protobuf/proto"

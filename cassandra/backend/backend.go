@@ -26,10 +26,11 @@ import (
 	"github.com/bleemeo/squirreldb/cassandra/connection"
 	"github.com/bleemeo/squirreldb/cassandra/index"
 	"github.com/bleemeo/squirreldb/cassandra/locks"
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	cassandramutable "github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/cassandra/states"
 	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
@@ -243,7 +244,7 @@ func (b *Backend) getMutableLabelProvider(ctx context.Context) (mutable.Store, e
 		return b.mutableStore, nil
 	}
 
-	store, err := mutable.NewCassandraStore(ctx, mutable.Options{
+	store, err := cassandramutable.NewCassandraStore(ctx, cassandramutable.Options{
 		Connection: b.connection,
 		ReadOnly:   b.options.ReadOnly,
 		Logger:     b.logger.With().Str("component", "mutable-labels").Logger(),

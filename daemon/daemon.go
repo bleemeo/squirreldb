@@ -31,11 +31,11 @@ import (
 
 	"github.com/bleemeo/squirreldb/api"
 	"github.com/bleemeo/squirreldb/cassandra/backend"
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
-	clickhousetsdb "github.com/bleemeo/squirreldb/clickhouse/tsdb"
+	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/redis/client"
 	"github.com/bleemeo/squirreldb/redis/cluster"
 	"github.com/bleemeo/squirreldb/telemetry"
@@ -74,6 +74,7 @@ type SquirrelDB struct {
 	Logger          zerolog.Logger
 
 	cassandraBackend      *backend.Backend
+	clickhouseBackend     *clickhousebackend.Backend
 	lockFactory           LockFactory
 	states                types.State
 	persistentStore       types.TSDB
@@ -372,7 +373,7 @@ func SetTestEnvironment() {
 	if _, ok := os.LookupEnv("SQUIRRELDB_CLICKHOUSE_DATABASE"); !ok {
 		// If not explicitly changed, use the test database (the only one
 		// DropClickHouseData will drop). We do not want to touch real data.
-		_ = os.Setenv("SQUIRRELDB_CLICKHOUSE_DATABASE", clickhousetsdb.TestDatabase)
+		_ = os.Setenv("SQUIRRELDB_CLICKHOUSE_DATABASE", clickhousebackend.TestDatabase)
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_LISTEN_ADDRESS"); !ok {
@@ -424,6 +425,42 @@ func (s *SquirrelDB) CassandraBackend(ctx context.Context) (*backend.Backend, er
 	return s.cassandraBackend, nil
 }
 
+// newClickHouseBackend returns a new unstarted ClickHouse backend.
+func (s *SquirrelDB) newClickHouseBackend(ctx context.Context) (*clickhousebackend.Backend, error) {
+	options := clickhousebackend.Options{
+		Config:            s.Config.ClickHouse,
+		MetricRegistry:    s.MetricRegistry,
+		ReadOnly:          s.Config.Internal.ReadOnly,
+		TenantLabel:       s.Config.TenantLabelName,
+		BatchSize:         s.Config.Batch.Size,
+		DefaultTimeToLive: s.Config.DefaultTimeToLive,
+	}
+
+	if s.Config.Internal.TemporaryStore == "redis" {
+		options.Redis = s.Config.Redis
+	}
+
+	return clickhousebackend.New(ctx, s.Logger.With().Str("backend", "clickhouse").Logger(), options)
+}
+
+// ClickHouseBackend returns the (started) ClickHouse backend used by SquirrelDB.
+func (s *SquirrelDB) ClickHouseBackend(ctx context.Context) (*clickhousebackend.Backend, error) {
+	if s.clickhouseBackend == nil {
+		b, err := s.newClickHouseBackend(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := b.Start(ctx); err != nil {
+			return nil, err
+		}
+
+		s.clickhouseBackend = b
+	}
+
+	return s.clickhouseBackend, nil
+}
+
 // DropCassandraData delete the Cassandra keyspace. If forceNonTestKeyspace also drop if the
 // keyspace is not "squirreldb_test".
 // This method is intended for testing, where keyspace is overrided to squirreldb_test.
@@ -436,16 +473,22 @@ func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace
 	return backend.DropCassandraData(ctx, forceNonTestKeyspace)
 }
 
-// DropClickHouseData drops the ClickHouse TSDB tables. If forceNonTestDatabase
-// also drops when the database is not "squirreldb_test". It is a no-op unless
-// the TSDB backend is ClickHouse, so tests can call it unconditionally.
+// DropClickHouseData drops the ClickHouse tables (TSDB and mutable labels). If
+// forceNonTestDatabase also drops when the database is not "squirreldb_test". It
+// is a no-op unless a ClickHouse-backed store is configured, so tests can call
+// it unconditionally.
 // This method is intended for testing, where the database is overridden to squirreldb_test.
 func (s *SquirrelDB) DropClickHouseData(ctx context.Context, forceNonTestDatabase bool) error {
-	if s.Config.Internal.TSDB != backendClickHouse {
+	if s.Config.Internal.TSDB != backendClickHouse && s.Config.Internal.MutableLabelsProvider != backendClickHouse {
 		return nil
 	}
 
-	return clickhousetsdb.DropTables(ctx, s.Config.ClickHouse, forceNonTestDatabase)
+	b, err := s.newClickHouseBackend(ctx)
+	if err != nil {
+		return err
+	}
+
+	return b.DropTables(ctx, forceNonTestDatabase)
 }
 
 // LockFactory return the Lock factory of SquirrelDB.
@@ -618,6 +661,10 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	if s.cassandraBackend != nil {
 		s.cassandraBackend.CloseAll(stopCtx) //nolint:contextcheck
 	}
+
+	if s.clickhouseBackend != nil {
+		s.clickhouseBackend.CloseAll(stopCtx) //nolint:contextcheck
+	}
 }
 
 // Cluster return an types.Cluster. The returned cluster should be closed after use.
@@ -698,23 +745,12 @@ func (s *SquirrelDB) TSDB(ctx context.Context, dontStartIndex bool, fakeTime fun
 
 			s.persistentStore = tsdb
 		case backendClickHouse:
-			options := clickhousetsdb.Options{
-				Config:            s.Config.ClickHouse,
-				Reg:               s.MetricRegistry,
-				TenantLabel:       s.Config.TenantLabelName,
-				BatchSize:         s.Config.Batch.Size,
-				DefaultTimeToLive: s.Config.DefaultTimeToLive,
+			clickhouseBackend, err := s.ClickHouseBackend(ctx)
+			if err != nil {
+				return nil, err
 			}
 
-			if s.Config.Internal.TemporaryStore == "redis" {
-				options.Redis = s.Config.Redis
-			}
-
-			tsdb, err := clickhousetsdb.New(
-				ctx,
-				s.Logger.With().Str("backend", "clickhouse").Logger(),
-				options,
-			)
+			tsdb, err := clickhouseBackend.TSDB(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -785,7 +821,7 @@ func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelP
 }
 
 func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.LabelProvider, error) {
-	if s.mutableLabelProvider == nil {
+	if s.mutableLabelProvider == nil { //nolint:nestif
 		var store mutable.Store
 
 		switch s.Config.Internal.MutableLabelsProvider {
@@ -796,6 +832,16 @@ func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.LabelPro
 			}
 
 			store, err = backend.MutableLabelProvider(ctx)
+			if err != nil {
+				return nil, err
+			}
+		case backendClickHouse:
+			clickhouseBackend, err := s.ClickHouseBackend(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			store, err = clickhouseBackend.MutableLabelProvider(ctx)
 			if err != nil {
 				return nil, err
 			}

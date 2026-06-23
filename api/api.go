@@ -36,8 +36,8 @@ import (
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/api/requestscoped"
 	"github.com/bleemeo/squirreldb/appendable/fixedappender"
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/grafana/regexp"
