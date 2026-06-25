@@ -88,12 +88,7 @@ func run(ctx context.Context) error {
 			defer squirreldb.Stop()
 
 			if n == 0 {
-				err = squirreldb.DropCassandraData(ctx, false)
-				if err != nil {
-					return err
-				}
-
-				err = squirreldb.DropClickHouseData(ctx, false)
+				err = squirreldb.DropData(ctx, false)
 				if err != nil {
 					return err
 				}

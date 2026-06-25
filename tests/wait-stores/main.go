@@ -5,7 +5,6 @@ import (
 	"flag"
 	"time"
 
-	"github.com/bleemeo/squirreldb/cassandra/backend"
 	"github.com/bleemeo/squirreldb/daemon"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,96 +41,18 @@ func run(ctx context.Context) error {
 		Logger:         log.With().Str("component", "daemon").Logger(),
 	}
 
-	replication := cfg.Cassandra.ReplicationFactor
-
-	msg := "Using Cassandra at %v with RF=%d. Redis at %v"
-	log.Printf(msg, cfg.Cassandra.Addresses, replication, cfg.Redis.Addresses)
-
-	firstLoop := true
-
 	ctx, cancel := context.WithTimeout(ctx, *maxWaitTime)
 	defer cancel()
 
-	var store *backend.Backend
-
-	for ctx.Err() == nil {
-		if !firstLoop {
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				break
-			}
-		}
-
-		firstLoop = false
-
-		if store == nil {
-			tmp, err := squirreldb.CassandraBackend(ctx)
-			if err != nil {
-				log.Printf("connection to cassandra failed: %s", err)
-
-				continue
-			}
-
-			store = tmp
-
-			defer store.CloseAll(ctx)
-		}
-
-		count, err := store.StoreNodeCount(ctx)
-		if err != nil {
-			log.Printf("failed to query node count: %s", err)
-
-			continue
-		}
-
-		if count < replication {
-			log.Printf("Not enough Cassandra up. Had %d want at least %d", count+1, replication)
-
-			continue
-		}
-
-		log.Printf("Cassandra is ready")
-
-		break
-	}
-
-	firstLoop = true
-
-	for ctx.Err() == nil {
-		if !firstLoop {
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				break
-			}
-		}
-
-		cluster, err := squirreldb.Cluster(ctx)
-		_ = cluster.Close()
-
-		if err != nil {
-			log.Printf("connection to Redis failed: %s", err)
-
-			continue
-		}
-
-		log.Printf("Redis is ready")
-
-		break
-	}
-
-	if cfg.Internal.TSDB == "clickhouse" {
-		waitClickHouse(ctx, squirreldb)
-	}
+	// Redis (clustering) first: the backend needs the cluster to start.
+	waitRedis(ctx, squirreldb)
+	waitBackend(ctx, squirreldb, cfg.Cassandra.ReplicationFactor)
 
 	return ctx.Err()
 }
 
-// waitClickHouse waits until the ClickHouse TSDB can be built (connection ping
-// and schema creation succeed). It reuses the daemon's config-driven discovery,
-// so it picks up the same addresses/database/auth as the rest of the run.
-func waitClickHouse(ctx context.Context, squirreldb *daemon.SquirrelDB) {
+// waitRedis waits until the cluster (Redis) is reachable.
+func waitRedis(ctx context.Context, squirreldb *daemon.SquirrelDB) {
 	firstLoop := true
 
 	for ctx.Err() == nil {
@@ -145,17 +66,64 @@ func waitClickHouse(ctx context.Context, squirreldb *daemon.SquirrelDB) {
 
 		firstLoop = false
 
-		db, err := squirreldb.TSDB(ctx, false, nil)
-		if err != nil {
-			log.Printf("connection to ClickHouse failed: %s", err)
+		if _, err := squirreldb.Cluster(ctx); err != nil {
+			log.Printf("connection to Redis failed: %s", err)
 
 			continue
 		}
 
-		_ = db.Close(ctx)
+		log.Printf("Redis is ready")
 
-		log.Printf("ClickHouse is ready")
+		return
+	}
+}
 
-		break
+// nodeCounter is implemented by the Cassandra backend, to wait for the
+// replication factor. The ClickHouse backend does not implement it.
+type nodeCounter interface {
+	StoreNodeCount(ctx context.Context) (int, error)
+}
+
+// waitBackend waits until the configured backend is reachable (its connection
+// starts). For Cassandra it also waits until at least replication nodes are up.
+func waitBackend(ctx context.Context, squirreldb *daemon.SquirrelDB, replication int) {
+	firstLoop := true
+
+	for ctx.Err() == nil {
+		if !firstLoop {
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		firstLoop = false
+
+		b, err := squirreldb.Backend(ctx)
+		if err != nil {
+			log.Printf("backend not ready: %s", err)
+
+			continue
+		}
+
+		if counter, ok := b.(nodeCounter); ok {
+			count, err := counter.StoreNodeCount(ctx)
+			if err != nil {
+				log.Printf("failed to query node count: %s", err)
+
+				continue
+			}
+
+			if count < replication {
+				log.Printf("Not enough Cassandra up. Had %d want at least %d", count, replication)
+
+				continue
+			}
+		}
+
+		log.Printf("Backend %s is ready", squirreldb.Config.Backend)
+
+		return
 	}
 }

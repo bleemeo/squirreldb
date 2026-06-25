@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/api"
-	"github.com/bleemeo/squirreldb/cassandra/backend"
+	cassandrabackend "github.com/bleemeo/squirreldb/cassandra/backend"
 	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
@@ -58,11 +58,29 @@ var (
 const (
 	backendCassandra  = "cassandra"
 	backendClickHouse = "clickhouse"
-	backendDummy      = "dummy"
 )
 
 type LockFactory interface {
 	CreateLock(name string, timeToLive time.Duration) types.TryLocker
+}
+
+// ErrSkipBackend is returned by a test tool's run function when the configured
+// backend does not support what the tool exercises (e.g. the lock benchmark or
+// the Cassandra-index benchmarks on a ClickHouse backend). Tools treat it as a
+// clean skip — no fatal error, minimal output — so run-tests.sh can launch every
+// tool against any backend and let unsupported ones skip themselves.
+var ErrSkipBackend = errors.New("test skipped: not supported by the configured backend")
+
+// Backend is the uniform storage interface both Cassandra and ClickHouse satisfy.
+// A single backend (selected by the "backend" config option) provides every
+// store; mixing backends is not supported.
+type Backend interface {
+	Start(ctx context.Context) error
+	TSDB(ctx context.Context) (types.TSDB, error)
+	MutableProvider(ctx context.Context) (*mutable.Provider, error)
+	MutableProcessor(ctx context.Context) (*mutable.LabelProcessor, error)
+	TelemetryStore(ctx context.Context) (telemetry.Store, error)
+	CloseAll(ctx context.Context)
 }
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
@@ -73,16 +91,11 @@ type SquirrelDB struct {
 	MetricRegistry  prometheus.Registerer
 	Logger          zerolog.Logger
 
-	cassandraBackend      *backend.Backend
-	clickhouseBackend     *clickhousebackend.Backend
-	lockFactory           LockFactory
-	states                types.State
-	persistentStore       types.TSDB
-	api                   api.API
-	mutableLabelProvider  mutable.LabelProvider
-	mutableLabelProcessor *mutable.LabelProcessor
-	cancel                context.CancelFunc
-	wg                    sync.WaitGroup
+	backend         Backend
+	persistentStore types.TSDB
+	api             api.API
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
 }
 
 // Start will run SquirrelDB and Init()ializing it. It return when SquirrelDB
@@ -107,7 +120,7 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		return fmt.Errorf("init fail: %w", err)
 	}
 
-	_, err = s.TSDB(ctx, false, nil)
+	_, err = s.TSDB(ctx)
 	if err != nil {
 		return fmt.Errorf("TSDB start fail: %w", err)
 	}
@@ -371,8 +384,8 @@ func SetTestEnvironment() {
 	}
 
 	if _, ok := os.LookupEnv("SQUIRRELDB_CLICKHOUSE_DATABASE"); !ok {
-		// If not explicitly changed, use the test database (the only one
-		// DropClickHouseData will drop). We do not want to touch real data.
+		// If not explicitly changed, use the test database (the only one DropData
+		// will drop). We do not want to touch real data.
 		_ = os.Setenv("SQUIRRELDB_CLICKHOUSE_DATABASE", clickhousebackend.TestDatabase)
 	}
 
@@ -394,43 +407,38 @@ func SetTestEnvironment() {
 	log.Logger = logger.NewTestLogger(cfg.Log.DisableColor)
 }
 
-// newCassandraBackend returns a new unstarted backend.
-func (s *SquirrelDB) newCassandraBackend(ctx context.Context) (*backend.Backend, error) {
-	return backend.New(
-		ctx,
-		s.Logger.With().Str("backend", "cassandra").Logger(),
-		backend.Options{
-			CassandraConfig: s.Config.Cassandra,
-			ReadOnly:        s.Config.Internal.ReadOnly,
-			MetricRegistry:  s.MetricRegistry,
-		},
-	)
-}
-
-// CassandraBackend return the Cassandra backend used by SquirrelDB.
-func (s *SquirrelDB) CassandraBackend(ctx context.Context) (*backend.Backend, error) {
-	if s.cassandraBackend == nil {
-		backend, err := s.newCassandraBackend(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := backend.Start(ctx); err != nil {
-			return nil, err
-		}
-
-		s.cassandraBackend = backend
+// cassandraBackendOptions builds the Cassandra backend options from the config
+// and the daemon-provided cluster. Index test hooks (DontStartIndex/
+// InternalNowFunction) are set later via Backend.SetCassandraIndexTestingOption.
+func (s *SquirrelDB) cassandraBackendOptions(cluster types.Cluster) cassandrabackend.Options {
+	options := cassandrabackend.Options{
+		CassandraConfig:           s.Config.Cassandra,
+		ReadOnly:                  s.Config.Internal.ReadOnly,
+		MetricRegistry:            s.MetricRegistry,
+		Cluster:                   cluster,
+		TenantLabel:               s.Config.TenantLabelName,
+		DefaultTimeToLive:         s.Config.DefaultTimeToLive,
+		AggregateIntendedDuration: s.getAggregateIntendedDuration,
+		DisablePreAggregation:     s.Config.Internal.DisablePreAggregation,
+		BatchSize:                 s.Config.Batch.Size,
+		PreCreateShardDuration:    s.Config.Cassandra.PreCreateShardDuration,
+		PreCreateShardFraction:    s.Config.Cassandra.PreCreateShardFraction,
 	}
 
-	return s.cassandraBackend, nil
+	if s.Config.Internal.TemporaryStore == "redis" {
+		options.Redis = s.Config.Redis
+	}
+
+	return options
 }
 
-// newClickHouseBackend returns a new unstarted ClickHouse backend.
-func (s *SquirrelDB) newClickHouseBackend(ctx context.Context) (*clickhousebackend.Backend, error) {
+// clickHouseBackendOptions builds the ClickHouse backend options.
+func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhousebackend.Options {
 	options := clickhousebackend.Options{
 		Config:            s.Config.ClickHouse,
 		MetricRegistry:    s.MetricRegistry,
 		ReadOnly:          s.Config.Internal.ReadOnly,
+		Cluster:           cluster,
 		TenantLabel:       s.Config.TenantLabelName,
 		BatchSize:         s.Config.Batch.Size,
 		DefaultTimeToLive: s.Config.DefaultTimeToLive,
@@ -440,112 +448,88 @@ func (s *SquirrelDB) newClickHouseBackend(ctx context.Context) (*clickhousebacke
 		options.Redis = s.Config.Redis
 	}
 
-	return clickhousebackend.New(ctx, s.Logger.With().Str("backend", "clickhouse").Logger(), options)
+	return options
 }
 
-// ClickHouseBackend returns the (started) ClickHouse backend used by SquirrelDB.
-func (s *SquirrelDB) ClickHouseBackend(ctx context.Context) (*clickhousebackend.Backend, error) {
-	if s.clickhouseBackend == nil {
-		b, err := s.newClickHouseBackend(ctx)
+// Backend returns the (started, cached) storage backend. Test tools use it to
+// reach backend-specific capabilities (e.g. a type-assert for the Cassandra lock
+// factory or index test hooks); a tool needing a capability the configured
+// backend doesn't provide can detect the failed assertion and skip itself.
+func (s *SquirrelDB) Backend(ctx context.Context) (Backend, error) {
+	return s.getBackend(ctx)
+}
+
+// getBackend returns the (started, cached) storage backend selected by the
+// "backend" config option.
+func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
+	if s.backend != nil {
+		return s.backend, nil
+	}
+
+	cluster, err := s.Cluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var b Backend
+
+	switch s.Config.Backend {
+	case backendCassandra:
+		b, err = cassandrabackend.New(
+			ctx, s.Logger.With().Str("backend", "cassandra").Logger(), s.cassandraBackendOptions(cluster))
+	case backendClickHouse:
+		b, err = clickhousebackend.New(
+			ctx, s.Logger.With().Str("backend", "clickhouse").Logger(), s.clickHouseBackendOptions(cluster))
+	default:
+		return nil, fmt.Errorf("unknown backend: %v", s.Config.Backend)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := b.Start(ctx); err != nil {
+		return nil, err
+	}
+
+	s.backend = b
+
+	return s.backend, nil
+}
+
+// DropData drops the persisted data of the configured backend (Cassandra
+// keyspace or ClickHouse tables). If force is set it also drops when the
+// keyspace/database is not "squirreldb_test". It uses its own short-lived,
+// unstarted backend so it can run before anything else.
+// This method is intended for testing, where the keyspace/database is overridden
+// to squirreldb_test.
+func (s *SquirrelDB) DropData(ctx context.Context, force bool) error {
+	switch s.Config.Backend {
+	case backendCassandra:
+		b, err := cassandrabackend.New(
+			ctx,
+			s.Logger.With().Str("backend", "cassandra").Logger(),
+			cassandrabackend.Options{CassandraConfig: s.Config.Cassandra},
+		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		if err := b.Start(ctx); err != nil {
-			return nil, err
+		return b.DropData(ctx, force)
+	case backendClickHouse:
+		b, err := clickhousebackend.New(
+			ctx,
+			s.Logger.With().Str("backend", "clickhouse").Logger(),
+			clickhousebackend.Options{Config: s.Config.ClickHouse},
+		)
+		if err != nil {
+			return err
 		}
 
-		s.clickhouseBackend = b
+		return b.DropData(ctx, force)
+	default:
+		return fmt.Errorf("unknown backend: %v", s.Config.Backend)
 	}
-
-	return s.clickhouseBackend, nil
-}
-
-// DropCassandraData delete the Cassandra keyspace. If forceNonTestKeyspace also drop if the
-// keyspace is not "squirreldb_test".
-// This method is intended for testing, where keyspace is overrided to squirreldb_test.
-func (s *SquirrelDB) DropCassandraData(ctx context.Context, forceNonTestKeyspace bool) error {
-	backend, err := s.newCassandraBackend(ctx)
-	if err != nil {
-		return err
-	}
-
-	return backend.DropCassandraData(ctx, forceNonTestKeyspace)
-}
-
-// DropClickHouseData drops the ClickHouse tables (TSDB and mutable labels). If
-// forceNonTestDatabase also drops when the database is not "squirreldb_test". It
-// is a no-op unless a ClickHouse-backed store is configured, so tests can call
-// it unconditionally.
-// This method is intended for testing, where the database is overridden to squirreldb_test.
-func (s *SquirrelDB) DropClickHouseData(ctx context.Context, forceNonTestDatabase bool) error {
-	if s.Config.Internal.TSDB != backendClickHouse && s.Config.Internal.MutableLabelsProvider != backendClickHouse {
-		return nil
-	}
-
-	b, err := s.newClickHouseBackend(ctx)
-	if err != nil {
-		return err
-	}
-
-	return b.DropTables(ctx, forceNonTestDatabase)
-}
-
-// LockFactory return the Lock factory of SquirrelDB.
-func (s *SquirrelDB) LockFactory(ctx context.Context) (LockFactory, error) {
-	if s.lockFactory == nil {
-		switch s.Config.Internal.Locks {
-		case backendCassandra:
-			backend, err := s.CassandraBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			factory, err := backend.LockFactory(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			s.lockFactory = factory
-		case backendDummy:
-			s.Logger.Warn().Msg("Using dummy lock factory (only work on single node)")
-
-			s.lockFactory = &dummy.Locks{}
-		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.Locks)
-		}
-	}
-
-	return s.lockFactory, nil
-}
-
-func (s *SquirrelDB) States(ctx context.Context) (types.State, error) {
-	if s.states == nil {
-		switch s.Config.Internal.States {
-		case backendCassandra:
-			backend, err := s.CassandraBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			states, err := backend.States(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			s.states = states
-		case backendDummy:
-			s.Logger.Warn().Msg(
-				"Cassandra is disabled for states. Using dummy states store (only in-memory and single-node)",
-			)
-
-			s.states = &dummy.States{}
-		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.States)
-		}
-	}
-
-	return s.states, nil
 }
 
 type namedTasks struct {
@@ -647,23 +631,15 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// At this point, API is shutdown, so external write are stopped.
-	// Stop Cassandra TSDB which will flush batch (and stop aggregation)
-	err = s.persistentStore.Close(stopCtx) //nolint:contextcheck
-	if err != nil {
-		s.Logger.Error().Msgf("Failed to stop persistent store: %s", err.Error())
+	// At this point, API is shutdown, so external writes are stopped. CloseAll
+	// stops the backend's stores (the TSDB flushes its batch and stops
+	// aggregation, telemetry stops its refresh loops) then closes the connection.
+	if s.backend != nil {
+		s.backend.CloseAll(stopCtx) //nolint:contextcheck
 	}
 
 	if err := s.ExistingCluster.Close(); err != nil {
 		s.Logger.Error().Msgf("Failed to stop cluster: %s", err.Error())
-	}
-
-	if s.cassandraBackend != nil {
-		s.cassandraBackend.CloseAll(stopCtx) //nolint:contextcheck
-	}
-
-	if s.clickhouseBackend != nil {
-		s.clickhouseBackend.CloseAll(stopCtx) //nolint:contextcheck
 	}
 }
 
@@ -695,75 +671,25 @@ func (s *SquirrelDB) Cluster(ctx context.Context) (types.Cluster, error) {
 	return s.ExistingCluster, nil
 }
 
-// TSDB return the metric persistent store. If dontStartIndex is true the index is not started.
-// fakeTime could be used during testing, if nil time.Now() will be used.
-func (s *SquirrelDB) TSDB(ctx context.Context, dontStartIndex bool, fakeTime func() time.Time) (types.TSDB, error) {
-	if s.persistentStore == nil { //nolint:nestif
-		switch s.Config.Internal.TSDB {
-		case backendCassandra:
-			cassandraBackend, err := s.CassandraBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			states, err := s.States(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			cluster, err := s.Cluster(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			mutableLabelProcessor, err := s.MutableLabelProcessor(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			options := backend.TSDBOption{
-				DefaultTimeToLive:         s.Config.DefaultTimeToLive,
-				AggregateIntendedDuration: s.getAggregateIntendedDuration,
-				DisablePreAggregation:     s.Config.Internal.DisablePreAggregation,
-				BatchSize:                 s.Config.Batch.Size,
-				States:                    states,
-				TenantLabel:               s.Config.TenantLabelName,
-				Cluster:                   cluster,
-				MutableLabelProcessor:     mutableLabelProcessor,
-				DontStartIndex:            dontStartIndex,
-				InternalNowFunction:       fakeTime,
-			}
-
-			if s.Config.Internal.TemporaryStore == "redis" {
-				options.Redis = s.Config.Redis
-			}
-
-			tsdb, err := cassandraBackend.TSDB(ctx, options)
-			if err != nil {
-				return nil, err
-			}
-
-			s.persistentStore = tsdb
-		case backendClickHouse:
-			clickhouseBackend, err := s.ClickHouseBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			tsdb, err := clickhouseBackend.TSDB(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			s.persistentStore = tsdb
-		case backendDummy:
-			s.Logger.Warn().Msg("Cassandra is disabled for TSDB. Using dummy states store that discard every write")
-
-			s.persistentStore = &dummy.DiscardTSDB{}
-		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.TSDB)
-		}
+// TSDB returns the metric persistent store. Cassandra-index test hooks
+// (don't-start-index, fake time) are set beforehand via
+// Backend().SetCassandraIndexTestingOption, not here.
+func (s *SquirrelDB) TSDB(ctx context.Context) (types.TSDB, error) {
+	if s.persistentStore != nil {
+		return s.persistentStore, nil
 	}
+
+	b, err := s.getBackend(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tsdb, err := b.TSDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.persistentStore = tsdb
 
 	return s.persistentStore, nil
 }
@@ -778,12 +704,12 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 		return err
 	}
 
-	state, err := s.States(ctx)
+	b, err := s.getBackend(ctx)
 	if err != nil {
 		return err
 	}
 
-	lockFactory, err := s.LockFactory(ctx)
+	store, err := b.TelemetryStore(ctx)
 	if err != nil {
 		return err
 	}
@@ -794,8 +720,7 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 			Version:            Version,
 			InstallationFormat: s.Config.Internal.Installation.Format,
 			ClusterSizeFn:      cluster.Size,
-			LockFactory:        lockFactory,
-			State:              state,
+			Store:              store,
 			Logger:             s.Logger.With().Str("component", "telemetry").Logger(),
 		},
 	)
@@ -804,68 +729,37 @@ func (s *SquirrelDB) Telemetry(ctx context.Context) error {
 	return nil
 }
 
+// MutableLabelProcessor returns the mutable label processor from the backend. It
+// also ensures the API mutable label writer is wired (via MutableLabelProvider).
 func (s *SquirrelDB) MutableLabelProcessor(ctx context.Context) (*mutable.LabelProcessor, error) {
-	if s.mutableLabelProcessor == nil {
-		labelProvider, err := s.MutableLabelProvider(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		tenantLabelName := s.Config.TenantLabelName
-		labelProcessor := mutable.NewLabelProcessor(labelProvider, tenantLabelName)
-
-		s.mutableLabelProcessor = labelProcessor
+	if _, err := s.MutableLabelProvider(ctx); err != nil {
+		return nil, err
 	}
 
-	return s.mutableLabelProcessor, nil
+	b, err := s.getBackend(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.MutableProcessor(ctx)
 }
 
-func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (mutable.LabelProvider, error) {
-	if s.mutableLabelProvider == nil { //nolint:nestif
-		var store mutable.Store
-
-		switch s.Config.Internal.MutableLabelsProvider {
-		case backendCassandra:
-			backend, err := s.CassandraBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			store, err = backend.MutableLabelProvider(ctx)
-			if err != nil {
-				return nil, err
-			}
-		case backendClickHouse:
-			clickhouseBackend, err := s.ClickHouseBackend(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			store, err = clickhouseBackend.MutableLabelProvider(ctx)
-			if err != nil {
-				return nil, err
-			}
-		case backendDummy:
-			s.Logger.Warn().Msg("Cassandra is disabled for mutable labels. Using dummy store that returns no label.")
-
-			store = dummy.NewMutableLabelStore(dummy.MutableLabels{})
-		default:
-			return nil, fmt.Errorf("unknown backend: %v", s.Config.Internal.MutableLabelsProvider)
-		}
-
-		cluster, err := s.Cluster(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		logger := s.Logger.With().Str("component", "label_provider").Logger()
-		labelProvider := mutable.NewProvider(ctx, s.MetricRegistry, cluster, store, logger)
-
-		s.mutableLabelProvider = labelProvider
-		s.api.MutableLabelWriter = labelProvider
+// MutableLabelProvider returns the mutable label provider from the backend and
+// wires it as the API mutable label writer.
+func (s *SquirrelDB) MutableLabelProvider(ctx context.Context) (*mutable.Provider, error) {
+	b, err := s.getBackend(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	return s.mutableLabelProvider, nil
+	provider, err := b.MutableProvider(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.api.MutableLabelWriter = provider
+
+	return provider, nil
 }
 
 // getAggregateIntendedDuration returns the duration the aggregation should last,

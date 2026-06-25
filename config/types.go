@@ -20,6 +20,10 @@ import "time"
 
 // Config is the main structured configuration.
 type Config struct {
+	// Backend selects the storage backend used for everything (TSDB, mutable
+	// labels, telemetry, and — for Cassandra — locks/states). Either "cassandra"
+	// or "clickhouse"; mixing backends is not supported.
+	Backend             string        `yaml:"backend"`
 	Cassandra           Cassandra     `yaml:"cassandra"`
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
 	Redis               Redis         `yaml:"redis"`
@@ -43,16 +47,10 @@ type Config struct {
 
 type Internal struct {
 	ShowGoroutingOnShutdown bool         `yaml:"show_gorouting_on_shutdown"`
-	Index                   string       `yaml:"index"`
 	IndexDummyCheckConflict bool         `yaml:"index_dummy_check_conflict"`
 	IndexDummyFixedID       int          `yaml:"index_dummy_fixed_id"`
 	Installation            Installation `yaml:"installation"`
-	TSDB                    string       `yaml:"tsdb"`
 	TemporaryStore          string       `yaml:"temporary_store"`
-	Locks                   string       `yaml:"locks"`
-	States                  string       `yaml:"states"`
-	Store                   string       `yaml:"store"`
-	MutableLabelsProvider   string       `yaml:"mutable_labels_provider"`
 	DisablePreAggregation   bool         `yaml:"disable_pre_aggregation"`
 	ReadOnly                bool         `yaml:"read_only"`
 }
@@ -119,8 +117,8 @@ type Aggregate struct {
 	IntendedDuration time.Duration `yaml:"intended_duration"`
 }
 
-// ClickHouse holds the configuration of the ClickHouse TSDB backend.
-// It is used when internal.tsdb is set to "clickhouse".
+// ClickHouse holds the configuration of the ClickHouse backend.
+// It is used when the "backend" option is set to "clickhouse".
 type ClickHouse struct {
 	// Addresses are the ClickHouse native protocol endpoints (host:port),
 	// used for SQL (table creation and the read/write path).

@@ -27,6 +27,7 @@ import (
 // TestStructuredConfig tests loading the full configuration file.
 func TestStructuredConfig(t *testing.T) {
 	expectedConfig := Config{
+		Backend: "clickhouse",
 		Cassandra: Cassandra{
 			Addresses: []string{
 				"127.0.0.1:9000",
@@ -76,18 +77,12 @@ func TestStructuredConfig(t *testing.T) {
 			DSN: "my_dsn",
 		},
 		Internal: Internal{
-			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       1,
 			Installation: Installation{
 				Format: "manual",
 			},
-			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 backendCassandra,
-			States:                backendCassandra,
-			Store:                 "batcher",
-			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: true,
 		},
 		Telemetry: Telemetry{

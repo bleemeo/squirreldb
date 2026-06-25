@@ -29,6 +29,7 @@ func defaultPaths() []string {
 
 func DefaultConfig() Config {
 	return Config{
+		Backend:           backendCassandra,
 		DefaultTimeToLive: 365 * 24 * time.Hour, // 1 year
 		Cassandra: Cassandra{
 			Addresses:              []string{"127.0.0.1:9042"},
@@ -89,18 +90,12 @@ func DefaultConfig() Config {
 		},
 		Internal: Internal{
 			ShowGoroutingOnShutdown: false,
-			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       0,
 			Installation: Installation{
 				Format: "Manual",
 			},
-			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 backendCassandra,
-			States:                backendCassandra,
-			Store:                 "batcher",
-			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: false,
 		},
 		MaxRequestBodySize:     64, // MiB

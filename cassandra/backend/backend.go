@@ -28,43 +28,46 @@ import (
 	"github.com/bleemeo/squirreldb/cassandra/locks"
 	cassandramutable "github.com/bleemeo/squirreldb/cassandra/mutable"
 	"github.com/bleemeo/squirreldb/cassandra/states"
+	cassandratelemetrystore "github.com/bleemeo/squirreldb/cassandra/telemetrystore"
 	"github.com/bleemeo/squirreldb/cassandra/tsdb"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/mutable"
+	"github.com/bleemeo/squirreldb/telemetry"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
 
+// Options carries everything the Cassandra backend needs. The store-specific
+// options that used to be passed to TSDB() per-call now live here, set once at
+// creation (there is a single TSDB instance per backend).
 type Options struct {
-	CassandraConfig config.Cassandra
-	ReadOnly        bool
-	MetricRegistry  prometheus.Registerer
-}
-
-type TSDBOption struct {
-	DontStartIndex            bool
+	CassandraConfig           config.Cassandra
+	ReadOnly                  bool
+	MetricRegistry            prometheus.Registerer
 	Cluster                   types.Cluster
-	States                    types.State
 	TenantLabel               string
 	DefaultTimeToLive         time.Duration
 	AggregateIntendedDuration func() time.Duration
 	DisablePreAggregation     bool
 	BatchSize                 time.Duration
-	Redis                     config.Redis // If Redis is unset, use an in-memory store for batching
-	InternalNowFunction       func() time.Time
+	Redis                     config.Redis // If Redis is unset, use an in-memory store for batching.
 	PreCreateShardDuration    time.Duration
 	PreCreateShardFraction    int
-	MutableLabelProcessor     *mutable.LabelProcessor
+	// DontStartIndex and InternalNowFunction are test hooks for the index.
+	DontStartIndex      bool
+	InternalNowFunction func() time.Time
 }
 
 var (
-	ErrNotStarted     = errors.New("backend not started")
-	ErrAlreadyStarted = errors.New("already started")
+	ErrNotStarted         = errors.New("backend not started")
+	ErrAlreadyStarted     = errors.New("already started")
+	ErrTSDBAlreadyStarted = errors.New("cannot set index testing options after the TSDB is started")
 )
 
-func New(ctx context.Context, logger zerolog.Logger, options Options) (*Backend, error) {
+// New returns a new unstarted backend.
+func New(_ context.Context, logger zerolog.Logger, options Options) (*Backend, error) {
 	backend := &Backend{
 		options: options,
 		logger:  logger,
@@ -79,11 +82,13 @@ type Backend struct {
 	options         Options
 	logger          zerolog.Logger
 
-	l            sync.Mutex
-	lockFactory  *locks.CassandraLocks
-	states       *states.CassandraStates
-	mutableStore mutable.Store
-	tsdbs        []*tsdb.CassandraTSDB
+	l                sync.Mutex
+	lockFactory      *locks.CassandraLocks
+	states           *states.CassandraStates
+	mutableStore     mutable.Store
+	mutableProvider  *mutable.Provider
+	mutableProcessor *mutable.LabelProcessor
+	tsdb             *tsdb.CassandraTSDB
 }
 
 func (b *Backend) Start(ctx context.Context) error {
@@ -146,26 +151,29 @@ func (b *Backend) CloseAll(ctx context.Context) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
-	for _, row := range b.tsdbs {
-		if err := row.Close(ctx); err != nil {
+	if b.tsdb != nil {
+		if err := b.tsdb.Close(ctx); err != nil {
 			b.logger.Warn().Msgf("unable to stop TSDB: %v", err.Error())
 		}
-	}
 
-	b.tsdbs = nil
+		b.tsdb = nil
+	}
 
 	b.lockFactory = nil
 	b.states = nil
 	b.mutableStore = nil
+	b.mutableProvider = nil
+	b.mutableProcessor = nil
 
 	b.connection.Close()
 	b.connection = nil
 }
 
-// DropCassandraData delete the Cassandra keyspace. If forceNonTestKeyspace also drop if the
-// keyspace is not "squirreldb_test".
-// This method is intended for testing, where keyspace is overrided to squirreldb_test.
-func (b *Backend) DropCassandraData(ctx context.Context, forceNonTestKeyspace bool) error {
+// DropData deletes the Cassandra keyspace. If forceNonTestKeyspace also drops if
+// the keyspace is not "squirreldb_test". It uses its own short-lived session, so
+// it works on an unstarted backend.
+// This method is intended for testing, where keyspace is overridden to squirreldb_test.
+func (b *Backend) DropData(ctx context.Context, forceNonTestKeyspace bool) error {
 	if b.options.CassandraConfig.Keyspace != "squirreldb_test" && !forceNonTestKeyspace {
 		return fmt.Errorf("refuse to drop keyspace %s without forceNonTestKeyspace", b.options.CassandraConfig.Keyspace)
 	}
@@ -185,6 +193,10 @@ func (b *Backend) DropCassandraData(ctx context.Context, forceNonTestKeyspace bo
 	return nil
 }
 
+// LockFactory returns the Cassandra lock factory. It is exposed for the lock
+// benchmark tool (which type-asserts for it; the ClickHouse backend has no
+// equivalent and the bench self-skips); the rest of the code uses locks only
+// through the backend.
 func (b *Backend) LockFactory(ctx context.Context) (*locks.CassandraLocks, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
@@ -192,32 +204,85 @@ func (b *Backend) LockFactory(ctx context.Context) (*locks.CassandraLocks, error
 	return b.getLockFactory(ctx)
 }
 
-func (b *Backend) States(ctx context.Context) (*states.CassandraStates, error) {
+// SetCassandraIndexTestingOption configures the Cassandra-index test hooks
+// (don't start the index, override "now"). It must be called before the TSDB is
+// built, and fails otherwise. It is Cassandra-specific: the ClickHouse backend
+// does not implement it, so tests needing it are Cassandra-only by construction.
+func (b *Backend) SetCassandraIndexTestingOption(dontStartIndex bool, nowFunc func() time.Time) error {
 	b.l.Lock()
 	defer b.l.Unlock()
 
-	return b.getStates(ctx)
+	if b.tsdb != nil {
+		return ErrTSDBAlreadyStarted
+	}
+
+	b.options.DontStartIndex = dontStartIndex
+	b.options.InternalNowFunction = nowFunc
+
+	return nil
 }
 
-func (b *Backend) TSDB(ctx context.Context, options TSDBOption) (types.TSDB, error) {
+// TSDB returns the (single, cached) Cassandra TSDB.
+func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
-	tsdb, err := b.newTSDB(ctx, options)
+	if b.tsdb != nil {
+		return b.tsdb, nil
+	}
+
+	t, err := b.newTSDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	b.tsdbs = append(b.tsdbs, tsdb)
+	b.tsdb = t
 
-	return tsdb, nil
+	return t, nil
 }
 
-func (b *Backend) MutableLabelProvider(ctx context.Context) (mutable.Store, error) {
+// MutableProvider returns the mutable label provider (used by the API to read
+// and write mutable labels).
+func (b *Backend) MutableProvider(ctx context.Context) (*mutable.Provider, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
-	return b.getMutableLabelProvider(ctx)
+	provider, _, err := b.getMutableStack(ctx)
+
+	return provider, err
+}
+
+// MutableProcessor returns the mutable label processor (used by the API and the
+// index to translate mutable labels).
+func (b *Backend) MutableProcessor(ctx context.Context) (*mutable.LabelProcessor, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	_, processor, err := b.getMutableStack(ctx)
+
+	return processor, err
+}
+
+// TelemetryStore returns the telemetry store backed by Cassandra states + locks.
+func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	state, err := b.getStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	lockFactory, err := b.getLockFactory(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return cassandratelemetrystore.New(
+		state,
+		lockFactory,
+		b.logger.With().Str("component", "telemetry").Logger(),
+	), nil
 }
 
 // rawSession opens a new connection to Cassandra and return the session.
@@ -256,6 +321,33 @@ func (b *Backend) getMutableLabelProvider(ctx context.Context) (mutable.Store, e
 	b.mutableStore = store
 
 	return b.mutableStore, nil
+}
+
+// getMutableStack builds (once) the backend-agnostic mutable label provider and
+// processor on top of the Cassandra store. Caller must hold b.l.
+func (b *Backend) getMutableStack(ctx context.Context) (*mutable.Provider, *mutable.LabelProcessor, error) {
+	if b.mutableProvider != nil {
+		return b.mutableProvider, b.mutableProcessor, nil
+	}
+
+	store, err := b.getMutableLabelProvider(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	provider, processor := mutable.NewProviderAndProcessor(
+		ctx,
+		b.options.MetricRegistry,
+		b.options.Cluster,
+		store,
+		b.options.TenantLabel,
+		b.logger.With().Str("component", "label_provider").Logger(),
+	)
+
+	b.mutableProvider = provider
+	b.mutableProcessor = processor
+
+	return provider, processor, nil
 }
 
 func (b *Backend) getLockFactory(ctx context.Context) (*locks.CassandraLocks, error) {
@@ -322,7 +414,9 @@ func (b *Backend) getStates(ctx context.Context) (*states.CassandraStates, error
 	return b.states, nil
 }
 
-func (b *Backend) newTSDB(ctx context.Context, createOptions TSDBOption) (*tsdb.CassandraTSDB, error) {
+// newTSDB builds the Cassandra TSDB (index + store) from the backend options.
+// Caller must hold b.l.
+func (b *Backend) newTSDB(ctx context.Context) (*tsdb.CassandraTSDB, error) {
 	if b.connection == nil {
 		return nil, ErrNotStarted
 	}
@@ -337,19 +431,29 @@ func (b *Backend) newTSDB(ctx context.Context, createOptions TSDBOption) (*tsdb.
 		return nil, err
 	}
 
+	states, err := b.getStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, mutableProcessor, err := b.getMutableStack(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	idxOptions := index.Options{
-		DefaultTimeToLive:      createOptions.DefaultTimeToLive,
-		PreCreateShardDuration: createOptions.PreCreateShardDuration,
-		PreCreateShardFraction: createOptions.PreCreateShardFraction,
-		TenantLabelName:        createOptions.TenantLabel,
+		DefaultTimeToLive:      b.options.DefaultTimeToLive,
+		PreCreateShardDuration: b.options.PreCreateShardDuration,
+		PreCreateShardFraction: b.options.PreCreateShardFraction,
+		TenantLabelName:        b.options.TenantLabel,
 		LockFactory:            lockFactory,
-		States:                 createOptions.States,
+		States:                 states,
 		SchemaLock:             schemaLock,
-		Cluster:                createOptions.Cluster,
+		Cluster:                b.options.Cluster,
 		ReadOnly:               b.options.ReadOnly,
 		Logger:                 b.logger.With().Str("component", "index").Logger(),
-		InternalRunOnceCalled:  createOptions.DontStartIndex,
-		InternalNowFunction:    createOptions.InternalNowFunction,
+		InternalRunOnceCalled:  b.options.DontStartIndex,
+		InternalNowFunction:    b.options.InternalNowFunction,
 	}
 
 	wrappedIndex, err := index.New(
@@ -363,36 +467,36 @@ func (b *Backend) newTSDB(ctx context.Context, createOptions TSDBOption) (*tsdb.
 		return nil, err
 	}
 
-	if !createOptions.DontStartIndex {
+	if !b.options.DontStartIndex {
 		if err := wrappedIndex.Start(ctx); err != nil {
 			return nil, fmt.Errorf("start index task: %w", err)
 		}
 	}
 
-	index := mutable.NewIndexWrapper(
+	wrapped := mutable.NewIndexWrapper(
 		wrappedIndex,
-		createOptions.MutableLabelProcessor,
+		mutableProcessor,
 		b.logger.With().Str("component", "index_wrapper").Logger(),
 	)
 
 	options := tsdb.Options{
-		DefaultTimeToLive:         createOptions.DefaultTimeToLive,
-		AggregateIntendedDuration: createOptions.AggregateIntendedDuration,
+		DefaultTimeToLive:         b.options.DefaultTimeToLive,
+		AggregateIntendedDuration: b.options.AggregateIntendedDuration,
 		SchemaLock:                schemaLock,
 		ReadOnly:                  b.options.ReadOnly,
-		DisablePreAggregation:     createOptions.DisablePreAggregation,
-		BatchSize:                 createOptions.BatchSize,
-		Redis:                     createOptions.Redis,
+		DisablePreAggregation:     b.options.DisablePreAggregation,
+		BatchSize:                 b.options.BatchSize,
+		Redis:                     b.options.Redis,
 	}
 
-	tsdb, err := tsdb.New(
+	t, err := tsdb.New(
 		ctx,
 		b.options.MetricRegistry,
 		b.connection,
 		options,
-		index,
+		wrapped,
 		lockFactory,
-		createOptions.States,
+		states,
 		b.logger.With().Str("component", "tsdb").Logger(),
 	)
 	if err != nil {
@@ -403,7 +507,7 @@ func (b *Backend) newTSDB(ctx context.Context, createOptions TSDBOption) (*tsdb.
 		return nil, err
 	}
 
-	if err := tsdb.Start(ctx); err != nil {
+	if err := t.Start(ctx); err != nil {
 		if err := wrappedIndex.Stop(); err != nil {
 			b.logger.Warn().Msgf("unable to stop index: %v", err.Error())
 		}
@@ -411,5 +515,5 @@ func (b *Backend) newTSDB(ctx context.Context, createOptions TSDBOption) (*tsdb.
 		return nil, err
 	}
 
-	return tsdb, nil
+	return t, nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	cassandralocks "github.com/bleemeo/squirreldb/cassandra/locks"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -42,6 +44,13 @@ const (
 	blockDelay    = 6 * time.Second
 )
 
+// lockFactoryProvider is implemented by the Cassandra backend. Other backends
+// (e.g. ClickHouse) do not provide a lock factory, so the assertion fails and
+// the benchmark skips itself.
+type lockFactoryProvider interface {
+	LockFactory(ctx context.Context) (*cassandralocks.CassandraLocks, error)
+}
+
 type result struct {
 	ErrCount         int
 	LockAcquired     int
@@ -60,6 +69,12 @@ func main() {
 	daemon.SetTestEnvironment()
 
 	err := daemon.RunWithSignalHandler(run)
+
+	if errors.Is(err, daemon.ErrSkipBackend) {
+		log.Info().Msg(err.Error())
+
+		return
+	}
 
 	metricResult, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range metricResult {
@@ -104,7 +119,20 @@ func run(ctx context.Context) error {
 
 		defer squirreldb.Stop()
 
-		lockFactory, err := squirreldb.LockFactory(ctx)
+		b, err := squirreldb.Backend(ctx)
+		if err != nil {
+			return err
+		}
+
+		// The lock factory is Cassandra-specific. With another backend (e.g.
+		// ClickHouse) the assertion fails and the benchmark skips itself, so it
+		// can be launched unconditionally for any backend.
+		provider, ok := b.(lockFactoryProvider)
+		if !ok {
+			return daemon.ErrSkipBackend
+		}
+
+		lockFactory, err := provider.LockFactory(ctx)
 		if err != nil {
 			return err
 		}

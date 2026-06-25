@@ -16,7 +16,7 @@
 
 // Package tsdb implements a SquirrelDB TSDB backend backed by ClickHouse.
 //
-// It is selected through the "clickhouse" value of the internal.tsdb option and
+// It is selected through the "clickhouse" value of the "backend" option and
 // is an alternative to the Cassandra backend.
 //
 // Writes go through the shared batcher (batch.Batch): points are accumulated by

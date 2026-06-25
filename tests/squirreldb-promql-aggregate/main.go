@@ -51,14 +51,9 @@ func run(ctx context.Context) error {
 		Logger:         log.With().Str("component", "daemon").Logger(),
 	}
 
-	err = squirreldb.DropCassandraData(ctx, false)
+	err = squirreldb.DropData(ctx, false)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to drop keyspace")
-	}
-
-	err = squirreldb.DropClickHouseData(ctx, false)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to drop ClickHouse tables")
+		log.Fatal().Err(err).Msg("Failed to drop backend data")
 	}
 
 	err = squirreldb.DropTemporaryStore(ctx, false)

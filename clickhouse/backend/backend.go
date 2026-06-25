@@ -15,7 +15,7 @@
 // limitations under the License.
 
 // Package backend owns the single ClickHouse connection shared by every
-// ClickHouse-backed store (TSDB, mutable labels, ...), mirroring
+// ClickHouse-backed store (TSDB, mutable labels, telemetry), mirroring
 // cassandra/backend. The connection is a clickhouse-go pool, safe for
 // concurrent use, so all stores share it instead of opening their own.
 package backend
@@ -28,9 +28,11 @@ import (
 	"time"
 
 	chmutable "github.com/bleemeo/squirreldb/clickhouse/mutable"
+	"github.com/bleemeo/squirreldb/clickhouse/telemetrystore"
 	"github.com/bleemeo/squirreldb/clickhouse/tsdb"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/mutable"
+	"github.com/bleemeo/squirreldb/telemetry"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -39,7 +41,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// TestDatabase is the ClickHouse database used by tests. DropTables refuses to
+// TestDatabase is the ClickHouse database used by tests. DropData refuses to
 // drop tables in any other database, to guard against wiping production data.
 const TestDatabase = "squirreldb_test"
 
@@ -48,13 +50,14 @@ var (
 	ErrAlreadyStarted = errors.New("already started")
 )
 
-// Options carries the configuration shared by the ClickHouse stores. The
-// TSDB-specific options are derived from it by TSDB().
+// Options carries everything the ClickHouse backend needs. The TSDB-specific
+// options are derived from it; there is a single TSDB instance per backend.
 type Options struct {
 	Config            config.ClickHouse
 	Redis             config.Redis // If unset, the TSDB uses an in-memory batching store.
 	MetricRegistry    prometheus.Registerer
 	ReadOnly          bool
+	Cluster           types.Cluster
 	TenantLabel       string
 	BatchSize         time.Duration
 	DefaultTimeToLive time.Duration
@@ -64,10 +67,13 @@ type Backend struct {
 	options Options
 	logger  zerolog.Logger
 
-	l            sync.Mutex
-	conn         driver.Conn
-	mutableStore mutable.Store
-	tsdbs        []*tsdb.ClickHouseTSDB
+	l                sync.Mutex
+	conn             driver.Conn
+	mutableStore     mutable.Store
+	mutableProvider  *mutable.Provider
+	mutableProcessor *mutable.LabelProcessor
+	telemetryStore   *telemetrystore.Store
+	tsdb             *tsdb.ClickHouseTSDB
 }
 
 // New returns a new unstarted backend.
@@ -112,13 +118,17 @@ func (b *Backend) Start(ctx context.Context) error {
 	return nil
 }
 
-// TSDB returns a new ClickHouse TSDB sharing the backend connection.
+// TSDB returns the (single, cached) ClickHouse TSDB, sharing the backend connection.
 func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
 	if b.conn == nil {
 		return nil, ErrNotStarted
+	}
+
+	if b.tsdb != nil {
+		return b.tsdb, nil
 	}
 
 	t, err := tsdb.New(
@@ -137,14 +147,75 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 		return nil, err
 	}
 
-	b.tsdbs = append(b.tsdbs, t)
+	b.tsdb = t
 
 	return t, nil
 }
 
-// MutableLabelProvider returns the ClickHouse mutable label store, sharing the
-// backend connection.
-func (b *Backend) MutableLabelProvider(ctx context.Context) (mutable.Store, error) {
+// MutableProvider returns the mutable label provider (used by the API to read
+// and write mutable labels).
+func (b *Backend) MutableProvider(ctx context.Context) (*mutable.Provider, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	provider, _, err := b.getMutableStack(ctx)
+
+	return provider, err
+}
+
+// MutableProcessor returns the mutable label processor (used by the API to
+// translate mutable labels).
+func (b *Backend) MutableProcessor(ctx context.Context) (*mutable.LabelProcessor, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	_, processor, err := b.getMutableStack(ctx)
+
+	return processor, err
+}
+
+// getMutableStack builds (once) the mutable label store, provider and processor.
+// Caller must hold b.l.
+func (b *Backend) getMutableStack(ctx context.Context) (*mutable.Provider, *mutable.LabelProcessor, error) {
+	if b.conn == nil {
+		return nil, nil, ErrNotStarted
+	}
+
+	if b.mutableProvider != nil {
+		return b.mutableProvider, b.mutableProcessor, nil
+	}
+
+	if b.mutableStore == nil {
+		store, err := chmutable.NewStore(ctx, b.conn, chmutable.Options{
+			ReadOnly: b.options.ReadOnly,
+			Logger:   b.logger.With().Str("component", "mutable-labels").Logger(),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		b.mutableStore = store
+	}
+
+	provider, processor := mutable.NewProviderAndProcessor(
+		ctx,
+		b.options.MetricRegistry,
+		b.options.Cluster,
+		b.mutableStore,
+		b.options.TenantLabel,
+		b.logger.With().Str("component", "label_provider").Logger(),
+	)
+
+	b.mutableProvider = provider
+	b.mutableProcessor = processor
+
+	return provider, processor, nil
+}
+
+// TelemetryStore returns the ClickHouse telemetry store, sharing the backend
+// connection. The store runs background lease-refresh goroutines, so it is
+// owned by the backend and closed by CloseAll (before the connection).
+func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
@@ -152,30 +223,27 @@ func (b *Backend) MutableLabelProvider(ctx context.Context) (mutable.Store, erro
 		return nil, ErrNotStarted
 	}
 
-	if b.mutableStore != nil {
-		return b.mutableStore, nil
+	if b.telemetryStore != nil {
+		return b.telemetryStore, nil
 	}
 
-	store, err := chmutable.NewStore(ctx, b.conn, chmutable.Options{
-		ReadOnly: b.options.ReadOnly,
-		Logger:   b.logger.With().Str("component", "mutable-labels").Logger(),
-	})
+	store, err := telemetrystore.New(ctx, b.conn, b.logger.With().Str("component", "telemetry").Logger())
 	if err != nil {
 		return nil, err
 	}
 
-	b.mutableStore = store
+	b.telemetryStore = store
 
-	return b.mutableStore, nil
+	return b.telemetryStore, nil
 }
 
-// DropTables drops every ClickHouse table SquirrelDB owns (TSDB and mutable
-// labels). It refuses unless the configured database is TestDatabase, or
+// DropData drops every ClickHouse table SquirrelDB owns (TSDB, mutable labels,
+// telemetry). It refuses unless the configured database is TestDatabase, or
 // forceNonTestDatabase is set — the same guard as the Cassandra backend's
 // keyspace drop. The database itself is left intact (it is created by
 // ClickHouse, not by us). It can be called before Start (it opens its own
 // short-lived connection when the backend is not started).
-func (b *Backend) DropTables(ctx context.Context, forceNonTestDatabase bool) error {
+func (b *Backend) DropData(ctx context.Context, forceNonTestDatabase bool) error {
 	if b.options.Config.Database != TestDatabase && !forceNonTestDatabase {
 		return fmt.Errorf(
 			"refuse to drop tables in database %q without forceNonTestDatabase", b.options.Config.Database)
@@ -202,6 +270,8 @@ func (b *Backend) DropTables(ctx context.Context, forceNonTestDatabase bool) err
 		"DROP TABLE IF EXISTS tsdb_tags",
 		"DROP TABLE IF EXISTS mutable_label_names",
 		"DROP TABLE IF EXISTS mutable_label_values",
+		"DROP TABLE IF EXISTS telemetry_cluster_id",
+		"DROP TABLE IF EXISTS telemetry_node_ids",
 	}
 
 	for _, stmt := range statements {
@@ -213,20 +283,30 @@ func (b *Backend) DropTables(ctx context.Context, forceNonTestDatabase bool) err
 	return nil
 }
 
-// CloseAll stops every store using the connection (TSDB flushes its batch) then
-// closes the shared connection.
+// CloseAll stops every store using the connection (TSDB flushes its batch,
+// telemetry stops its refresh loops) then closes the shared connection.
 func (b *Backend) CloseAll(ctx context.Context) {
 	b.l.Lock()
 	defer b.l.Unlock()
 
-	for _, t := range b.tsdbs {
-		if err := t.Close(ctx); err != nil {
+	if b.tsdb != nil {
+		if err := b.tsdb.Close(ctx); err != nil {
 			b.logger.Warn().Msgf("unable to stop TSDB: %v", err.Error())
 		}
+
+		b.tsdb = nil
 	}
 
-	b.tsdbs = nil
 	b.mutableStore = nil
+	b.mutableProvider = nil
+	b.mutableProcessor = nil
+
+	// Stop the telemetry refresh goroutines before closing the connection they
+	// use.
+	if b.telemetryStore != nil {
+		_ = b.telemetryStore.Close()
+		b.telemetryStore = nil
+	}
 
 	if b.conn != nil {
 		_ = b.conn.Close()

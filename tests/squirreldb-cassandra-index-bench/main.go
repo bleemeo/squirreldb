@@ -55,6 +55,12 @@ func main() {
 
 	err := daemon.RunWithSignalHandler(run)
 
+	if errors.Is(err, daemon.ErrSkipBackend) {
+		log.Info().Msg(err.Error())
+
+		return
+	}
+
 	metricResult, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range metricResult {
 		_, _ = expfmt.MetricFamilyToText(os.Stdout, mf)
@@ -65,15 +71,35 @@ func main() {
 	}
 }
 
+// cassandraIndexTester is implemented by the Cassandra backend to configure the
+// index test hooks before the TSDB is built.
+type cassandraIndexTester interface {
+	SetCassandraIndexTestingOption(dontStartIndex bool, nowFunc func() time.Time) error
+}
+
 func getIndex(ctx context.Context, squirreldb *daemon.SquirrelDB, dontStartIndex bool) (types.Index, error) {
-	db, err := squirreldb.TSDB(ctx, dontStartIndex, nil)
+	b, err := squirreldb.Backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tester, ok := b.(cassandraIndexTester)
+	if !ok {
+		return nil, daemon.ErrSkipBackend
+	}
+
+	if err := tester.SetCassandraIndexTestingOption(dontStartIndex, nil); err != nil {
+		return nil, err
+	}
+
+	db, err := squirreldb.TSDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	cassandraTSDB, ok := db.(*tsdb.CassandraTSDB)
 	if !ok {
-		return nil, errors.New("TSDB isn't Cassandra")
+		return nil, daemon.ErrSkipBackend
 	}
 
 	return cassandraTSDB.Index(), nil
@@ -108,9 +134,9 @@ func run(ctx context.Context) error {
 	if !*noDropTables {
 		log.Printf("Dropping tables")
 
-		err := squirreldb.DropCassandraData(ctx, false)
+		err := squirreldb.DropData(ctx, false)
 		if err != nil {
-			return fmt.Errorf("failed to drop keyspace: %w", err)
+			return fmt.Errorf("failed to drop backend data: %w", err)
 		}
 	}
 

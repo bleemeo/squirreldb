@@ -37,9 +37,9 @@ func TestDropTablesRefusesNonTestDatabase(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	err = b.DropTables(context.Background(), false)
+	err = b.DropData(context.Background(), false)
 	if err == nil {
-		t.Fatal("DropTables should refuse a non-test database without forceNonTestDatabase")
+		t.Fatal("DropData should refuse a non-test database without forceNonTestDatabase")
 	}
 
 	// The error should name the refused database (it must not have tried to connect).

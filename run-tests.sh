@@ -88,6 +88,7 @@ if [ "${WITH_CLUSTER}" = "1" ]; then
     export SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     export SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
+    export SQUIRRELDB_BACKEND=cassandra
 elif [ "${WITH_SCYLLADB}" = "1" ]; then
     echo
     echo "== Starting ScyllaDB & Redis"
@@ -98,6 +99,18 @@ elif [ "${WITH_SCYLLADB}" = "1" ]; then
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
     export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
+    export SQUIRRELDB_BACKEND=cassandra  # ScyllaDB is a Cassandra-like
+elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
+    # The database is created by the ClickHouse image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
+    echo
+    echo "== Starting ClickHouse (TSDB + mutable labels backends)"
+    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
+
+    docker_network=""
+    export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
+    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
+    export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+    export SQUIRRELDB_BACKEND=clickhouse
 else
     echo
     echo "== Starting Cassandra & Redis"
@@ -108,24 +121,7 @@ else
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
     export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
-fi
-
-# Cassandra is the default backend
-export SQUIRRELDB_INTERNAL_TSDB=clickhouse
-export SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER=clickhouse
-
-# ClickHouse provides the TSDB and the mutable labels backends (locks/states
-# stay on Cassandra). The database is created by the ClickHouse image
-# (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
-if [ "${WITH_CLICKHOUSE}" = "1" ]; then
-    echo
-    echo "== Starting ClickHouse (TSDB + mutable labels backends)"
-    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
-
-    export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
-    export SQUIRRELDB_INTERNAL_TSDB=clickhouse
-    export SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER=clickhouse
-    export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+    export SQUIRRELDB_BACKEND=cassandra
 fi
 
 build_opt=""
@@ -172,8 +168,7 @@ run_sqdb() {
         -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
         -e SQUIRRELDB_REDIS_ADDRESSES \
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
-        -e SQUIRRELDB_INTERNAL_TSDB \
-        -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
+        -e SQUIRRELDB_BACKEND \
         -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
@@ -191,8 +186,7 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
     -e SQUIRRELDB_REDIS_ADDRESSES \
     -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
-    -e SQUIRRELDB_INTERNAL_TSDB \
-    -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
+    -e SQUIRRELDB_BACKEND \
     -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
     -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
@@ -217,20 +211,16 @@ run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock2_opt"
 echo "== Running squirreldb-cassandra-lock-bench (with blocking/unblocking from time to time)"
 run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-lock-bench/ $lock3_opt"
 
-# The index benches exercise the Cassandra index, which the ClickHouse TSDB
-# backend does not use (series are indexed in tsdb_tags), so skip them there.
-if [ "${WITH_CLICKHOUSE}" = "1" ]; then
-    echo
-    echo "== Skipping squirreldb-cassandra-index-bench & index-bench2 (Cassandra index unused with ClickHouse TSDB)"
-else
-    echo
-    echo "== Running squirreldb-cassandra-index-bench"
-    run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
+# The index benches exercise the Cassandra index, which the ClickHouse backend
+# does not use (series are indexed in tsdb_tags). They run unconditionally: with
+# a non-Cassandra backend they skip themselves (daemon.ErrSkipBackend).
+echo
+echo "== Running squirreldb-cassandra-index-bench"
+run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench/ --verify $index_bench_opt"
 
-    echo
-    echo "== Running squirreldb-cassandra-index-bench2"
-    run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench2/ $index_bench2_opt"
-fi
+echo
+echo "== Running squirreldb-cassandra-index-bench2"
+run_sqdb "go run $build_opt ./tests/squirreldb-cassandra-index-bench2/ $index_bench2_opt"
 
 echo
 echo "== Running squirreldb-promql-aggregate"
@@ -266,8 +256,7 @@ if [ "${WITH_COVER}" = "1" ]; then
         -e SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR \
         -e SQUIRRELDB_REDIS_ADDRESSES \
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
-        -e SQUIRRELDB_INTERNAL_TSDB \
-        -e SQUIRRELDB_INTERNAL_MUTABLE_LABELS_PROVIDER \
+        -e SQUIRRELDB_BACKEND \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
         -v $(pwd):/src -w /src ${GO_MOUNT_CACHE} \

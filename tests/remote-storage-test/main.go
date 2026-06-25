@@ -84,14 +84,9 @@ func run(ctx context.Context) error {
 		}
 		defer squirreldb.Stop()
 
-		err = squirreldb.DropCassandraData(ctx, false)
+		err = squirreldb.DropData(ctx, false)
 		if err != nil {
-			return fmt.Errorf("fail to DropCassandraData: %w", err)
-		}
-
-		err = squirreldb.DropClickHouseData(ctx, false)
-		if err != nil {
-			return fmt.Errorf("fail to DropClickHouseData: %w", err)
+			return fmt.Errorf("fail to DropData: %w", err)
 		}
 
 		err = squirreldb.DropTemporaryStore(ctx, false)
