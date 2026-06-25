@@ -126,4 +126,13 @@ type ClickHouse struct {
 	Database  string   `yaml:"database"`
 	Username  string   `yaml:"username"`
 	Password  string   `yaml:"password"`
+	// ClusterName, when set, makes SquirrelDB create its tables with
+	// "ON CLUSTER <name>" and ReplicatedMergeTree engines (ClickHouse cluster
+	// mode). Empty means a single ClickHouse node (plain MergeTree). It must
+	// match the cluster name in the ClickHouse server configuration.
+	//
+	// The replicated tables use an explicit, name-based Keeper path, so they
+	// must never be RENAMEd; see examples/squirreldb_ha_clickhouse for the
+	// node-recovery runbook.
+	ClusterName string `yaml:"cluster_name"`
 }

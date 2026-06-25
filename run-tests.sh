@@ -65,17 +65,23 @@ EOF
     shift
 done
 
-if [ "${WITH_CLICKHOUSE}" = "1" ] && [ "${WITH_CLUSTER}" = "1" ]; then
-    echo "ClickHouse is not yet supported in cluster mode with run-tests.sh"
-    exit 1
-fi
-
 GO_MOUNT_CACHE=""
 if docker volume ls | grep -q squirreldb-buildcache; then
    GO_MOUNT_CACHE="-v squirreldb-buildcache:/go/pkg"
 fi
 
-if [ "${WITH_CLUSTER}" = "1" ]; then
+if [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 1 ]; then
+    echo
+    echo "== Starting cluster component using examples/squirreldb_ha_clickhouse/"
+    (cd examples/squirreldb_ha_clickhouse/; docker compose up -d clickhouse-keeper-0 clickhouse-keeper-1 clickhouse-keeper-2 clickhouse-server-0 clickhouse-server-1 redis1 redis2 redis3 redis4 redis5 redis6 redis_init)
+    docker_network="--network squirreldb_ha_clickhouse_default"
+    export SQUIRRELDB_CLICKHOUSE_ADDRESSES=clickhouse-server-0:9000,clickhouse-server-1:9000
+    export SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+    export SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=main_cluster
+    export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+    export SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
+    export SQUIRRELDB_BACKEND=clickhouse
+elif [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 0 ]; then
     if [ "${WITH_SCYLLADB}" = "1" ]; then
         echo "ScyllaDB is not yet supported in cluster with run-tests.sh"
         exit 1
@@ -109,7 +115,9 @@ elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
     docker_network=""
     export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
     export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
+    export SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=""
     export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+    export SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
     export SQUIRRELDB_BACKEND=clickhouse
 else
     echo
@@ -170,6 +178,8 @@ run_sqdb() {
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
         -e SQUIRRELDB_BACKEND \
         -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
+        -e SQUIRRELDB_CLICKHOUSE_USERNAME \
+        -e SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
         -v "$(pwd)":/src -w /src ${GO_MOUNT_CACHE} \
@@ -270,10 +280,18 @@ chown -R $USER_UID coverage-run-tests/
 fi
 
 if [ ! "${WITH_NOSTOP}" = "1" ]; then
-    if [ "${WITH_CLUSTER}" = "1" ]; then
+    if [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 1 ]; then
+        echo
+        echo "== Stopping cluster component using examples/squirreldb_ha_clickhouse/"
+        (cd examples/squirreldb_ha_clickhouse/; docker compose down -v)
+    elif [ "${WITH_CLUSTER}" = "1" ]; then
         echo
         echo "== Stopping cluster component using examples/squirreldb_ha/"
         (cd examples/squirreldb_ha/; docker compose down -v)
+    elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
+        echo
+        echo "== Stopping ClickHouse"
+        docker rm -f squirreldb-test-clickhouse
     else
         echo
         echo "== Stopping Cassandra & Redis"
@@ -285,11 +303,5 @@ if [ ! "${WITH_NOSTOP}" = "1" ]; then
         fi
 
         docker rm -f squirreldb-test-redis
-    fi
-
-    if [ "${WITH_CLICKHOUSE}" = "1" ]; then
-        echo
-        echo "== Stopping ClickHouse"
-        docker rm -f squirreldb-test-clickhouse
     fi
 fi

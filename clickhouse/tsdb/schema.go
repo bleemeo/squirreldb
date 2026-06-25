@@ -17,10 +17,10 @@
 package tsdb
 
 import (
-	"context"
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 )
 
 // tsdbDataDDL is the table holding the raw points.
@@ -29,14 +29,14 @@ import (
 // (mv_datapoint_data). {{TTL}} is the TTL clause based on it (removed when no TTL
 // is configured); there is no hardcoded TTL value in the schema.
 const tsdbDataDDL = `
-CREATE TABLE IF NOT EXISTS tsdb_data
+CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
 (
     id UUID,
     timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     value Float64 CODEC(ZSTD(1)),
     row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1))
 )
-ENGINE = MergeTree
+ENGINE = {{ENGINE}}
 PARTITION BY toStartOfWeek(timestamp)
 ORDER BY (id, timestamp){{TTL}}
 SETTINGS allow_suspicious_low_cardinality_types = 1`
@@ -55,7 +55,7 @@ SETTINGS allow_suspicious_low_cardinality_types = 1`
 // data. min_time/max_time bound the series activity (used to filter label
 // queries); max_time carries the same gap margin.
 const tsdbTagsDDL = `
-CREATE TABLE IF NOT EXISTS tsdb_tags
+CREATE TABLE IF NOT EXISTS tsdb_tags{{ON_CLUSTER}}
 (
     id UUID DEFAULT reinterpretAsUUID(sipHash128(metric_name, tenant, tags)),
     metric_name LowCardinality(String),
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS tsdb_tags
     max_time SimpleAggregateFunction(max, Nullable(DateTime64(3))),
     max_expiration SimpleAggregateFunction(max, DateTime64(3))
 )
-ENGINE = AggregatingMergeTree
+ENGINE = {{ENGINE}}
 PRIMARY KEY (tenant, metric_name)
 ORDER BY (tenant, metric_name, id){{TTL}}`
 
@@ -75,8 +75,10 @@ ORDER BY (tenant, metric_name, id){{TTL}}`
 //
 // Column types match tsdb_tags so the id computed here equals the one computed by
 // the tsdb_tags DEFAULT for an eager registration of the same series.
+// datapoint_input is a Null-engine table (a stateless insert entry point): it is
+// created ON CLUSTER so it exists on every node, but is never Replicated.
 const datapointInputDDL = `
-CREATE TABLE IF NOT EXISTS datapoint_input
+CREATE TABLE IF NOT EXISTS datapoint_input{{ON_CLUSTER}}
 (
     metric_name LowCardinality(String),
     tenant LowCardinality(String),
@@ -88,7 +90,7 @@ CREATE TABLE IF NOT EXISTS datapoint_input
 ENGINE = Null`
 
 const mvDatapointDataDDL = `
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data TO tsdb_data
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_data
 (
     id UUID,
     timestamp DateTime64(3),
@@ -102,35 +104,19 @@ SELECT
     row_ttl_days
 FROM datapoint_input`
 
-// createSchema creates the ClickHouse tables if they don't exist yet.
-//
-// tsdb_data is fed by points (datapoint_input + mv_datapoint_data); tsdb_tags is
-// written directly by the registration path (see eager_register.go), not by a
-// materialized view.
-//
-// Creation is idempotent (CREATE TABLE IF NOT EXISTS), so the TTL clause is
-// only applied when a table is created for the first time. Changing the
-// configured TTL afterwards does not alter an existing table.
-func (c *ClickHouseTSDB) createSchema(ctx context.Context) error {
-	statements := []struct {
-		name string
-		ddl  string
-	}{
-		{"tsdb_data", c.tsdbDataStatement()},
-		{"tsdb_tags", c.tsdbTagsStatement()},
-		{"datapoint_input", datapointInputDDL},
-		{"mv_datapoint_data", mvDatapointDataDDL},
+// SchemaObjects returns the ClickHouse objects owned by the TSDB store, engine
+// and per-row TTL filled in. Exposed so the backend can create the whole schema
+// up front and derive the expected-table set, independently of whether the store
+// is ever instantiated.
+func SchemaObjects(clusterName string, defaultTTL time.Duration) []ddl.Object {
+	days := ttlDaysOf(defaultTTL)
+
+	return []ddl.Object{
+		{Name: "tsdb_data", DDL: ddl.Apply(tsdbDataStatement(clusterName, days), clusterName), Replicated: true},
+		{Name: "tsdb_tags", DDL: ddl.Apply(tsdbTagsStatement(clusterName, days), clusterName), Replicated: true},
+		{Name: "datapoint_input", DDL: ddl.Apply(datapointInputDDL, clusterName)},
+		{Name: "mv_datapoint_data", DDL: ddl.Apply(mvDatapointDataDDL, clusterName)},
 	}
-
-	for _, stmt := range statements {
-		if err := c.conn.Exec(ctx, stmt.ddl); err != nil {
-			return fmt.Errorf("create table %s: %w", stmt.name, err)
-		}
-
-		c.logger.Debug().Msgf("ClickHouse table %s is ready", stmt.name)
-	}
-
-	return nil
 }
 
 // storeMinTimeMillis and storeMaxTimeMillis are the bounds, in Unix
@@ -149,33 +135,43 @@ var (
 	storeMaxTimeMillis = time.Date(2299, 12, 31, 0, 0, 0, 0, time.UTC).UnixMilli()
 )
 
-// ttlDays returns the configured global TTL in days (0 when no TTL is configured).
-func (c *ClickHouseTSDB) ttlDays() int {
-	return max(int(c.opts.DefaultTimeToLive/(24*time.Hour)), 0)
+// ttlDaysOf converts a TTL duration to whole days (0 when no TTL is configured).
+func ttlDaysOf(d time.Duration) int {
+	return max(int(d/(24*time.Hour)), 0)
 }
 
-// tsdbDataStatement fills the tsdb_data {{TTL}} placeholder with a per-row TTL
-// clause based on row_ttl_days (each metric keeps its own TTL). The clause is
-// omitted when no TTL is configured.
-func (c *ClickHouseTSDB) tsdbDataStatement() string {
+// ttlDays returns the configured global TTL in days (0 when no TTL is configured).
+func (c *ClickHouseTSDB) ttlDays() int {
+	return ttlDaysOf(c.opts.DefaultTimeToLive)
+}
+
+// tsdbDataStatement fills the tsdb_data {{ENGINE}} and {{TTL}} placeholders. The
+// per-row TTL clause is based on row_ttl_days (each metric keeps its own TTL)
+// and omitted when no TTL is configured.
+func tsdbDataStatement(clusterName string, ttlDays int) string {
 	var ttlClause string
 
-	if c.ttlDays() > 0 {
+	if ttlDays > 0 {
 		ttlClause = "\nTTL toDateTime(timestamp) + toIntervalDay(row_ttl_days)"
 	}
 
-	return strings.Replace(tsdbDataDDL, "{{TTL}}", ttlClause, 1)
+	stmt := strings.Replace(tsdbDataDDL, "{{TTL}}", ttlClause, 1)
+
+	return strings.Replace(stmt, "{{ENGINE}}", ddl.ReplicatedEngine(clusterName, "tsdb_data", "MergeTree"), 1)
 }
 
-// tsdbTagsStatement fills the tsdb_tags DDL: the index row expires once its
-// latest point has expired (TTL max_expiration, the per-metric expiration baked
-// in by the write path). The TTL clause is omitted when no TTL is configured.
-func (c *ClickHouseTSDB) tsdbTagsStatement() string {
+// tsdbTagsStatement fills the tsdb_tags {{ENGINE}} and {{TTL}} placeholders: the
+// index row expires once its latest point has expired (TTL max_expiration, the
+// per-metric expiration baked in by the write path). The TTL clause is omitted
+// when no TTL is configured.
+func tsdbTagsStatement(clusterName string, ttlDays int) string {
 	var ttlClause string
 
-	if c.ttlDays() > 0 {
+	if ttlDays > 0 {
 		ttlClause = "\nTTL max_expiration"
 	}
 
-	return strings.Replace(tsdbTagsDDL, "{{TTL}}", ttlClause, 1)
+	stmt := strings.Replace(tsdbTagsDDL, "{{TTL}}", ttlClause, 1)
+
+	return strings.Replace(stmt, "{{ENGINE}}", ddl.ReplicatedEngine(clusterName, "tsdb_tags", "AggregatingMergeTree"), 1)
 }

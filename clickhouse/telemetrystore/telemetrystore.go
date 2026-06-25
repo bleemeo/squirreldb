@@ -30,8 +30,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
@@ -58,24 +61,47 @@ const clusterIDKey = "cluster_id"
 
 var errClaimContended = errors.New("could not claim a telemetry node ID")
 
+// SchemaObjects returns the ClickHouse objects owned by the telemetry store.
+// Exposed so the backend can create the whole schema up front and derive the
+// expected-table set, independently of whether the store is ever instantiated.
+func SchemaObjects(clusterName string) []ddl.Object {
+	statements := []struct {
+		table string
+		ddl   string
+	}{
+		{"telemetry_cluster_id", clusterDDL},
+		{"telemetry_node_ids", nodeIDsDDL},
+	}
+
+	objects := make([]ddl.Object, 0, len(statements))
+
+	for _, stmt := range statements {
+		engine := ddl.ReplicatedEngine(clusterName, stmt.table, "ReplacingMergeTree", "version")
+		stmtDDL := strings.Replace(stmt.ddl, "{{ENGINE}}", engine, 1)
+		objects = append(objects, ddl.Object{Name: stmt.table, DDL: ddl.Apply(stmtDDL, clusterName), Replicated: true})
+	}
+
+	return objects
+}
+
 const (
 	clusterDDL = `
-		CREATE TABLE IF NOT EXISTS telemetry_cluster_id (
+		CREATE TABLE IF NOT EXISTS telemetry_cluster_id{{ON_CLUSTER}} (
 			k String,
 			cluster_id String,
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = ReplacingMergeTree(version)
+		ENGINE = {{ENGINE}}
 		ORDER BY k`
 
 	nodeIDsDDL = `
-		CREATE TABLE IF NOT EXISTS telemetry_node_ids (
+		CREATE TABLE IF NOT EXISTS telemetry_node_ids{{ON_CLUSTER}} (
 			telemetry_id String,
 			owner String,
 			lease_until DateTime64(3),
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = ReplacingMergeTree(version)
+		ENGINE = {{ENGINE}}
 		ORDER BY telemetry_id`
 )
 
@@ -86,29 +112,27 @@ const (
 // tracked by wg and stopped by closeCh, so Close stops every refresh loop and
 // waits for it to return before the shared connection may be closed.
 type Store struct {
-	conn   driver.Conn
-	logger zerolog.Logger
+	conn        driver.Conn
+	clusterName string
+	logger      zerolog.Logger
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
 	wg        sync.WaitGroup
 }
 
-// New returns a new ClickHouse telemetry store, creating its tables if needed.
-func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger) (*Store, error) {
-	s := &Store{
-		conn:    conn,
-		logger:  logger,
-		closeCh: make(chan struct{}),
-	}
-
-	for _, ddl := range []string{clusterDDL, nodeIDsDDL} {
-		if err := conn.Exec(ctx, ddl); err != nil {
-			return nil, fmt.Errorf("create telemetry tables: %w", err)
-		}
-	}
-
-	return s, nil
+// New returns a new ClickHouse telemetry store. clusterName enables ClickHouse
+// cluster mode (ON CLUSTER + Replicated with an explicit, name-based Keeper path;
+// the tables must not be RENAMEd) when set. Schema creation is owned by
+// clickhouse/backend (created up front for every store), so the store assumes its
+// tables already exist.
+func New(_ context.Context, conn driver.Conn, clusterName string, logger zerolog.Logger) (*Store, error) {
+	return &Store{
+		conn:        conn,
+		clusterName: clusterName,
+		logger:      logger,
+		closeCh:     make(chan struct{}),
+	}, nil
 }
 
 // Close stops every node-ID refresh loop and waits for them to return, so the
@@ -226,7 +250,7 @@ func pickFreeSlot(slots []slot) (string, bool) {
 // AcquireNodeID claims a node ID and keeps its lease alive in a background loop
 // until the returned release function is called (which frees the slot). The
 // owner identity is internal: a fresh UUID per acquisition.
-func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
+func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) { //nolint:contextcheck
 	owner := uuid.New().String()
 
 	id, err := s.claim(ctx, owner)
@@ -237,22 +261,22 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
 	// The lease is renewed from a background loop, independent of the (possibly
 	// short-lived) acquisition context. The loop is tracked by s.wg and ends on
 	// either stop (this release) or s.closeCh (the whole Store closing).
-	stop := make(chan struct{})
+	loopCtx, loopCancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	s.wg.Go(func() {
 		defer close(done)
 
-		s.refreshLoop(stop, owner, id)
+		s.refreshLoop(loopCtx, owner, id)
 	})
 
 	var once sync.Once
 
-	release := func() {
+	release := func() { //nolint:contextcheck
 		once.Do(func() {
 			// Stop our refresh loop and wait for it to return before freeing the
 			// slot, so a last refresh write can't resurrect the lease we clear.
-			close(stop)
+			loopCancel()
 			<-done
 
 			rctx, rcancel := context.WithTimeout(context.Background(), writeTimeout)
@@ -311,7 +335,7 @@ func (s *Store) claim(ctx context.Context, owner string) (string, error) {
 // take it (they only reuse free/expired slots), so this just keeps the lease
 // from lapsing — no ownership re-check is needed. Each write is bounded by
 // writeTimeout so a stuck ClickHouse can't block Close.
-func (s *Store) refreshLoop(stop <-chan struct{}, owner, id string) {
+func (s *Store) refreshLoop(ctx context.Context, owner, id string) {
 	ticker := time.NewTicker(refreshInterval)
 	defer ticker.Stop()
 
@@ -319,10 +343,10 @@ func (s *Store) refreshLoop(stop <-chan struct{}, owner, id string) {
 		select {
 		case <-s.closeCh:
 			return
-		case <-stop:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+			ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 			err := s.writeLease(ctx, id, owner, time.Now().Add(leaseTTL))
 
 			cancel()

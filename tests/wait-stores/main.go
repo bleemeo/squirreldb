@@ -69,6 +69,11 @@ func waitRedis(ctx context.Context, squirreldb *daemon.SquirrelDB) {
 		if _, err := squirreldb.Cluster(ctx); err != nil {
 			log.Printf("connection to Redis failed: %s", err)
 
+			// Because the cluster might very likely already have registrered metrics in
+			// the MetricRegistry (and re-regisreting the same metrics will fail),
+			// we re-new the MetricRegistry to allow next loop to work
+			squirreldb.MetricRegistry = prometheus.NewRegistry()
+
 			continue
 		}
 

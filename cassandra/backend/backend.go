@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -167,6 +168,11 @@ func (b *Backend) CloseAll(ctx context.Context) {
 
 	b.connection.Close()
 	b.connection = nil
+}
+
+// RegisterHTTPEndpoints registers no Cassandra-specific debug endpoints yet (the
+// index debug endpoints may move here later). It satisfies daemon.Backend.
+func (b *Backend) RegisterHTTPEndpoints(_ func(method, path, description string, handler http.HandlerFunc)) {
 }
 
 // DropData deletes the Cassandra keyspace. If forceNonTestKeyspace also drops if

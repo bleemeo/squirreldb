@@ -36,10 +36,6 @@ redis:
 This quickstart will start a SquirrelDB in HA (with Cassandra cluster and Redis) using docker compose.
 Obvisouly this is only for testing since all components will run on the same machine.
 
-Due to some component not liking to change their IP address, they are fixed and use
-subnet 172.28.0.0/16. If this conflict with one of your existing network, update
-the docker compose file to change this subnet.
-
 Like the single-node quickstart, this will also start a Prometheus + Grafana and one node_exporter to
 have some data in SquirrelDB.
 

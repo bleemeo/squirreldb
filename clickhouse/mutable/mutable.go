@@ -33,7 +33,9 @@ package mutable
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	"github.com/bleemeo/squirreldb/mutable"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -43,7 +45,10 @@ import (
 // Options configures the ClickHouse mutable label store.
 type Options struct {
 	ReadOnly bool
-	Logger   zerolog.Logger
+	// ClusterName enables ClickHouse cluster mode (ON CLUSTER + Replicated with
+	// an explicit, name-based Keeper path; the tables must not be RENAMEd).
+	ClusterName string
+	Logger      zerolog.Logger
 }
 
 type clickhouseStore struct {
@@ -55,57 +60,59 @@ type clickhouseStore struct {
 // same key always wins on read with FINAL.
 const (
 	namesDDL = `
-		CREATE TABLE IF NOT EXISTS mutable_label_names (
+		CREATE TABLE IF NOT EXISTS mutable_label_names{{ON_CLUSTER}} (
 			tenant LowCardinality(String) CODEC(ZSTD(1)),
 			name String,
 			associated_name String,
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = ReplacingMergeTree(version)
+		ENGINE = {{ENGINE}}
 		ORDER BY (tenant, name)`
 
 	valuesDDL = `
-		CREATE TABLE IF NOT EXISTS mutable_label_values (
+		CREATE TABLE IF NOT EXISTS mutable_label_values{{ON_CLUSTER}} (
 			tenant LowCardinality(String) CODEC(ZSTD(1)),
 			name String,
 			value String,
 			associated_values Array(String) CODEC(ZSTD(1)),
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = ReplacingMergeTree(version)
+		ENGINE = {{ENGINE}}
 		ORDER BY (tenant, name, value)`
 )
 
 // NewStore returns a new ClickHouse mutable label store. The connection is owned
 // by the caller (clickhouse/backend) and shared with the other ClickHouse stores.
 func NewStore(ctx context.Context, conn driver.Conn, options Options) (mutable.Store, error) {
-	s := &clickhouseStore{
+	// Schema creation is owned by clickhouse/backend (created up front for every
+	// store), so the store assumes its tables already exist.
+	return &clickhouseStore{
 		conn:    conn,
 		options: options,
-	}
-
-	if err := s.createTables(ctx); err != nil {
-		return nil, err
-	}
-
-	return s, nil
+	}, nil
 }
 
-// createTables creates the mutable labels tables if they don't exist.
-func (s *clickhouseStore) createTables(ctx context.Context) error {
-	if s.options.ReadOnly {
-		s.options.Logger.Debug().Msg("Read-only mode is activated. Not trying to create tables and assuming they exist")
-
-		return nil
+// SchemaObjects returns the ClickHouse objects owned by the mutable labels store.
+// Exposed so the backend can create the whole schema up front and derive the
+// expected-table set, independently of whether the store is ever instantiated.
+func SchemaObjects(clusterName string) []ddl.Object {
+	statements := []struct {
+		table string
+		ddl   string
+	}{
+		{"mutable_label_names", namesDDL},
+		{"mutable_label_values", valuesDDL},
 	}
 
-	for _, ddl := range []string{namesDDL, valuesDDL} {
-		if err := s.conn.Exec(ctx, ddl); err != nil {
-			return fmt.Errorf("create tables: %w", err)
-		}
+	objects := make([]ddl.Object, 0, len(statements))
+
+	for _, stmt := range statements {
+		engine := ddl.ReplicatedEngine(clusterName, stmt.table, "ReplacingMergeTree", "version")
+		stmtDDL := strings.Replace(stmt.ddl, "{{ENGINE}}", engine, 1)
+		objects = append(objects, ddl.Object{Name: stmt.table, DDL: ddl.Apply(stmtDDL, clusterName), Replicated: true})
 	}
 
-	return nil
+	return objects
 }
 
 // AssociatedNames return the associated names map[mutable label name] -> non mutable label name.

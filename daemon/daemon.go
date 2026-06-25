@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -81,6 +82,10 @@ type Backend interface {
 	MutableProcessor(ctx context.Context) (*mutable.LabelProcessor, error)
 	TelemetryStore(ctx context.Context) (telemetry.Store, error)
 	CloseAll(ctx context.Context)
+	// RegisterHTTPEndpoints registers backend-specific debug endpoints. The API
+	// prepends a per-backend prefix (/debug/<backend>/), so paths are relative;
+	// description feeds the /debug/ index.
+	RegisterHTTPEndpoints(register func(method, path, description string, handler http.HandlerFunc))
 }
 
 // SquirrelDB is the SquirrelDB process itself. The Prometheus remote-store.
@@ -442,6 +447,7 @@ func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhouseb
 		TenantLabel:       s.Config.TenantLabelName,
 		BatchSize:         s.Config.Batch.Size,
 		DefaultTimeToLive: s.Config.DefaultTimeToLive,
+		ClusterName:       s.Config.ClickHouse.ClusterName,
 	}
 
 	if s.Config.Internal.TemporaryStore == "redis" {
@@ -520,7 +526,7 @@ func (s *SquirrelDB) DropData(ctx context.Context, force bool) error {
 		b, err := clickhousebackend.New(
 			ctx,
 			s.Logger.With().Str("backend", "clickhouse").Logger(),
-			clickhousebackend.Options{Config: s.Config.ClickHouse},
+			clickhousebackend.Options{Config: s.Config.ClickHouse, ClusterName: s.Config.ClickHouse.ClusterName},
 		)
 		if err != nil {
 			return err
@@ -561,6 +567,11 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 	s.api.DefaultTTL = s.Config.DefaultTimeToLive
+
+	if backend, err := s.getBackend(ctx); err == nil {
+		s.api.BackendName = s.Config.Backend
+		s.api.BackendDebug = backend
+	}
 
 	s.api.FuturePointsBackdateOffset = s.Config.MaxAllowedTimeInFuture
 

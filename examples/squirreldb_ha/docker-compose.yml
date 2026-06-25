@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   cassandra1:
     image: cassandra
@@ -16,9 +14,6 @@ services:
       - "MAX_HEAP_SIZE=128M"
       - "HEAP_NEWSIZE=24M"
       - "CASSANDRA_SEEDS=cassandra1,cassandra2"
-    networks:
-      default:
-        ipv4_address: 172.28.0.11 # Cassandra don't like if node swap their IPs. Other case should be fine
   cassandra2:
     image: cassandra
     restart: unless-stopped
@@ -30,9 +25,6 @@ services:
       - "MAX_HEAP_SIZE=128M"
       - "HEAP_NEWSIZE=24M"
       - "CASSANDRA_SEEDS=cassandra1,cassandra2"
-    networks:
-      default:
-        ipv4_address: 172.28.0.12
   cassandra3:
     image: cassandra
     restart: unless-stopped
@@ -44,84 +36,84 @@ services:
       - "MAX_HEAP_SIZE=128M"
       - "HEAP_NEWSIZE=24M"
       - "CASSANDRA_SEEDS=cassandra1,cassandra2"
-      # We don't fix Cassandra 3 IP because:
-      # * in a 3 nodes cluster, with the first two having fixed IP avoid any swap of node IP
-      # * it make easier to run some test with higher number of Cassandra. Just scale cassandra3
 
   redis1:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.21 # Redis need fixed IP of the cluster may fail to recover by itself if node switch their IPs or all node changes their IP.
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis2:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.22
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis3:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.23
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis4:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.24
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis5:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.25
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis6:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis.conf:/etc/redis.conf:ro
-    command: [ "/etc/redis.conf" ]
-    networks:
-      default:
-        ipv4_address: 172.28.0.26
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
   redis_init:
-    image: redis:6
+    image: redis:7
     restart: unless-stopped
     labels:
       glouton.enable: "false"
-    volumes:
-      - ./redis-init.sh:/usr/bin/redis-init.sh:ro
-    command: [ "/bin/sh", "/usr/bin/redis-init.sh" ]
+    configs:
+      - source: redis_cluster_init
+        target: /srv/redis-files/redis-cluster-init.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-cluster-init.sh" ]
 
   squirreldb1:
     image: bleemeo/squirreldb
@@ -132,9 +124,7 @@ services:
       - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
       - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
       - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
-    networks:
-      default:
-        ipv4_address: 172.28.0.31 # SquirrelDB don't care about its IP, but nginx will only resolv DNS name on startup. So if SquirrelDB change their IP, nginx will no longer send traffic to them
+      - SQUIRRELDB_BACKEND=cassandra
   squirreldb2:
     image: bleemeo/squirreldb
     restart: unless-stopped
@@ -144,9 +134,7 @@ services:
       - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
       - SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
       - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
-    networks:
-      default:
-        ipv4_address: 172.28.0.32
+      - SQUIRRELDB_BACKEND=cassandra
 
   squirreldb:
     image: nginx
@@ -181,8 +169,18 @@ services:
     ports:
       - 127.0.0.1:3000:3000
 
-networks:
-  default:
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
+
+configs:
+  redis_config:
+    content: |
+      cluster-enabled yes
+      cluster-require-full-coverage no
+      cluster-node-timeout 15000
+      cluster-config-file /data/nodes.conf
+      cluster-migration-barrier 1
+      appendonly yes
+      protected-mode no
+  redis_cluster_init:
+    file: ./redis-scripts/redis-cluster-init.sh
+  redis_node_start:
+    file: ./redis-scripts/redis-node-start.sh

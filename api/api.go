@@ -105,14 +105,34 @@ type API struct {
 	// When enabled, return an response to queries and write
 	// requests that don't provide the tenant header.
 	RequireTenantHeader bool
-	Logger              zerolog.Logger
+	// BackendDebug, when set, registers backend-specific debug endpoints under
+	// /debug/<BackendName>/. BackendName identifies the backend (e.g. "clickhouse")
+	// so two backends never collide on the same relative path.
+	BackendDebug BackendDebugRegistrar
+	BackendName  string
+	Logger       zerolog.Logger
 
-	ready      atomic.Int32
-	router     http.Handler
-	listenPort int
-	metrics    *metrics
+	ready                 atomic.Int32
+	router                http.Handler
+	listenPort            int
+	metrics               *metrics
+	backendDebugEndpoints []backendDebugEndpoint
 
 	FuturePointsBackdateOffset time.Duration
+}
+
+// BackendDebugRegistrar is implemented by the storage backend to register its
+// debug HTTP endpoints. The API calls it with a register function that prepends
+// /debug/<BackendName>/ to each (relative) path; the description feeds the
+// /debug/ index.
+type BackendDebugRegistrar interface {
+	RegisterHTTPEndpoints(register func(method, path, description string, handler http.HandlerFunc))
+}
+
+type backendDebugEndpoint struct {
+	method      string
+	path        string
+	description string
 }
 
 type MutableLabelInterface interface {
@@ -274,6 +294,28 @@ func (a *API) init(ctx context.Context) error {
 	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
 	router.Post("/debug/mutable_import", a.mutableImportHandler)
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+
+	if a.BackendDebug != nil && a.BackendName != "" {
+		prefix := "/debug/" + a.BackendName
+
+		a.BackendDebug.RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc) {
+			full := prefix + path
+
+			switch method {
+			case http.MethodGet:
+				router.Get(full, handler)
+			case http.MethodPost:
+				router.Post(full, handler)
+			default:
+				a.Logger.Warn().Msgf("ignoring backend debug endpoint %s: unsupported method %q", full, method)
+
+				return
+			}
+
+			a.backendDebugEndpoints = append(a.backendDebugEndpoints,
+				backendDebugEndpoint{method: method, path: full, description: description})
+		})
+	}
 
 	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
 	router.Del("/mutable/names", a.mutableLabelNamesDeleteHandler)
@@ -541,6 +583,10 @@ The CSV format is: metricID, labels,expirationDate
 	/debug/index_dump_by_posting?shard_time=0001-01-01&name=__global__all|metrics__
 
 `)
+
+	for _, e := range a.backendDebugEndpoints {
+		fmt.Fprintf(w, "\n%s %s\n\t%s\n", e.method, e.path, e.description)
+	}
 }
 
 func (a *API) getIndexDumperOrReplyError(w http.ResponseWriter) types.IndexDumper {

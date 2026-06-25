@@ -58,6 +58,10 @@ const labelsTTLMargin = time.Hour
 
 // Options carries the configuration needed to build a ClickHouseTSDB.
 type Options struct {
+	// ClusterName, when set, switches the schema to ClickHouse cluster mode
+	// (ON CLUSTER + ReplicatedMergeTree with an explicit, name-based Keeper
+	// path; the tables must not be RENAMEd). Empty means a single node.
+	ClusterName       string
 	Redis             config.Redis // If unset, an in-memory store is used for batching.
 	Reg               prometheus.Registerer
 	TenantLabel       string
@@ -104,10 +108,6 @@ func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger, opts Opti
 		metrics:    newMetrics(opts.Reg),
 		logger:     logger,
 		seenSeries: make(map[uint64]seenEntry),
-	}
-
-	if err := c.createSchema(ctx); err != nil {
-		return nil, fmt.Errorf("clickhouse: create schema: %w", err)
 	}
 
 	temporaryStore, err := newTemporaryStore(ctx, opts, logger)

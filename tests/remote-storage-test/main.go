@@ -73,7 +73,7 @@ func run(ctx context.Context) error {
 
 	var squirreldb *daemon.SquirrelDB
 
-	if squirrelDBURL == "" { //nolint:nestif
+	if squirrelDBURL == "" {
 		squirreldb = &daemon.SquirrelDB{
 			Config: cfg,
 			Logger: log.With().Str("component", "daemon").Logger(),

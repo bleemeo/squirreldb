@@ -17,6 +17,7 @@
 package telemetrystore
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -30,12 +31,15 @@ func TestCloseStopsRefreshLoop(t *testing.T) {
 
 	s := &Store{closeCh: make(chan struct{})}
 
-	stop := make(chan struct{})
+	loopCtx, loopCancel := context.WithCancel(t.Context())
+	defer loopCancel()
+
 	s.wg.Go(func() {
-		s.refreshLoop(stop, "owner", "id")
+		s.refreshLoop(loopCtx, "owner", "id")
 	})
 
 	done := make(chan struct{})
+
 	go func() {
 		_ = s.Close()
 
