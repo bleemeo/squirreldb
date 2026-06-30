@@ -532,8 +532,10 @@ func TestBatch_flush(t *testing.T) {
 				t.Errorf("writer got = %v, want = %v", writer.Data, tt.wantWriter)
 			}
 
+			// Order-insensitive: dumpMemoryStore returns metrics in map-iteration
+			// order (GetAllKnownMetrics), which is non-deterministic.
 			gotMemoryStore := dumpMemoryStore(t.Context(), tt.memoryStore)
-			if !dataEqual(true, gotMemoryStore, tt.wantMemoryStore) {
+			if !dataEqual(false, gotMemoryStore, tt.wantMemoryStore) {
 				t.Errorf("memory store got = %v, want = %v", gotMemoryStore, tt.wantMemoryStore)
 			}
 		})
@@ -1143,7 +1145,10 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			}
 
 			if tt.wantWriter1 != nil {
-				if !dataEqual(true, writer1.Data, tt.wantWriter1) {
+				// Order-insensitive: a flush of several metrics writes them in
+				// b.states map-iteration order, which is non-deterministic. Only the
+				// set of (metric, points) written matters, not the cross-metric order.
+				if !dataEqual(false, writer1.Data, tt.wantWriter1) {
 					t.Errorf("writer1 = %v, want = %v", writer1.Data, tt.wantWriter1)
 				}
 			}
@@ -1155,7 +1160,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			}
 
 			if tt.wantWriter2 != nil {
-				if !dataEqual(true, writer2.Data, tt.wantWriter2) {
+				if !dataEqual(false, writer2.Data, tt.wantWriter2) {
 					t.Errorf("writer2 = %v, want = %v", writer2.Data, tt.wantWriter2)
 				}
 			}
