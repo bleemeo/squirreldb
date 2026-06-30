@@ -84,19 +84,29 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 
 		cols := seriesToInput(lbls, w.c.opts.TenantLabel, m.TimeToLive, globalDays)
 
-		for _, p := range m.Points {
-			if err := batch.Append(
-				cols.metricName, cols.tenant, cols.tags, time.UnixMilli(p.Timestamp), p.Value, cols.rowTTLDays,
-			); err != nil {
-				_ = batch.Abort()
+		// One row per series: the points go in as parallel timestamps/values arrays
+		// (re-expanded server-side by mv_datapoint_data's ARRAY JOIN). This keeps the
+		// series identity (metric_name, tenant, tags) once per series in the
+		// clickhouse-go block instead of once per point — see datapointInputDDL.
+		timestamps := make([]time.Time, len(m.Points))
+		values := make([]float64, len(m.Points))
 
-				w.c.metrics.FlushErrorsTotal.Inc()
-
-				return fmt.Errorf("append row: %w", err)
-			}
-
-			rows++
+		for j, p := range m.Points {
+			timestamps[j] = time.UnixMilli(p.Timestamp)
+			values[j] = p.Value
 		}
+
+		if err := batch.Append(
+			cols.metricName, cols.tenant, cols.tags, timestamps, values, cols.rowTTLDays,
+		); err != nil {
+			_ = batch.Abort()
+
+			w.c.metrics.FlushErrorsTotal.Inc()
+
+			return fmt.Errorf("append row: %w", err)
+		}
+
+		rows += len(m.Points)
 	}
 
 	if droppedPoints > 0 {
@@ -107,9 +117,9 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 			Msg("Missing labels for some metrics at flush time, their points were dropped")
 	}
 
-	// Size of the clickhouse-go block this flush builds in memory before Send:
-	// rows is one per point (metric_name + tags duplicated on each), the dominant
-	// memory cost during a backlog catch-up.
+	// Size of the clickhouse-go block this flush builds in memory before Send: total
+	// points (array elements) and distinct series (one block row each). The
+	// points-per-series ratio is what a per-point layout used to amplify in memory.
 	w.c.metrics.FlushRowsPerBatch.Observe(float64(rows))
 	w.c.metrics.FlushMetricsPerBatch.Observe(float64(len(metrics) - missingLabels))
 

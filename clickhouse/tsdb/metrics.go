@@ -28,10 +28,12 @@ type metrics struct {
 	FlushErrorsTotal        prometheus.Counter
 	FlushDroppedPointsTotal prometheus.Counter
 	// FlushRowsPerBatch / FlushMetricsPerBatch capture the size of a single
-	// clickhouse-go INSERT block (rows = one per point, metrics = distinct series).
-	// During a backlog catch-up the batcher hands a large flush to the writer in one
-	// block, and clickhouse-go buffers the whole block (with metric_name + tags
-	// duplicated per row) in memory before Send — these reveal that peak.
+	// clickhouse-go INSERT block: points (timestamps/values array elements across
+	// all series) and distinct series (one block row each, since the write path
+	// sends one row per series — see datapointInputDDL). During a backlog catch-up
+	// the batcher hands a large flush to the writer in one block, and clickhouse-go
+	// buffers the whole block uncompressed before Send — these reveal that peak and
+	// the points-per-series ratio that drove it.
 	FlushRowsPerBatch    prometheus.Histogram
 	FlushMetricsPerBatch prometheus.Histogram
 
@@ -82,7 +84,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Namespace: namespace,
 			Subsystem: subSystem,
 			Name:      "flush_rows_per_batch",
-			Help:      "Rows (one per point) sent to ClickHouse in a single INSERT block",
+			Help:      "Points (timestamps/values array elements) sent to ClickHouse in a single INSERT block",
 			Buckets:   prometheus.ExponentialBuckets(100, 4, 10), // 100 .. ~26M
 		}),
 		FlushMetricsPerBatch: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{

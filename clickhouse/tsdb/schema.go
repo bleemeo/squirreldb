@@ -70,8 +70,17 @@ PRIMARY KEY (tenant, metric_name)
 ORDER BY (tenant, metric_name, id){{TTL}}`
 
 // SQL write path: points are inserted into the Null-engine datapoint_input
-// table, and two materialized views fan them out into the data and tags tables,
-// computing the series id as reinterpretAsUUID(sipHash128(metric_name, tenant, tags)).
+// table, and a materialized view fans them out into tsdb_data, computing the
+// series id as reinterpretAsUUID(sipHash128(metric_name, tenant, tags)).
+//
+// One input row carries a whole series' points as parallel timestamps/values
+// arrays, NOT one row per point: the series identity (metric_name, tenant, tags)
+// then appears once per series instead of once per point. clickhouse-go buffers
+// the whole INSERT block uncompressed client-side (the tag values are plain
+// String — not dictionary-encoded like the LowCardinality columns), so a per-point
+// layout duplicated those bytes thousands of times during a backlog catch-up,
+// driving the process to hundreds of MiB. The MV re-expands the arrays with
+// ARRAY JOIN, so tsdb_data still gets one row per point.
 //
 // Column types match tsdb_tags so the id computed here equals the one computed by
 // the tsdb_tags DEFAULT for an eager registration of the same series.
@@ -83,12 +92,16 @@ CREATE TABLE IF NOT EXISTS datapoint_input{{ON_CLUSTER}}
     metric_name LowCardinality(String),
     tenant LowCardinality(String),
     tags Map(LowCardinality(String), String),
-    timestamp DateTime64(3),
-    value Float64,
+    timestamps Array(DateTime64(3)),
+    values Array(Float64),
     row_ttl_days UInt16
 )
 ENGINE = Null`
 
+// mvDatapointDataDDL expands each series row into one tsdb_data row per point.
+// The parallel ARRAY JOIN zips timestamps and values element-wise (they always
+// have the same length, see sqlWriter.Write). The id is computed once per input
+// row (per series) and repeated across its points by the join.
 const mvDatapointDataDDL = `
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_data
 (
@@ -102,7 +115,10 @@ SELECT
     timestamp,
     value,
     row_ttl_days
-FROM datapoint_input`
+FROM datapoint_input
+ARRAY JOIN
+    timestamps AS timestamp,
+    values AS value`
 
 // SchemaObjects returns the ClickHouse objects owned by the TSDB store, engine
 // and per-row TTL filled in. Exposed so the backend can create the whole schema
