@@ -131,6 +131,17 @@ func run(ctx context.Context) error {
 	}
 	defer squirreldb.Stop()
 
+	// Skip early, before touching any data: this bench is Cassandra-index only, so
+	// on another backend (e.g. ClickHouse) we must not drop/recreate its tables.
+	backend, err := squirreldb.Backend(ctx)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := backend.(cassandraIndexTester); !ok {
+		return daemon.ErrSkipBackend
+	}
+
 	if !*noDropTables {
 		log.Printf("Dropping tables")
 

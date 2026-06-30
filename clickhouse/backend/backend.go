@@ -384,11 +384,16 @@ func (b *Backend) DropData(ctx context.Context, forceNonTestDatabase bool) error
 	// Drop in REVERSE of the creation order so the materialized view goes before
 	// its source/target tables. DROP TABLE works on the view and the Null table
 	// too. ON CLUSTER (when clustered) drops on every node, matching creation.
+	//
+	// SYNC forces a synchronous drop: with the Atomic database engine a plain DROP
+	// is deferred (database_atomic_delay_before_drop_table_sec, 480s by default)
+	// and the replica's Keeper path is freed only then — so an immediate re-CREATE
+	// (our name-based path) would hit REPLICA_ALREADY_EXISTS. SYNC frees Keeper now.
 	onCluster := ddl.OnCluster(b.options.ClusterName)
 	objects := allSchemaObjects(b.options)
 
 	for _, row := range slices.Backward(objects) {
-		stmt := "DROP TABLE IF EXISTS " + row.Name + onCluster
+		stmt := "DROP TABLE IF EXISTS " + row.Name + onCluster + " SYNC"
 		if err := conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("clickhouse: %s: %w", stmt, err)
 		}

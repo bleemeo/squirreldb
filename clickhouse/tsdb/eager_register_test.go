@@ -26,7 +26,7 @@ import (
 )
 
 func TestSeriesToRegister(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry)}
+	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry), metrics: newMetrics(nil)}
 	t0 := time.Unix(1000, 0)
 
 	a := types.Timeseries{Labels: labels.FromStrings("__name__", "a")}
@@ -102,7 +102,7 @@ func TestComputeMaxExpiration(t *testing.T) {
 }
 
 func TestSweepSeenSeries(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry)}
+	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry), metrics: newMetrics(nil)}
 	start := time.Unix(1000, 0)
 
 	a := types.Timeseries{Labels: labels.FromStrings("__name__", "a")}

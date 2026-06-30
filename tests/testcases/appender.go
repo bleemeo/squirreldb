@@ -339,7 +339,13 @@ func (c ReadWriteTestCase) execCase(ctx context.Context, optionalT *testing.T, t
 			)
 
 			wg.Go(func() {
-				err := subTask()
+				// Outside a *testing.T (the integration runner, run-test-cases),
+				// the backend may be eventually consistent: a clustered ClickHouse
+				// replicates asynchronously, so a read right after a write can hit a
+				// replica that hasn't caught up. Retry the query block until it
+				// matches or the budget elapses; a consistent backend matches on the
+				// first try (no delay).
+				err := retryUntilConsistent(ctx, subTask)
 
 				l.Lock()
 				defer l.Unlock()
@@ -354,6 +360,33 @@ func (c ReadWriteTestCase) execCase(ctx context.Context, optionalT *testing.T, t
 	}
 
 	return errors.Join(errs...)
+}
+
+// Retry budget for the integration runner's query assertions, to absorb the
+// replication lag of an eventually-consistent backend (clustered ClickHouse).
+const (
+	queryRetryBudget = 15 * time.Second
+	queryRetryStep   = 250 * time.Millisecond
+)
+
+// retryUntilConsistent runs fn until it succeeds or the budget elapses, returning
+// the last error. A consistent backend succeeds on the first call, so there is no
+// delay unless the read is actually stale (or genuinely wrong).
+func retryUntilConsistent(ctx context.Context, fn func() error) error {
+	start := time.Now()
+
+	for {
+		err := fn()
+		if err == nil || time.Since(start) >= queryRetryBudget {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(queryRetryStep):
+		}
+	}
 }
 
 func generatePoints(startT, stepT, count int64, value float64) []types.MetricPoint {

@@ -138,6 +138,8 @@ func (c *ClickHouseTSDB) seriesToRegister(series []types.Timeseries, now time.Ti
 		c.seenSeries[hash] = entry
 	}
 
+	c.metrics.SeenSeriesSize.Set(float64(len(c.seenSeries)))
+
 	return toRegister
 }
 
@@ -181,6 +183,8 @@ func (c *ClickHouseTSDB) sweepSeenSeries(now time.Time) {
 			delete(c.seenSeries, hash)
 		}
 	}
+
+	c.metrics.SeenSeriesSize.Set(float64(len(c.seenSeries)))
 }
 
 // computeMaxExpiration returns the tsdb_tags max_expiration for a series: the

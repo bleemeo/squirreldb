@@ -107,6 +107,12 @@ func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error
 			Msg("Missing labels for some metrics at flush time, their points were dropped")
 	}
 
+	// Size of the clickhouse-go block this flush builds in memory before Send:
+	// rows is one per point (metric_name + tags duplicated on each), the dominant
+	// memory cost during a backlog catch-up.
+	w.c.metrics.FlushRowsPerBatch.Observe(float64(rows))
+	w.c.metrics.FlushMetricsPerBatch.Observe(float64(len(metrics) - missingLabels))
+
 	if rows == 0 {
 		return batch.Abort()
 	}
