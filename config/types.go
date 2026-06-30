@@ -52,6 +52,7 @@ type Internal struct {
 	Installation            Installation `yaml:"installation"`
 	TemporaryStore          string       `yaml:"temporary_store"`
 	DisablePreAggregation   bool         `yaml:"disable_pre_aggregation"`
+	Dummy                   Dummy        `yaml:"dummy"`
 	ReadOnly                bool         `yaml:"read_only"`
 }
 
@@ -135,4 +136,26 @@ type ClickHouse struct {
 	// must never be RENAMEd; see examples/squirreldb_ha_clickhouse for the
 	// node-recovery runbook.
 	ClusterName string `yaml:"cluster_name"`
+}
+
+// Dummy holds the configuration of the dummy backend.
+// It is used when the "backend" option is set to "dummy". The dummy backend
+// discards every write and serves empty reads; it has no external dependency.
+// Its purpose is to isolate load-test overhead: if a load test is slow against
+// the dummy backend, the bottleneck is the test (or the batcher), not Cassandra
+// or ClickHouse.
+type Dummy struct {
+	// Batcher, when true (the default), routes writes through the shared batcher
+	// (batch.Batch) and its temporary store before discarding them, so the dummy
+	// backend exercises the same write path as Cassandra/ClickHouse minus the
+	// database write itself. When false, writes are discarded immediately, with
+	// no batching and no temporary store (the absolute load-test baseline).
+	Batcher bool `yaml:"batcher"`
+	// StoreLabels, when true, makes the appender store each series' labels in the
+	// temporary store (StoreLabelsByID) at commit time and the writer read them
+	// back (GetLabelsByID) at flush time, mirroring the ClickHouse backend's label
+	// round-trip. It isolates the cost of that round-trip from the rest of the
+	// write path. It only applies when Batcher is true (otherwise there is no
+	// temporary store and no writer).
+	StoreLabels bool `yaml:"store_labels"`
 }

@@ -89,6 +89,10 @@ func DefaultConfig() Config {
 			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
 		},
 		Internal: Internal{
+			Dummy: Dummy{
+				Batcher:     true,
+				StoreLabels: false,
+			},
 			ShowGoroutingOnShutdown: false,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       0,

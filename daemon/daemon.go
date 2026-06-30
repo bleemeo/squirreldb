@@ -35,6 +35,7 @@ import (
 	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
+	dummybackend "github.com/bleemeo/squirreldb/dummy/backend"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/redis/client"
@@ -59,6 +60,7 @@ var (
 const (
 	backendCassandra  = "cassandra"
 	backendClickHouse = "clickhouse"
+	backendDummy      = "dummy"
 )
 
 type LockFactory interface {
@@ -457,6 +459,26 @@ func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhouseb
 	return options
 }
 
+// dummyBackendOptions builds the dummy backend options. The dummy backend
+// discards all writes; the batcher (and its temporary store) are only wired when
+// dummy.batcher is set.
+func (s *SquirrelDB) dummyBackendOptions(cluster types.Cluster) dummybackend.Options {
+	options := dummybackend.Options{
+		MetricRegistry: s.MetricRegistry,
+		Cluster:        cluster,
+		TenantLabel:    s.Config.TenantLabelName,
+		Batch:          s.Config.Batch,
+		Batcher:        s.Config.Internal.Dummy.Batcher,
+		StoreLabels:    s.Config.Internal.Dummy.StoreLabels,
+	}
+
+	if s.Config.Internal.TemporaryStore == "redis" {
+		options.Redis = s.Config.Redis
+	}
+
+	return options
+}
+
 // Backend returns the (started, cached) storage backend. Test tools use it to
 // reach backend-specific capabilities (e.g. a type-assert for the Cassandra lock
 // factory or index test hooks); a tool needing a capability the configured
@@ -486,6 +508,9 @@ func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
 	case backendClickHouse:
 		b, err = clickhousebackend.New(
 			ctx, s.Logger.With().Str("backend", "clickhouse").Logger(), s.clickHouseBackendOptions(cluster))
+	case backendDummy:
+		b, err = dummybackend.New(
+			ctx, s.Logger.With().Str("backend", "dummy").Logger(), s.dummyBackendOptions(cluster))
 	default:
 		return nil, fmt.Errorf("unknown backend: %v", s.Config.Backend)
 	}
@@ -533,6 +558,9 @@ func (s *SquirrelDB) DropData(ctx context.Context, force bool) error {
 		}
 
 		return b.DropData(ctx, force)
+	case backendDummy:
+		// The dummy backend persists nothing, so there is nothing to drop.
+		return nil
 	default:
 		return fmt.Errorf("unknown backend: %v", s.Config.Backend)
 	}
