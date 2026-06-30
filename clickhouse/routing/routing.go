@@ -68,6 +68,10 @@ type Options struct {
 	Addresses []string
 	Auth      clickhouse.Auth
 	Settings  clickhouse.Settings
+	// Compression, when set, is applied to every per-host connection (native
+	// protocol block compression). LZ4 markedly cuts the wire size — and the
+	// flush latency — of the large, repetitive INSERT blocks the write path sends.
+	Compression *clickhouse.Compression
 	// ExpectedTables are the tables a host must hold to be considered ready. When
 	// empty, the table check is skipped (a reachable host is ready).
 	ExpectedTables []string
@@ -178,9 +182,10 @@ func New(ctx context.Context, opts Options) (*Conn, error) {
 
 	for _, addr := range opts.Addresses {
 		hc, err := clickhouse.Open(&clickhouse.Options{
-			Addr:     []string{addr},
-			Auth:     opts.Auth,
-			Settings: opts.Settings,
+			Addr:        []string{addr},
+			Auth:        opts.Auth,
+			Settings:    opts.Settings,
+			Compression: opts.Compression,
 		})
 		if err != nil {
 			cancelMontor()

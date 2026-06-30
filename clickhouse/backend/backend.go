@@ -105,6 +105,14 @@ var chSettings = clickhouse.Settings{
 	"distributed_ddl_task_timeout": distributedDDLTaskTimeout,
 }
 
+// chCompression is applied to every per-host connection. LZ4 block compression on
+// the native protocol markedly cuts the wire size — and the flush latency — of the
+// large, repetitive INSERT blocks the write path sends during a backlog catch-up,
+// for negligible CPU. (The default, no compression, leaves those blocks raw.)
+//
+//nolint:gochecknoglobals
+var chCompression = &clickhouse.Compression{Method: clickhouse.CompressionLZ4}
+
 // openConn opens a plain (non-routing) ClickHouse connection over all addresses.
 // Used by DropData; the live read/write path uses the routing connection opened
 // in Start.
@@ -116,7 +124,8 @@ func openConn(cfg config.ClickHouse) (driver.Conn, error) {
 			Username: cfg.Username,
 			Password: cfg.Password,
 		},
-		Settings: chSettings,
+		Settings:    chSettings,
+		Compression: chCompression,
 	})
 }
 
@@ -199,6 +208,7 @@ func (b *Backend) Start(ctx context.Context) error {
 			Password: cfg.Password,
 		},
 		Settings:       chSettings,
+		Compression:    chCompression,
 		ExpectedTables: expectedTables(b.options),
 		ClusterName:    b.options.ClusterName,
 		Registerer:     b.options.MetricRegistry,
