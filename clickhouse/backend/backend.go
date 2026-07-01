@@ -207,12 +207,13 @@ func (b *Backend) Start(ctx context.Context) error {
 			Username: cfg.Username,
 			Password: cfg.Password,
 		},
-		Settings:       chSettings,
-		Compression:    chCompression,
-		ExpectedTables: expectedTables(b.options),
-		ClusterName:    b.options.ClusterName,
-		Registerer:     b.options.MetricRegistry,
-		Logger:         b.logger.With().Str("component", "clickhouse-routing").Logger(),
+		Settings:             chSettings,
+		Compression:          chCompression,
+		MaxConcurrentQueries: cfg.MaxConcurrentQueries,
+		ExpectedTables:       expectedTables(b.options),
+		ClusterName:          b.options.ClusterName,
+		Registerer:           b.options.MetricRegistry,
+		Logger:               b.logger.With().Str("component", "clickhouse-routing").Logger(),
 	})
 	if err != nil {
 		return fmt.Errorf("clickhouse: open connection: %w", err)

@@ -40,6 +40,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +64,17 @@ const (
 	probeTimeout         = 3 * time.Second
 )
 
+// Query-concurrency limiter (see Conn.sem / acquireRead / acquireWrite).
+const (
+	// minQueryBudget is the smallest total (read+write) budget: at least one slot
+	// each for a read and a write.
+	minQueryBudget = 2
+	// autoQueryBudgetMargin is subtracted from ClickHouse's detected
+	// max_concurrent_queries when the budget is auto-detected, leaving headroom for
+	// the health probes (which bypass the limiter) and any other client of that node.
+	autoQueryBudgetMargin = 4
+)
+
 // Options configures a routing Conn.
 type Options struct {
 	Addresses []string
@@ -81,6 +93,14 @@ type Options struct {
 	ClusterName   string
 	ProbeInterval time.Duration // default DefaultProbeInterval
 	LagThreshold  time.Duration // default DefaultLagThreshold
+	// MaxConcurrentQueries is the total (read+write) budget of in-flight queries
+	// this Conn sends, so it never trips ClickHouse's max_concurrent_queries (which
+	// would surface as an error). Reads are capped at budget-1 so a write always has
+	// a slot. 0 auto-detects from the server's max_concurrent_queries minus a margin
+	// (works for 1:1 non-shared setups; set it explicitly for shared servers or an
+	// N-SquirrelDB/M-ClickHouse fan-out). A value below minQueryBudget is raised to
+	// it; when auto-detect finds an unlimited server (0), no limit is applied.
+	MaxConcurrentQueries int
 	// Registerer, when set, receives per-host health gauges.
 	Registerer prometheus.Registerer
 	Logger     zerolog.Logger
@@ -150,6 +170,14 @@ type Conn struct {
 	cancelMonitor context.CancelFunc
 	wg            sync.WaitGroup
 
+	// sem bounds total in-flight queries; readSem (size len(sem)-1) additionally
+	// caps reads so a write always finds a free sem slot. Both nil = no limit. A
+	// read acquires readSem then sem; a write acquires sem only. Slots are held for
+	// the whole query life (until Rows.Close / Batch Send/Abort/Close).
+	sem       chan struct{}
+	readSem   chan struct{}
+	queryWait *prometheus.CounterVec // times an acquisition had to block, by kind
+
 	registerer prometheus.Registerer
 	collector  prometheus.Collector
 }
@@ -200,6 +228,15 @@ func New(ctx context.Context, opts Options) (*Conn, error) {
 
 	c.probeAll(ctx)
 	c.warnClusterSize(ctx)
+
+	if err := c.setupQueryLimit(ctx); err != nil {
+		cancelMontor()
+
+		_ = c.Close()
+
+		return nil, err
+	}
+
 	c.registerMetrics()
 
 	c.wg.Add(1)
@@ -207,6 +244,158 @@ func New(ctx context.Context, opts Options) (*Conn, error) {
 	go c.monitor(monitorCtx) //nolint:contextcheck
 
 	return c, nil
+}
+
+// setupQueryLimit resolves the total query budget and builds the semaphores (left
+// nil when unlimited). Called once at startup, after probeAll so a host is
+// available for auto-detection.
+//
+// It fails when the budget must be auto-detected but no ClickHouse host answers:
+// starting with the limiter disabled would let SquirrelDB overrun ClickHouse's
+// max_concurrent_queries. Failing here is deliberate — at first startup ClickHouse
+// may simply not be up yet, and the caller retries New (e.g. the process exits and
+// is restarted). It never fails once running: the budget is resolved a single time
+// here and left untouched afterwards, so a host that dies later never tears down
+// the (already installed) limiter or crashes SquirrelDB.
+func (c *Conn) setupQueryLimit(ctx context.Context) error {
+	budget, err := c.resolveQueryBudget(ctx)
+	if err != nil {
+		return err
+	}
+
+	if budget <= 0 {
+		c.logger.Info().Msg("ClickHouse query-concurrency limit disabled (unlimited)")
+
+		return nil
+	}
+
+	c.sem = make(chan struct{}, budget)
+	c.readSem = make(chan struct{}, budget-1) // budget >= minQueryBudget (2) so this is >= 1
+
+	c.logger.Info().Int("budget", budget).Int("read_budget", budget-1).
+		Msg("ClickHouse query-concurrency limit enabled")
+
+	return nil
+}
+
+// resolveQueryBudget returns the total read+write query budget: the configured
+// value (raised to minQueryBudget), or one auto-detected from the server. A
+// configured value needs no reachable host. Auto-detection returns 0 ("no limit")
+// only when the server itself reports an unlimited max_concurrent_queries; it
+// errors when no host could be reached to read the setting, so the caller retries
+// rather than silently running unlimited.
+func (c *Conn) resolveQueryBudget(ctx context.Context) (int, error) {
+	if c.opts.MaxConcurrentQueries > 0 {
+		return max(minQueryBudget, c.opts.MaxConcurrentQueries), nil
+	}
+
+	serverLimit, err := c.serverMaxConcurrentQueries(ctx)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"auto-detect max_concurrent_queries (set clickhouse.max_concurrent_queries to skip auto-detection): %w",
+			err)
+	}
+
+	if serverLimit == 0 {
+		return 0, nil // server is unlimited -> we don't limit either
+	}
+
+	return max(minQueryBudget, serverLimit-autoQueryBudgetMargin), nil
+}
+
+// serverMaxConcurrentQueries reads the server's max_concurrent_queries setting from
+// a reachable host. It is a per-server setting; on a cluster of identically
+// configured nodes any host answers the same. Note it does NOT reflect per-user
+// limits (max_concurrent_queries_for_user) — configure the budget explicitly then.
+func (c *Conn) serverMaxConcurrentQueries(ctx context.Context) (int, error) {
+	h, err := c.pick()
+	if err != nil {
+		return 0, err
+	}
+
+	var value string
+
+	err = h.conn.QueryRow(ctx,
+		"SELECT value FROM system.server_settings WHERE name = 'max_concurrent_queries'",
+	).Scan(&value)
+	if err != nil {
+		return 0, fmt.Errorf("read max_concurrent_queries: %w", err)
+	}
+
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse max_concurrent_queries %q: %w", value, err)
+	}
+
+	return n, nil
+}
+
+// acquireRead reserves a read slot (readSem then sem) or returns ctx.Err(). No-op
+// when unlimited. Reads are capped at budget-1 (readSem) so a write always finds a
+// free sem slot.
+func (c *Conn) acquireRead(ctx context.Context) error {
+	if c.sem == nil {
+		return nil
+	}
+
+	if err := c.acquire(ctx, c.readSem, "read"); err != nil {
+		return err
+	}
+
+	if err := c.acquire(ctx, c.sem, "read"); err != nil {
+		<-c.readSem // release the readSem slot taken above
+
+		return err
+	}
+
+	return nil
+}
+
+func (c *Conn) releaseRead() {
+	if c.sem == nil {
+		return
+	}
+
+	<-c.sem
+	<-c.readSem
+}
+
+// acquireWrite reserves a write slot (sem only) or returns ctx.Err(). No-op when
+// unlimited.
+func (c *Conn) acquireWrite(ctx context.Context) error {
+	if c.sem == nil {
+		return nil
+	}
+
+	return c.acquire(ctx, c.sem, "write")
+}
+
+func (c *Conn) releaseWrite() {
+	if c.sem == nil {
+		return
+	}
+
+	<-c.sem
+}
+
+// acquire sends on sem, counting a wait if it can't be taken immediately.
+func (c *Conn) acquire(ctx context.Context, sem chan struct{}, kind string) error {
+	select {
+	case sem <- struct{}{}:
+		return nil
+	default:
+	}
+
+	if c.queryWait != nil {
+		c.queryWait.WithLabelValues(kind).Inc()
+	}
+
+	select {
+	case sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // warnClusterSize logs a warning when the number of configured addresses does
@@ -253,6 +442,27 @@ func (c *Conn) registerMetrics() {
 
 	c.registerer = c.opts.Registerer
 	c.collector = col
+
+	// Only meaningful when the limiter is enabled; a non-zero rate means SquirrelDB
+	// is throttling itself to stay under ClickHouse's max_concurrent_queries.
+	if c.sem != nil {
+		c.queryWait = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "squirreldb",
+			Subsystem: "clickhouse",
+			Name:      "query_wait_total",
+			Help:      "Query acquisitions that had to wait for a concurrency slot, by kind (read/write)",
+		}, []string{"kind"})
+		if err := c.opts.Registerer.Register(c.queryWait); err != nil {
+			c.logger.Warn().Err(err).Msg("could not register ClickHouse query-wait metric")
+
+			c.queryWait = nil
+		} else {
+			// Initialize both series to 0 so they are exposed even before the first
+			// wait (a CounterVec emits no series for an untouched label set).
+			c.queryWait.WithLabelValues("read")
+			c.queryWait.WithLabelValues("write")
+		}
+	}
 }
 
 // AnyReachable reports whether at least one host currently answers a ping.
@@ -530,6 +740,11 @@ func (c *Conn) lagging(ctx context.Context, h *host) (bool, error) {
 // --- driver.Conn implementation (route each call to a picked host) ---
 
 func (c *Conn) Exec(ctx context.Context, query string, args ...any) error {
+	if err := c.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer c.releaseWrite()
+
 	h, err := c.pick()
 	if err != nil {
 		return err
@@ -542,18 +757,37 @@ func (c *Conn) Exec(ctx context.Context, query string, args ...any) error {
 }
 
 func (c *Conn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	if err := c.acquireRead(ctx); err != nil {
+		return nil, err
+	}
+
 	h, err := c.pick()
 	if err != nil {
+		c.releaseRead()
+
 		return nil, err
 	}
 
 	rows, err := h.conn.Query(ctx, query, args...)
 	c.observe(h, err)
 
-	return rows, err
+	if err != nil {
+		c.releaseRead()
+
+		return nil, err
+	}
+
+	// The query runs on ClickHouse until the rows are closed, so hold the slot
+	// until then.
+	return &limitedRows{Rows: rows, release: c.releaseRead}, nil
 }
 
 func (c *Conn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
+	if err := c.acquireRead(ctx); err != nil {
+		return errorRow{err: err}
+	}
+	defer c.releaseRead()
+
 	h, err := c.pick()
 	if err != nil {
 		return errorRow{err: err}
@@ -566,6 +800,11 @@ func (c *Conn) QueryRow(ctx context.Context, query string, args ...any) driver.R
 }
 
 func (c *Conn) Select(ctx context.Context, dest any, query string, args ...any) error {
+	if err := c.acquireRead(ctx); err != nil {
+		return err
+	}
+	defer c.releaseRead()
+
 	h, err := c.pick()
 	if err != nil {
 		return err
@@ -580,15 +819,75 @@ func (c *Conn) Select(ctx context.Context, dest any, query string, args ...any) 
 func (c *Conn) PrepareBatch(
 	ctx context.Context, query string, opts ...driver.PrepareBatchOption,
 ) (driver.Batch, error) {
-	h, err := c.pick()
-	if err != nil {
+	if err := c.acquireWrite(ctx); err != nil {
 		return nil, err
 	}
 
-	batch, err := h.conn.PrepareBatch(ctx, query, opts...)
+	h, err := c.pick()
+	if err != nil {
+		c.releaseWrite()
+
+		return nil, err
+	}
+
+	batch, err := h.conn.PrepareBatch(ctx, query, opts...) //nolint:clickhouselint
 	c.observe(h, err)
 
-	return batch, err
+	if err != nil {
+		c.releaseWrite()
+
+		return nil, err
+	}
+
+	// The slot is held until the batch is Sent/Aborted/Closed.
+	return &limitedBatch{Batch: batch, release: c.releaseWrite}, nil
+}
+
+// limitedRows wraps driver.Rows to release a query-concurrency slot when the rows
+// are closed (the ClickHouse query runs until then). release is idempotent.
+type limitedRows struct {
+	driver.Rows
+
+	release func()
+	once    sync.Once
+}
+
+func (r *limitedRows) Close() error {
+	err := r.Rows.Close()
+	r.once.Do(r.release)
+
+	return err
+}
+
+// limitedBatch wraps driver.Batch to release a query-concurrency slot when the
+// batch is finished (Send, Abort or Close — whichever comes first). release is
+// idempotent, so the usual Send-then-Close releases exactly once.
+type limitedBatch struct {
+	driver.Batch
+
+	release func()
+	once    sync.Once
+}
+
+func (b *limitedBatch) Send() error {
+	err := b.Batch.Send()
+	b.once.Do(b.release)
+
+	return err
+}
+
+func (b *limitedBatch) Abort() error {
+	err := b.Batch.Abort()
+	b.once.Do(b.release)
+
+	return err
+}
+
+func (b *limitedBatch) Close() error {
+	err := b.Batch.Close()
+	b.once.Do(b.release)
+
+	return err
 }
 
 // AsyncInsert is required by driver.Conn (deprecated upstream; SquirrelDB does
@@ -703,6 +1002,11 @@ type stickyConn struct {
 var _ driver.Conn = (*stickyConn)(nil)
 
 func (s *stickyConn) Exec(ctx context.Context, query string, args ...any) error {
+	if err := s.c.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer s.c.releaseWrite()
+
 	h, err := s.c.pickSticky()
 	if err != nil {
 		return err
@@ -715,18 +1019,35 @@ func (s *stickyConn) Exec(ctx context.Context, query string, args ...any) error 
 }
 
 func (s *stickyConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	if err := s.c.acquireRead(ctx); err != nil {
+		return nil, err
+	}
+
 	h, err := s.c.pickSticky()
 	if err != nil {
+		s.c.releaseRead()
+
 		return nil, err
 	}
 
 	rows, err := h.conn.Query(ctx, query, args...)
 	s.c.observe(h, err)
 
-	return rows, err
+	if err != nil {
+		s.c.releaseRead()
+
+		return nil, err
+	}
+
+	return &limitedRows{Rows: rows, release: s.c.releaseRead}, nil
 }
 
 func (s *stickyConn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
+	if err := s.c.acquireRead(ctx); err != nil {
+		return errorRow{err: err}
+	}
+	defer s.c.releaseRead()
+
 	h, err := s.c.pickSticky()
 	if err != nil {
 		return errorRow{err: err}
@@ -739,6 +1060,11 @@ func (s *stickyConn) QueryRow(ctx context.Context, query string, args ...any) dr
 }
 
 func (s *stickyConn) Select(ctx context.Context, dest any, query string, args ...any) error {
+	if err := s.c.acquireRead(ctx); err != nil {
+		return err
+	}
+	defer s.c.releaseRead()
+
 	h, err := s.c.pickSticky()
 	if err != nil {
 		return err
@@ -753,15 +1079,27 @@ func (s *stickyConn) Select(ctx context.Context, dest any, query string, args ..
 func (s *stickyConn) PrepareBatch(
 	ctx context.Context, query string, opts ...driver.PrepareBatchOption,
 ) (driver.Batch, error) {
-	h, err := s.c.pickSticky()
-	if err != nil {
+	if err := s.c.acquireWrite(ctx); err != nil {
 		return nil, err
 	}
 
-	batch, err := h.conn.PrepareBatch(ctx, query, opts...)
+	h, err := s.c.pickSticky()
+	if err != nil {
+		s.c.releaseWrite()
+
+		return nil, err
+	}
+
+	batch, err := h.conn.PrepareBatch(ctx, query, opts...) //nolint:clickhouselint
 	s.c.observe(h, err)
 
-	return batch, err
+	if err != nil {
+		s.c.releaseWrite()
+
+		return nil, err
+	}
+
+	return &limitedBatch{Batch: batch, release: s.c.releaseWrite}, nil
 }
 
 //nolint:staticcheck

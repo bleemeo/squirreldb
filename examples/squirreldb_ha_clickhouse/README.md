@@ -69,7 +69,7 @@ Example of test:
 # are read from SquirrelDB
 docker compose up -d --force-recreate --renew-anon-volumes prometheus
 
-# Kill one Cassandra then restart it
+# Kill one Clickhouse then restart it
 docker compose stop -t0 clickhouse-server-0
 docker compose start clickhouse-server-0
 

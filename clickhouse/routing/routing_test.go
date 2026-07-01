@@ -137,3 +137,87 @@ func TestObserve(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveQueryBudget(t *testing.T) {
+	t.Parallel()
+
+	// A configured value is used as-is, raised to the minimum, without needing a host.
+	got, err := (&Conn{opts: Options{MaxConcurrentQueries: 5}}).resolveQueryBudget(context.Background())
+	if got != 5 || err != nil {
+		t.Errorf("configured budget = (%d, %v), want (5, nil)", got, err)
+	}
+
+	got, err = (&Conn{opts: Options{MaxConcurrentQueries: 1}}).resolveQueryBudget(context.Background())
+	if got != minQueryBudget || err != nil {
+		t.Errorf("below-min budget = (%d, %v), want (%d, nil)", got, err, minQueryBudget)
+	}
+
+	// Auto-detect (0) with no reachable host can't query the server -> error, so the
+	// caller retries rather than starting with the limiter silently disabled.
+	if _, err := newTestConn().resolveQueryBudget(context.Background()); err == nil {
+		t.Error("auto-detect without host should error")
+	}
+}
+
+// TestQueryConcurrencyReservation verifies reads are capped at budget-1 so a write
+// always finds a slot, and that a full sem blocks further acquisitions.
+func TestQueryConcurrencyReservation(t *testing.T) {
+	t.Parallel()
+
+	// budget = 2 -> sem cap 2, readSem cap 1 (one read + one reserved write).
+	c := &Conn{sem: make(chan struct{}, 2), readSem: make(chan struct{}, 1)}
+	ctx := context.Background()
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+
+	// First read takes readSem(1/1) + sem(1/2).
+	if err := c.acquireRead(ctx); err != nil {
+		t.Fatalf("first acquireRead: %v", err)
+	}
+
+	// A second read blocks (readSem full) — a cancelled ctx surfaces that.
+	if err := c.acquireRead(cancelled); err == nil {
+		t.Error("second acquireRead should block while reads are at budget-1")
+	}
+
+	// ...but a write still gets the reserved slot (sem has 1 free).
+	if err := c.acquireWrite(ctx); err != nil {
+		t.Fatalf("acquireWrite should succeed while reads are maxed: %v", err)
+	}
+
+	// Now sem is full (2/2): another write blocks.
+	if err := c.acquireWrite(cancelled); err == nil {
+		t.Error("acquireWrite should block when sem is full")
+	}
+
+	// Releasing frees the slots for a new read.
+	c.releaseWrite()
+	c.releaseRead()
+
+	if err := c.acquireRead(ctx); err != nil {
+		t.Fatalf("acquireRead after release: %v", err)
+	}
+
+	c.releaseRead()
+}
+
+// TestQueryConcurrencyUnlimited checks the acquire/release helpers are no-ops when
+// no limit is configured (nil semaphores).
+func TestQueryConcurrencyUnlimited(t *testing.T) {
+	t.Parallel()
+
+	c := &Conn{} // sem/readSem nil
+
+	if err := c.acquireRead(context.Background()); err != nil {
+		t.Fatalf("acquireRead unlimited: %v", err)
+	}
+
+	c.releaseRead()
+
+	if err := c.acquireWrite(context.Background()); err != nil {
+		t.Fatalf("acquireWrite unlimited: %v", err)
+	}
+
+	c.releaseWrite()
+}

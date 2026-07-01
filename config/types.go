@@ -136,6 +136,15 @@ type ClickHouse struct {
 	// must never be RENAMEd; see examples/squirreldb_ha_clickhouse for the
 	// node-recovery runbook.
 	ClusterName string `yaml:"cluster_name"`
+	// MaxConcurrentQueries caps the total in-flight queries (reads + writes)
+	// SquirrelDB sends to ClickHouse, so it stays under the server's
+	// max_concurrent_queries instead of surfacing a "too many simultaneous
+	// queries" error; excess queries wait for a slot. Reads are capped one below
+	// this so a write always has a slot. 0 (default) auto-detects the server's
+	// max_concurrent_queries minus a margin — good for a 1:1, non-shared setup;
+	// set it explicitly for a shared server, a per-user limit, or an
+	// N-SquirrelDB/M-ClickHouse fan-out.
+	MaxConcurrentQueries int `yaml:"max_concurrent_queries"`
 }
 
 // Dummy holds the configuration of the dummy backend.
