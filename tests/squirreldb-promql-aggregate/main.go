@@ -26,6 +26,42 @@ var (
 	errUnexpectedValue  = errors.New("unexpected value")
 )
 
+// A just-written point is only queryable once the ClickHouse backend has drained
+// its write-ahead log (normally ~5s); reads are eventually consistent. Retry each
+// query until it matches or the budget elapses — a consistent read passes on the
+// first try, so this only adds delay right after a write. The budget is a bit above
+// the normal drain delay so a slow drain doesn't fail the test spuriously.
+const (
+	queryRetryBudget = 10 * time.Second
+	queryRetryStep   = 500 * time.Millisecond
+)
+
+func retryUntilConsistent(ctx context.Context, fn func() error) error {
+	start := time.Now()
+
+	for attempt := 1; ; attempt++ {
+		err := fn()
+		if err == nil {
+			if attempt > 1 {
+				// Log the observed write->visible delay (how long the drain took).
+				log.Info().Dur("delay", time.Since(start)).Msg("query became consistent (write now visible)")
+			}
+
+			return nil
+		}
+
+		if time.Since(start) >= queryRetryBudget {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(queryRetryStep):
+		}
+	}
+}
+
 func main() {
 	daemon.SetTestEnvironment()
 
@@ -163,28 +199,35 @@ func checkPromQL(ctx context.Context, minTS, maxTS time.Time, squirrelDBURL stri
 	for request, expectedValue := range expectedValueByRequest {
 		log.Info().Msgf("Running query %s", request)
 
-		rangeValues, warnings, err := api.QueryRange(ctx, request, v1Range)
-		for _, warning := range warnings {
-			log.Warn().Msgf("PromQL query warning: %s", warning)
-		}
+		err := retryUntilConsistent(ctx, func() error {
+			rangeValues, warnings, err := api.QueryRange(ctx, request, v1Range)
+			for _, warning := range warnings {
+				log.Warn().Msgf("PromQL query warning: %s", warning)
+			}
 
+			if err != nil {
+				return err
+			}
+
+			matrix, _ := rangeValues.(model.Matrix)
+			if len(matrix) != 1 {
+				return fmt.Errorf("%w: got %d series, wanted 1", errUnexpectedSeries, len(matrix))
+			}
+
+			for _, sample := range matrix[0].Values {
+				// Allow 5% of error.
+				if math.Abs(float64(sample.Value)-expectedValue) > 5*expectedValue/100 {
+					return fmt.Errorf(
+						"%w: got value %f at %s, wanted %f for query %s",
+						errUnexpectedValue, sample.Value, sample.Timestamp.Time(), expectedValue, request,
+					)
+				}
+			}
+
+			return nil
+		})
 		if err != nil {
 			return err
-		}
-
-		matrix, _ := rangeValues.(model.Matrix)
-		if len(matrix) != 1 {
-			return fmt.Errorf("%w: got %d series, wanted 1", errUnexpectedSeries, len(matrix))
-		}
-
-		for _, sample := range matrix[0].Values {
-			// Allow 5% of error.
-			if math.Abs(float64(sample.Value)-expectedValue) > 5*expectedValue/100 {
-				return fmt.Errorf(
-					"%w: got value %f at %s, wanted %f for query %s",
-					errUnexpectedValue, sample.Value, sample.Timestamp.Time(), expectedValue, request,
-				)
-			}
 		}
 	}
 

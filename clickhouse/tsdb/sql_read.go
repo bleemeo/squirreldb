@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -35,15 +34,14 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 )
 
-// sqlQuerier serves Select entirely through SQL (mode "sql"): it resolves the
-// matching series and their labels from tsdb_tags, then streams their points
-// from tsdb_data, merging in the points still buffered in the batcher (not yet
-// flushed) so recent writes are visible. LabelValues/LabelNames come from the
-// embedded labelQuerier.
+// sqlQuerier serves Select entirely through SQL: it resolves the matching series
+// and their labels from tsdb_tags, then streams their points from tsdb_data.
+// Recently-written points are visible once the WAL drainer has flushed them
+// (~the flush delay); there is no read-merge of un-flushed points.
+// LabelValues/LabelNames come from the embedded labelQuerier.
 type sqlQuerier struct {
 	labelQuerier
 
-	batcher *batch.Batch
 	metrics *metrics
 	// onClose releases this querier's in-flight registration (queries.Done); see
 	// ClickHouseTSDB.newSQLQuerier. Called once, from Close.
@@ -74,12 +72,6 @@ func (q *sqlQuerier) Select(
 		return storage.EmptySeriesSet()
 	}
 
-	// Points still buffered in the batcher (not yet flushed to tsdb_data).
-	pending, err := q.readPending(ctx, labelsByID)
-	if err != nil {
-		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: read pending points: %w", err))
-	}
-
 	query, queryArgs := q.pointsQuery(where, args)
 
 	rows, err := q.conn.Query(ctx, query, queryArgs...)
@@ -87,7 +79,7 @@ func (q *sqlQuerier) Select(
 		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: read points: %w", err))
 	}
 
-	set := &sqlSeriesSet{rows: rows, labelsByID: labelsByID, pending: pending}
+	set := &sqlSeriesSet{rows: rows, labelsByID: labelsByID}
 
 	// Track the set so Close releases its cursor even if the caller abandons the
 	// iteration early (a fully-drained cursor closes itself, see readRow). Earlier
@@ -188,51 +180,6 @@ func (q *sqlQuerier) resolveSeries(ctx context.Context, where string, args []any
 	return labelsByID, rows.Err()
 }
 
-// readPending reads, for every matching series, the points still buffered in the
-// batcher within [mint, maxt]. The batcher is keyed by the labels hash, so we
-// derive it from the reconstructed labels. Returns a map keyed by ClickHouse id.
-func (q *sqlQuerier) readPending(
-	ctx context.Context,
-	labelsByID map[uuid.UUID]labels.Labels,
-) (map[uuid.UUID][]types.MetricPoint, error) {
-	if q.batcher == nil || len(labelsByID) == 0 {
-		return nil, nil //nolint:nilnil
-	}
-
-	start := time.Now()
-	defer func() {
-		q.metrics.ReadSeconds.WithLabelValues("pending").Observe(time.Since(start).Seconds())
-	}()
-
-	chids := make([]uuid.UUID, 0, len(labelsByID))
-	hashIDs := make([]types.MetricID, 0, len(labelsByID))
-
-	for chid, lbls := range labelsByID {
-		chids = append(chids, chid)
-		hashIDs = append(hashIDs, types.MetricID(lbls.Hash())) //nolint:gosec // hash used as the batcher key
-	}
-
-	data, err := q.batcher.ReadTemporaryMultiple(ctx, hashIDs, q.mint, q.maxt)
-	if err != nil {
-		return nil, err
-	}
-
-	pending := make(map[uuid.UUID][]types.MetricPoint)
-
-	var pendingPoints int
-
-	for i, md := range data {
-		if len(md.Points) > 0 {
-			pending[chids[i]] = md.Points
-			pendingPoints += len(md.Points)
-		}
-	}
-
-	q.metrics.ReadPendingPointsTotal.Add(float64(pendingPoints))
-
-	return pending, nil
-}
-
 // clampStoreTime clamps a millisecond timestamp to the range representable by
 // the DateTime64(3) timestamp columns (see storeMinTimeMillis/storeMaxTimeMillis).
 // Both the points filter (pointsQuery) and the activity filter (whereWithTime)
@@ -313,87 +260,16 @@ func dedupSortedPoints(points []types.MetricPoint) []types.MetricPoint {
 	return points[:w]
 }
 
-// mergePoints merges two timestamp-sorted, individually de-duplicated slices,
-// dropping duplicate timestamps across the boundary (a point flushed to
-// tsdb_data and still in the batcher); the first slice wins on a tie. Callers
-// must pass de-duplicated inputs (flushed via dedupSortedPoints, pending via the
-// batcher) — the fast paths below copy a slice through unchanged.
-func mergePoints(flushed, pending []types.MetricPoint) []types.MetricPoint {
-	if len(pending) == 0 {
-		return flushed
-	}
-
-	if len(flushed) == 0 {
-		return pending
-	}
-
-	// Fast path for the common case: pending (the recent un-flushed tail) is
-	// entirely after flushed. Concatenate with bulk copies, no per-point merge.
-	// The general path below stays correct for overlap / backdated points.
-	if flushed[len(flushed)-1].Timestamp < pending[0].Timestamp {
-		out := make([]types.MetricPoint, 0, len(flushed)+len(pending))
-		out = append(out, flushed...)
-		out = append(out, pending...)
-
-		return out
-	}
-
-	out := make([]types.MetricPoint, 0, len(flushed)+len(pending))
-
-	var (
-		lastTS   int64
-		haveLast bool
-	)
-
-	add := func(p types.MetricPoint) {
-		if haveLast && p.Timestamp == lastTS {
-			return
-		}
-
-		out = append(out, p)
-		lastTS = p.Timestamp
-		haveLast = true
-	}
-
-	i, j := 0, 0
-	for i < len(flushed) && j < len(pending) {
-		if flushed[i].Timestamp <= pending[j].Timestamp {
-			add(flushed[i])
-			i++
-		} else {
-			add(pending[j])
-			j++
-		}
-	}
-
-	for ; i < len(flushed); i++ {
-		add(flushed[i])
-	}
-
-	for ; j < len(pending); j++ {
-		add(pending[j])
-	}
-
-	return out
-}
-
 // sqlSeriesSet is a streaming storage.SeriesSet over an (id, timestamp)-ordered
-// tsdb_data cursor, merging each series with its batcher pending points. It has
-// two phases: first the series that have flushed points (driven by the cursor),
-// then the series that only have pending points (batcher-only, in the query
-// window).
+// tsdb_data cursor: it groups the consecutive rows of each id into one series.
 type sqlSeriesSet struct {
 	rows       driver.Rows
 	labelsByID map[uuid.UUID]labels.Labels
-	pending    map[uuid.UUID][]types.MetricPoint // consumed in phase 1, leftovers emitted in phase 2
 
-	started    bool
-	hasLook    bool
-	inPhase2   bool
-	closed     bool
-	lookahead  sqlPoint
-	leftover   []uuid.UUID
-	leftoverAt int
+	started   bool
+	hasLook   bool
+	closed    bool
+	lookahead sqlPoint
 
 	current sqlSeries
 	err     error
@@ -413,35 +289,13 @@ type sqlPoint struct {
 	point types.MetricPoint
 }
 
+// Next groups the cursor's rows for one id into the current series. The cursor is
+// ordered by (id, timestamp), so a series' rows are contiguous and already sorted.
 func (s *sqlSeriesSet) Next() bool {
 	if s.err != nil {
 		return false
 	}
 
-	if !s.inPhase2 {
-		if s.nextFlushed() {
-			return true
-		}
-
-		if s.err != nil {
-			return false
-		}
-
-		// Cursor exhausted: move to the batcher-only series.
-		s.inPhase2 = true
-		s.leftover = make([]uuid.UUID, 0, len(s.pending))
-
-		for id := range s.pending {
-			s.leftover = append(s.leftover, id)
-		}
-	}
-
-	return s.nextPendingOnly()
-}
-
-// nextFlushed yields the next series that has flushed points (from the cursor),
-// merging in its pending points.
-func (s *sqlSeriesSet) nextFlushed() bool {
 	if !s.started {
 		s.started = true
 
@@ -456,7 +310,7 @@ func (s *sqlSeriesSet) nextFlushed() bool {
 
 	for s.hasLook {
 		id := s.lookahead.id
-		flushed := []types.MetricPoint{s.lookahead.point}
+		points := []types.MetricPoint{s.lookahead.point}
 		s.hasLook = false
 
 		for {
@@ -472,7 +326,7 @@ func (s *sqlSeriesSet) nextFlushed() bool {
 				break
 			}
 
-			flushed = append(flushed, p.point)
+			points = append(points, p.point)
 		}
 
 		if s.err != nil {
@@ -485,31 +339,10 @@ func (s *sqlSeriesSet) nextFlushed() bool {
 			continue
 		}
 
-		flushed = dedupSortedPoints(flushed)
-
-		points := mergePoints(flushed, s.pending[id])
-		delete(s.pending, id)
-
-		s.current = sqlSeries{labels: lbls, points: points}
-
-		return true
-	}
-
-	return false
-}
-
-// nextPendingOnly yields the next series that only has batcher points.
-func (s *sqlSeriesSet) nextPendingOnly() bool {
-	for s.leftoverAt < len(s.leftover) {
-		id := s.leftover[s.leftoverAt]
-		s.leftoverAt++
-
-		points := s.pending[id]
-		if len(points) == 0 {
-			continue
-		}
-
-		s.current = sqlSeries{labels: s.labelsByID[id], points: points}
+		// tsdb_data is a plain MergeTree and the WAL is at-least-once (a re-drained
+		// batch can leave several rows for the same (id, timestamp)); drop the
+		// duplicates so PromQL doesn't abort with "duplicate sample".
+		s.current = sqlSeries{labels: lbls, points: dedupSortedPoints(points)}
 
 		return true
 	}

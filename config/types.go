@@ -145,6 +145,18 @@ type ClickHouse struct {
 	// set it explicitly for a shared server, a per-user limit, or an
 	// N-SquirrelDB/M-ClickHouse fan-out.
 	MaxConcurrentQueries int `yaml:"max_concurrent_queries"`
+	// WALFlushDelay is how often the elected drainer writes the shared Redis
+	// write-ahead log to ClickHouse (0 uses the built-in default, ~5s). Writes are
+	// durable in Redis on return; this bounds how long they take to become
+	// queryable in ClickHouse.
+	WALFlushDelay time.Duration `yaml:"wal_flush_delay"`
+	// WALSoftThreshold is the WAL length, in POINTS, above which the drainer flushes
+	// early rather than waiting for WALFlushDelay; the producer-backpressure
+	// thresholds (slow down at 3×, block at 10×) are derived from it. The WAL stores
+	// one point per entry, so its length is an exact, cheap point count; each point
+	// carries its labels (~150-200 B), so this also bounds Redis memory. 0 uses the
+	// built-in default (200k points ≈ 35 MiB → block at ~2M points ≈ 350 MiB).
+	WALSoftThreshold int `yaml:"wal_soft_threshold"`
 }
 
 // Dummy holds the configuration of the dummy backend.

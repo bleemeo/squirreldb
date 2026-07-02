@@ -447,7 +447,6 @@ func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhouseb
 		ReadOnly:          s.Config.Internal.ReadOnly,
 		Cluster:           cluster,
 		TenantLabel:       s.Config.TenantLabelName,
-		BatchSize:         s.Config.Batch.Size,
 		DefaultTimeToLive: s.Config.DefaultTimeToLive,
 		ClusterName:       s.Config.ClickHouse.ClusterName,
 	}

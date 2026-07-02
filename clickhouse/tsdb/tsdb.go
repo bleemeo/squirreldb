@@ -19,68 +19,110 @@
 // It is selected through the "clickhouse" value of the "backend" option and
 // is an alternative to the Cassandra backend.
 //
-// Writes go through the shared batcher (batch.Batch): points are accumulated by
-// label hash and flushed periodically to ClickHouse via SQL (a Null-engine input
-// table + materialized views). The batcher works by metric ID and drops the
-// labels, so the labels are stored in the temporary store (keyed by the same
-// hash) to be rebuilt at flush time, including after a takeover by another node.
-// New series are eagerly registered in tsdb_tags so queries resolve them (and
-// merge their not-yet-flushed points) before the next flush.
+// Writes go through a shared Redis WAL (write-ahead log): each Commit appends its
+// series (labels + points) to a single Redis list and returns — durable as soon as
+// it is in (HA) Redis. One node in the cluster (the drainer, elected via a Redis
+// lease) periodically writes the head of the WAL to ClickHouse in a few large
+// arrays-per-series inserts (registering the series in tsdb_tags and inserting the
+// points into datapoint_input, whose materialized view fans them into tsdb_data)
+// then trims it. This is a deliberate fit for ClickHouse (few large global inserts,
+// no per-metric ownership/takeover) at the cost of read-your-writes: a just-written
+// point becomes queryable within ~the flush delay.
 //
 // Reads (Querier) resolve the matching series from tsdb_tags and stream their
-// points from tsdb_data, merging in the points still buffered in the batcher.
+// points from tsdb_data; there is no read-merge of not-yet-drained points.
 package tsdb
 
 import (
 	"context"
-	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/config"
-	"github.com/bleemeo/squirreldb/dummy/temporarystore"
 	"github.com/bleemeo/squirreldb/queryable/convert"
-	redisTemporarystore "github.com/bleemeo/squirreldb/redis/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/rs/zerolog"
 )
 
-// labelsTTLMargin is added on top of the batch size for the lifetime of the
-// id -> labels mapping in the temporary store. It must cover the flush deadline
-// (~batch size) plus the takeover window of a dead node, so the labels are
-// still available when its points are flushed by another node.
-const labelsTTLMargin = time.Hour
+const (
+	// defaultWALFlushDelay is how often the drainer writes the WAL to ClickHouse
+	// when it is below the soft threshold (config wal_flush_delay overrides it).
+	defaultWALFlushDelay = 5 * time.Second
+	// defaultWALSoftThreshold is the WAL length, in POINTS, above which the drainer
+	// flushes early instead of waiting for the delay (config wal_soft_threshold
+	// overrides it). One WAL entry is one point, so the list length IS the point
+	// count — an exact, free bound (LLEN) with no side counter. With the factors
+	// below the producer starts slowing at 3× and blocks at 10× this. Each buffered
+	// point carries its labels (~150-200 B), so 200k points ≈ 35 MiB and the 10×
+	// block ≈ 2M points ≈ 350 MiB of Redis. Tuned against real workloads / Redis
+	// capacity.
+	defaultWALSoftThreshold = 200_000 // points
+
+	// walCriticalFactor and walStopFactor derive the producer-backpressure
+	// thresholds from the soft threshold: at critical (× soft) a producer starts
+	// sleeping before appending, at stop (× soft) it blocks until the WAL drains.
+	// Both are well above soft so a healthy drainer (keeping the WAL near soft)
+	// never triggers backpressure.
+	walCriticalFactor = 3
+	walStopFactor     = 10
+
+	// walMaxSleep caps the backpressure sleep (reached at the stop threshold).
+	walMaxSleep = time.Second
+	// walBlockPollInterval is how often a blocked producer re-checks the WAL length.
+	walBlockPollInterval = 100 * time.Millisecond
+	// walLeaseTTL is the drainer lease lifetime; it is refreshed every
+	// drainPollInterval, so a dead leader is replaced within ~this delay.
+	walLeaseTTL = 20 * time.Second
+	// walInsertMaxPoints caps the points in one ClickHouse insert (the drainer
+	// loops over several inserts to drain a large WAL).
+	walInsertMaxPoints = 500_000
+)
 
 // Options carries the configuration needed to build a ClickHouseTSDB.
 type Options struct {
 	// ClusterName, when set, switches the schema to ClickHouse cluster mode
 	// (ON CLUSTER + ReplicatedMergeTree with an explicit, name-based Keeper
 	// path; the tables must not be RENAMEd). Empty means a single node.
-	ClusterName       string
-	Redis             config.Redis // If unset, an in-memory store is used for batching.
+	ClusterName string
+	// Redis holds the write-ahead log shared by every node (durable, HA). When
+	// unset, the WAL falls back to an in-process, single-node store with reduced
+	// durability (see newWALClient / memWALClient) — like the Cassandra backend.
+	Redis             config.Redis
 	Reg               prometheus.Registerer
 	TenantLabel       string
-	BatchSize         time.Duration
 	DefaultTimeToLive time.Duration
+	// WALFlushDelay / WALSoftThreshold override the drain cadence and the early-
+	// flush / backpressure thresholds (WALSoftThreshold is in POINTS); 0 uses the
+	// defaults above.
+	WALFlushDelay    time.Duration
+	WALSoftThreshold int
 }
 
 // ClickHouseTSDB is a types.TSDB backed by ClickHouse.
 type ClickHouseTSDB struct {
-	opts           Options
-	conn           driver.Conn
-	temporaryStore batch.TemporaryStore
-	batcher        *batch.Batch
-	labelsTTL      time.Duration
-	metrics        *metrics
-	logger         zerolog.Logger
+	opts    Options
+	conn    driver.Conn
+	walConn walClient // owns the WAL/lease connection (closed here); Redis or in-memory
+	wal     *walStore
+	drainer *walDrainer // periodic drain loop; also flushes the WAL on Close
+	metrics *metrics
+	logger  zerolog.Logger
+
+	// walCritical/walStop are the backpressure thresholds (points); lastWALLen is
+	// the WAL length (points) seen at the last append, used to decide the NEXT
+	// append's backpressure without an extra Redis round-trip.
+	walCritical int
+	walStop     int
+	lastWALLen  atomic.Int64
 
 	// seenSeries caches the labels hashes registered in tsdb_tags, to avoid
-	// re-inserting them on every write. Entries track last-seen (for eviction)
+	// re-inserting them on every drain. Entries track last-seen (for eviction)
 	// and next-register (for periodic refresh); swept after seenSeriesTTL.
 	seenSeries map[uint64]seenEntry
 	seenMu     sync.Mutex
@@ -89,85 +131,72 @@ type ClickHouseTSDB struct {
 	cancel context.CancelFunc
 
 	// queries tracks in-flight queriers (each holds the shared conn); Close waits
-	// for them before closing the conn. closeMu guards closed so no querier is
-	// registered once Close has started (which would race queries.Add/Wait).
+	// for them before returning. closeMu guards closed so no querier is registered
+	// once Close has started (which would race queries.Add/Wait).
 	queries sync.WaitGroup
 	closeMu sync.Mutex
 	closed  bool
 }
 
-// New creates the schema if needed, sets up the write path (batcher + SQL
-// writer) and returns a ready ClickHouseTSDB. The connection is owned by the
-// caller (clickhouse/backend): it is shared with the other ClickHouse stores
-// and closed by the backend, not here.
+// New sets up the write path (WAL + drainer) and returns a ready ClickHouseTSDB.
+// The WAL is Redis-backed when Redis is configured (durable, HA) and in-process
+// otherwise (see newWALClient). The ClickHouse connection is owned by the caller
+// (clickhouse/backend) and closed by it; the WAL connection is owned here.
 func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger, opts Options) (*ClickHouseTSDB, error) {
+	flushDelay := opts.WALFlushDelay
+	if flushDelay <= 0 {
+		flushDelay = defaultWALFlushDelay
+	}
+
+	soft := opts.WALSoftThreshold
+	if soft <= 0 {
+		soft = defaultWALSoftThreshold
+	}
+
+	walConn := newWALClient(opts.Redis, logger)
+	wal := &walStore{
+		client: walConn,
+		key:    opts.Redis.Keyspace + "clickhouse_wal",
+	}
+
 	c := &ClickHouseTSDB{
-		opts:       opts,
-		conn:       conn,
-		labelsTTL:  opts.BatchSize + labelsTTLMargin,
-		metrics:    newMetrics(opts.Reg),
-		logger:     logger,
-		seenSeries: make(map[uint64]seenEntry),
+		opts:        opts,
+		conn:        conn,
+		walConn:     walConn,
+		wal:         wal,
+		metrics:     newMetrics(opts.Reg),
+		logger:      logger,
+		walCritical: soft * walCriticalFactor,
+		walStop:     soft * walStopFactor,
+		seenSeries:  make(map[uint64]seenEntry),
 	}
-
-	temporaryStore, err := newTemporaryStore(ctx, opts, logger)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse: %w", err)
-	}
-
-	c.temporaryStore = temporaryStore
-
-	c.batcher = batch.New(
-		opts.Reg,
-		opts.BatchSize,
-		c.temporaryStore,
-		logger.With().Str("component", "batch").Logger(),
-	)
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.cancel = cancel
 
+	c.drainer = &walDrainer{
+		wal:        wal,
+		leaseKey:   opts.Redis.Keyspace + "clickhouse_wal_lease",
+		owner:      uuid.NewString(),
+		leaseTTL:   walLeaseTTL,
+		flushDelay: flushDelay,
+		soft:       soft,
+		maxPoints:  walInsertMaxPoints,
+		write:      c.drainWrite,
+		metrics:    c.metrics,
+		logger:     logger.With().Str("component", "wal-drainer").Logger(),
+	}
+
 	c.wg.Go(func() {
-		c.batcher.Run(runCtx, &sqlWriter{c: c})
+		c.drainer.run(runCtx)
 	})
 
-	// Evict stale entries from the eager-registration cache.
+	// Evict stale entries from the registration cache.
 	c.wg.Go(func() {
 		c.runSeenSweeper(runCtx)
 	})
 
 	return c, nil
-}
-
-// newTemporaryStore returns a Redis-backed store when Redis is configured, or an
-// in-memory store otherwise. The store is owned by the batcher (closed by it).
-//
-// When Redis is configured it MUST succeed: we do not fall back to the in-memory
-// store on a Redis error. The in-memory store is node-local, so a silent fallback
-// would make a node's buffered labels and points invisible to the node that takes
-// over on failure — silent data loss on failover. Fail loudly instead (the
-// Cassandra backend has the same contract).
-func newTemporaryStore(ctx context.Context, opts Options, logger zerolog.Logger) (batch.TemporaryStore, error) {
-	storeLogger := logger.With().Str("component", "temporary_store").Logger()
-
-	if len(opts.Redis.Addresses) > 0 && opts.Redis.Addresses[0] != "" {
-		store, err := redisTemporarystore.New(
-			ctx,
-			opts.Reg,
-			redisTemporarystore.Options{
-				RedisOptions: opts.Redis,
-				Keyspace:     opts.Redis.Keyspace,
-			},
-			storeLogger,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("redis temporary store: %w", err)
-		}
-
-		return store, nil
-	}
-
-	return temporarystore.New(opts.Reg, storeLogger), nil //nolint:contextcheck
 }
 
 func (c *ClickHouseTSDB) AppenderWithOptions(
@@ -203,10 +232,10 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 	return convert.NewQuerierToChunkQuerier(q), nil
 }
 
-// newSQLQuerier builds a querier and registers it as in-flight so Close waits
-// for it to release the shared connection. The matching queries.Done runs in
-// sqlQuerier.Close (called by Prometheus once the querier is no longer used).
-// It is refused once Close has started, so the connection is never used after it.
+// newSQLQuerier builds a querier and registers it as in-flight so Close waits for
+// it to release the shared connection. The matching queries.Done runs in
+// sqlQuerier.Close. It is refused once Close has started, so the connection is
+// never used after it.
 func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) (*sqlQuerier, error) {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
@@ -219,7 +248,6 @@ func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) (*sqlQuerier, error) {
 
 	return &sqlQuerier{
 		labelQuerier: c.newLabelQuerier(mint, maxt),
-		batcher:      c.batcher,
 		metrics:      c.metrics,
 		onClose:      c.queries.Done,
 	}, nil
@@ -234,9 +262,58 @@ func (c *ClickHouseTSDB) newLabelQuerier(mint, maxt int64) labelQuerier {
 	}
 }
 
-// Flush flushes points still buffered in the batcher to ClickHouse.
-func (c *ClickHouseTSDB) Flush(ctx context.Context) error {
-	return c.batcher.Flush(ctx)
+// applyBackpressure slows or blocks the caller before it appends to the WAL, based
+// on the length seen at the previous append (see backpressureDelay). Applying it
+// BEFORE the append means a context timeout during the wait leaves nothing written
+// (no duplicate on the client's retry). It returns ctx.Err() if the wait is
+// cancelled.
+func (c *ClickHouseTSDB) applyBackpressure(ctx context.Context) error {
+	delay, block := backpressureDelay(c.lastWALLen.Load(), c.walCritical, c.walStop, walMaxSleep)
+
+	if block {
+		c.metrics.WALBackpressureTotal.WithLabelValues("block").Inc()
+		c.logger.Warn().Int("stop_points", c.walStop).
+			Msg("ClickHouse WAL reached the stop threshold; blocking writes until it drains")
+
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(walBlockPollInterval):
+			}
+
+			n, err := c.wal.Len(ctx)
+			if err != nil {
+				return err
+			}
+
+			c.lastWALLen.Store(n)
+
+			if n < int64(c.walStop) {
+				return nil
+			}
+		}
+	}
+
+	if delay > 0 {
+		c.metrics.WALBackpressureTotal.WithLabelValues("slow").Inc()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	return nil
+}
+
+// Flush is a no-op: a write is buffered in the WAL as soon as Commit returns and
+// drained to ClickHouse asynchronously by the drainer (a clean shutdown drains what
+// remains, see Close). It does not force a synchronous drain here because that would
+// race the running periodic drainer on the WAL head.
+func (c *ClickHouseTSDB) Flush(_ context.Context) error {
+	return nil
 }
 
 func (c *ClickHouseTSDB) Close(ctx context.Context) error {
@@ -245,19 +322,35 @@ func (c *ClickHouseTSDB) Close(ctx context.Context) error {
 	c.closed = true
 	c.closeMu.Unlock()
 
+	// Wait for in-flight queries to finish FIRST, while the periodic drainer is still
+	// running. Any work still in flight can keep feeding the WAL, and the running
+	// drainer keeps absorbing it, so we don't stop draining until the write side is
+	// quiet. Bounded by the shutdown context so a stuck query can't block forever.
+	if !c.waitInflightQueries(ctx) {
+		c.logger.Warn().Msg("Stopping ClickHouse TSDB while queries are still in flight")
+	}
+
+	// Now that nothing is producing points, stop the periodic drainer and the
+	// sweeper.
 	if c.cancel != nil {
 		c.cancel()
 	}
 
-	// The batcher does a final flush and closes the temporary store on shutdown.
 	c.wg.Wait()
 
-	// Wait for in-flight queries to finish before returning, bounded by the
-	// shutdown context so a stuck query can't block forever. The connection
-	// itself is closed by the backend (its owner), after this returns.
-	if !c.waitInflightQueries(ctx) {
-		c.logger.Warn().Msg("Stopping ClickHouse TSDB while queries are still in flight")
+	// Flush whatever is still buffered to ClickHouse, so a clean shutdown leaves the
+	// data only in ClickHouse. This is essential for the in-memory WAL (its buffer
+	// would otherwise be lost with the process) and a harmless backlog-reducer for
+	// Redis. It also releases the drainer lease so a takeover is immediate. Bounded
+	// by the shutdown context, and safe to run now: external writes are already
+	// stopped and the ClickHouse connection is closed by the backend (its owner)
+	// only after this returns.
+	if c.drainer != nil {
+		c.drainer.finalDrain(ctx)
 	}
+
+	// The WAL connection is ours.
+	c.walConn.Close()
 
 	return nil
 }

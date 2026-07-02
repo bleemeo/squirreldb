@@ -28,12 +28,11 @@ type metrics struct {
 	FlushErrorsTotal        prometheus.Counter
 	FlushDroppedPointsTotal prometheus.Counter
 	// FlushRowsPerBatch / FlushMetricsPerBatch capture the size of a single
-	// clickhouse-go INSERT block: points (timestamps/values array elements across
-	// all series) and distinct series (one block row each, since the write path
-	// sends one row per series — see datapointInputDDL). During a backlog catch-up
-	// the batcher hands a large flush to the writer in one block, and clickhouse-go
-	// buffers the whole block uncompressed before Send — these reveal that peak and
-	// the points-per-series ratio that drove it.
+	// clickhouse-go INSERT block the drainer sends: points (timestamps/values array
+	// elements across all series) and distinct series (one block row each, since the
+	// write path sends one row per series — see datapointInputDDL). clickhouse-go
+	// buffers the whole block uncompressed before Send, so these reveal the peak and
+	// the points-per-series ratio that drives it.
 	FlushRowsPerBatch    prometheus.Histogram
 	FlushMetricsPerBatch prometheus.Histogram
 
@@ -44,9 +43,13 @@ type metrics struct {
 	// the cache out as a memory driver during a backlog.
 	SeenSeriesSize prometheus.Gauge
 
-	ReadSeconds            *prometheus.SummaryVec
-	ReadSeriesTotal        prometheus.Counter
-	ReadPendingPointsTotal prometheus.Counter
+	ReadSeconds     *prometheus.SummaryVec
+	ReadSeriesTotal prometheus.Counter
+
+	// WAL / drainer.
+	WALLength            prometheus.Gauge       // current number of buffered points in the Redis WAL
+	WALDrainerIsLeader   prometheus.Gauge       // 1 if this node holds the drainer lease
+	WALBackpressureTotal *prometheus.CounterVec // writes slowed/blocked, by kind
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -127,11 +130,35 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name:      "read_series_total",
 			Help:      "Total series resolved by Select (SQL mode)",
 		}),
-		ReadPendingPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+		WALLength: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subSystem,
-			Name:      "read_pending_points_total",
-			Help:      "Total batcher pending points merged into reads (SQL mode)",
+			Name:      "wal_length",
+			Help:      "Current number of buffered points in the ClickHouse write-ahead log (one entry per point)",
 		}),
+		WALDrainerIsLeader: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "wal_drainer_is_leader",
+			Help:      "1 if this node currently holds the WAL drainer lease (writes the WAL to ClickHouse), else 0",
+		}),
+		WALBackpressureTotal: newWALBackpressureTotal(reg, namespace, subSystem),
 	}
+}
+
+// newWALBackpressureTotal builds the WAL backpressure counter with both label
+// values pre-initialized to 0 (a CounterVec emits no series for an untouched
+// label set), so they show even before the WAL first backs up.
+func newWALBackpressureTotal(reg prometheus.Registerer, namespace, subSystem string) *prometheus.CounterVec {
+	c := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subSystem,
+		Name:      "wal_backpressure_total",
+		Help:      "Writes slowed or blocked by WAL backpressure, by kind (slow = ramp sleep, block = held until drained)",
+	}, []string{"kind"})
+
+	c.WithLabelValues("slow")
+	c.WithLabelValues("block")
+
+	return c
 }

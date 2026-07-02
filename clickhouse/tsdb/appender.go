@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 
 	"github.com/bleemeo/squirreldb/types"
 
@@ -39,10 +37,9 @@ var (
 )
 
 // appender accumulates the points of a single remote write request, keyed by
-// label hash, and on Commit hands them to the batcher. Unlike the Cassandra
-// backend it does not resolve a real metric ID through an index: the label hash
-// is used directly as the ID, and the labels are stored in the temporary store
-// so the writer can rebuild them at flush time.
+// label hash to merge repeated samples of the same series, and on Commit appends
+// them (labels + points) to the shared Redis WAL. The drainer later writes the WAL
+// to ClickHouse; there is no metric-index lookup.
 type appender struct {
 	c   *ClickHouseTSDB
 	ttl int64
@@ -99,39 +96,33 @@ func (app *appender) Commit() error {
 		return nil
 	}
 
-	pending := slices.Collect(maps.Values(app.pendingTimeSeries))
+	// One WAL entry per point (not per series), so the WAL list length is the exact
+	// buffered-point count. A series with N points therefore produces N entries that
+	// repeat its labels; the drainer regroups them into one arrays-per-series insert,
+	// so the label repetition costs only transient Redis memory, never ClickHouse
+	// write efficiency.
+	var entries []walEntry
 
-	ids := make([]types.MetricID, len(pending))
-	labelsList := make([]labels.Labels, len(pending))
-	metrics := make([]types.MetricData, len(pending))
-
-	for i, ts := range pending {
-		id := types.MetricID(ts.Labels.Hash()) //nolint:gosec // hash used as an opaque batching key
-
-		ids[i] = id
-		labelsList[i] = ts.Labels
-		metrics[i] = types.MetricData{
-			ID:         id,
-			Points:     ts.Points,
-			TimeToLive: app.ttl,
+	for _, ts := range app.pendingTimeSeries {
+		for _, p := range ts.Points {
+			entries = append(entries, walEntry{Labels: ts.Labels, TTL: app.ttl, Points: []types.MetricPoint{p}})
 		}
 	}
 
-	// Store the labels before the points: the writer needs them at flush time
-	// to rebuild the remote_write request.
-	if err := app.c.temporaryStore.StoreLabelsByID(app.ctx, ids, labelsList, app.c.labelsTTL); err != nil {
-		return fmt.Errorf("store labels: %w", err)
+	// Slow (or, at the stop threshold, block) before appending when the WAL is
+	// backed up, so a lagging drainer bounds the WAL instead of letting it grow
+	// unbounded. Applied before the append so a client timeout during it leaves
+	// nothing written.
+	if err := app.c.applyBackpressure(app.ctx); err != nil {
+		return fmt.Errorf("wal backpressure: %w", err)
 	}
 
-	// Register new series in tsdb_tags right away so queries can resolve them
-	// before the batcher flushes their points (point (a)).
-	if err := app.c.registerSeries(app.ctx, pending, app.ttl); err != nil {
-		return fmt.Errorf("register series: %w", err)
+	walLen, err := app.c.wal.Append(app.ctx, entries)
+	if err != nil {
+		return fmt.Errorf("append to wal: %w", err)
 	}
 
-	if err := app.c.batcher.Write(app.ctx, metrics); err != nil {
-		return fmt.Errorf("write metrics: %w", err)
-	}
+	app.c.lastWALLen.Store(walLen)
 
 	return nil
 }

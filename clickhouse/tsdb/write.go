@@ -17,126 +17,13 @@
 package tsdb
 
 import (
-	"context"
-	"fmt"
 	"math"
-	"time"
-
-	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
 const secondsPerDay = 24 * 60 * 60
-
-// sqlWriter implements types.MetricWriter and is used by the batcher to flush
-// batched points to ClickHouse through SQL. It inserts raw rows
-// into the Null-engine datapoint_input table; materialized views compute the
-// series id and fan them out into tsdb_data and tsdb_tags.
-type sqlWriter struct {
-	c *ClickHouseTSDB
-}
-
-func (w *sqlWriter) Write(ctx context.Context, metrics []types.MetricData) error {
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	start := time.Now()
-	defer func() {
-		w.c.metrics.FlushSeconds.Observe(time.Since(start).Seconds())
-	}()
-
-	ids := make([]types.MetricID, len(metrics))
-	for i, m := range metrics {
-		ids[i] = m.ID
-	}
-
-	labelsList, err := w.c.temporaryStore.GetLabelsByID(ctx, ids)
-	if err != nil {
-		return fmt.Errorf("get labels: %w", err)
-	}
-
-	batch, err := w.c.conn.PrepareBatch(ctx, "INSERT INTO datapoint_input")
-	if err != nil {
-		return fmt.Errorf("prepare batch: %w", err)
-	}
-
-	defer batch.Close()
-
-	globalDays := uint16(w.c.ttlDays()) //nolint:gosec
-	rows := 0
-
-	var (
-		missingLabels int
-		droppedPoints int
-	)
-
-	for i, m := range metrics {
-		lbls := labelsList[i]
-		if lbls.Len() == 0 {
-			missingLabels++
-			droppedPoints += len(m.Points)
-
-			continue
-		}
-
-		cols := seriesToInput(lbls, w.c.opts.TenantLabel, m.TimeToLive, globalDays)
-
-		// One row per series: the points go in as parallel timestamps/values arrays
-		// (re-expanded server-side by mv_datapoint_data's ARRAY JOIN). This keeps the
-		// series identity (metric_name, tenant, tags) once per series in the
-		// clickhouse-go block instead of once per point — see datapointInputDDL.
-		timestamps := make([]time.Time, len(m.Points))
-		values := make([]float64, len(m.Points))
-
-		for j, p := range m.Points {
-			timestamps[j] = time.UnixMilli(p.Timestamp)
-			values[j] = p.Value
-		}
-
-		if err := batch.Append(
-			cols.metricName, cols.tenant, cols.tags, timestamps, values, cols.rowTTLDays,
-		); err != nil {
-			_ = batch.Abort()
-
-			w.c.metrics.FlushErrorsTotal.Inc()
-
-			return fmt.Errorf("append row: %w", err)
-		}
-
-		rows += len(m.Points)
-	}
-
-	if droppedPoints > 0 {
-		w.c.metrics.FlushDroppedPointsTotal.Add(float64(droppedPoints))
-		w.c.logger.Warn().
-			Int("series", missingLabels).
-			Int("points", droppedPoints).
-			Msg("Missing labels for some metrics at flush time, their points were dropped")
-	}
-
-	// Size of the clickhouse-go block this flush builds in memory before Send: total
-	// points (array elements) and distinct series (one block row each). The
-	// points-per-series ratio is what a per-point layout used to amplify in memory.
-	w.c.metrics.FlushRowsPerBatch.Observe(float64(rows))
-	w.c.metrics.FlushMetricsPerBatch.Observe(float64(len(metrics) - missingLabels))
-
-	if rows == 0 {
-		return batch.Abort()
-	}
-
-	if err := batch.Send(); err != nil {
-		w.c.metrics.FlushErrorsTotal.Inc()
-
-		return fmt.Errorf("send batch to clickhouse: %w", err)
-	}
-
-	w.c.metrics.FlushPointsTotal.Add(float64(rows))
-
-	return nil
-}
 
 // seriesColumns are the datapoint_input / tsdb_tags columns derived from a
 // series' labels.

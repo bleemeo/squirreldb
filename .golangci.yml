@@ -13,6 +13,7 @@ linters:
     - funcorder # Would force us to reorganize hundreds of functions.
     - funlen
     - gocognit # We use maintidx to lint function complexity.
+    - goconst # Too picky, with tests it require too many creation of constants.
     - gocyclo # We use maintidx to lint function complexity.
     - interfacebloat # Warn when an interface has too many methods, not useful.
     - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.

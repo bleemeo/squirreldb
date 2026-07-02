@@ -23,7 +23,20 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/types"
+
+	"github.com/prometheus/prometheus/model/labels"
 )
+
+// registration is the tsdb_tags registration input for one series: its labels, the
+// per-metric write TTL (seconds), and the min/max timestamp (ms) of the points that
+// produced it. The TTL and range are per-series because a single drain batch mixes
+// series from many writes with different TTLs and time ranges.
+type registration struct {
+	labels labels.Labels
+	ttl    int64
+	minTS  int64
+	maxTS  int64
+}
 
 const (
 	// reRegisterBase and reRegisterJitter set how often an active series is
@@ -59,18 +72,17 @@ type seenEntry struct {
 }
 
 // registerSeries writes into tsdb_tags the series that are new or due for a
-// refresh, so reads can resolve them (and merge their batcher points) before the
-// batcher flushes, and so their index row keeps a fresh expiration. tsdb_tags is
-// written only here (no materialized view); the point flush only writes tsdb_data.
+// refresh, so reads can resolve them and so their index row keeps a fresh
+// expiration. It is called by the drainer for each batch it writes; tsdb_tags is
+// written only here (no materialized view), while the point insert writes tsdb_data.
 //
-// min_time/max_time/max_expiration are derived from the request's points (not
-// now), with a reRegisterGap margin on max_time and max_expiration so a series
-// is never excluded or expired before data written until the next registration.
-// ttlSeconds is the write TTL of the request that produced these series.
-func (c *ClickHouseTSDB) registerSeries(ctx context.Context, series []types.Timeseries, ttlSeconds int64) error {
+// min_time/max_time/max_expiration are derived from each series' points (not now),
+// with a reRegisterGap margin on max_time and max_expiration so a series is never
+// excluded or expired before data written until the next registration.
+func (c *ClickHouseTSDB) registerSeries(ctx context.Context, regs []registration) error {
 	now := time.Now()
 
-	toRegister := c.seriesToRegister(series, now)
+	toRegister := c.seriesToRegister(regs, now)
 	if len(toRegister) == 0 {
 		return nil
 	}
@@ -90,16 +102,15 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, series []types.Time
 
 	globalDays := uint16(c.ttlDays()) //nolint:gosec
 
-	for _, ts := range toRegister {
-		cols := seriesToInput(ts.Labels, c.opts.TenantLabel, ttlSeconds, globalDays)
-		minTS, maxTS := pointsRange(ts.Points)
+	for _, r := range toRegister {
+		cols := seriesToInput(r.labels, c.opts.TenantLabel, r.ttl, globalDays)
 
-		minTime := time.UnixMilli(minTS)
+		minTime := time.UnixMilli(r.minTS)
 		// max_time covers the gap so label queries don't exclude the series for
 		// data written until the next registration. maxTS is within the store range
 		// (writes reject out-of-range timestamps), so maxTS+gap cannot overflow.
-		maxTime := time.UnixMilli(maxTS).Add(reRegisterGap)
-		maxExpiration := computeMaxExpiration(maxTS, cols.rowTTLDays)
+		maxTime := time.UnixMilli(r.maxTS).Add(reRegisterGap)
+		maxExpiration := computeMaxExpiration(r.maxTS, cols.rowTTLDays)
 
 		if err := batch.Append(cols.metricName, cols.tenant, cols.tags, minTime, maxTime, maxExpiration); err != nil {
 			_ = batch.Abort()
@@ -120,18 +131,18 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, series []types.Time
 
 // seriesToRegister returns the series that are new or due for re-registration,
 // and refreshes the last-seen time of every series (so active ones aren't evicted).
-func (c *ClickHouseTSDB) seriesToRegister(series []types.Timeseries, now time.Time) []types.Timeseries {
+func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []registration {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
 
-	var toRegister []types.Timeseries
+	var toRegister []registration
 
-	for _, ts := range series {
-		hash := ts.Labels.Hash()
+	for _, r := range regs {
+		hash := r.labels.Hash()
 
 		entry, ok := c.seenSeries[hash]
 		if !ok || !now.Before(entry.nextRegister) {
-			toRegister = append(toRegister, ts)
+			toRegister = append(toRegister, r)
 		}
 
 		entry.lastSeen = now
@@ -145,12 +156,12 @@ func (c *ClickHouseTSDB) seriesToRegister(series []types.Timeseries, now time.Ti
 
 // markRegistered schedules the next re-registration of each series (after a
 // successful insert), with per-series jitter to spread the load.
-func (c *ClickHouseTSDB) markRegistered(series []types.Timeseries, now time.Time) {
+func (c *ClickHouseTSDB) markRegistered(regs []registration, now time.Time) {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
 
-	for _, ts := range series {
-		hash := ts.Labels.Hash()
+	for _, r := range regs {
+		hash := r.labels.Hash()
 
 		entry := c.seenSeries[hash]
 		entry.nextRegister = now.Add(reRegisterBase + time.Duration(rand.Int64N(int64(reRegisterJitter)))) //nolint:gosec

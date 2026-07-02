@@ -21,51 +21,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/bleemeo/squirreldb/config"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog"
 )
-
-// TestNewTemporaryStore checks the store selection contract: an in-memory store
-// only when Redis is not configured, and a hard error (never a silent in-memory
-// fallback) when Redis is configured but unreachable — a fallback would make the
-// labels store node-local and break multi-node takeover.
-func TestNewTemporaryStore(t *testing.T) {
-	logger := zerolog.Nop()
-
-	t.Run("no redis configured returns in-memory store", func(t *testing.T) {
-		opts := Options{Reg: prometheus.NewRegistry()}
-
-		store, err := newTemporaryStore(context.Background(), opts, logger)
-		if err != nil {
-			t.Fatalf("newTemporaryStore returned error: %v", err)
-		}
-
-		if store == nil {
-			t.Fatal("newTemporaryStore returned a nil store")
-		}
-	})
-
-	t.Run("configured but unreachable redis errors without falling back", func(t *testing.T) {
-		// A cancelled context makes the Redis connection attempt fail
-		// deterministically (IsCluster pings through the context).
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		opts := Options{
-			Reg:   prometheus.NewRegistry(),
-			Redis: config.Redis{Addresses: []string{"127.0.0.1:6379"}},
-		}
-
-		store, err := newTemporaryStore(ctx, opts, logger)
-		if err == nil {
-			t.Fatalf("newTemporaryStore silently returned a store (%T) instead of erroring "+
-				"when Redis is configured but unreachable", store)
-		}
-	})
-}
 
 // TestQuerierLifecycle checks that queriers are tracked as in-flight (so Close
 // can wait for them to release the shared connection), that closing a querier

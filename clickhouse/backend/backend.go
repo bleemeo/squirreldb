@@ -65,7 +65,6 @@ type Options struct {
 	ReadOnly          bool
 	Cluster           types.Cluster
 	TenantLabel       string
-	BatchSize         time.Duration
 	DefaultTimeToLive time.Duration
 	// ClusterName enables ClickHouse cluster mode (ON CLUSTER + Replicated) for
 	// every store's schema. Empty means a single ClickHouse node.
@@ -262,8 +261,9 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 			Redis:             b.options.Redis,
 			Reg:               b.options.MetricRegistry,
 			TenantLabel:       b.options.TenantLabel,
-			BatchSize:         b.options.BatchSize,
 			DefaultTimeToLive: b.options.DefaultTimeToLive,
+			WALFlushDelay:     b.options.Config.WALFlushDelay,
+			WALSoftThreshold:  b.options.Config.WALSoftThreshold,
 		},
 	)
 	if err != nil {
