@@ -25,7 +25,6 @@ import (
 
 	"github.com/bleemeo/squirreldb/appendable/fixedappender"
 	"github.com/bleemeo/squirreldb/queryable/convert"
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -56,11 +55,11 @@ func (DiscardTSDB) AppenderWithOptions(ctx context.Context, _ types.AppenderOpti
 }
 
 func (DiscardTSDB) Querier(mint, maxt int64) (storage.Querier, error) {
-	return fixedqueryable.NewEmptyQuerier(), nil
+	return storage.NoopQuerier(), nil
 }
 
 func (DiscardTSDB) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
-	return convert.NewQuerierToChunkQuerier(fixedqueryable.NewEmptyQuerier()), nil
+	return convert.NewQuerierToChunkQuerier(storage.NoopQuerier()), nil
 }
 
 func (DiscardTSDB) Flush(context.Context) error {

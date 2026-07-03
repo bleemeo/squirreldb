@@ -20,7 +20,6 @@ package requestscoped
 import (
 	"context"
 
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -66,7 +65,7 @@ func (p *pendingQuerier) Select(
 ) storage.SeriesSet {
 	q, err := p.getQuerier(ctx)
 	if err != nil {
-		return fixedqueryable.NewErrorSeriesSet(err)
+		return storage.ErrSeriesSet(err)
 	}
 
 	return q.Select(ctx, sortSeries, hints, matchers...)

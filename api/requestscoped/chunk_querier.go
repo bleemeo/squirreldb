@@ -20,7 +20,6 @@ package requestscoped
 import (
 	"context"
 
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -66,7 +65,7 @@ func (p *pendingChunkQuerier) Select(
 ) storage.ChunkSeriesSet {
 	q, err := p.getChunkQuerier(ctx)
 	if err != nil {
-		return fixedqueryable.NewErrorChunkSeriesSet(err)
+		return storage.ErrChunkSeriesSet(err)
 	}
 
 	return q.Select(ctx, sortSeries, hints, matchers...)

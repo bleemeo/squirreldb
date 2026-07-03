@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunks"
@@ -42,7 +41,7 @@ func (q chunkQuerier) Select(
 	matchers ...*labels.Matcher,
 ) storage.ChunkSeriesSet {
 	if q.parent.opts.MaxEvaluatedSeries != 0 && q.parent.returnedSeries.Load() >= q.parent.opts.MaxEvaluatedSeries {
-		return fixedqueryable.NewErrorChunkSeriesSet(ErrTooManySeries)
+		return storage.ErrChunkSeriesSet(ErrTooManySeries)
 	}
 
 	if q.parent.opts.ForcedMatchers != nil {

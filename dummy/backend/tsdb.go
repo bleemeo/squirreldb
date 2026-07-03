@@ -28,7 +28,6 @@ import (
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy/temporarystore"
 	"github.com/bleemeo/squirreldb/queryable/convert"
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	redisTemporarystore "github.com/bleemeo/squirreldb/redis/temporarystore"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -173,11 +172,11 @@ func (t *batchingTSDB) AppenderWithOptions(ctx context.Context, opts types.Appen
 }
 
 func (t *batchingTSDB) QuerierWithOptions(_ types.QuerierOptions, _, _ int64) (storage.Querier, error) {
-	return fixedqueryable.NewEmptyQuerier(), nil
+	return storage.NoopQuerier(), nil
 }
 
 func (t *batchingTSDB) ChunkQuerierWithOptions(_ types.QuerierOptions, _, _ int64) (storage.ChunkQuerier, error) {
-	return convert.NewQuerierToChunkQuerier(fixedqueryable.NewEmptyQuerier()), nil
+	return convert.NewQuerierToChunkQuerier(storage.NoopQuerier()), nil
 }
 
 // Flush flushes points still buffered in the batcher to the discard writer

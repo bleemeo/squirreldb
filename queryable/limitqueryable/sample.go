@@ -19,7 +19,6 @@ package limitqueryable
 import (
 	"context"
 
-	"github.com/bleemeo/squirreldb/queryable/fixedqueryable"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
@@ -34,7 +33,7 @@ type querier struct {
 
 func (q querier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet { //nolint:lll
 	if q.parent.opts.MaxEvaluatedSeries != 0 && q.parent.returnedSeries.Load() >= q.parent.opts.MaxEvaluatedSeries {
-		return fixedqueryable.NewErrorSeriesSet(ErrTooManySeries)
+		return storage.ErrSeriesSet(ErrTooManySeries)
 	}
 
 	if q.parent.opts.ForcedMatchers != nil {
