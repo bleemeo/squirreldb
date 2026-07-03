@@ -19,6 +19,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
@@ -81,6 +82,24 @@ func TestPick(t *testing.T) {
 
 		if _, err := c.pick(); err == nil {
 			t.Fatal("pick should error when no host is reachable")
+		}
+	})
+
+	t.Run("error surfaces the per-host cause", func(t *testing.T) {
+		t.Parallel()
+
+		down := &host{addr: "clickhouse:9000"}
+		down.set(false, false, "code: 516, AUTHENTICATION_FAILED", zerolog.Nop())
+		c := newTestConn(down)
+
+		_, err := c.pick()
+		if err == nil {
+			t.Fatal("pick should error when no host is reachable")
+		}
+
+		if !strings.Contains(err.Error(), "clickhouse:9000") ||
+			!strings.Contains(err.Error(), "AUTHENTICATION_FAILED") {
+			t.Fatalf("error should carry the host and its cause, got: %v", err)
 		}
 	})
 

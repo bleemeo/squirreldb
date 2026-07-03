@@ -41,6 +41,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -113,6 +114,11 @@ type host struct {
 	mu        sync.RWMutex
 	reachable bool
 	ready     bool
+	// cause is the last reason the host is not fully healthy: the ping error when
+	// unreachable, or the readiness reason (missing tables, lagging) when reachable
+	// but not ready. Empty when ready. Surfaced in pick's error and the debug
+	// endpoint so an operator sees WHY a host is excluded (e.g. bad credentials).
+	cause string
 }
 
 func (h *host) state() (reachable, ready bool) {
@@ -120,6 +126,13 @@ func (h *host) state() (reachable, ready bool) {
 	defer h.mu.RUnlock()
 
 	return h.reachable, h.ready
+}
+
+func (h *host) lastCause() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	return h.cause
 }
 
 func (h *host) set(reachable, ready bool, causeMessage string, logger zerolog.Logger) {
@@ -157,6 +170,7 @@ func (h *host) set(reachable, ready bool, causeMessage string, logger zerolog.Lo
 	}
 
 	h.reachable, h.ready = reachable, ready
+	h.cause = causeMessage
 }
 
 // Conn is a driver.Conn routing to healthy hosts. It is safe for concurrent use.
@@ -481,6 +495,9 @@ type HostStatus struct {
 	Address   string `json:"address"`
 	Reachable bool   `json:"reachable"`
 	Ready     bool   `json:"ready"`
+	// Cause is the reason the host is not fully healthy (ping error, missing tables,
+	// lagging); empty when ready.
+	Cause string `json:"cause,omitempty"`
 }
 
 // Hosts returns the current health of every configured host (for introspection,
@@ -490,7 +507,12 @@ func (c *Conn) Hosts() []HostStatus {
 
 	for _, h := range c.hosts {
 		reachable, ready := h.state()
-		statuses = append(statuses, HostStatus{Address: h.addr, Reachable: reachable, Ready: ready})
+		statuses = append(statuses, HostStatus{
+			Address:   h.addr,
+			Reachable: reachable,
+			Ready:     ready,
+			Cause:     h.lastCause(),
+		})
 	}
 
 	return statuses
@@ -531,12 +553,32 @@ func (c *Conn) pick() (*host, error) {
 	}
 
 	if len(pool) == 0 {
-		return nil, errors.New("routing: no reachable ClickHouse host")
+		return nil, c.noReachableHostError()
 	}
 
 	idx := int(c.rr.Add(1)-1) % len(pool) //nolint:gosec
 
 	return pool[idx], nil
+}
+
+// noReachableHostError builds the "no reachable host" error, appending each host's
+// last cause (e.g. "code: 516 ... AUTHENTICATION_FAILED", "connection refused") so
+// the reason is visible wherever the error surfaces — instead of a bare message
+// that hides bad credentials or a wrong address.
+func (c *Conn) noReachableHostError() error {
+	causes := make([]string, 0, len(c.hosts))
+
+	for _, h := range c.hosts {
+		if cause := h.lastCause(); cause != "" {
+			causes = append(causes, fmt.Sprintf("%s: %s", h.addr, cause))
+		}
+	}
+
+	if len(causes) == 0 {
+		return errors.New("routing: no reachable ClickHouse host")
+	}
+
+	return fmt.Errorf("routing: no reachable ClickHouse host (%s)", strings.Join(causes, "; "))
 }
 
 // pickSticky is like pick but DETERMINISTIC: it returns the first ready host (in
@@ -561,7 +603,7 @@ func (c *Conn) pickSticky() (*host, error) {
 		return firstReachable, nil
 	}
 
-	return nil, errors.New("routing: no reachable ClickHouse host")
+	return nil, c.noReachableHostError()
 }
 
 // observe reacts to the error of a call routed to h: a connection-level error
@@ -639,7 +681,11 @@ func (c *Conn) probe(parent context.Context, h *host) {
 	defer cancel()
 
 	if err := h.conn.Ping(ctx); err != nil {
-		h.set(false, false, "", c.logger)
+		// Record the ping error as the cause so pick's error and the debug endpoint
+		// can show WHY the host is down (bad credentials, refused connection, ...) —
+		// otherwise a never-reachable host surfaces only as the generic "no reachable
+		// host" (no state transition to log at startup).
+		h.set(false, false, err.Error(), c.logger)
 
 		return
 	}

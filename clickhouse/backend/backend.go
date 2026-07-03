@@ -199,6 +199,12 @@ func (b *Backend) Start(ctx context.Context) error {
 
 	cfg := b.options.Config
 
+	b.logger.Debug().
+		Strs("addresses", cfg.Addresses).
+		Str("database", cfg.Database).
+		Str("clusterName", b.options.ClusterName).
+		Msgf("Starting Clickhouse backend")
+
 	conn, err := routing.New(ctx, routing.Options{
 		Addresses: cfg.Addresses,
 		Auth: clickhouse.Auth{
