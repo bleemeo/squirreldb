@@ -41,7 +41,7 @@ func newTestTSDB(t *testing.T) *ClickHouseTSDB {
 	return &ClickHouseTSDB{
 		metrics:    newMetrics(nil),
 		logger:     zerolog.Nop(),
-		seenSeries: make(map[uint64]seenEntry),
+		seenSeries: make(map[string]seenEntry),
 	}
 }
 

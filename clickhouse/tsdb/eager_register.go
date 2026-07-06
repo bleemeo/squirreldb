@@ -138,15 +138,15 @@ func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []
 	var toRegister []registration
 
 	for _, r := range regs {
-		hash := r.labels.Hash()
+		key := string(r.labels.Bytes(nil))
 
-		entry, ok := c.seenSeries[hash]
+		entry, ok := c.seenSeries[key]
 		if !ok || !now.Before(entry.nextRegister) {
 			toRegister = append(toRegister, r)
 		}
 
 		entry.lastSeen = now
-		c.seenSeries[hash] = entry
+		c.seenSeries[key] = entry
 	}
 
 	c.metrics.SeenSeriesSize.Set(float64(len(c.seenSeries)))
@@ -161,11 +161,11 @@ func (c *ClickHouseTSDB) markRegistered(regs []registration, now time.Time) {
 	defer c.seenMu.Unlock()
 
 	for _, r := range regs {
-		hash := r.labels.Hash()
+		key := string(r.labels.Bytes(nil))
 
-		entry := c.seenSeries[hash]
+		entry := c.seenSeries[key]
 		entry.nextRegister = now.Add(reRegisterBase + time.Duration(rand.Int64N(int64(reRegisterJitter)))) //nolint:gosec
-		c.seenSeries[hash] = entry
+		c.seenSeries[key] = entry
 	}
 }
 
@@ -189,9 +189,9 @@ func (c *ClickHouseTSDB) sweepSeenSeries(now time.Time) {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
 
-	for hash, entry := range c.seenSeries {
+	for key, entry := range c.seenSeries {
 		if now.Sub(entry.lastSeen) > seenSeriesTTL {
-			delete(c.seenSeries, hash)
+			delete(c.seenSeries, key)
 		}
 	}
 

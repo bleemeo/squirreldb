@@ -36,17 +36,19 @@ var (
 	errClosed              = errors.New("clickhouse tsdb is closed")
 )
 
-// appender accumulates the points of a single remote write request, keyed by
-// label hash to merge repeated samples of the same series, and on Commit appends
-// them (labels + points) to the shared Redis WAL. The drainer later writes the WAL
+// appender accumulates the points of a single remote write request and, on
+// Commit, appends them to the shared Redis WAL. The drainer later writes the WAL
 // to ClickHouse; there is no metric-index lookup.
 type appender struct {
 	c   *ClickHouseTSDB
 	ttl int64
 	ctx context.Context //nolint:containedctx
 
-	// Pending timeseries indexed by their labels hash.
-	pendingTimeSeries map[uint64]types.Timeseries
+	// pending holds one WAL entry per appended point. The WAL is one-entry-per-
+	// point (see walEntry / wal.go), so there is nothing to group per series here
+	// — the drainer regroups points by series at insert time. Accumulating a flat
+	// slice avoids both a per-series map and any label hashing on the write path.
+	pending []walEntry
 }
 
 func (app *appender) Append(
@@ -65,48 +67,22 @@ func (app *appender) Append(
 		)
 	}
 
-	labelsHash := l.Hash()
-
-	ts, ok := app.pendingTimeSeries[labelsHash]
-	if !ok {
-		app.pendingTimeSeries[labelsHash] = types.Timeseries{
-			Labels: l,
-			Points: []types.MetricPoint{{
-				Timestamp: t,
-				Value:     v,
-			}},
-		}
-	} else {
-		ts.Points = append(ts.Points, types.MetricPoint{
-			Timestamp: t,
-			Value:     v,
-		})
-		app.pendingTimeSeries[labelsHash] = ts
-	}
+	app.pending = append(app.pending, walEntry{
+		Labels: l,
+		TTL:    app.ttl,
+		Points: []types.MetricPoint{{Timestamp: t, Value: v}},
+	})
 
 	return 0, nil
 }
 
 func (app *appender) Commit() error {
 	defer func() {
-		app.pendingTimeSeries = make(map[uint64]types.Timeseries)
+		app.pending = nil
 	}()
 
-	if len(app.pendingTimeSeries) == 0 {
+	if len(app.pending) == 0 {
 		return nil
-	}
-
-	// One WAL entry per point (not per series), so the WAL list length is the exact
-	// buffered-point count. A series with N points therefore produces N entries that
-	// repeat its labels; the drainer regroups them into one arrays-per-series insert,
-	// so the label repetition costs only transient Redis memory, never ClickHouse
-	// write efficiency.
-	var entries []walEntry
-
-	for _, ts := range app.pendingTimeSeries {
-		for _, p := range ts.Points {
-			entries = append(entries, walEntry{Labels: ts.Labels, TTL: app.ttl, Points: []types.MetricPoint{p}})
-		}
 	}
 
 	// Slow (or, at the stop threshold, block) before appending when the WAL is
@@ -117,7 +93,7 @@ func (app *appender) Commit() error {
 		return fmt.Errorf("wal backpressure: %w", err)
 	}
 
-	walLen, err := app.c.wal.Append(app.ctx, entries)
+	walLen, err := app.c.wal.Append(app.ctx, app.pending)
 	if err != nil {
 		return fmt.Errorf("append to wal: %w", err)
 	}
@@ -128,7 +104,7 @@ func (app *appender) Commit() error {
 }
 
 func (app *appender) Rollback() error {
-	app.pendingTimeSeries = make(map[uint64]types.Timeseries)
+	app.pending = nil
 
 	return nil
 }

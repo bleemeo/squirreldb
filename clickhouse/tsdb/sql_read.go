@@ -201,13 +201,29 @@ func clampStoreTime(ms int64) int64 {
 // pointsQuery builds the tsdb_data query and its arguments. Rows are ordered by
 // id so the streaming SeriesSet can group points per series; series order does
 // not matter (the caller sorts when it requires label order, see sortedByLabels).
+//
+// A tenant-scoped query filters tsdb_data by `tenant = ?` (the trusted request
+// tenant) on top of the id set from tsdb_tags. tsdb_data is keyed by id, so
+// matching id alone would return BOTH tenants' points for a colliding id; the
+// explicit tenant predicate confines any id collision to the querying tenant and
+// lets ClickHouse prune on the (tenant, id, timestamp) primary key. Skipped when
+// unscoped (q.tenant == ""), which reads across tenants as before.
 func (q *sqlQuerier) pointsQuery(where string, args []any) (string, []any) {
+	queryArgs := make([]any, 0, len(args)+3)
+
+	var tenantCond string
+
+	if q.tenant != "" {
+		tenantCond = "tenant = ? AND "
+
+		queryArgs = append(queryArgs, q.tenant)
+	}
+
 	query := "SELECT id, timestamp, value FROM tsdb_data" +
-		" WHERE id IN (SELECT id FROM tsdb_tags WHERE " + where + ")" +
+		" WHERE " + tenantCond + "id IN (SELECT id FROM tsdb_tags WHERE " + where + ")" +
 		" AND timestamp >= fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?)" +
 		" ORDER BY id, timestamp"
 
-	queryArgs := make([]any, 0, len(args)+2)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
 

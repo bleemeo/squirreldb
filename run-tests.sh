@@ -109,8 +109,9 @@ elif [ "${WITH_SCYLLADB}" = "1" ]; then
 elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
     # The database is created by the ClickHouse image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
     echo
-    echo "== Starting ClickHouse (TSDB + mutable labels backends)"
-    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
+    echo "== Starting ClickHouse & Redis"
+    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_USER=squirreldb_user -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
+    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
@@ -177,8 +178,8 @@ run_sqdb() {
         -e SQUIRRELDB_REDIS_ADDRESSES \
         -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
         -e SQUIRRELDB_BACKEND \
-        -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
         -e SQUIRRELDB_CLICKHOUSE_USERNAME \
+        -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
         -e SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME \
         -e SQUIRRELDB_TELEMETRY_ENABLED=false \
         -e GOCOVERDIR -e GORACE \
@@ -197,7 +198,9 @@ docker run $docker_network -p 127.0.0.1:9200:9201 --rm -ti -e HOME=/go/pkg \
     -e SQUIRRELDB_REDIS_ADDRESSES \
     -e SQUIRRELDB_CLICKHOUSE_ADDRESSES \
     -e SQUIRRELDB_BACKEND \
+    -e SQUIRRELDB_CLICKHOUSE_USERNAME \
     -e SQUIRRELDB_CLICKHOUSE_PASSWORD \
+    -e SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME \
     -e SQUIRRELDB_TELEMETRY_ENABLED=false \
     -e SQUIRRELDB_LISTEN_ADDRESS=0.0.0.0:9201 \
     -e GOCOVERDIR -e GORACE \
@@ -290,8 +293,9 @@ if [ ! "${WITH_NOSTOP}" = "1" ]; then
         (cd examples/squirreldb_ha/; docker compose down -v)
     elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
         echo
-        echo "== Stopping ClickHouse"
+        echo "== Stopping ClickHouse & Redis"
         docker rm -f squirreldb-test-clickhouse
+        docker rm -f squirreldb-test-redis
     else
         echo
         echo "== Stopping Cassandra & Redis"

@@ -31,7 +31,8 @@ import (
 // labelQuerier implements LabelValues/LabelNames against the tsdb_tags table.
 type labelQuerier struct {
 	conn        driver.Conn
-	tenantLabel string
+	tenantLabel string // the label NAME carrying the tenant (opts.TenantLabel)
+	tenant      string // the trusted request tenant VALUE (opts.Tenant); "" = unscoped
 	mint        int64
 	maxt        int64
 }
@@ -135,19 +136,32 @@ func (lq *labelQuerier) LabelNames(
 }
 
 // buildWhere turns the matchers into a SQL condition and its arguments. It
-// returns "1" (always true) when there is no matcher.
+// returns "1" (always true) when there is nothing to filter.
+//
+// When the request is tenant-scoped it prepends an explicit `tenant = ?` from
+// the trusted request tenant (lq.tenant). The caller already forces a tenant
+// matcher, so this is redundant (ClickHouse folds `tenant = ? AND tenant = ?`),
+// but it makes the isolation visible in the code and independent of the
+// forced-matcher wiring, and lets ClickHouse prune on the (tenant, ...) primary
+// key. It is skipped when unscoped (lq.tenant == "") so a mono-tenant or
+// cross-tenant admin query still reads across tenants.
 func (lq *labelQuerier) buildWhere(matchers []*labels.Matcher) (string, []any) {
-	if len(matchers) == 0 {
-		return "1", nil
-	}
+	conditions := make([]string, 0, len(matchers)+1)
+	args := make([]any, 0, len(matchers)+1)
 
-	conditions := make([]string, 0, len(matchers))
-	args := make([]any, 0, len(matchers))
+	if lq.tenant != "" {
+		conditions = append(conditions, "tenant = ?")
+		args = append(args, lq.tenant)
+	}
 
 	for _, m := range matchers {
 		cond, condArgs := lq.matcherCondition(m)
 		conditions = append(conditions, cond)
 		args = append(args, condArgs...)
+	}
+
+	if len(conditions) == 0 {
+		return "1", nil
 	}
 
 	return strings.Join(conditions, " AND "), args

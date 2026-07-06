@@ -28,17 +28,30 @@ import (
 // row_ttl_days carries a per-metric TTL (in days), always set by the write path
 // (mv_datapoint_data). {{TTL}} is the TTL clause based on it (removed when no TTL
 // is configured); there is no hardcoded TTL value in the schema.
+//
+// tenant is carried on every point row so the read path can filter it (see
+// pointsQuery). The series id already includes the tenant (sipHash128), so two
+// tenants normally have distinct ids; the tenant column is defence in depth,
+// confining the blast radius of any id collision (adversarial or accidental) to
+// a single tenant instead of leaking one tenant's points into another's query.
+//
+// tenant LEADS the ORDER BY (like tsdb_tags): almost every read is tenant-scoped
+// (WHERE tenant = ?), so a leading tenant prunes the primary index to one
+// tenant's range. timestamp stays LAST so the Delta codec still sees the
+// increasing per-series timestamps within an id (a (tenant, id) order without it
+// would scatter timestamps and wreck compression).
 const tsdbDataDDL = `
 CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
 (
     id UUID,
+    tenant LowCardinality(String) CODEC(ZSTD(1)),
     timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     value Float64 CODEC(ZSTD(1)),
     row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1))
 )
 ENGINE = {{ENGINE}}
 PARTITION BY toStartOfWeek(timestamp)
-ORDER BY (id, timestamp){{TTL}}
+ORDER BY (tenant, id, timestamp){{TTL}}
 SETTINGS allow_suspicious_low_cardinality_types = 1`
 
 // tsdbTagsDDL holds the series (id <-> labels) index. The series id is
@@ -106,12 +119,14 @@ const mvDatapointDataDDL = `
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_data
 (
     id UUID,
+    tenant LowCardinality(String),
     timestamp DateTime64(3),
     value Float64,
     row_ttl_days UInt16
 ) AS
 SELECT
     reinterpretAsUUID(sipHash128(metric_name, tenant, tags)) AS id,
+    tenant,
     timestamp,
     value,
     row_ttl_days

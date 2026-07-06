@@ -114,27 +114,33 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 // seriesBatch per distinct series (its points concatenated, largest TTL kept), so
 // the insert stays arrays-per-series regardless of how the points were appended.
 func groupBySeries(entries []walEntry) []*seriesBatch {
-	byHash := make(map[uint64]*seriesBatch)
+	// Keyed by the canonical labels encoding (labels.Bytes), not labels.Hash():
+	// the WAL is shared across tenants, so an attacker-forced xxHash collision
+	// (xxHash is invertible) would otherwise merge a victim tenant's series into
+	// the attacker's here. A string key lets Go's seeded map hashing bucket the
+	// series, and byte equality keeps distinct series distinct. Bytes, not String:
+	// String is not injective for adversarial UTF-8 label names.
+	bySeries := make(map[string]*seriesBatch)
 
 	for _, e := range entries {
 		if len(e.Points) == 0 {
 			continue
 		}
 
-		hash := e.Labels.Hash()
+		key := string(e.Labels.Bytes(nil))
 
-		s, ok := byHash[hash]
+		s, ok := bySeries[key]
 		if !ok {
 			s = &seriesBatch{labels: e.Labels, ttl: e.TTL}
-			byHash[hash] = s
+			bySeries[key] = s
 		}
 
 		s.ttl = max(s.ttl, e.TTL)
 		s.points = append(s.points, e.Points...)
 	}
 
-	out := make([]*seriesBatch, 0, len(byHash))
-	for _, s := range byHash {
+	out := make([]*seriesBatch, 0, len(bySeries))
+	for _, s := range bySeries {
 		out = append(out, s)
 	}
 

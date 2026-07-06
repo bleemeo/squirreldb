@@ -24,7 +24,7 @@ import (
 )
 
 func TestSeriesToRegister(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry), metrics: newMetrics(nil)}
+	c := &ClickHouseTSDB{seenSeries: make(map[string]seenEntry), metrics: newMetrics(nil)}
 	t0 := time.Unix(1000, 0)
 
 	a := registration{labels: labels.FromStrings("__name__", "a")}
@@ -100,7 +100,7 @@ func TestComputeMaxExpiration(t *testing.T) {
 }
 
 func TestSweepSeenSeries(t *testing.T) {
-	c := &ClickHouseTSDB{seenSeries: make(map[uint64]seenEntry), metrics: newMetrics(nil)}
+	c := &ClickHouseTSDB{seenSeries: make(map[string]seenEntry), metrics: newMetrics(nil)}
 	start := time.Unix(1000, 0)
 
 	a := registration{labels: labels.FromStrings("__name__", "a")}
@@ -115,11 +115,11 @@ func TestSweepSeenSeries(t *testing.T) {
 
 	c.sweepSeenSeries(start.Add(seenSeriesTTL + time.Second))
 
-	if _, ok := c.seenSeries[a.labels.Hash()]; !ok {
+	if _, ok := c.seenSeries[string(a.labels.Bytes(nil))]; !ok {
 		t.Errorf("active series a was evicted")
 	}
 
-	if _, ok := c.seenSeries[b.labels.Hash()]; ok {
+	if _, ok := c.seenSeries[string(b.labels.Bytes(nil))]; ok {
 		t.Errorf("idle series b was not evicted")
 	}
 }

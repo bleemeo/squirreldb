@@ -121,10 +121,14 @@ type ClickHouseTSDB struct {
 	walStop     int
 	lastWALLen  atomic.Int64
 
-	// seenSeries caches the labels hashes registered in tsdb_tags, to avoid
-	// re-inserting them on every drain. Entries track last-seen (for eviction)
-	// and next-register (for periodic refresh); swept after seenSeriesTTL.
-	seenSeries map[uint64]seenEntry
+	// seenSeries caches the series registered in tsdb_tags, to avoid re-inserting
+	// them on every drain. Keyed by the canonical labels encoding (labels.Bytes),
+	// not labels.Hash(): the cache spans all tenants, so an attacker-forced xxHash
+	// collision would otherwise let one tenant's cached series mask another
+	// tenant's registration (leaving its data unqueryable). Entries track
+	// last-seen (for eviction) and next-register (for periodic refresh); swept
+	// after seenSeriesTTL.
+	seenSeries map[string]seenEntry
 	seenMu     sync.Mutex
 
 	wg     sync.WaitGroup
@@ -168,7 +172,7 @@ func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger, opts Opti
 		logger:      logger,
 		walCritical: soft * walCriticalFactor,
 		walStop:     soft * walStopFactor,
-		seenSeries:  make(map[uint64]seenEntry),
+		seenSeries:  make(map[string]seenEntry),
 	}
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -204,27 +208,26 @@ func (c *ClickHouseTSDB) AppenderWithOptions(
 	opts types.AppenderOptions,
 ) storage.Appender {
 	return &appender{
-		c:                 c,
-		ttl:               opts.WriteTTL,
-		ctx:               ctx,
-		pendingTimeSeries: make(map[uint64]types.Timeseries),
+		c:   c,
+		ttl: opts.WriteTTL,
+		ctx: ctx,
 	}
 }
 
 func (c *ClickHouseTSDB) QuerierWithOptions(
-	_ types.QuerierOptions,
+	opts types.QuerierOptions,
 	mint int64,
 	maxt int64,
 ) (storage.Querier, error) {
-	return c.newSQLQuerier(mint, maxt)
+	return c.newSQLQuerier(opts.Tenant, mint, maxt)
 }
 
 func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
-	_ types.QuerierOptions,
+	opts types.QuerierOptions,
 	mint int64,
 	maxt int64,
 ) (storage.ChunkQuerier, error) {
-	q, err := c.newSQLQuerier(mint, maxt)
+	q, err := c.newSQLQuerier(opts.Tenant, mint, maxt)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +239,7 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 // it to release the shared connection. The matching queries.Done runs in
 // sqlQuerier.Close. It is refused once Close has started, so the connection is
 // never used after it.
-func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) (*sqlQuerier, error) {
+func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64) (*sqlQuerier, error) {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 
@@ -247,16 +250,17 @@ func (c *ClickHouseTSDB) newSQLQuerier(mint, maxt int64) (*sqlQuerier, error) {
 	c.queries.Add(1)
 
 	return &sqlQuerier{
-		labelQuerier: c.newLabelQuerier(mint, maxt),
+		labelQuerier: c.newLabelQuerier(tenant, mint, maxt),
 		metrics:      c.metrics,
 		onClose:      c.queries.Done,
 	}, nil
 }
 
-func (c *ClickHouseTSDB) newLabelQuerier(mint, maxt int64) labelQuerier {
+func (c *ClickHouseTSDB) newLabelQuerier(tenant string, mint, maxt int64) labelQuerier {
 	return labelQuerier{
 		conn:        c.conn,
 		tenantLabel: c.opts.TenantLabel,
+		tenant:      tenant,
 		mint:        mint,
 		maxt:        maxt,
 	}
