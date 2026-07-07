@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/telemetry"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/google/uuid"
@@ -37,8 +38,8 @@ import (
 )
 
 const (
-	idLockTTL        = time.Minute
-	idLockRetryDelay = 5 * time.Second
+	defaultIDLockTTL        = time.Minute
+	defaultIDLockRetryDelay = 5 * time.Second
 )
 
 var errFailedLock = errors.New("failed to acquire lock")
@@ -53,15 +54,32 @@ type Store struct {
 	state       types.State
 	lockFactory LockFactory
 	logger      zerolog.Logger
+
+	// Lock timing, resolved from telemetry.StoreTiming at New (zero → default).
+	idLockTTL        time.Duration
+	idLockRetryDelay time.Duration
 }
 
-// New returns a telemetry store backed by a state and a lock factory.
-func New(state types.State, lockFactory LockFactory, logger zerolog.Logger) *Store {
+// New returns a telemetry store backed by a state and a lock factory. timing
+// overrides the per-ID lock timing (zero fields keep the built-in defaults); it
+// is a test hook, not a user-facing config option.
+func New(state types.State, lockFactory LockFactory, timing telemetry.StoreTiming, logger zerolog.Logger) *Store {
 	return &Store{
-		state:       state,
-		lockFactory: lockFactory,
-		logger:      logger,
+		state:            state,
+		lockFactory:      lockFactory,
+		logger:           logger,
+		idLockTTL:        orDefault(timing.IDLockTTL, defaultIDLockTTL),
+		idLockRetryDelay: orDefault(timing.IDLockRetryDelay, defaultIDLockRetryDelay),
 	}
+}
+
+// orDefault returns v when it is positive, otherwise def.
+func orDefault(v, def time.Duration) time.Duration {
+	if v > 0 {
+		return v
+	}
+
+	return def
 }
 
 func (s *Store) ClusterID(ctx context.Context) (string, error) {
@@ -102,15 +120,15 @@ func (s *Store) ClusterID(ctx context.Context) (string, error) {
 // is acquirable) and holds its lock; if none is free it creates a new ID, adds
 // it to the list and locks it. The returned release unlocks that per-id lock
 // (the lock auto-refreshes itself while held, so there is nothing else to do).
-func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
+func (s *Store) AcquireNodeID(ctx context.Context) (func() string, func(), error) {
 	// Use a lock to read and write to the list of telemetry IDs from the state.
 	lock := s.lockFactory.CreateLock("create telemetry id", 5*time.Second)
 	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
 		if ctx.Err() != nil {
-			return "", nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 
-		return "", nil, fmt.Errorf("%w: create telemetry id", errFailedLock)
+		return nil, nil, fmt.Errorf("%w: create telemetry id", errFailedLock)
 	}
 
 	defer lock.Unlock()
@@ -118,16 +136,16 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
 	telemetryIDs := make([]string, 0, 1)
 
 	if _, err := s.state.Read(ctx, "telemetry-ids", &telemetryIDs); err != nil {
-		return "", nil, fmt.Errorf("failed to read telemetry ID from state: %w", err)
+		return nil, nil, fmt.Errorf("failed to read telemetry ID from state: %w", err)
 	}
 
 	// Find a free ID in the list.
 	for _, id := range telemetryIDs {
 		if ctx.Err() != nil {
-			return "", nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 
-		idLock := s.lockFactory.CreateLock("telemetry-id-"+id, idLockTTL)
+		idLock := s.lockFactory.CreateLock("telemetry-id-"+id, s.idLockTTL)
 		if ok := idLock.TryLock(ctx, 0); !ok {
 			// The lock is taken, another SquirrelDB already uses this ID.
 			continue
@@ -135,7 +153,9 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
 
 		s.logger.Debug().Msgf("Found free telemetry ID %s", id)
 
-		return id, releaseLock(idLock), nil
+		// The lock guarantees exclusive ownership, so the ID never changes here;
+		// a constant getter satisfies the telemetry.Store contract.
+		return func() string { return id }, releaseLock(idLock), nil
 	}
 
 	// No free ID found, create a new one, add it to the state and lock it.
@@ -143,17 +163,17 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) {
 	telemetryIDs = append(telemetryIDs, id)
 
 	if err := s.state.Write(ctx, "telemetry-ids", telemetryIDs); err != nil {
-		return "", nil, fmt.Errorf("failed to write telemetry ID in state: %w", err)
+		return nil, nil, fmt.Errorf("failed to write telemetry ID in state: %w", err)
 	}
 
-	idLock := s.lockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
-	if ok := idLock.TryLock(ctx, idLockRetryDelay); !ok {
-		return "", nil, fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
+	idLock := s.lockFactory.CreateLock("telemetry-id-"+id, s.idLockTTL)
+	if ok := idLock.TryLock(ctx, s.idLockRetryDelay); !ok {
+		return nil, nil, fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
 	}
 
 	s.logger.Debug().Msgf("Created telemetry ID %s", id)
 
-	return id, releaseLock(idLock), nil
+	return func() string { return id }, releaseLock(idLock), nil
 }
 
 // releaseLock returns an idempotent release function that unlocks the held lock.

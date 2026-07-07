@@ -23,12 +23,20 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 )
 
+// reg builds a registration the way the drain path does: labels plus the
+// canonical key (seriesKey) the seen-cache is keyed on.
+func reg(name string) registration {
+	l := labels.FromStrings("__name__", name)
+
+	return registration{labels: l, key: seriesKey(l)}
+}
+
 func TestSeriesToRegister(t *testing.T) {
 	c := &ClickHouseTSDB{seenSeries: make(map[string]seenEntry), metrics: newMetrics(nil)}
 	t0 := time.Unix(1000, 0)
 
-	a := registration{labels: labels.FromStrings("__name__", "a")}
-	b := registration{labels: labels.FromStrings("__name__", "b")}
+	a := reg("a")
+	b := reg("b")
 
 	// New series are due for registration.
 	if got := c.seriesToRegister([]registration{a, b}, t0); len(got) != 2 {
@@ -103,8 +111,8 @@ func TestSweepSeenSeries(t *testing.T) {
 	c := &ClickHouseTSDB{seenSeries: make(map[string]seenEntry), metrics: newMetrics(nil)}
 	start := time.Unix(1000, 0)
 
-	a := registration{labels: labels.FromStrings("__name__", "a")}
-	b := registration{labels: labels.FromStrings("__name__", "b")}
+	a := reg("a")
+	b := reg("b")
 
 	c.seriesToRegister([]registration{a, b}, start)
 	c.markRegistered([]registration{a, b}, start)
@@ -115,11 +123,11 @@ func TestSweepSeenSeries(t *testing.T) {
 
 	c.sweepSeenSeries(start.Add(seenSeriesTTL + time.Second))
 
-	if _, ok := c.seenSeries[string(a.labels.Bytes(nil))]; !ok {
+	if _, ok := c.seenSeries[a.key]; !ok {
 		t.Errorf("active series a was evicted")
 	}
 
-	if _, ok := c.seenSeries[string(b.labels.Bytes(nil))]; ok {
+	if _, ok := c.seenSeries[b.key]; ok {
 		t.Errorf("idle series b was not evicted")
 	}
 }

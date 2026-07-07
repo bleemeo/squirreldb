@@ -172,11 +172,4 @@ type Dummy struct {
 	// database write itself. When false, writes are discarded immediately, with
 	// no batching and no temporary store (the absolute load-test baseline).
 	Batcher bool `yaml:"batcher"`
-	// StoreLabels, when true, makes the appender store each series' labels in the
-	// temporary store (StoreLabelsByID) at commit time and the writer read them
-	// back (GetLabelsByID) at flush time, mirroring the ClickHouse backend's label
-	// round-trip. It isolates the cost of that round-trip from the rest of the
-	// write path. It only applies when Batcher is true (otherwise there is no
-	// temporary store and no writer).
-	StoreLabels bool `yaml:"store_labels"`
 }

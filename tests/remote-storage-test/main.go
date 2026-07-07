@@ -116,13 +116,11 @@ func run(ctx context.Context) error {
 				map[string]string{"restarted": "false"},
 				prometheus.DefaultRegisterer,
 			),
+			// Drop stale data when this (first, non-restarted) instance starts. The
+			// restarted instance below must NOT drop — it reads the persisted data.
+			DropDataOnStartup: true,
 		}
 		defer squirreldb.Stop()
-
-		err = squirreldb.DropData(ctx, false)
-		if err != nil {
-			return fmt.Errorf("fail to DropData: %w", err)
-		}
 
 		err = squirreldb.DropTemporaryStore(ctx, false)
 		if err != nil {

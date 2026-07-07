@@ -43,7 +43,6 @@ func NewStore(options Options) *Store {
 var (
 	ErrParseTTLHeader      = errors.New("can't parse time to live header")
 	ErrMissingTenantHeader = errors.New("the tenant header is missing")
-	ErrInvalidMatcher      = errors.New("invalid matcher")
 	ErrInconsistentContext = errors.New("assertion failed, different context used in same Querier")
 	ErrAssertion           = errors.New("assertion error")
 	ErrNoContextValue      = errors.New("assertion error: missing call to ContextWithRequest")

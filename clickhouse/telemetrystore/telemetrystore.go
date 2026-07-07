@@ -20,10 +20,20 @@
 //
 // ClickHouse has no transactions, so the lease is optimistic and leans on the
 // telemetry's soft contract: both tables are ReplacingMergeTree(version) (latest
-// write wins on read with FINAL), the lease holds an owner + an expiry, and a
-// node that races and loses a slot notices at its next RefreshNodeID (owner no
-// longer matches) and re-acquires. The telemetry's staggered start makes
-// simultaneous claims rare in the first place.
+// write wins on read with FINAL), and the lease holds an owner + an expiry. Two
+// safeguards keep two live nodes from durably sharing an ID:
+//   - at claim time a node writes its lease then reads it back to confirm
+//     ownership; in cluster mode it waits claimSettleDelay first so a concurrent
+//     claim on another replica has time to replicate — the loser then sees the
+//     winner and retries a different slot instead of both confirming;
+//   - the refresh loop re-checks ownership on every tick and, if the slot was
+//     taken over (a split that slipped past the read-back, only possible across
+//     replicas in cluster mode), re-acquires a different slot and switches to it.
+//
+// Because the loop can switch slots, the node ID is handed to the caller as a
+// getter (see AcquireNodeID); the telemetry reads it afresh at each report, so a
+// healed ID propagates well before the next (24h) report. The telemetry's
+// staggered start makes simultaneous claims rare in the first place.
 package telemetrystore
 
 import (
@@ -35,6 +45,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/clickhouse/ddl"
+	"github.com/bleemeo/squirreldb/telemetry"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
@@ -42,18 +53,23 @@ import (
 )
 
 const (
-	// leaseTTL is how long a node-ID lease stays valid without a refresh. On a
-	// crash the lease lapses after at most this long, freeing the ID.
-	leaseTTL = 5 * time.Minute
-	// refreshInterval is how often the background loop renews the lease. It MUST
-	// be smaller than leaseTTL so a live node never lets its lease lapse.
-	refreshInterval = time.Minute
+	// defaultLeaseTTL is how long a node-ID lease stays valid without a refresh. On
+	// a crash the lease lapses after at most this long, freeing the ID.
+	defaultLeaseTTL = 5 * time.Minute
+	// defaultRefreshInterval is how often the background loop renews the lease. It
+	// MUST be smaller than the lease TTL so a live node never lets its lease lapse.
+	defaultRefreshInterval = time.Minute
 	// claimAttempts bounds how many times AcquireNodeID retries when it loses a
 	// slot to a concurrent claimer.
 	claimAttempts = 3
 	// writeTimeout bounds a background lease write (refresh or release), so a
 	// stuck ClickHouse can never block a refresh loop (and thus Close) forever.
 	writeTimeout = 5 * time.Second
+	// defaultClaimSettleDelay is how long claim waits, in cluster mode only,
+	// between writing its lease and reading it back, so a concurrent claim on
+	// another replica has time to replicate and the read-back reflects the real
+	// winner. Single-node mode skips it (write and read-back hit the same replica).
+	defaultClaimSettleDelay = 2 * time.Second
 )
 
 // clusterIDKey is the single row key of telemetry_cluster_id.
@@ -116,6 +132,11 @@ type Store struct {
 	clusterName string
 	logger      zerolog.Logger
 
+	// Lease timing, resolved from telemetry.StoreTiming at New (zero → default).
+	refreshInterval  time.Duration
+	leaseTTL         time.Duration
+	claimSettleDelay time.Duration
+
 	closeOnce sync.Once
 	closeCh   chan struct{}
 	wg        sync.WaitGroup
@@ -123,16 +144,32 @@ type Store struct {
 
 // New returns a new ClickHouse telemetry store. clusterName enables ClickHouse
 // cluster mode (ON CLUSTER + Replicated with an explicit, name-based Keeper path;
-// the tables must not be RENAMEd) when set. Schema creation is owned by
-// clickhouse/backend (created up front for every store), so the store assumes its
-// tables already exist.
-func New(_ context.Context, conn driver.Conn, clusterName string, logger zerolog.Logger) (*Store, error) {
+// the tables must not be RENAMEd) when set. timing overrides the lease timing
+// (zero fields keep the built-in defaults); it is a test hook, not a user option.
+// Schema creation is owned by clickhouse/backend (created up front for every
+// store), so the store assumes its tables already exist.
+func New(
+	_ context.Context, conn driver.Conn, clusterName string,
+	timing telemetry.StoreTiming, logger zerolog.Logger,
+) (*Store, error) {
 	return &Store{
-		conn:        conn,
-		clusterName: clusterName,
-		logger:      logger,
-		closeCh:     make(chan struct{}),
+		conn:             conn,
+		clusterName:      clusterName,
+		logger:           logger,
+		refreshInterval:  orDefault(timing.RefreshInterval, defaultRefreshInterval),
+		leaseTTL:         orDefault(timing.LeaseTTL, defaultLeaseTTL),
+		claimSettleDelay: orDefault(timing.ClaimSettleDelay, defaultClaimSettleDelay),
+		closeCh:          make(chan struct{}),
 	}, nil
+}
+
+// orDefault returns v when it is positive, otherwise def.
+func orDefault(v, def time.Duration) time.Duration {
+	if v > 0 {
+		return v
+	}
+
+	return def
 }
 
 // Close stops every node-ID refresh loop and waits for them to return, so the
@@ -247,16 +284,44 @@ func pickFreeSlot(slots []slot) (string, bool) {
 	return "", false
 }
 
+// nodeIDLease is the mutable, concurrency-safe holder of the ID a refresh loop
+// currently owns. The loop may switch the ID when it heals a split (see
+// refreshLoop), so the getter returned by AcquireNodeID reads it under the lock.
+type nodeIDLease struct {
+	owner string
+
+	mu sync.Mutex
+	id string
+}
+
+func (l *nodeIDLease) currentID() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.id
+}
+
+func (l *nodeIDLease) setID(id string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.id = id
+}
+
 // AcquireNodeID claims a node ID and keeps its lease alive in a background loop
 // until the returned release function is called (which frees the slot). The
-// owner identity is internal: a fresh UUID per acquisition.
-func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) { //nolint:contextcheck
+// owner identity is internal: a fresh UUID per acquisition. The returned getter
+// reports the currently-owned ID, which the loop may change to heal a split (see
+// refreshLoop) — callers must read it afresh rather than cache it.
+func (s *Store) AcquireNodeID(ctx context.Context) (func() string, func(), error) { //nolint:contextcheck
 	owner := uuid.New().String()
 
 	id, err := s.claim(ctx, owner)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
+
+	lease := &nodeIDLease{owner: owner, id: id}
 
 	// The lease is renewed from a background loop, independent of the (possibly
 	// short-lived) acquisition context. The loop is tracked by s.wg and ends on
@@ -267,7 +332,7 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) { //n
 	s.wg.Go(func() {
 		defer close(done)
 
-		s.refreshLoop(loopCtx, owner, id)
+		s.refreshLoop(loopCtx, lease)
 	})
 
 	var once sync.Once
@@ -282,13 +347,15 @@ func (s *Store) AcquireNodeID(ctx context.Context) (string, func(), error) { //n
 			rctx, rcancel := context.WithTimeout(context.Background(), writeTimeout)
 			defer rcancel()
 
+			// Free whatever slot we currently hold (the loop may have switched it).
+			id := lease.currentID()
 			if err := s.writeLease(rctx, id, "", time.Unix(0, 0)); err != nil {
 				s.logger.Err(err).Msgf("Failed to release telemetry ID %s", id)
 			}
 		})
 	}
 
-	return id, release, nil
+	return lease.currentID, release, nil
 }
 
 // claim picks a free slot (or a new ID), writes the lease, then confirms it owns
@@ -307,8 +374,19 @@ func (s *Store) claim(ctx context.Context, owner string) (string, error) {
 			id = uuid.New().String()
 		}
 
-		if err := s.writeLease(ctx, id, owner, time.Now().Add(leaseTTL)); err != nil {
+		if err := s.writeLease(ctx, id, owner, time.Now().Add(s.leaseTTL)); err != nil {
 			return "", err
+		}
+
+		// In cluster mode, let a concurrent claim on another replica replicate
+		// before reading back, so the read-back reflects the real (max-version)
+		// winner and the loser retries a different slot instead of both confirming.
+		if s.clusterName != "" {
+			select {
+			case <-time.After(s.claimSettleDelay):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
 		}
 
 		ownsIt, err := s.isOwner(ctx, id, owner)
@@ -330,32 +408,87 @@ func (s *Store) claim(ctx context.Context, owner string) (string, error) {
 	return "", fmt.Errorf("%w after %d attempts", errClaimContended, claimAttempts)
 }
 
-// refreshLoop renews the lease until this acquisition is released (stop) or the
-// whole Store is closed (s.closeCh). Once a slot is owned, no other node will
-// take it (they only reuse free/expired slots), so this just keeps the lease
-// from lapsing — no ownership re-check is needed. Each write is bounded by
-// writeTimeout so a stuck ClickHouse can't block Close.
-func (s *Store) refreshLoop(ctx context.Context, owner, id string) {
-	ticker := time.NewTicker(refreshInterval)
+// refreshLoop keeps the lease alive until this acquisition is released (loop ctx
+// cancelled) or the whole Store is closed (s.closeCh). Each tick it re-checks
+// ownership and either renews (still ours) or heals (taken over): see refresh.
+// The loop ctx is folded together with s.closeCh so an in-flight write or heal
+// is cancelled promptly on Close and can't block it.
+func (s *Store) refreshLoop(ctx context.Context, lease *nodeIDLease) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		select {
+		case <-s.closeCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	ticker := time.NewTicker(s.refreshInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.closeCh:
-			return
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(ctx, writeTimeout)
-			err := s.writeLease(ctx, id, owner, time.Now().Add(leaseTTL))
-
-			cancel()
-
-			if err != nil {
-				s.logger.Err(err).Msgf("Failed to refresh telemetry ID %s", id)
-			}
+			s.refresh(ctx, lease)
 		}
 	}
+}
+
+// refresh renews the lease for one tick. It first reads back the current owner:
+// if we still own the slot it renews, otherwise a concurrent claimer took it
+// over (a split that got past the claim read-back, only reachable across
+// replicas in cluster mode) and we re-acquire a different slot and switch to it,
+// so the two nodes stop sharing one ID. Each step is time-bounded so a stuck
+// ClickHouse can't wedge the loop (and thus Close).
+func (s *Store) refresh(ctx context.Context, lease *nodeIDLease) {
+	id := lease.currentID()
+
+	checkCtx, checkCancel := context.WithTimeout(ctx, writeTimeout)
+	owns, err := s.isOwner(checkCtx, id, lease.owner)
+
+	checkCancel()
+
+	if err != nil {
+		s.logger.Err(err).Msgf("Failed to verify telemetry ID %s ownership", id)
+
+		return
+	}
+
+	if owns {
+		writeCtx, writeCancel := context.WithTimeout(ctx, writeTimeout)
+		err := s.writeLease(writeCtx, id, lease.owner, time.Now().Add(s.leaseTTL))
+
+		writeCancel()
+
+		if err != nil {
+			s.logger.Err(err).Msgf("Failed to refresh telemetry ID %s", id)
+		}
+
+		return
+	}
+
+	s.logger.Warn().Msgf("Telemetry ID %s was taken over by another node; re-acquiring a new one", id)
+
+	// healTimeout must cover claimAttempts, each with its settle delay and writes.
+	healTimeout := claimAttempts * (s.claimSettleDelay + writeTimeout)
+
+	healCtx, healCancel := context.WithTimeout(ctx, healTimeout)
+	newID, err := s.claim(healCtx, lease.owner)
+
+	healCancel()
+
+	if err != nil {
+		s.logger.Err(err).Msg("Failed to re-acquire a telemetry ID after losing the slot")
+
+		return
+	}
+
+	lease.setID(newID)
+	s.logger.Info().Msgf("Re-acquired telemetry ID %s (previously %s)", newID, id)
 }
 
 // isOwner reports whether owner currently holds the lease on id.

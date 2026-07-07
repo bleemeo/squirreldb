@@ -18,7 +18,6 @@ package temporarystore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -27,15 +26,12 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
 )
 
 const expiratorInterval = 60
 
 const defaultTTL = 24 * time.Hour
-
-var errAssertionError = errors.New("assertion error")
 
 type storeData struct {
 	types.MetricData
@@ -45,16 +41,10 @@ type storeData struct {
 	WriteOffset    int
 }
 
-type labelsEntry struct {
-	labels         labels.Labels
-	expirationTime time.Time
-}
-
 type Store struct {
 	cancel           context.CancelFunc
 	knownMetrics     map[types.MetricID]any
 	metricsStore     map[types.MetricID]storeData
-	labelsStore      map[types.MetricID]labelsEntry
 	transfertMetrics []types.MetricID
 	mutex            sync.Mutex
 	metrics          *metrics
@@ -67,7 +57,6 @@ func New(reg prometheus.Registerer, logger zerolog.Logger) *Store {
 
 	store := &Store{
 		metricsStore: make(map[types.MetricID]storeData),
-		labelsStore:  make(map[types.MetricID]labelsEntry),
 		knownMetrics: make(map[types.MetricID]any),
 		metrics:      newMetrics(reg),
 		logger:       logger,
@@ -271,48 +260,6 @@ func (s *Store) GetAllKnownMetrics(_ context.Context) (map[types.MetricID]time.T
 	return results, nil
 }
 
-// StoreLabelsByID implement batch.TemporaryStore interface.
-func (s *Store) StoreLabelsByID(
-	_ context.Context,
-	ids []types.MetricID,
-	labelsList []labels.Labels,
-	ttl time.Duration,
-) error {
-	if len(ids) != len(labelsList) {
-		return fmt.Errorf("%w: ids & labelsList aren't the same size", errAssertionError)
-	}
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	expirationTime := time.Now().Add(ttl)
-
-	for i, id := range ids {
-		s.labelsStore[id] = labelsEntry{
-			labels:         labelsList[i],
-			expirationTime: expirationTime,
-		}
-	}
-
-	return nil
-}
-
-// GetLabelsByID implement batch.TemporaryStore interface.
-func (s *Store) GetLabelsByID(_ context.Context, ids []types.MetricID) ([]labels.Labels, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	labelsList := make([]labels.Labels, len(ids))
-
-	for i, id := range ids {
-		if entry, ok := s.labelsStore[id]; ok {
-			labelsList[i] = entry.labels
-		}
-	}
-
-	return labelsList, nil
-}
-
 // Run starts all Store services.
 func (s *Store) Run(ctx context.Context) {
 	interval := expiratorInterval * time.Second
@@ -344,12 +291,6 @@ func (s *Store) expire(now time.Time) {
 			delete(s.metricsStore, id)
 		} else {
 			pointsCount += len(storeData.Points)
-		}
-	}
-
-	for id, entry := range s.labelsStore {
-		if entry.expirationTime.Before(now) {
-			delete(s.labelsStore, id)
 		}
 	}
 

@@ -72,7 +72,12 @@ func (q *sqlQuerier) Select(
 		return storage.EmptySeriesSet()
 	}
 
-	query, queryArgs := q.pointsQuery(where, args)
+	ids := make([]uuid.UUID, 0, len(labelsByID))
+	for id := range labelsByID {
+		ids = append(ids, id)
+	}
+
+	query, queryArgs := q.pointsQuery(ids)
 
 	rows, err := q.conn.Query(ctx, query, queryArgs...)
 	if err != nil {
@@ -202,14 +207,19 @@ func clampStoreTime(ms int64) int64 {
 // id so the streaming SeriesSet can group points per series; series order does
 // not matter (the caller sorts when it requires label order, see sortedByLabels).
 //
-// A tenant-scoped query filters tsdb_data by `tenant = ?` (the trusted request
-// tenant) on top of the id set from tsdb_tags. tsdb_data is keyed by id, so
-// matching id alone would return BOTH tenants' points for a colliding id; the
-// explicit tenant predicate confines any id collision to the querying tenant and
-// lets ClickHouse prune on the (tenant, id, timestamp) primary key. Skipped when
-// unscoped (q.tenant == ""), which reads across tenants as before.
-func (q *sqlQuerier) pointsQuery(where string, args []any) (string, []any) {
-	queryArgs := make([]any, 0, len(args)+3)
+// It binds `id IN (?)` with the ids resolveSeries already resolved, rather than
+// re-running the matcher WHERE as a `id IN (SELECT ... FROM tsdb_tags WHERE ...)`
+// subquery: the matchers (including regex match()) are thus evaluated against
+// tsdb_tags once per Select, not twice.
+//
+// A tenant-scoped query also filters tsdb_data by `tenant = ?` (the trusted
+// request tenant). tsdb_data is keyed by id, so matching id alone would return
+// BOTH tenants' points for a colliding id; the explicit tenant predicate confines
+// any id collision to the querying tenant and lets ClickHouse prune on the
+// (tenant, id, timestamp) primary key. Skipped when unscoped (q.tenant == ""),
+// which reads across tenants as before.
+func (q *sqlQuerier) pointsQuery(ids []uuid.UUID) (string, []any) {
+	queryArgs := make([]any, 0, 4)
 
 	var tenantCond string
 
@@ -219,13 +229,16 @@ func (q *sqlQuerier) pointsQuery(where string, args []any) (string, []any) {
 		queryArgs = append(queryArgs, q.tenant)
 	}
 
+	// ORDER BY ends with inserted_at DESC so that duplicate (id, timestamp) rows
+	// come newest-first; dedupSortedPoints then keeps the first of each run, i.e.
+	// the last-written value (last-write-wins). inserted_at is not selected, only
+	// used to order.
 	query := "SELECT id, timestamp, value FROM tsdb_data" +
-		" WHERE " + tenantCond + "id IN (SELECT id FROM tsdb_tags WHERE " + where + ")" +
+		" WHERE " + tenantCond + "id IN (?)" +
 		" AND timestamp >= fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?)" +
-		" ORDER BY id, timestamp"
+		" ORDER BY id, timestamp, inserted_at DESC"
 
-	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
+	queryArgs = append(queryArgs, ids, clampStoreTime(q.mint), clampStoreTime(q.maxt))
 
 	return query, queryArgs
 }
@@ -253,10 +266,12 @@ func (lq *labelQuerier) buildLabels(metricName, tenant string, tags map[string]s
 // allocation) and is a no-op when there is nothing to drop.
 //
 // tsdb_data is a plain MergeTree with no deduplication, so re-flushing a point
-// (takeover, batcher last-chance re-write) can leave several rows for the same
-// (id, timestamp). The read cursor orders by (id, timestamp), so such rows are
-// adjacent; left in place they would make PromQL abort with "duplicate sample
-// for timestamp". We drop them here, on the flushed slice we just built.
+// (takeover, batcher last-chance re-write) or a client re-writing a corrected
+// value can leave several rows for the same (id, timestamp). The read cursor
+// orders by (id, timestamp, inserted_at DESC), so such rows are adjacent and the
+// most recently written one comes first; left in place they would make PromQL
+// abort with "duplicate sample for timestamp". We keep the first of each run
+// (last-write-wins) and drop the rest, on the flushed slice we just built.
 func dedupSortedPoints(points []types.MetricPoint) []types.MetricPoint {
 	if len(points) < 2 {
 		return points

@@ -82,14 +82,10 @@ func run(ctx context.Context) error {
 	}
 
 	squirreldb := &daemon.SquirrelDB{
-		Config:         cfg,
-		MetricRegistry: prometheus.DefaultRegisterer,
-		Logger:         log.With().Str("component", "daemon").Logger(),
-	}
-
-	err = squirreldb.DropData(ctx, false)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to drop backend data")
+		Config:            cfg,
+		MetricRegistry:    prometheus.DefaultRegisterer,
+		Logger:            log.With().Str("component", "daemon").Logger(),
+		DropDataOnStartup: true, // the backend drops its data when it first starts
 	}
 
 	err = squirreldb.DropTemporaryStore(ctx, false)

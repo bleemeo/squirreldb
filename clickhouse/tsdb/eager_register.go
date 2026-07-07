@@ -33,9 +33,13 @@ import (
 // series from many writes with different TTLs and time ranges.
 type registration struct {
 	labels labels.Labels
-	ttl    int64
-	minTS  int64
-	maxTS  int64
+	// key is the canonical labels encoding (see seriesKey), computed once in
+	// groupBySeries and reused as the seen-cache key here (both passes) instead of
+	// re-encoding the labels.
+	key   string
+	ttl   int64
+	minTS int64
+	maxTS int64
 }
 
 const (
@@ -138,15 +142,13 @@ func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []
 	var toRegister []registration
 
 	for _, r := range regs {
-		key := string(r.labels.Bytes(nil))
-
-		entry, ok := c.seenSeries[key]
+		entry, ok := c.seenSeries[r.key]
 		if !ok || !now.Before(entry.nextRegister) {
 			toRegister = append(toRegister, r)
 		}
 
 		entry.lastSeen = now
-		c.seenSeries[key] = entry
+		c.seenSeries[r.key] = entry
 	}
 
 	c.metrics.SeenSeriesSize.Set(float64(len(c.seenSeries)))
@@ -161,11 +163,9 @@ func (c *ClickHouseTSDB) markRegistered(regs []registration, now time.Time) {
 	defer c.seenMu.Unlock()
 
 	for _, r := range regs {
-		key := string(r.labels.Bytes(nil))
-
-		entry := c.seenSeries[key]
+		entry := c.seenSeries[r.key]
 		entry.nextRegister = now.Add(reRegisterBase + time.Duration(rand.Int64N(int64(reRegisterJitter)))) //nolint:gosec
-		c.seenSeries[key] = entry
+		c.seenSeries[r.key] = entry
 	}
 }
 

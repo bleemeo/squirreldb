@@ -46,17 +46,14 @@ func doTest(ctx context.Context, cfg config.Config, c testcases.ReadWriteTestCas
 	log.Printf("Running test for %s", c.Name)
 
 	squirreldb := &daemon.SquirrelDB{
-		Config:         cfg,
-		MetricRegistry: prometheus.NewRegistry(),
-		Logger:         log.Logger,
+		Config:            cfg,
+		MetricRegistry:    prometheus.NewRegistry(),
+		Logger:            log.Logger,
+		DropDataOnStartup: true, // the backend drops its data when it first starts
 	}
 	defer squirreldb.Stop()
 
 	log.Printf("Dropping tables")
-
-	if err := squirreldb.DropData(ctx, false); err != nil {
-		return fmt.Errorf("failed to drop backend data: %w", err)
-	}
 
 	if err := squirreldb.DropTemporaryStore(ctx, false); err != nil {
 		return fmt.Errorf("failed to drop keyspace: %w", err)

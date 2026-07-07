@@ -40,6 +40,22 @@ import (
 // tenant's range. timestamp stays LAST so the Delta codec still sees the
 // increasing per-series timestamps within an id (a (tenant, id) order without it
 // would scatter timestamps and wreck compression).
+//
+// inserted_at is the wall-clock time of the INSERT batch that produced the row
+// (set by the MV, see mvDatapointDataDDL). It is NOT part of the ORDER BY — it
+// serves only as a read-side tiebreaker so that when two rows share the same
+// (id, timestamp) with different values (a client re-writing a corrected value,
+// e.g. bleemeo-forecast overwriting its 1h overlap every 24h), the read keeps
+// the most recently written one (last-write-wins, see pointsQuery /
+// dedupSortedPoints). Existing rows predating this column read back as epoch 0
+// (DEFAULT), so any later write wins.
+//
+// It uses Delta(8),ZSTD like timestamp (NOT plain ZSTD, which cost ~40x more):
+// rows are stored ordered by (tenant, id, timestamp), and within a series run
+// inserted_at is near-constant — a point is inserted shortly after its own
+// timestamp (real-time scrape) or a whole batch shares one now64() (forecast /
+// backfill of future timestamps). So the intra-series deltas are tiny, exactly
+// like timestamp; only the per-series boundary produces a large (negligible) one.
 const tsdbDataDDL = `
 CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
 (
@@ -47,7 +63,8 @@ CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
     tenant LowCardinality(String) CODEC(ZSTD(1)),
     timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     value Float64 CODEC(ZSTD(1)),
-    row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1))
+    row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1)),
+    inserted_at DateTime64(3) DEFAULT toDateTime64(0, 3) CODEC(Delta(8), ZSTD(1))
 )
 ENGINE = {{ENGINE}}
 PARTITION BY toStartOfWeek(timestamp)
@@ -115,6 +132,11 @@ ENGINE = Null`
 // The parallel ARRAY JOIN zips timestamps and values element-wise (they always
 // have the same length, see sqlWriter.Write). The id is computed once per input
 // row (per series) and repeated across its points by the join.
+//
+// inserted_at is now64(3), evaluated once per INSERT (now() is constant within a
+// query) so every point of a batch shares the same value. It is the read-side
+// last-write-wins tiebreaker for duplicate (id, timestamp) rows (see tsdbDataDDL
+// and pointsQuery).
 const mvDatapointDataDDL = `
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_data
 (
@@ -122,14 +144,16 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_d
     tenant LowCardinality(String),
     timestamp DateTime64(3),
     value Float64,
-    row_ttl_days UInt16
+    row_ttl_days UInt16,
+    inserted_at DateTime64(3)
 ) AS
 SELECT
     reinterpretAsUUID(sipHash128(metric_name, tenant, tags)) AS id,
     tenant,
     timestamp,
     value,
-    row_ttl_days
+    row_ttl_days,
+    now64(3) AS inserted_at
 FROM datapoint_input
 ARRAY JOIN
     timestamps AS timestamp,

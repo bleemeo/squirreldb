@@ -90,8 +90,7 @@ func DefaultConfig() Config {
 		},
 		Internal: Internal{
 			Dummy: Dummy{
-				Batcher:     true,
-				StoreLabels: false,
+				Batcher: true,
 			},
 			ShowGoroutingOnShutdown: false,
 			IndexDummyCheckConflict: true,

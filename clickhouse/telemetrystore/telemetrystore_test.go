@@ -29,13 +29,13 @@ import (
 func TestCloseStopsRefreshLoop(t *testing.T) {
 	t.Parallel()
 
-	s := &Store{closeCh: make(chan struct{})}
+	s := &Store{closeCh: make(chan struct{}), refreshInterval: defaultRefreshInterval}
 
 	loopCtx, loopCancel := context.WithCancel(t.Context())
 	defer loopCancel()
 
 	s.wg.Go(func() {
-		s.refreshLoop(loopCtx, "owner", "id")
+		s.refreshLoop(loopCtx, &nodeIDLease{owner: "owner", id: "id"})
 	})
 
 	done := make(chan struct{})

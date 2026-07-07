@@ -26,9 +26,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// TestDropTablesRefusesNonTestDatabase checks the safety guard: DropTables must
-// refuse any database other than the test one unless forced, so it can never wipe
-// production tables. The guard runs before any connection, so no ClickHouse is needed.
+// TestDropTablesRefusesNonTestDatabase checks the safety guard: dropData must
+// refuse any database other than the test one, so it can never wipe production
+// tables. The guard runs before any connection, so no ClickHouse is needed.
 func TestDropTablesRefusesNonTestDatabase(t *testing.T) {
 	b, err := New(context.Background(), zerolog.Nop(), Options{
 		Config: config.ClickHouse{Database: "production"},
@@ -37,9 +37,9 @@ func TestDropTablesRefusesNonTestDatabase(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	err = b.DropData(context.Background(), false)
+	err = b.dropData(context.Background())
 	if err == nil {
-		t.Fatal("DropData should refuse a non-test database without forceNonTestDatabase")
+		t.Fatal("dropData should refuse a non-test database")
 	}
 
 	// The error should name the refused database (it must not have tried to connect).

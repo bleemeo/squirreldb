@@ -49,7 +49,6 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/model/labels"
 	"github.com/rs/zerolog"
 )
 
@@ -106,15 +105,6 @@ type TemporaryStore interface {
 
 	// GetAllKnownMetrics return all known metrics with their deadline
 	GetAllKnownMetrics(ctx context.Context) (map[types.MetricID]time.Time, error)
-
-	// StoreLabelsByID stores the labels of each metric ID with the given TTL, so a
-	// backend that batches by hash can recover labels at flush time (including
-	// after a takeover by another node).
-	StoreLabelsByID(ctx context.Context, ids []types.MetricID, labelsList []labels.Labels, ttl time.Duration) error
-
-	// GetLabelsByID returns the labels previously stored for each metric ID.
-	// A metric whose labels are missing (e.g. expired) gets empty labels.
-	GetLabelsByID(ctx context.Context, ids []types.MetricID) ([]labels.Labels, error)
 
 	// Close free resource used by the temporary store. After this call, the temporary store shouldn't be used anymore.
 	Close() error

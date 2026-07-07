@@ -59,6 +59,13 @@ type Options struct {
 	// DontStartIndex and InternalNowFunction are test hooks for the index.
 	DontStartIndex      bool
 	InternalNowFunction func() time.Time
+	// TelemetryTiming overrides the telemetry store's per-ID lock timing. It is a
+	// test hook (zero fields keep the defaults), not a user-facing config option.
+	TelemetryTiming telemetry.StoreTiming
+	// DropDataOnStartup makes Start drop the (test) keyspace before recreating it.
+	// It is a test hook, not a user-facing config option, and refuses to run on any
+	// keyspace other than the test one.
+	DropDataOnStartup bool
 }
 
 var (
@@ -98,6 +105,15 @@ func (b *Backend) Start(ctx context.Context) error {
 
 	if b.connection != nil {
 		return ErrAlreadyStarted
+	}
+
+	// A test may ask for a clean slate: drop the keyspace before the connection
+	// (re)creates it, so the drop happens on this very backend instead of a
+	// separate one racing it.
+	if b.options.DropDataOnStartup {
+		if err := b.dropData(ctx); err != nil {
+			return fmt.Errorf("drop data on startup: %w", err)
+		}
 	}
 
 	session, keyspaceCreated, err := connection.New(
@@ -175,13 +191,13 @@ func (b *Backend) CloseAll(ctx context.Context) {
 func (b *Backend) RegisterHTTPEndpoints(_ func(method, path, description string, handler http.HandlerFunc)) {
 }
 
-// DropData deletes the Cassandra keyspace. If forceNonTestKeyspace also drops if
-// the keyspace is not "squirreldb_test". It uses its own short-lived session, so
-// it works on an unstarted backend.
-// This method is intended for testing, where keyspace is overridden to squirreldb_test.
-func (b *Backend) DropData(ctx context.Context, forceNonTestKeyspace bool) error {
-	if b.options.CassandraConfig.Keyspace != "squirreldb_test" && !forceNonTestKeyspace {
-		return fmt.Errorf("refuse to drop keyspace %s without forceNonTestKeyspace", b.options.CassandraConfig.Keyspace)
+// dropData deletes the Cassandra test keyspace. It refuses any keyspace other
+// than "squirreldb_test", and uses its own short-lived session (no keyspace
+// selected), so it can run before the main connection creates the keyspace. It is
+// only reached through the DropDataOnStartup test option.
+func (b *Backend) dropData(ctx context.Context) error {
+	if b.options.CassandraConfig.Keyspace != "squirreldb_test" {
+		return fmt.Errorf("refuse to drop non-test keyspace %s", b.options.CassandraConfig.Keyspace)
 	}
 
 	session, err := b.rawSession()
@@ -287,6 +303,7 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	return cassandratelemetrystore.New(
 		state,
 		lockFactory,
+		b.options.TelemetryTiming,
 		b.logger.With().Str("component", "telemetry").Logger(),
 	), nil
 }

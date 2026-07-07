@@ -55,11 +55,6 @@ type Options struct {
 	// Batcher selects whether writes go through the shared batcher (true) or are
 	// discarded immediately (false).
 	Batcher bool
-	// StoreLabels, when true (and Batcher is true), makes the appender store each
-	// series' labels in the temporary store at commit and the writer read them
-	// back at flush, mirroring the ClickHouse backend's label round-trip. It has
-	// no effect when Batcher is false.
-	StoreLabels bool
 }
 
 // Backend is the dummy daemon.Backend.
@@ -105,7 +100,6 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 		b.options.MetricRegistry,
 		b.options.Batch,
 		b.options.Redis,
-		b.options.StoreLabels,
 		b.logger.With().Str("component", "tsdb").Logger(),
 	)
 	if err != nil {
@@ -201,8 +195,8 @@ func (telemetryStore) ClusterID(context.Context) (string, error) {
 	return "dummy", nil
 }
 
-func (telemetryStore) AcquireNodeID(context.Context) (string, func(), error) {
-	return "dummy", func() {}, nil
+func (telemetryStore) AcquireNodeID(context.Context) (func() string, func(), error) {
+	return func() string { return "dummy" }, func() {}, nil
 }
 
 // compile-time check that the dummy backend keeps satisfying the interfaces it

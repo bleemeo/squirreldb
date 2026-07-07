@@ -43,11 +43,42 @@ import (
 type Store interface {
 	// ClusterID returns the shared cluster ID, creating it on first use.
 	ClusterID(ctx context.Context) (string, error)
-	// AcquireNodeID claims a node ID and returns it together with a release
-	// function that frees it. Keeping the claim alive (lease refresh, lock
+	// AcquireNodeID claims a node ID and returns a getter for it together with a
+	// release function that frees it. Keeping the claim alive (lease refresh, lock
 	// keep-alive, ...) is the Store's own concern; the caller only has to call
 	// release once it no longer needs the ID. ctx bounds the initial claim only.
-	AcquireNodeID(ctx context.Context) (id string, release func(), err error)
+	//
+	// The ID is returned as a getter (not a plain string) because a Store may
+	// change it after the fact — e.g. the ClickHouse store re-acquires a fresh ID
+	// if it detects it lost its slot to a concurrent claimer. Callers must read it
+	// through the getter each time rather than cache the value.
+	AcquireNodeID(ctx context.Context) (id func() string, release func(), err error)
+}
+
+// StoreTiming overrides the timing constants a telemetry Store uses to keep a
+// node-ID claim alive. It exists so tests can run the ownership dance in seconds
+// instead of minutes; it is NOT a user-facing config option. Every field is
+// optional: a zero value keeps the store's built-in default. Each backend reads
+// only the fields relevant to its own mechanism (the others are ignored).
+type StoreTiming struct {
+	// ClickHouse lease-based store (clickhouse/telemetrystore):
+	//
+	// RefreshInterval is how often the background loop renews the lease; it must
+	// stay smaller than LeaseTTL. LeaseTTL is how long a lease stays valid without
+	// a refresh (a crashed node frees its ID after at most this long).
+	// ClaimSettleDelay is how long a claim waits, in cluster mode only, between
+	// writing its lease and reading it back so a concurrent claim can replicate.
+	RefreshInterval  time.Duration
+	LeaseTTL         time.Duration
+	ClaimSettleDelay time.Duration
+
+	// Cassandra lock-based store (cassandra/telemetrystore):
+	//
+	// IDLockTTL is the TTL of the per-ID lock that stands in for ownership.
+	// IDLockRetryDelay is how long to wait for the lock when creating a brand-new
+	// ID.
+	IDLockTTL        time.Duration
+	IDLockRetryDelay time.Duration
 }
 
 type Telemetry struct {
@@ -55,8 +86,9 @@ type Telemetry struct {
 
 	// Common ID between all SquirrelDB in the cluster.
 	clusterID string
-	// ID of this SquirrelDB instance, and the function that releases it.
-	id        string
+	// Getter for the ID of this SquirrelDB instance (the Store may change it, so
+	// it is read afresh each report), and the function that releases it.
+	idFn      func() string
 	releaseID func()
 }
 
@@ -177,19 +209,19 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 // getTelemetryID returns this node's telemetry ID, acquiring one from the Store
 // (and caching it, with its release function) on first use.
 func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
-	if t.id != "" {
-		return t.id, nil
+	if t.idFn == nil {
+		idFn, release, err := t.opts.Store.AcquireNodeID(ctx)
+		if err != nil {
+			return "", err
+		}
+
+		t.idFn = idFn
+		t.releaseID = release
 	}
 
-	id, release, err := t.opts.Store.AcquireNodeID(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	t.id = id
-	t.releaseID = release
-
-	return id, nil
+	// Read afresh: the Store may have re-acquired a different ID since (see
+	// AcquireNodeID), so this must not be cached.
+	return t.idFn(), nil
 }
 
 func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {

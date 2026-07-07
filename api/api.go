@@ -36,6 +36,7 @@ import (
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/api/requestscoped"
 	"github.com/bleemeo/squirreldb/appendable/fixedappender"
+	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/types"
@@ -67,7 +68,7 @@ var allowedProtoMsgs = []config.RemoteWriteProtoMsg{ //nolint:gochecknoglobals
 }
 
 var (
-	regexErrInvalidMatcher      = regexp.MustCompile(fmt.Sprintf("^%s", requestscoped.ErrInvalidMatcher))
+	regexErrInvalidLabel        = regexp.MustCompile(fmt.Sprintf("^%s", requestappender.ErrInvalidLabel))
 	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", requestscoped.ErrMissingTenantHeader))
 	ErrIsReadOnly               = errors.New("trying to write but read-only mode is enabled")
 )
@@ -1223,7 +1224,7 @@ func (i *interceptor) WriteHeader(rc int) {
 
 func (i *interceptor) Write(b []byte) (int, error) {
 	if i.status == http.StatusInternalServerError &&
-		(regexErrInvalidMatcher.Match(b) || regexErrMissingTenantHeader.Match(b)) {
+		(regexErrInvalidLabel.Match(b) || regexErrMissingTenantHeader.Match(b)) {
 		i.status = http.StatusBadRequest
 	}
 

@@ -785,13 +785,22 @@ func (c *Conn) lagging(ctx context.Context, h *host) (bool, error) {
 
 // --- driver.Conn implementation (route each call to a picked host) ---
 
+// pickFunc selects the host a call routes to. The data-plane methods below take
+// it so Conn (round-robin, c.pick) and its sticky view (deterministic single
+// host, c.pickSticky) share one implementation and differ only in the strategy.
+type pickFunc func() (*host, error)
+
 func (c *Conn) Exec(ctx context.Context, query string, args ...any) error {
+	return c.exec(ctx, c.pick, query, args...)
+}
+
+func (c *Conn) exec(ctx context.Context, pick pickFunc, query string, args ...any) error {
 	if err := c.acquireWrite(ctx); err != nil {
 		return err
 	}
 	defer c.releaseWrite()
 
-	h, err := c.pick()
+	h, err := pick()
 	if err != nil {
 		return err
 	}
@@ -803,11 +812,15 @@ func (c *Conn) Exec(ctx context.Context, query string, args ...any) error {
 }
 
 func (c *Conn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	return c.query(ctx, c.pick, query, args...)
+}
+
+func (c *Conn) query(ctx context.Context, pick pickFunc, query string, args ...any) (driver.Rows, error) {
 	if err := c.acquireRead(ctx); err != nil {
 		return nil, err
 	}
 
-	h, err := c.pick()
+	h, err := pick()
 	if err != nil {
 		c.releaseRead()
 
@@ -829,12 +842,16 @@ func (c *Conn) Query(ctx context.Context, query string, args ...any) (driver.Row
 }
 
 func (c *Conn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
+	return c.queryRow(ctx, c.pick, query, args...)
+}
+
+func (c *Conn) queryRow(ctx context.Context, pick pickFunc, query string, args ...any) driver.Row {
 	if err := c.acquireRead(ctx); err != nil {
 		return errorRow{err: err}
 	}
 	defer c.releaseRead()
 
-	h, err := c.pick()
+	h, err := pick()
 	if err != nil {
 		return errorRow{err: err}
 	}
@@ -846,12 +863,16 @@ func (c *Conn) QueryRow(ctx context.Context, query string, args ...any) driver.R
 }
 
 func (c *Conn) Select(ctx context.Context, dest any, query string, args ...any) error {
+	return c.doSelect(ctx, c.pick, dest, query, args...)
+}
+
+func (c *Conn) doSelect(ctx context.Context, pick pickFunc, dest any, query string, args ...any) error {
 	if err := c.acquireRead(ctx); err != nil {
 		return err
 	}
 	defer c.releaseRead()
 
-	h, err := c.pick()
+	h, err := pick()
 	if err != nil {
 		return err
 	}
@@ -865,11 +886,17 @@ func (c *Conn) Select(ctx context.Context, dest any, query string, args ...any) 
 func (c *Conn) PrepareBatch(
 	ctx context.Context, query string, opts ...driver.PrepareBatchOption,
 ) (driver.Batch, error) {
+	return c.prepareBatch(ctx, c.pick, query, opts...)
+}
+
+func (c *Conn) prepareBatch(
+	ctx context.Context, pick pickFunc, query string, opts ...driver.PrepareBatchOption,
+) (driver.Batch, error) {
 	if err := c.acquireWrite(ctx); err != nil {
 		return nil, err
 	}
 
-	h, err := c.pick()
+	h, err := pick()
 	if err != nil {
 		c.releaseWrite()
 
@@ -938,10 +965,13 @@ func (b *limitedBatch) Close() error {
 
 // AsyncInsert is required by driver.Conn (deprecated upstream; SquirrelDB does
 // not use it, but the interface must be satisfied).
-//
-//nolint:staticcheck
 func (c *Conn) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
-	h, err := c.pick()
+	return c.asyncInsert(ctx, c.pick, query, wait, args...)
+}
+
+//nolint:staticcheck
+func (c *Conn) asyncInsert(ctx context.Context, pick pickFunc, query string, wait bool, args ...any) error {
+	h, err := pick()
 	if err != nil {
 		return err
 	}
@@ -953,7 +983,11 @@ func (c *Conn) AsyncInsert(ctx context.Context, query string, wait bool, args ..
 }
 
 func (c *Conn) Ping(ctx context.Context) error {
-	h, err := c.pick()
+	return c.ping(ctx, c.pick)
+}
+
+func (c *Conn) ping(ctx context.Context, pick pickFunc) error {
+	h, err := pick()
 	if err != nil {
 		return err
 	}
@@ -1047,127 +1081,37 @@ type stickyConn struct {
 
 var _ driver.Conn = (*stickyConn)(nil)
 
+// The data-plane methods share Conn's implementation, differing only by routing
+// through pickSticky (deterministic single host) instead of pick (round-robin).
+
 func (s *stickyConn) Exec(ctx context.Context, query string, args ...any) error {
-	if err := s.c.acquireWrite(ctx); err != nil {
-		return err
-	}
-	defer s.c.releaseWrite()
-
-	h, err := s.c.pickSticky()
-	if err != nil {
-		return err
-	}
-
-	err = h.conn.Exec(ctx, query, args...)
-	s.c.observe(h, err)
-
-	return err
+	return s.c.exec(ctx, s.c.pickSticky, query, args...)
 }
 
 func (s *stickyConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
-	if err := s.c.acquireRead(ctx); err != nil {
-		return nil, err
-	}
-
-	h, err := s.c.pickSticky()
-	if err != nil {
-		s.c.releaseRead()
-
-		return nil, err
-	}
-
-	rows, err := h.conn.Query(ctx, query, args...)
-	s.c.observe(h, err)
-
-	if err != nil {
-		s.c.releaseRead()
-
-		return nil, err
-	}
-
-	return &limitedRows{Rows: rows, release: s.c.releaseRead}, nil
+	return s.c.query(ctx, s.c.pickSticky, query, args...)
 }
 
 func (s *stickyConn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
-	if err := s.c.acquireRead(ctx); err != nil {
-		return errorRow{err: err}
-	}
-	defer s.c.releaseRead()
-
-	h, err := s.c.pickSticky()
-	if err != nil {
-		return errorRow{err: err}
-	}
-
-	row := h.conn.QueryRow(ctx, query, args...)
-	s.c.observe(h, row.Err())
-
-	return row
+	return s.c.queryRow(ctx, s.c.pickSticky, query, args...)
 }
 
 func (s *stickyConn) Select(ctx context.Context, dest any, query string, args ...any) error {
-	if err := s.c.acquireRead(ctx); err != nil {
-		return err
-	}
-	defer s.c.releaseRead()
-
-	h, err := s.c.pickSticky()
-	if err != nil {
-		return err
-	}
-
-	err = h.conn.Select(ctx, dest, query, args...)
-	s.c.observe(h, err)
-
-	return err
+	return s.c.doSelect(ctx, s.c.pickSticky, dest, query, args...)
 }
 
 func (s *stickyConn) PrepareBatch(
 	ctx context.Context, query string, opts ...driver.PrepareBatchOption,
 ) (driver.Batch, error) {
-	if err := s.c.acquireWrite(ctx); err != nil {
-		return nil, err
-	}
-
-	h, err := s.c.pickSticky()
-	if err != nil {
-		s.c.releaseWrite()
-
-		return nil, err
-	}
-
-	batch, err := h.conn.PrepareBatch(ctx, query, opts...) //nolint:clickhouselint
-	s.c.observe(h, err)
-
-	if err != nil {
-		s.c.releaseWrite()
-
-		return nil, err
-	}
-
-	return &limitedBatch{Batch: batch, release: s.c.releaseWrite}, nil
+	return s.c.prepareBatch(ctx, s.c.pickSticky, query, opts...)
 }
 
-//nolint:staticcheck
 func (s *stickyConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
-	h, err := s.c.pickSticky()
-	if err != nil {
-		return err
-	}
-
-	err = h.conn.AsyncInsert(ctx, query, wait, args...)
-	s.c.observe(h, err)
-
-	return err
+	return s.c.asyncInsert(ctx, s.c.pickSticky, query, wait, args...)
 }
 
 func (s *stickyConn) Ping(ctx context.Context) error {
-	h, err := s.c.pickSticky()
-	if err != nil {
-		return err
-	}
-
-	return h.conn.Ping(ctx)
+	return s.c.ping(ctx, s.c.pickSticky)
 }
 
 // Contributors/ServerVersion/Stats don't depend on the picking strategy.

@@ -151,6 +151,7 @@ index_bench2_opt="--bench.scale-agent 10 --bench.scale-tenant 5"
 remote_store_opt=""
 remote_store2_opt=""
 redis_opt=""
+telemetry_opt=""
 
 if [ "${WITH_LONG}" = "1" ]; then
     lock_opt="--worker-processes 3 --run-time 90s"
@@ -250,6 +251,10 @@ run_sqdb "go run $build_opt ./tests/remote-storage-test2/ $remote_store2_opt"
 echo
 echo "== Running squirreldb-cluster-redis"
 run_sqdb "go run $build_opt ./tests/squirreldb-cluster-redis/ $redis_opt"
+
+echo
+echo "== Running squirreldb-telemetry"
+run_sqdb "go run $build_opt ./tests/squirreldb-telemetry/ $telemetry_opt"
 
 echo
 echo "== Running run-test-cases"

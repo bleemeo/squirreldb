@@ -69,6 +69,13 @@ type Options struct {
 	// ClusterName enables ClickHouse cluster mode (ON CLUSTER + Replicated) for
 	// every store's schema. Empty means a single ClickHouse node.
 	ClusterName string
+	// TelemetryTiming overrides the telemetry store's lease timing. It is a test
+	// hook (zero fields keep the defaults), not a user-facing config option.
+	TelemetryTiming telemetry.StoreTiming
+	// DropDataOnStartup makes Start drop every SquirrelDB table before recreating
+	// the schema. It is a test hook, not a user-facing config option, and refuses
+	// to run on any database other than the test one.
+	DropDataOnStartup bool
 }
 
 type Backend struct {
@@ -204,6 +211,15 @@ func (b *Backend) Start(ctx context.Context) error {
 		Str("database", cfg.Database).
 		Str("clusterName", b.options.ClusterName).
 		Msgf("Starting Clickhouse backend")
+
+	// A test may ask for a clean slate: drop every table before the schema is
+	// (re)created below, on its own short-lived connection (routing is not open
+	// yet), so the drop happens on this very backend instead of a separate one.
+	if b.options.DropDataOnStartup {
+		if err := b.dropData(ctx); err != nil {
+			return fmt.Errorf("clickhouse: drop data on startup: %w", err)
+		}
+	}
 
 	conn, err := routing.New(ctx, routing.Options{
 		Addresses: cfg.Addresses,
@@ -360,7 +376,7 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	}
 
 	store, err := telemetrystore.New(
-		ctx, b.routing.Sticky(), b.options.ClusterName,
+		ctx, b.routing.Sticky(), b.options.ClusterName, b.options.TelemetryTiming,
 		b.logger.With().Str("component", "telemetry").Logger())
 	if err != nil {
 		return nil, err
@@ -371,16 +387,14 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	return b.telemetryStore, nil
 }
 
-// DropData drops every ClickHouse table SquirrelDB owns (TSDB, mutable labels,
-// telemetry). It refuses unless the configured database is TestDatabase, or
-// forceNonTestDatabase is set — the same guard as the Cassandra backend's
-// keyspace drop. The database itself is left intact (it is created by
-// ClickHouse, not by us). It can be called before Start (it opens its own
-// short-lived connection when the backend is not started).
-func (b *Backend) DropData(ctx context.Context, forceNonTestDatabase bool) error {
-	if b.options.Config.Database != TestDatabase && !forceNonTestDatabase {
-		return fmt.Errorf(
-			"refuse to drop tables in database %q without forceNonTestDatabase", b.options.Config.Database)
+// dropData drops every ClickHouse table SquirrelDB owns (TSDB, mutable labels,
+// telemetry). It refuses any database other than TestDatabase. The database
+// itself is left intact (it is created by ClickHouse, not by us). It runs before
+// Start opens routing, so it opens its own short-lived connection. It is only
+// reached through the DropDataOnStartup test option.
+func (b *Backend) dropData(ctx context.Context) error {
+	if b.options.Config.Database != TestDatabase {
+		return fmt.Errorf("refuse to drop tables in non-test database %q", b.options.Config.Database)
 	}
 
 	var conn driver.Conn

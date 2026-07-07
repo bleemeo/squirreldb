@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/telemetry"
 
 	"github.com/rs/zerolog/log"
 )
@@ -75,7 +76,7 @@ func TestNodeID(t *testing.T) {
 }
 
 func newStore(lockFactory *dummy.Locks, state *dummy.States) *Store {
-	return New(state, lockFactory, log.With().Str("component", "telemetry").Logger())
+	return New(state, lockFactory, telemetry.StoreTiming{}, log.With().Str("component", "telemetry").Logger())
 }
 
 func acquire(t *testing.T, store *Store) (string, func()) {
@@ -86,5 +87,5 @@ func acquire(t *testing.T, store *Store) (string, func()) {
 		t.Fatalf("AcquireNodeID: %s", err)
 	}
 
-	return id, release
+	return id(), release
 }

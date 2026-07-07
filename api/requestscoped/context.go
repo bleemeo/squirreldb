@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/prometheus/prometheus/model/labels"
@@ -92,7 +93,7 @@ func (ctxValue *contextValue) fillQueryableOption() {
 	if value != "" {
 		part := strings.SplitN(value, "=", 2)
 		if len(part) != 2 {
-			result.Error = fmt.Errorf("%w: \"%s\", require labelName=labelValue", ErrInvalidMatcher, value)
+			result.Error = fmt.Errorf("%w: \"%s\", require labelName=labelValue", requestappender.ErrInvalidLabel, value)
 
 			return
 		}

@@ -97,6 +97,17 @@ type SquirrelDB struct {
 	ExistingCluster types.Cluster
 	MetricRegistry  prometheus.Registerer
 	Logger          zerolog.Logger
+	// TelemetryStoreTiming overrides the telemetry store's ownership timing (lease
+	// refresh for ClickHouse, per-ID lock for Cassandra). It is a test hook — set
+	// directly by test tools, never from the config file — so a test can run the
+	// node-ID dance in seconds. Zero fields keep the production defaults.
+	TelemetryStoreTiming telemetry.StoreTiming
+	// DropDataOnStartup makes the backend drop its (test) data when it starts,
+	// before it (re)creates the schema. It is a test hook, set directly by test
+	// tools and never from the config file, and only ever drops the test
+	// keyspace/database. To reset a shared store, set it on a single instance and
+	// start that instance before any other.
+	DropDataOnStartup bool
 
 	backend         Backend
 	persistentStore types.TSDB
@@ -430,6 +441,8 @@ func (s *SquirrelDB) cassandraBackendOptions(cluster types.Cluster) cassandrabac
 		BatchSize:                 s.Config.Batch.Size,
 		PreCreateShardDuration:    s.Config.Cassandra.PreCreateShardDuration,
 		PreCreateShardFraction:    s.Config.Cassandra.PreCreateShardFraction,
+		TelemetryTiming:           s.TelemetryStoreTiming,
+		DropDataOnStartup:         s.DropDataOnStartup,
 	}
 
 	if s.Config.Internal.TemporaryStore == "redis" {
@@ -449,6 +462,8 @@ func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhouseb
 		TenantLabel:       s.Config.TenantLabelName,
 		DefaultTimeToLive: s.Config.DefaultTimeToLive,
 		ClusterName:       s.Config.ClickHouse.ClusterName,
+		TelemetryTiming:   s.TelemetryStoreTiming,
+		DropDataOnStartup: s.DropDataOnStartup,
 	}
 
 	if s.Config.Internal.TemporaryStore == "redis" {
@@ -468,7 +483,6 @@ func (s *SquirrelDB) dummyBackendOptions(cluster types.Cluster) dummybackend.Opt
 		TenantLabel:    s.Config.TenantLabelName,
 		Batch:          s.Config.Batch,
 		Batcher:        s.Config.Internal.Dummy.Batcher,
-		StoreLabels:    s.Config.Internal.Dummy.StoreLabels,
 	}
 
 	if s.Config.Internal.TemporaryStore == "redis" {
@@ -525,44 +539,6 @@ func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
 	s.backend = b
 
 	return s.backend, nil
-}
-
-// DropData drops the persisted data of the configured backend (Cassandra
-// keyspace or ClickHouse tables). If force is set it also drops when the
-// keyspace/database is not "squirreldb_test". It uses its own short-lived,
-// unstarted backend so it can run before anything else.
-// This method is intended for testing, where the keyspace/database is overridden
-// to squirreldb_test.
-func (s *SquirrelDB) DropData(ctx context.Context, force bool) error {
-	switch s.Config.Backend {
-	case backendCassandra:
-		b, err := cassandrabackend.New(
-			ctx,
-			s.Logger.With().Str("backend", "cassandra").Logger(),
-			cassandrabackend.Options{CassandraConfig: s.Config.Cassandra},
-		)
-		if err != nil {
-			return err
-		}
-
-		return b.DropData(ctx, force)
-	case backendClickHouse:
-		b, err := clickhousebackend.New(
-			ctx,
-			s.Logger.With().Str("backend", "clickhouse").Logger(),
-			clickhousebackend.Options{Config: s.Config.ClickHouse, ClusterName: s.Config.ClickHouse.ClusterName},
-		)
-		if err != nil {
-			return err
-		}
-
-		return b.DropData(ctx, force)
-	case backendDummy:
-		// The dummy backend persists nothing, so there is nothing to drop.
-		return nil
-	default:
-		return fmt.Errorf("unknown backend: %v", s.Config.Backend)
-	}
 }
 
 type namedTasks struct {

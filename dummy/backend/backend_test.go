@@ -30,26 +30,22 @@ import (
 )
 
 // flusher is implemented by the batcher-backed TSDB so the test can force a
-// flush (exercising the writer, including the GetLabelsByID round-trip).
+// flush (exercising the writer).
 type flusher interface {
 	Flush(ctx context.Context) error
 }
 
 // TestDiscardWrites checks that the dummy backend accepts writes and serves
-// empty reads, across its three modes: without batcher, with batcher, and
-// batcher + store_labels (which exercises the StoreLabelsByID/GetLabelsByID
-// round-trip on commit and flush).
+// empty reads, both without and with the batcher.
 func TestDiscardWrites(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name        string
-		batcher     bool
-		storeLabels bool
+		name    string
+		batcher bool
 	}{
 		{name: "no-batcher", batcher: false},
 		{name: "batcher", batcher: true},
-		{name: "batcher-store-labels", batcher: true, storeLabels: true},
 	}
 
 	for _, tc := range testCases {
@@ -63,7 +59,6 @@ func TestDiscardWrites(t *testing.T) {
 				TenantLabel:    "__account_id",
 				Batch:          config.Batch{Size: time.Minute},
 				Batcher:        tc.batcher,
-				StoreLabels:    tc.storeLabels,
 			})
 			if err != nil {
 				t.Fatalf("New: %v", err)
@@ -91,8 +86,7 @@ func TestDiscardWrites(t *testing.T) {
 				t.Fatalf("Commit: %v", err)
 			}
 
-			// Force a flush so the writer runs: with store_labels, this exercises
-			// the GetLabelsByID round-trip and must not error.
+			// Force a flush so the writer runs and must not error.
 			if f, ok := tsdb.(flusher); ok {
 				if err := f.Flush(ctx); err != nil {
 					t.Fatalf("Flush: %v", err)

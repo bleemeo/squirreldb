@@ -29,11 +29,24 @@ import (
 // seriesBatch is all points of one series within a drain batch, regrouped from the
 // per-point WAL entries so the ClickHouse insert is one arrays-per-series row (not
 // one row per point). ttl is the largest seen for the series (never under-estimate
-// max_expiration/row TTL, which would expire data or its index row early).
+// max_expiration/row TTL, which would expire data or its index row early). key is
+// the canonical labels encoding (see seriesKey), computed once here and carried
+// through registration so the seen-cache passes don't recompute it.
 type seriesBatch struct {
 	labels labels.Labels
+	key    string
 	ttl    int64
 	points []types.MetricPoint
+}
+
+// seriesKey is the canonical map key for a series: the labels encoding
+// (labels.Bytes), NOT labels.Hash(). The WAL is shared across tenants, so an
+// attacker-forced xxHash collision (xxHash is invertible) would otherwise merge a
+// victim tenant's series into the attacker's. A string key lets Go's seeded map
+// hashing bucket the series, and byte equality keeps distinct series distinct.
+// Bytes, not String: String is not injective for adversarial UTF-8 label names.
+func seriesKey(l labels.Labels) string {
+	return string(l.Bytes(nil))
 }
 
 // drainWrite persists a batch of WAL entries to ClickHouse. Each entry is one point;
@@ -114,12 +127,7 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 // seriesBatch per distinct series (its points concatenated, largest TTL kept), so
 // the insert stays arrays-per-series regardless of how the points were appended.
 func groupBySeries(entries []walEntry) []*seriesBatch {
-	// Keyed by the canonical labels encoding (labels.Bytes), not labels.Hash():
-	// the WAL is shared across tenants, so an attacker-forced xxHash collision
-	// (xxHash is invertible) would otherwise merge a victim tenant's series into
-	// the attacker's here. A string key lets Go's seeded map hashing bucket the
-	// series, and byte equality keeps distinct series distinct. Bytes, not String:
-	// String is not injective for adversarial UTF-8 label names.
+	// Keyed by the canonical labels encoding (see seriesKey), not labels.Hash().
 	bySeries := make(map[string]*seriesBatch)
 
 	for _, e := range entries {
@@ -127,11 +135,11 @@ func groupBySeries(entries []walEntry) []*seriesBatch {
 			continue
 		}
 
-		key := string(e.Labels.Bytes(nil))
+		key := seriesKey(e.Labels)
 
 		s, ok := bySeries[key]
 		if !ok {
-			s = &seriesBatch{labels: e.Labels, ttl: e.TTL}
+			s = &seriesBatch{labels: e.Labels, key: key, ttl: e.TTL}
 			bySeries[key] = s
 		}
 
@@ -154,7 +162,7 @@ func registrationsFor(series []*seriesBatch) []registration {
 
 	for _, s := range series {
 		minTS, maxTS := pointsRange(s.points)
-		regs = append(regs, registration{labels: s.labels, ttl: s.ttl, minTS: minTS, maxTS: maxTS})
+		regs = append(regs, registration{labels: s.labels, key: s.key, ttl: s.ttl, minTS: minTS, maxTS: maxTS})
 	}
 
 	return regs

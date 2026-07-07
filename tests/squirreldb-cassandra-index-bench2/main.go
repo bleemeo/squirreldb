@@ -155,6 +155,12 @@ func run(ctx context.Context) error {
 		return warnings
 	}
 
+	// Skip early, before touching any data: this bench is Cassandra-index only, so
+	// on another backend (e.g. ClickHouse) we must not drop/recreate its tables.
+	if cfg.Backend != "cassandra" {
+		return daemon.ErrSkipBackend
+	}
+
 	squirreldb := &daemon.SquirrelDB{
 		Config: cfg,
 		MetricRegistry: prometheus.WrapRegistererWith(
@@ -162,11 +168,12 @@ func run(ctx context.Context) error {
 			prometheus.DefaultRegisterer,
 		),
 		Logger: log.With().Str("component", "daemon").Int("process", 1).Logger(),
+		// Drop stale data when the backend first starts, before it recreates the
+		// keyspace — on this very backend, not a separate one.
+		DropDataOnStartup: true,
 	}
 	defer squirreldb.Stop()
 
-	// Skip early, before touching any data: this bench is Cassandra-index only, so
-	// on another backend (e.g. ClickHouse) we must not drop/recreate its tables.
 	backend, err := squirreldb.Backend(ctx)
 	if err != nil {
 		return err
@@ -174,13 +181,6 @@ func run(ctx context.Context) error {
 
 	if _, ok := backend.(cassandraIndexTester); !ok {
 		return daemon.ErrSkipBackend
-	}
-
-	log.Printf("Dropping tables")
-
-	err = squirreldb.DropData(ctx, false)
-	if err != nil {
-		return fmt.Errorf("failed to drop backend data: %w", err)
 	}
 
 	clock := &fakeClock{}

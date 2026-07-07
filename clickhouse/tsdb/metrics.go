@@ -23,10 +23,9 @@ import (
 
 // metrics are the Prometheus metrics of the ClickHouse backend.
 type metrics struct {
-	FlushSeconds            prometheus.Summary
-	FlushPointsTotal        prometheus.Counter
-	FlushErrorsTotal        prometheus.Counter
-	FlushDroppedPointsTotal prometheus.Counter
+	FlushSeconds     prometheus.Summary
+	FlushPointsTotal prometheus.Counter
+	FlushErrorsTotal prometheus.Counter
 	// FlushRowsPerBatch / FlushMetricsPerBatch capture the size of a single
 	// clickhouse-go INSERT block the drainer sends: points (timestamps/values array
 	// elements across all series) and distinct series (one block row each, since the
@@ -76,12 +75,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Subsystem: subSystem,
 			Name:      "flush_errors_total",
 			Help:      "Total batch flushes that failed",
-		}),
-		FlushDroppedPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: subSystem,
-			Name:      "flush_dropped_points_total",
-			Help:      "Total points dropped at flush because their labels were missing (expired) in the temporary store",
 		}),
 		FlushRowsPerBatch: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
 			Namespace: namespace,

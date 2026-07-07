@@ -22,7 +22,6 @@ import (
 	"maps"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/config"
@@ -43,29 +42,9 @@ import (
 // discardWriter is the types.MetricWriter the batcher flushes to: it drops every
 // point. It is what makes the dummy backend "write to /dev/null" while still
 // exercising the whole batcher + temporary store machinery upstream of it.
-//
-// When storeLabels is set it first reads the series' labels back from the
-// temporary store (GetLabelsByID), mirroring the ClickHouse backend's writer,
-// then discards them — so the label round-trip's cost is exercised too.
-type discardWriter struct {
-	store       batch.TemporaryStore
-	storeLabels bool
-}
+type discardWriter struct{}
 
-func (w discardWriter) Write(ctx context.Context, metrics []types.MetricData) error {
-	if !w.storeLabels || len(metrics) == 0 {
-		return nil
-	}
-
-	ids := make([]types.MetricID, len(metrics))
-	for i, m := range metrics {
-		ids[i] = m.ID
-	}
-
-	if _, err := w.store.GetLabelsByID(ctx, ids); err != nil {
-		return fmt.Errorf("get labels: %w", err)
-	}
-
+func (discardWriter) Write(context.Context, []types.MetricData) error {
 	return nil
 }
 
@@ -76,32 +55,20 @@ func (w discardWriter) Write(ctx context.Context, metrics []types.MetricData) er
 // batcher/temporary store or the actual storage backend. Reads always return
 // empty (nothing is stored).
 type batchingTSDB struct {
-	batcher        *batch.Batch
-	temporaryStore batch.TemporaryStore
-	storeLabels    bool
-	labelsTTL      time.Duration
+	batcher *batch.Batch
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 }
 
-// labelsTTLMargin is added on top of the batch size for the lifetime of the
-// id -> labels mapping in the temporary store, mirroring clickhouse/tsdb: it
-// must cover the flush deadline (~batch size) so the labels are still present
-// when their points are flushed.
-const labelsTTLMargin = time.Hour
-
 // newBatchingTSDB builds the batcher and its temporary store (Redis when
 // configured, in-memory otherwise — same contract as the real backends) and
-// starts the background flush loop writing to discardWriter. When storeLabels is
-// set, the write path also performs the StoreLabelsByID/GetLabelsByID round-trip
-// the ClickHouse backend does.
+// starts the background flush loop writing to discardWriter.
 func newBatchingTSDB(
 	ctx context.Context,
 	reg prometheus.Registerer,
 	batchSize config.Batch,
 	redisCfg config.Redis,
-	storeLabels bool,
 	logger zerolog.Logger,
 ) (*batchingTSDB, error) {
 	store, err := newTemporaryStore(ctx, reg, redisCfg, logger)
@@ -110,9 +77,6 @@ func newBatchingTSDB(
 	}
 
 	t := &batchingTSDB{
-		temporaryStore: store,
-		storeLabels:    storeLabels,
-		labelsTTL:      batchSize.Size + labelsTTLMargin,
 		batcher: batch.New(
 			reg,
 			batchSize.Size,
@@ -125,7 +89,7 @@ func newBatchingTSDB(
 	t.cancel = cancel
 
 	t.wg.Go(func() {
-		t.batcher.Run(runCtx, discardWriter{store: store, storeLabels: storeLabels})
+		t.batcher.Run(runCtx, discardWriter{})
 	})
 
 	return t, nil
@@ -179,8 +143,7 @@ func (t *batchingTSDB) ChunkQuerierWithOptions(_ types.QuerierOptions, _, _ int6
 	return convert.NewQuerierToChunkQuerier(storage.NoopQuerier()), nil
 }
 
-// Flush flushes points still buffered in the batcher to the discard writer
-// (exercising the GetLabelsByID round-trip when store_labels is enabled). It
+// Flush flushes points still buffered in the batcher to the discard writer. It
 // mirrors clickhouse/tsdb's Flush; it is not part of types.TSDB.
 func (t *batchingTSDB) Flush(ctx context.Context) error {
 	return t.batcher.Flush(ctx)
@@ -242,30 +205,15 @@ func (app *batchingAppender) Commit() error {
 	}
 
 	pending := slices.Collect(maps.Values(app.pendingTimeSeries))
-	ids := make([]types.MetricID, len(pending))
 	metrics := make([]types.MetricData, len(pending))
 
 	for i, ts := range pending {
 		id := types.MetricID(ts.Labels.Hash()) //nolint:gosec // hash used as an opaque batching key
 
-		ids[i] = id
 		metrics[i] = types.MetricData{
 			ID:         id,
 			Points:     ts.Points,
 			TimeToLive: app.ttl,
-		}
-	}
-
-	// Store the labels before the points, mirroring the ClickHouse backend: the
-	// writer reads them back at flush time (GetLabelsByID).
-	if app.t.storeLabels {
-		labelsList := make([]labels.Labels, len(pending))
-		for i, ts := range pending {
-			labelsList[i] = ts.Labels
-		}
-
-		if err := app.t.temporaryStore.StoreLabelsByID(app.ctx, ids, labelsList, app.t.labelsTTL); err != nil {
-			return fmt.Errorf("store labels: %w", err)
 		}
 	}
 
