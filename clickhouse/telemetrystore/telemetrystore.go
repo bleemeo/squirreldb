@@ -62,9 +62,10 @@ const (
 	// claimAttempts bounds how many times AcquireNodeID retries when it loses a
 	// slot to a concurrent claimer.
 	claimAttempts = 3
-	// writeTimeout bounds a background lease write (refresh or release), so a
-	// stuck ClickHouse can never block a refresh loop (and thus Close) forever.
-	writeTimeout = 5 * time.Second
+	// opTimeout bounds a single background ClickHouse round-trip (a lease read or
+	// write in the refresh/claim/release paths), so a stuck ClickHouse can never
+	// block a refresh loop (and thus Close) forever.
+	opTimeout = 5 * time.Second
 	// defaultClaimSettleDelay is how long claim waits, in cluster mode only,
 	// between writing its lease and reading it back, so a concurrent claim on
 	// another replica has time to replicate and the read-back reflects the real
@@ -272,9 +273,23 @@ type slot struct {
 	expired bool
 }
 
-// pickFreeSlot returns the first reusable slot: one whose lease has expired or
-// that was explicitly released (empty owner).
-func pickFreeSlot(slots []slot) (string, bool) {
+// pickFreeSlot returns a slot to (re)claim. It first prefers a slot this owner
+// already holds (whatever its expiry), then falls back to the first reusable one
+// — a lapsed lease or an explicitly released slot (empty owner).
+//
+// Preferring an owned slot is a no-op on a first claim (the owner is a fresh UUID
+// that holds nothing), but it collapses a redundant ID in two cases where an
+// earlier of our own writes already made us the owner: a later claimAttempts
+// retry after a spurious (replication-lag) read-back, and a refresh heal after a
+// spurious "takeover". Without it we would skip our own slot (not expired, owner
+// set) and allocate a second ID while still holding the first.
+func pickFreeSlot(slots []slot, owner string) (string, bool) {
+	for _, sl := range slots {
+		if sl.owner == owner {
+			return sl.id, true
+		}
+	}
+
 	for _, sl := range slots {
 		if sl.expired || sl.owner == "" {
 			return sl.id, true
@@ -344,7 +359,7 @@ func (s *Store) AcquireNodeID(ctx context.Context) (func() string, func(), error
 			loopCancel()
 			<-done
 
-			rctx, rcancel := context.WithTimeout(context.Background(), writeTimeout)
+			rctx, rcancel := context.WithTimeout(context.Background(), opTimeout)
 			defer rcancel()
 
 			// Free whatever slot we currently hold (the loop may have switched it).
@@ -364,17 +379,29 @@ func (s *Store) AcquireNodeID(ctx context.Context) (func() string, func(), error
 // instead of two nodes silently sharing one ID.
 func (s *Store) claim(ctx context.Context, owner string) (string, error) {
 	for range claimAttempts {
-		slots, err := s.readSlots(ctx)
+		// Each ClickHouse round-trip is individually bounded by opTimeout, so a
+		// single stuck query can neither wedge the loop nor blow the caller's budget
+		// (see healTimeout in refresh, sized from this per-op bound).
+		readCtx, readCancel := context.WithTimeout(ctx, opTimeout)
+		slots, err := s.readSlots(readCtx)
+
+		readCancel()
+
 		if err != nil {
 			return "", err
 		}
 
-		id, reused := pickFreeSlot(slots)
+		id, reused := pickFreeSlot(slots, owner)
 		if !reused {
 			id = uuid.New().String()
 		}
 
-		if err := s.writeLease(ctx, id, owner, time.Now().Add(s.leaseTTL)); err != nil {
+		writeCtx, writeCancel := context.WithTimeout(ctx, opTimeout)
+		err = s.writeLease(writeCtx, id, owner, time.Now().Add(s.leaseTTL))
+
+		writeCancel()
+
+		if err != nil {
 			return "", err
 		}
 
@@ -389,7 +416,11 @@ func (s *Store) claim(ctx context.Context, owner string) (string, error) {
 			}
 		}
 
-		ownsIt, err := s.isOwner(ctx, id, owner)
+		checkCtx, checkCancel := context.WithTimeout(ctx, opTimeout)
+		ownsIt, err := s.isOwner(checkCtx, id, owner)
+
+		checkCancel()
+
 		if err != nil {
 			return "", err
 		}
@@ -447,7 +478,7 @@ func (s *Store) refreshLoop(ctx context.Context, lease *nodeIDLease) {
 func (s *Store) refresh(ctx context.Context, lease *nodeIDLease) {
 	id := lease.currentID()
 
-	checkCtx, checkCancel := context.WithTimeout(ctx, writeTimeout)
+	checkCtx, checkCancel := context.WithTimeout(ctx, opTimeout)
 	owns, err := s.isOwner(checkCtx, id, lease.owner)
 
 	checkCancel()
@@ -459,7 +490,7 @@ func (s *Store) refresh(ctx context.Context, lease *nodeIDLease) {
 	}
 
 	if owns {
-		writeCtx, writeCancel := context.WithTimeout(ctx, writeTimeout)
+		writeCtx, writeCancel := context.WithTimeout(ctx, opTimeout)
 		err := s.writeLease(writeCtx, id, lease.owner, time.Now().Add(s.leaseTTL))
 
 		writeCancel()
@@ -473,8 +504,13 @@ func (s *Store) refresh(ctx context.Context, lease *nodeIDLease) {
 
 	s.logger.Warn().Msgf("Telemetry ID %s was taken over by another node; re-acquiring a new one", id)
 
-	// healTimeout must cover claimAttempts, each with its settle delay and writes.
-	healTimeout := claimAttempts * (s.claimSettleDelay + writeTimeout)
+	// healTimeout must cover every claim attempt so a slow (not dead) ClickHouse
+	// doesn't cancel a legitimate re-claim mid-flight. Each attempt does three
+	// ClickHouse round-trips (readSlots, writeLease, isOwner), each bounded by
+	// opTimeout, plus the cluster settle delay.
+	const claimRoundTripsPerAttempt = 3
+
+	healTimeout := claimAttempts * (s.claimSettleDelay + claimRoundTripsPerAttempt*opTimeout)
 
 	healCtx, healCancel := context.WithTimeout(ctx, healTimeout)
 	newID, err := s.claim(healCtx, lease.owner)
@@ -488,7 +524,15 @@ func (s *Store) refresh(ctx context.Context, lease *nodeIDLease) {
 	}
 
 	lease.setID(newID)
-	s.logger.Info().Msgf("Re-acquired telemetry ID %s (previously %s)", newID, id)
+
+	// claim re-picks the slot we still own when it can (see pickFreeSlot), so an
+	// unchanged id means the takeover signal was spurious (a replication-lag read),
+	// not a real cross-node split.
+	if newID == id {
+		s.logger.Info().Msgf("Telemetry ID %s ownership re-confirmed (takeover signal was spurious)", id)
+	} else {
+		s.logger.Info().Msgf("Re-acquired telemetry ID %s (previously %s)", newID, id)
+	}
 }
 
 // isOwner reports whether owner currently holds the lease on id.

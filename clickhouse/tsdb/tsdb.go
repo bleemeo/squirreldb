@@ -219,7 +219,7 @@ func (c *ClickHouseTSDB) QuerierWithOptions(
 	mint int64,
 	maxt int64,
 ) (storage.Querier, error) {
-	return c.newSQLQuerier(opts.Tenant, mint, maxt)
+	return c.newSQLQuerier(opts.Tenant, mint, maxt, opts.MaxEvaluatedSeries)
 }
 
 func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
@@ -227,7 +227,7 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 	mint int64,
 	maxt int64,
 ) (storage.ChunkQuerier, error) {
-	q, err := c.newSQLQuerier(opts.Tenant, mint, maxt)
+	q, err := c.newSQLQuerier(opts.Tenant, mint, maxt, opts.MaxEvaluatedSeries)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 // it to release the shared connection. The matching queries.Done runs in
 // sqlQuerier.Close. It is refused once Close has started, so the connection is
 // never used after it.
-func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64) (*sqlQuerier, error) {
+func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64, maxSeries uint32) (*sqlQuerier, error) {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 
@@ -252,6 +252,7 @@ func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64) (*sqlQue
 	return &sqlQuerier{
 		labelQuerier: c.newLabelQuerier(tenant, mint, maxt),
 		metrics:      c.metrics,
+		maxSeries:    maxSeries,
 		onClose:      c.queries.Done,
 	}, nil
 }

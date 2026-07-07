@@ -58,6 +58,12 @@ type AppenderOptions struct {
 type QuerierOptions struct {
 	Tenant       string
 	RequestDebug DebugLevel
+	// MaxEvaluatedSeries caps how many series a single Select may resolve before
+	// it must fail; 0 means unlimited. It mirrors the limit limitqueryable
+	// enforces cumulatively across a request, exposed to backends so they can
+	// bound the work (and query size) of a broad matcher up-front rather than
+	// only once the caller iterates the result.
+	MaxEvaluatedSeries uint32
 	// BackendOptions is filled by calls like ParseHTTPOptions()
 	BackendOptions any
 }

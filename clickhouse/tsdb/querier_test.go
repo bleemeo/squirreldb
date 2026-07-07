@@ -17,9 +17,11 @@
 package tsdb
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/uuid"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
@@ -102,6 +104,61 @@ func TestBuildWhere(t *testing.T) {
 
 		// Arg order must follow the order of the ? in the string.
 		if diff := cmp.Diff([]any{"cpu_used", "item", "^(?:/.*)$"}, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestPointsQuery(t *testing.T) {
+	where := "metric_name = ?"
+	whereArgs := []any{"cpu_used"}
+	oneID := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}
+
+	t.Run("small id set inlines the ids, matcher evaluated once", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+
+		query, args := q.pointsQuery(oneID, where, whereArgs)
+
+		if !strings.Contains(query, "id IN (?)") || strings.Contains(query, "SELECT id FROM tsdb_tags") {
+			t.Errorf("query should inline ids, got:\n%s", query)
+		}
+
+		// Args follow the ? order: tenant, ids, mint, maxt. whereArgs are NOT bound.
+		want := []any{"tenant-1", oneID, clampStoreTime(5), clampStoreTime(9)}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("id set over the threshold falls back to a subquery", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+		bigIDs := make([]uuid.UUID, pointsInlineThreshold+1)
+
+		query, args := q.pointsQuery(bigIDs, where, whereArgs)
+
+		if !strings.Contains(query, "id IN (SELECT id FROM tsdb_tags WHERE "+where+")") {
+			t.Errorf("query should use the subquery fallback, got:\n%s", query)
+		}
+
+		// Args follow the ? order: tenant, then the subquery's whereArgs, then the
+		// time bounds. The (huge) id slice is never bound.
+		want := []any{"tenant-1", "cpu_used", clampStoreTime(5), clampStoreTime(9)}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("unscoped query omits the tenant predicate", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "", mint: 5, maxt: 9}}
+
+		query, args := q.pointsQuery(oneID, where, whereArgs)
+
+		if strings.Contains(query, "tenant = ?") {
+			t.Errorf("unscoped query must not filter tenant, got:\n%s", query)
+		}
+
+		want := []any{oneID, clampStoreTime(5), clampStoreTime(9)}
+		if diff := cmp.Diff(want, args); diff != "" {
 			t.Errorf("args mismatch (-want +got):\n%s", diff)
 		}
 	})

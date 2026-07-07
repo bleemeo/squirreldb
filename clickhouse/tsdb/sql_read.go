@@ -18,11 +18,13 @@ package tsdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -43,6 +45,10 @@ type sqlQuerier struct {
 	labelQuerier
 
 	metrics *metrics
+	// maxSeries caps how many series a single Select may resolve before it fails
+	// with limitqueryable.ErrTooManySeries; 0 means unlimited. It bounds both the
+	// resolve memory and the size of the id set pointsQuery inlines (see Select).
+	maxSeries uint32
 	// onClose releases this querier's in-flight registration (queries.Done); see
 	// ClickHouseTSDB.newSQLQuerier. Called once, from Close.
 	onClose func()
@@ -63,6 +69,12 @@ func (q *sqlQuerier) Select(
 
 	labelsByID, err := q.resolveSeries(ctx, where, args)
 	if err != nil {
+		// A limit overflow is a client-facing error in its own right (same one
+		// limitqueryable raises); don't bury it under a "resolve series" prefix.
+		if errors.Is(err, limitqueryable.ErrTooManySeries) {
+			return storage.ErrSeriesSet(err)
+		}
+
 		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: resolve series: %w", err))
 	}
 
@@ -77,7 +89,7 @@ func (q *sqlQuerier) Select(
 		ids = append(ids, id)
 	}
 
-	query, queryArgs := q.pointsQuery(ids)
+	query, queryArgs := q.pointsQuery(ids, where, args)
 
 	rows, err := q.conn.Query(ctx, query, queryArgs...)
 	if err != nil {
@@ -150,6 +162,11 @@ func (q *sqlQuerier) trackSet(set *sqlSeriesSet) {
 
 // resolveSeries returns the labels of every series matching the where clause,
 // keyed by their ClickHouse id. This reads only metadata (no points).
+//
+// When maxSeries is set it stops and returns limitqueryable.ErrTooManySeries as
+// soon as the distinct-id count exceeds it, bounding both the map's memory and
+// the id set pointsQuery will inline. It counts distinct ids (the map key), so
+// duplicate tsdb_tags rows (a re-registered series, pre-merge) don't trip it.
 func (q *sqlQuerier) resolveSeries(ctx context.Context, where string, args []any) (map[uuid.UUID]labels.Labels, error) {
 	start := time.Now()
 	defer func() {
@@ -180,6 +197,10 @@ func (q *sqlQuerier) resolveSeries(ctx context.Context, where string, args []any
 		}
 
 		labelsByID[id] = q.buildLabels(metricName, tenant, tags)
+
+		if q.maxSeries != 0 && len(labelsByID) > int(q.maxSeries) {
+			return nil, limitqueryable.ErrTooManySeries
+		}
 	}
 
 	return labelsByID, rows.Err()
@@ -203,14 +224,25 @@ func clampStoreTime(ms int64) int64 {
 	return ms
 }
 
+// pointsInlineThreshold is the largest id set pointsQuery inlines as a literal
+// `id IN (?)` list. clickhouse-go renders the slice into the query text, so a
+// larger set would risk exceeding ClickHouse's max_query_size (256 KiB default,
+// ~6800 UUIDs); above the threshold pointsQuery falls back to a server-side
+// subquery instead. Deployments that set promql.max_evaluated_series below this
+// (resolveSeries caps the id set to it) never reach the fallback.
+const pointsInlineThreshold = 5000
+
 // pointsQuery builds the tsdb_data query and its arguments. Rows are ordered by
 // id so the streaming SeriesSet can group points per series; series order does
 // not matter (the caller sorts when it requires label order, see sortedByLabels).
 //
-// It binds `id IN (?)` with the ids resolveSeries already resolved, rather than
-// re-running the matcher WHERE as a `id IN (SELECT ... FROM tsdb_tags WHERE ...)`
-// subquery: the matchers (including regex match()) are thus evaluated against
-// tsdb_tags once per Select, not twice.
+// For up to pointsInlineThreshold ids it binds `id IN (?)` with the ids
+// resolveSeries already resolved, so the matchers (including regex match()) are
+// evaluated against tsdb_tags once per Select, not twice. Beyond that it falls
+// back to `id IN (SELECT id FROM tsdb_tags WHERE <where>)`, re-evaluating the
+// matchers on the (small) index table but keeping the query size bounded; where
+// already carries the tenant scope (buildWhere), so the subquery reproduces
+// exactly the ids resolveSeries found.
 //
 // A tenant-scoped query also filters tsdb_data by `tenant = ?` (the trusted
 // request tenant). tsdb_data is keyed by id, so matching id alone would return
@@ -218,8 +250,8 @@ func clampStoreTime(ms int64) int64 {
 // any id collision to the querying tenant and lets ClickHouse prune on the
 // (tenant, id, timestamp) primary key. Skipped when unscoped (q.tenant == ""),
 // which reads across tenants as before.
-func (q *sqlQuerier) pointsQuery(ids []uuid.UUID) (string, []any) {
-	queryArgs := make([]any, 0, 4)
+func (q *sqlQuerier) pointsQuery(ids []uuid.UUID, where string, whereArgs []any) (string, []any) {
+	queryArgs := make([]any, 0, len(whereArgs)+4)
 
 	var tenantCond string
 
@@ -229,16 +261,28 @@ func (q *sqlQuerier) pointsQuery(ids []uuid.UUID) (string, []any) {
 		queryArgs = append(queryArgs, q.tenant)
 	}
 
-	// ORDER BY ends with inserted_at DESC so that duplicate (id, timestamp) rows
+	var idCond string
+
+	if len(ids) <= pointsInlineThreshold {
+		idCond = "id IN (?)"
+
+		queryArgs = append(queryArgs, ids)
+	} else {
+		idCond = "id IN (SELECT id FROM tsdb_tags WHERE " + where + ")"
+
+		queryArgs = append(queryArgs, whereArgs...)
+	}
+
+	// ORDER BY ends with insert_hour DESC so that duplicate (id, timestamp) rows
 	// come newest-first; dedupSortedPoints then keeps the first of each run, i.e.
-	// the last-written value (last-write-wins). inserted_at is not selected, only
+	// the last-written value (last-write-wins). insert_hour is not selected, only
 	// used to order.
 	query := "SELECT id, timestamp, value FROM tsdb_data" +
-		" WHERE " + tenantCond + "id IN (?)" +
+		" WHERE " + tenantCond + idCond +
 		" AND timestamp >= fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?)" +
-		" ORDER BY id, timestamp, inserted_at DESC"
+		" ORDER BY id, timestamp, insert_hour DESC"
 
-	queryArgs = append(queryArgs, ids, clampStoreTime(q.mint), clampStoreTime(q.maxt))
+	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
 
 	return query, queryArgs
 }
@@ -268,10 +312,11 @@ func (lq *labelQuerier) buildLabels(metricName, tenant string, tags map[string]s
 // tsdb_data is a plain MergeTree with no deduplication, so re-flushing a point
 // (takeover, batcher last-chance re-write) or a client re-writing a corrected
 // value can leave several rows for the same (id, timestamp). The read cursor
-// orders by (id, timestamp, inserted_at DESC), so such rows are adjacent and the
+// orders by (id, timestamp, insert_hour DESC), so such rows are adjacent and the
 // most recently written one comes first; left in place they would make PromQL
 // abort with "duplicate sample for timestamp". We keep the first of each run
-// (last-write-wins) and drop the rest, on the flushed slice we just built.
+// (last-write-wins) and drop the rest, on each series' points as the read cursor
+// groups them (see sqlSeriesSet.Next).
 func dedupSortedPoints(points []types.MetricPoint) []types.MetricPoint {
 	if len(points) < 2 {
 		return points

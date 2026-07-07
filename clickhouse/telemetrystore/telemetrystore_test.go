@@ -61,15 +61,19 @@ func TestCloseStopsRefreshLoop(t *testing.T) {
 func TestPickFreeSlot(t *testing.T) {
 	t.Parallel()
 
+	// "me" is the claiming owner; it holds no slot in the fallback cases below, so
+	// they exercise the same first-reusable behaviour as before the owner pref.
 	cases := []struct {
 		name      string
 		slots     []slot
+		owner     string
 		wantID    string
 		wantFound bool
 	}{
 		{
 			name:      "empty pool",
 			slots:     nil,
+			owner:     "me",
 			wantFound: false,
 		},
 		{
@@ -78,6 +82,7 @@ func TestPickFreeSlot(t *testing.T) {
 				{id: "a", owner: "n1", expired: false},
 				{id: "b", owner: "n2", expired: false},
 			},
+			owner:     "me",
 			wantFound: false,
 		},
 		{
@@ -86,6 +91,7 @@ func TestPickFreeSlot(t *testing.T) {
 				{id: "a", owner: "n1", expired: false},
 				{id: "b", owner: "n2", expired: true},
 			},
+			owner:     "me",
 			wantID:    "b",
 			wantFound: true,
 		},
@@ -94,6 +100,7 @@ func TestPickFreeSlot(t *testing.T) {
 			slots: []slot{
 				{id: "a", owner: "", expired: false},
 			},
+			owner:     "me",
 			wantID:    "a",
 			wantFound: true,
 		},
@@ -104,6 +111,27 @@ func TestPickFreeSlot(t *testing.T) {
 				{id: "b", owner: "", expired: false},
 				{id: "c", owner: "n3", expired: true},
 			},
+			owner:     "me",
+			wantID:    "b",
+			wantFound: true,
+		},
+		{
+			name: "prefers a slot we already own over a free one",
+			slots: []slot{
+				{id: "a", owner: "", expired: false},
+				{id: "b", owner: "me", expired: false},
+			},
+			owner:     "me",
+			wantID:    "b",
+			wantFound: true,
+		},
+		{
+			name: "reclaims our own slot even when expired and a free slot comes first",
+			slots: []slot{
+				{id: "a", owner: "n1", expired: true},
+				{id: "b", owner: "me", expired: true},
+			},
+			owner:     "me",
 			wantID:    "b",
 			wantFound: true,
 		},
@@ -113,7 +141,7 @@ func TestPickFreeSlot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			id, found := pickFreeSlot(tc.slots)
+			id, found := pickFreeSlot(tc.slots, tc.owner)
 			if found != tc.wantFound || id != tc.wantID {
 				t.Fatalf("pickFreeSlot = (%q, %v), want (%q, %v)", id, found, tc.wantID, tc.wantFound)
 			}

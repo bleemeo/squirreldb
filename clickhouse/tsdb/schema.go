@@ -41,21 +41,28 @@ import (
 // increasing per-series timestamps within an id (a (tenant, id) order without it
 // would scatter timestamps and wreck compression).
 //
-// inserted_at is the wall-clock time of the INSERT batch that produced the row
-// (set by the MV, see mvDatapointDataDDL). It is NOT part of the ORDER BY — it
-// serves only as a read-side tiebreaker so that when two rows share the same
-// (id, timestamp) with different values (a client re-writing a corrected value,
-// e.g. bleemeo-forecast overwriting its 1h overlap every 24h), the read keeps
-// the most recently written one (last-write-wins, see pointsQuery /
-// dedupSortedPoints). Existing rows predating this column read back as epoch 0
-// (DEFAULT), so any later write wins.
+// insert_hour is the wall-clock time of the INSERT batch that produced the row,
+// truncated to the hour. It serves only as a read-side tiebreaker so that when two rows
+// share the same (id, timestamp) with different values (a client re-writing a
+// corrected value) the read keeps the most recently written one (last-write-wins).
+// The only assumption of this system, is that corrected values aren't sent
+// within the same hour. You need to way at least one hour.
 //
-// It uses Delta(8),ZSTD like timestamp (NOT plain ZSTD, which cost ~40x more):
-// rows are stored ordered by (tenant, id, timestamp), and within a series run
-// inserted_at is near-constant — a point is inserted shortly after its own
-// timestamp (real-time scrape) or a whole batch shares one now64() (forecast /
-// backfill of future timestamps). So the intra-series deltas are tiny, exactly
-// like timestamp; only the per-series boundary produces a large (negligible) one.
+// The truncation to the hour (rather than the minute or 10s) is an empirical tradeoff:
+//   - 10 seconds is quiet good... IF you send point also every 10 seconds, because then
+//     the delta codec always see the same delta of 10 seconds.
+//   - 1 minutes isn't good with a 10 seconds metric period, because the delta codec will
+//     now see 5 times 0 seconds of delta, then 60 seconds which compressed poorly.
+//   - 1 hour hope to be a good tradeoff, covering any metric resolution.
+//
+// PARTITION BY is a 7-day interval anchored on the Unix epoch (in UTC), NOT
+// toStartOfWeek: the migration reads Cassandra shard by shard, and those shards
+// are 7-day windows anchored on the epoch too (see cassandra/index shardForTime).
+// toStartOfWeek anchors on Sunday, so an epoch-aligned shard straddled two
+// calendar-week partitions — one migration insert then wrote one part per
+// partition. Matching the anchor makes a shard fall in a single partition, so a
+// migration insert produces a single part. Granularity (≈7 days) is unchanged
+// for the live workload (TTL is per-row, pruning is by timestamp either way).
 const tsdbDataDDL = `
 CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
 (
@@ -64,7 +71,7 @@ CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
     timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     value Float64 CODEC(ZSTD(1)),
     row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1)),
-    inserted_at DateTime64(3) DEFAULT toDateTime64(0, 3) CODEC(Delta(8), ZSTD(1))
+    insert_hour DateTime DEFAULT toDateTime(0) CODEC(Delta(4), ZSTD(1))
 )
 ENGINE = {{ENGINE}}
 PARTITION BY toStartOfWeek(timestamp)
@@ -124,7 +131,8 @@ CREATE TABLE IF NOT EXISTS datapoint_input{{ON_CLUSTER}}
     tags Map(LowCardinality(String), String),
     timestamps Array(DateTime64(3)),
     values Array(Float64),
-    row_ttl_days UInt16
+    row_ttl_days UInt16,
+    insert_hour DateTime
 )
 ENGINE = Null`
 
@@ -133,10 +141,9 @@ ENGINE = Null`
 // have the same length, see sqlWriter.Write). The id is computed once per input
 // row (per series) and repeated across its points by the join.
 //
-// inserted_at is now64(3), evaluated once per INSERT (now() is constant within a
-// query) so every point of a batch shares the same value. It is the read-side
-// last-write-wins tiebreaker for duplicate (id, timestamp) rows (see tsdbDataDDL
-// and pointsQuery).
+// insert_hour is passed through from datapoint_input: the write path stamps one
+// hour-truncated time per batch. now() here would re-evaluate per inserted block,
+// not once per batch (the import splits a batch into several blocks).
 const mvDatapointDataDDL = `
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_data
 (
@@ -145,7 +152,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_data{{ON_CLUSTER}} TO tsdb_d
     timestamp DateTime64(3),
     value Float64,
     row_ttl_days UInt16,
-    inserted_at DateTime64(3)
+    insert_hour DateTime
 ) AS
 SELECT
     reinterpretAsUUID(sipHash128(metric_name, tenant, tags)) AS id,
@@ -153,7 +160,7 @@ SELECT
     timestamp,
     value,
     row_ttl_days,
-    now64(3) AS inserted_at
+    insert_hour
 FROM datapoint_input
 ARRAY JOIN
     timestamps AS timestamp,

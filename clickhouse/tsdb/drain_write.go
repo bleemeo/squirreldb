@@ -79,6 +79,11 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 
 	globalDays := uint16(c.ttlDays()) //nolint:gosec
 
+	// One hour-truncated stamp for the whole batch, used as the read-side
+	// last-write-wins tiebreaker (see tsdbDataDDL). Stamped here, not via now() in
+	// the MV, which would re-evaluate per inserted block.
+	insertHour := time.Now().Truncate(time.Hour)
+
 	var rows int
 
 	for _, s := range series {
@@ -93,7 +98,7 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 		}
 
 		if err := batch.Append(
-			cols.metricName, cols.tenant, cols.tags, timestamps, values, cols.rowTTLDays,
+			cols.metricName, cols.tenant, cols.tags, timestamps, values, cols.rowTTLDays, insertHour,
 		); err != nil {
 			_ = batch.Abort()
 
