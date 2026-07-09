@@ -34,6 +34,7 @@ import (
 	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	chmutable "github.com/bleemeo/squirreldb/clickhouse/mutable"
 	"github.com/bleemeo/squirreldb/clickhouse/routing"
+	chstate "github.com/bleemeo/squirreldb/clickhouse/state"
 	"github.com/bleemeo/squirreldb/clickhouse/telemetrystore"
 	"github.com/bleemeo/squirreldb/clickhouse/tsdb"
 	"github.com/bleemeo/squirreldb/config"
@@ -62,13 +63,16 @@ type Options struct {
 	Config            config.ClickHouse
 	Redis             config.Redis // If unset, the TSDB uses an in-memory batching store.
 	MetricRegistry    prometheus.Registerer
-	ReadOnly          bool
 	Cluster           types.Cluster
 	TenantLabel       string
 	DefaultTimeToLive time.Duration
 	// ClusterName enables ClickHouse cluster mode (ON CLUSTER + Replicated) for
 	// every store's schema. Empty means a single ClickHouse node.
 	ClusterName string
+	ReadOnly    bool
+	// ImportOnly builds the TSDB for bulk import only (no WAL drainer) — set by the
+	// `squirreldb migrate` target, which bypasses the WAL owned by the live daemon.
+	ImportOnly bool
 	// TelemetryTiming overrides the telemetry store's lease timing. It is a test
 	// hook (zero fields keep the defaults), not a user-facing config option.
 	TelemetryTiming telemetry.StoreTiming
@@ -88,6 +92,7 @@ type Backend struct {
 	mutableProvider  *mutable.Provider
 	mutableProcessor *mutable.LabelProcessor
 	telemetryStore   *telemetrystore.Store
+	stateStore       *chstate.Store
 	tsdb             *tsdb.ClickHouseTSDB
 }
 
@@ -141,6 +146,7 @@ func allSchemaObjects(opts Options) []ddl.Object {
 	objects := tsdb.SchemaObjects(opts.ClusterName, opts.DefaultTimeToLive)
 	objects = append(objects, chmutable.SchemaObjects(opts.ClusterName)...)
 	objects = append(objects, telemetrystore.SchemaObjects(opts.ClusterName)...)
+	objects = append(objects, chstate.SchemaObjects(opts.ClusterName)...)
 
 	return objects
 }
@@ -215,7 +221,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	// A test may ask for a clean slate: drop every table before the schema is
 	// (re)created below, on its own short-lived connection (routing is not open
 	// yet), so the drop happens on this very backend instead of a separate one.
-	if b.options.DropDataOnStartup {
+	if b.options.DropDataOnStartup && !b.options.ReadOnly {
 		if err := b.dropData(ctx); err != nil {
 			return fmt.Errorf("clickhouse: drop data on startup: %w", err)
 		}
@@ -286,6 +292,8 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 			DefaultTimeToLive: b.options.DefaultTimeToLive,
 			WALFlushDelay:     b.options.Config.WALFlushDelay,
 			WALSoftThreshold:  b.options.Config.WALSoftThreshold,
+			ReadOnly:          b.options.ReadOnly,
+			ImportOnly:        b.options.ImportOnly,
 		},
 	)
 	if err != nil {
@@ -376,7 +384,7 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	}
 
 	store, err := telemetrystore.New(
-		ctx, b.routing.Sticky(), b.options.ClusterName, b.options.TelemetryTiming,
+		ctx, b.routing.Sticky(), b.options.ClusterName, b.options.ReadOnly, b.options.TelemetryTiming,
 		b.logger.With().Str("component", "telemetry").Logger())
 	if err != nil {
 		return nil, err
@@ -385,6 +393,26 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	b.telemetryStore = store
 
 	return b.telemetryStore, nil
+}
+
+// StateStore returns the generic ClickHouse key/value state store. It uses a
+// STICKY connection (pinned to one host) so a writer reads back its own writes —
+// e.g. the migration checkpoint on restart; across replicas a just-written value
+// may lag until replication. The first user is the Cassandra→ClickHouse
+// migration checkpoint.
+func (b *Backend) StateStore(context.Context) (types.State, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	if b.routing == nil {
+		return nil, ErrNotStarted
+	}
+
+	if b.stateStore == nil {
+		b.stateStore = chstate.New(b.routing.Sticky(), b.options.ReadOnly)
+	}
+
+	return b.stateStore, nil
 }
 
 // dropData drops every ClickHouse table SquirrelDB owns (TSDB, mutable labels,

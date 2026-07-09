@@ -20,10 +20,16 @@ import "time"
 
 // Config is the main structured configuration.
 type Config struct {
-	// Backend selects the storage backend used for everything (TSDB, mutable
-	// labels, telemetry, and — for Cassandra — locks/states). Either "cassandra"
-	// or "clickhouse"; mixing backends is not supported.
-	Backend             string        `yaml:"backend"`
+	Backend string `yaml:"backend"`
+	// ExtraWriteBackend is an optional additional, best-effort write target
+	// alongside Backend (which is always written synchronously and must succeed,
+	// being the source of truth that serves reads, mutable labels and telemetry).
+	// The extra backend is written best-effort and non-blocking: a failure to
+	// write it is logged and dropped, never blocking or failing the request — so
+	// the extra being down never affects Backend. Empty means "Backend only". Used
+	// for the Cassandra→ClickHouse migration (dual-write); it must differ from
+	// Backend. The migrator reaches it via MigrateToBackend.
+	ExtraWriteBackend   string        `yaml:"extra_write_backend"`
 	Cassandra           Cassandra     `yaml:"cassandra"`
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
 	Redis               Redis         `yaml:"redis"`

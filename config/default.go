@@ -20,8 +20,8 @@ import "time"
 
 const backendCassandra = "cassandra"
 
-// defaultPaths returns the default paths used to search for config files.
-func defaultPaths() []string {
+// DefaultConfigPaths returns the default paths used to search for config files.
+func DefaultConfigPaths() []string {
 	return []string{
 		"squirreldb.conf",
 	}

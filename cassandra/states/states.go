@@ -18,13 +18,12 @@ package states
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/bleemeo/squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gocql/gocql"
 	"github.com/rs/zerolog"
@@ -72,25 +71,8 @@ func (c *CassandraStates) Read(ctx context.Context, name string, value any) (fou
 		return false, fmt.Errorf("read %s: %w", name, err)
 	}
 
-	switch v := value.(type) {
-	case *float64:
-		valueFloat64, _ := strconv.ParseFloat(valueString, 64)
-		*v = valueFloat64
-	case *int:
-		valueInt, _ := strconv.Atoi(valueString)
-		*v = valueInt
-	case *int64:
-		valueInt64, _ := strconv.ParseInt(valueString, 10, 64)
-		*v = valueInt64
-	case *string:
-		*v = valueString
-	default:
-		err := json.Unmarshal([]byte(valueString), value)
-		if err != nil {
-			return false, fmt.Errorf("failed to unmarshal value: %w", err)
-		}
-
-		return true, nil
+	if err := types.DecodeStateValue(valueString, value); err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -98,18 +80,9 @@ func (c *CassandraStates) Read(ctx context.Context, name string, value any) (fou
 
 // Write updates the state in the states table.
 func (c *CassandraStates) Write(ctx context.Context, name string, value any) error {
-	var valueString string
-
-	switch value.(type) {
-	case float64, int, int64, string:
-		valueString = fmt.Sprint(value)
-	default:
-		marshalled, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("failed to marshal value: %w", err)
-		}
-
-		valueString = string(marshalled)
+	valueString, err := types.EncodeStateValue(value)
+	if err != nil {
+		return err
 	}
 
 	if err := c.statesTableInsertState(ctx, name, valueString); err != nil {

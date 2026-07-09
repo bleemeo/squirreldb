@@ -71,10 +71,10 @@ CREATE TABLE IF NOT EXISTS tsdb_data{{ON_CLUSTER}}
     timestamp DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     value Float64 CODEC(ZSTD(1)),
     row_ttl_days LowCardinality(UInt16) CODEC(ZSTD(1)),
-    insert_hour DateTime DEFAULT toDateTime(0) CODEC(Delta(4), ZSTD(1))
+    insert_hour DateTime CODEC(Delta(4), ZSTD(1))
 )
 ENGINE = {{ENGINE}}
-PARTITION BY toStartOfWeek(timestamp)
+PARTITION BY toStartOfInterval(timestamp, INTERVAL 7 DAY, 'UTC')
 ORDER BY (tenant, id, timestamp){{TTL}}
 SETTINGS allow_suspicious_low_cardinality_types = 1`
 

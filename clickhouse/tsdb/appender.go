@@ -31,6 +31,7 @@ import (
 )
 
 var (
+	errReadOnly            = errors.New("backend is read-only")
 	errNotImplemented      = errors.New("not implemented")
 	errTimestampOutOfRange = errors.New("timestamp out of storable range")
 	errClosed              = errors.New("clickhouse tsdb is closed")
@@ -43,6 +44,11 @@ type appender struct {
 	c   *ClickHouseTSDB
 	ttl int64
 	ctx context.Context //nolint:containedctx
+
+	// bestEffort makes Commit drop-on-threshold and never block or error (see
+	// BestEffortAppenderWithOptions); false is the normal blocking-backpressure
+	// path.
+	bestEffort bool
 
 	// pending holds one WAL entry per appended point. The WAL is one-entry-per-
 	// point (see walEntry / wal.go), so there is nothing to group per series here
@@ -67,6 +73,10 @@ func (app *appender) Append(
 		)
 	}
 
+	if app.c.opts.ReadOnly {
+		return 0, errReadOnly
+	}
+
 	app.pending = append(app.pending, walEntry{
 		Labels: l,
 		TTL:    app.ttl,
@@ -82,6 +92,14 @@ func (app *appender) Commit() error {
 	}()
 
 	if len(app.pending) == 0 {
+		return nil
+	}
+
+	// Best-effort (dual-write extra): never block or fail the caller — drop on
+	// threshold / on error and account it for later repair from the primary.
+	if app.bestEffort {
+		app.c.commitBestEffort(app.ctx, app.pending)
+
 		return nil
 	}
 

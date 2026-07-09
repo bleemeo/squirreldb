@@ -49,6 +49,15 @@ type metrics struct {
 	WALLength            prometheus.Gauge       // current number of buffered points in the Redis WAL
 	WALDrainerIsLeader   prometheus.Gauge       // 1 if this node holds the drainer lease
 	WALBackpressureTotal *prometheus.CounterVec // writes slowed/blocked, by kind
+
+	// Best-effort (dual-write extra) drop accounting. Only ever non-zero when the
+	// ClickHouse backend runs as a best-effort extra write target.
+	WALDroppedPointsTotal prometheus.Counter // points dropped because ClickHouse was unavailable
+	// WALDroppedMin/MaxTimestamp are the min/max point timestamps (unix seconds)
+	// ever dropped by this instance — the range to re-run `squirreldb migrate`
+	// over to repair from the primary. Cumulative (never reset), 0 until a drop.
+	WALDroppedMinTimestamp prometheus.Gauge
+	WALDroppedMaxTimestamp prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -136,6 +145,24 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:      "1 if this node currently holds the WAL drainer lease (writes the WAL to ClickHouse), else 0",
 		}),
 		WALBackpressureTotal: newWALBackpressureTotal(reg, namespace, subSystem),
+		WALDroppedPointsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "wal_dropped_points_total",
+			Help:      "Points dropped by a best-effort (dual-write extra) ClickHouse because it was unavailable",
+		}),
+		WALDroppedMinTimestamp: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "wal_dropped_min_timestamp_seconds",
+			Help:      "Oldest point timestamp ever dropped by a best-effort ClickHouse (repair range lower bound); 0 if none",
+		}),
+		WALDroppedMaxTimestamp: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subSystem,
+			Name:      "wal_dropped_max_timestamp_seconds",
+			Help:      "Newest point timestamp ever dropped by a best-effort ClickHouse (repair range upper bound); 0 if none",
+		}),
 	}
 }
 

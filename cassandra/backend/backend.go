@@ -97,6 +97,10 @@ type Backend struct {
 	mutableProvider  *mutable.Provider
 	mutableProcessor *mutable.LabelProcessor
 	tsdb             *tsdb.CassandraTSDB
+	// cassandraIndex is the concrete index (not the mutable wrapper the TSDB
+	// holds), stashed for the migration-read accessors. Set by newTSDB, so it is
+	// non-nil only once TSDB() has built the store.
+	cassandraIndex *index.CassandraIndex
 }
 
 func (b *Backend) Start(ctx context.Context) error {
@@ -283,6 +287,13 @@ func (b *Backend) MutableProcessor(ctx context.Context) (*mutable.LabelProcessor
 	_, processor, err := b.getMutableStack(ctx)
 
 	return processor, err
+}
+
+func (b *Backend) StateStore(ctx context.Context) (types.State, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	return b.getStates(ctx)
 }
 
 // TelemetryStore returns the telemetry store backed by Cassandra states + locks.
@@ -538,5 +549,19 @@ func (b *Backend) newTSDB(ctx context.Context) (*tsdb.CassandraTSDB, error) {
 		return nil, err
 	}
 
+	b.cassandraIndex = wrappedIndex
+
 	return t, nil
+}
+
+// migrationIndex returns the concrete Cassandra index used by the migration
+// reader (the `squirreldb migrate` subcommand) to enumerate time-shards and
+// their series and to resolve id→labels. It is the raw index, not the mutable
+// wrapper the TSDB uses: migration copies the labels as stored, and mutable-label
+// aliasing is a query-time concern. Nil until TSDB() has built the store.
+func (b *Backend) migrationIndex() *index.CassandraIndex {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	return b.cassandraIndex
 }

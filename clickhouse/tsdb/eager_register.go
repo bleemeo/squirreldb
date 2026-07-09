@@ -87,12 +87,29 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, regs []registration
 	now := time.Now()
 
 	toRegister := c.seriesToRegister(regs, now)
-	if len(toRegister) == 0 {
+
+	if err := c.writeAllRegistrations(ctx, toRegister); err != nil {
+		return err
+	}
+
+	c.markRegistered(toRegister, now)
+
+	return nil
+}
+
+// writeAllRegistrations inserts a tsdb_tags row for every given registration,
+// without any seen-cache filtering. registerSeries calls it after cache
+// filtering (live drain); the bulk import calls it for every series on every
+// chunk, so a series imported across several time-shards keeps its full indexed
+// min/max range (the AggregatingMergeTree aggregates the rows).
+func (c *ClickHouseTSDB) writeAllRegistrations(ctx context.Context, regs []registration) error {
+	if len(regs) == 0 {
 		return nil
 	}
 
+	start := time.Now()
 	defer func() {
-		c.metrics.RegisterSeconds.Observe(time.Since(now).Seconds())
+		c.metrics.RegisterSeconds.Observe(time.Since(start).Seconds())
 	}()
 
 	batch, err := c.conn.PrepareBatch(
@@ -106,7 +123,7 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, regs []registration
 
 	globalDays := uint16(c.ttlDays()) //nolint:gosec
 
-	for _, r := range toRegister {
+	for _, r := range regs {
 		cols := seriesToInput(r.labels, c.opts.TenantLabel, r.ttl, globalDays)
 
 		minTime := time.UnixMilli(r.minTS)
@@ -127,8 +144,7 @@ func (c *ClickHouseTSDB) registerSeries(ctx context.Context, regs []registration
 		return fmt.Errorf("send batch to clickhouse: %w", err)
 	}
 
-	c.markRegistered(toRegister, now)
-	c.metrics.RegisteredSeriesTotal.Add(float64(len(toRegister)))
+	c.metrics.RegisteredSeriesTotal.Add(float64(len(regs)))
 
 	return nil
 }

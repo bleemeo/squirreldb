@@ -131,7 +131,7 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 	if withDefaultAndFlags {
 		// Parse the config flags without the command flags because the command flags would
 		// create warnings about invalid keys when the config is converted to a struct.
-		flagSet := flagSetFromFlags(configFlags())
+		flagSet := NewFlagSet("config", ConfigFlags())
 
 		// The error can be safely ignored as the flags were already parsed in the daemon.
 		_ = flagSet.Parse(args)

@@ -78,7 +78,10 @@ func newBatchingTSDB(
 
 	t := &batchingTSDB{
 		batcher: batch.New(
-			reg,
+			prometheus.WrapRegistererWith(
+				map[string]string{"backend": "dummy"},
+				reg,
+			),
 			batchSize.Size,
 			store,
 			logger.With().Str("component", "batch").Logger(),
@@ -109,7 +112,10 @@ func newTemporaryStore(
 	if len(redisCfg.Addresses) > 0 && redisCfg.Addresses[0] != "" {
 		store, err := redisTemporarystore.New(
 			ctx,
-			reg,
+			prometheus.WrapRegistererWith(
+				map[string]string{"backend": "dummy"},
+				reg,
+			),
 			redisTemporarystore.Options{
 				RedisOptions: redisCfg,
 				Keyspace:     redisCfg.Keyspace,
@@ -123,7 +129,13 @@ func newTemporaryStore(
 		return store, nil
 	}
 
-	return temporarystore.New(reg, storeLogger), nil //nolint:contextcheck
+	return temporarystore.New( //nolint:contextcheck
+		prometheus.WrapRegistererWith(
+			map[string]string{"backend": "dummy"},
+			reg,
+		),
+		storeLogger,
+	), nil
 }
 
 func (t *batchingTSDB) AppenderWithOptions(ctx context.Context, opts types.AppenderOptions) storage.Appender {

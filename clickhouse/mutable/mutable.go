@@ -32,6 +32,7 @@ package mutable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -80,6 +81,8 @@ const (
 		ENGINE = {{ENGINE}}
 		ORDER BY (tenant, name, value)`
 )
+
+var errReadOnly = errors.New("backend is read-only")
 
 // NewStore returns a new ClickHouse mutable label store. The connection is owned
 // by the caller (clickhouse/backend) and shared with the other ClickHouse stores.
@@ -184,6 +187,10 @@ func (s *clickhouseStore) AssociatedValues(ctx context.Context, tenant, name str
 
 // SetAssociatedValues sets the non mutable label values associated to a mutable label.
 func (s *clickhouseStore) SetAssociatedValues(ctx context.Context, label mutable.LabelWithValues) error {
+	if s.options.ReadOnly {
+		return errReadOnly
+	}
+
 	batch, err := s.conn.PrepareBatch(ctx,
 		"INSERT INTO mutable_label_values (tenant, name, value, associated_values)")
 	if err != nil {
@@ -205,6 +212,10 @@ func (s *clickhouseStore) SetAssociatedValues(ctx context.Context, label mutable
 
 // DeleteAssociatedValues deletes the non mutable label values associated to a mutable label.
 func (s *clickhouseStore) DeleteAssociatedValues(ctx context.Context, label mutable.Label) error {
+	if s.options.ReadOnly {
+		return errReadOnly
+	}
+
 	err := s.conn.Exec(ctx, `
 		DELETE FROM mutable_label_values
 		WHERE tenant = ? AND name = ? AND value = ?`,
@@ -219,6 +230,10 @@ func (s *clickhouseStore) DeleteAssociatedValues(ctx context.Context, label muta
 
 // SetAssociatedName sets the non mutable label name associated to a mutable label name.
 func (s *clickhouseStore) SetAssociatedName(ctx context.Context, label mutable.LabelWithName) error {
+	if s.options.ReadOnly {
+		return errReadOnly
+	}
+
 	batch, err := s.conn.PrepareBatch(ctx,
 		"INSERT INTO mutable_label_names (tenant, name, associated_name)")
 	if err != nil {
@@ -240,6 +255,10 @@ func (s *clickhouseStore) SetAssociatedName(ctx context.Context, label mutable.L
 
 // DeleteAssociatedName deletes a mutable label name and all its values.
 func (s *clickhouseStore) DeleteAssociatedName(ctx context.Context, tenant, name string) error {
+	if s.options.ReadOnly {
+		return errReadOnly
+	}
+
 	err := s.conn.Exec(ctx, `
 		DELETE FROM mutable_label_names
 		WHERE tenant = ? AND name = ?`,

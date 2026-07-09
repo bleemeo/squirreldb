@@ -105,7 +105,7 @@ func getIndex(ctx context.Context, squirreldb *daemon.SquirrelDB, dontStartIndex
 	return cassandraTSDB.Index(), nil
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, _ context.Context) error {
 	cfg, warnings, err := daemon.Config()
 	if err != nil {
 		return err

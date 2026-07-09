@@ -102,6 +102,13 @@ type Options struct {
 	// defaults above.
 	WALFlushDelay    time.Duration
 	WALSoftThreshold int
+	ReadOnly         bool
+	// ImportOnly builds the TSDB for bulk import (ImportRawData) only: it skips the
+	// WAL drainer and the registration-cache sweeper. The live write path (WAL +
+	// drainer) is what the `squirreldb migrate` target does not want — it bypasses
+	// the WAL and must not join the drainer lease election of the daemon that owns
+	// that shared WAL.
+	ImportOnly bool
 }
 
 // ClickHouseTSDB is a types.TSDB backed by ClickHouse.
@@ -120,6 +127,19 @@ type ClickHouseTSDB struct {
 	walCritical int
 	walStop     int
 	lastWALLen  atomic.Int64
+
+	// Drop accounting for best-effort appenders (BestEffortAppenderWithOptions):
+	// dropping is an atomic fast-path flag (checked on every best-effort commit);
+	// the min/max fields track the current drop episode and the cumulative dropped
+	// point timestamps (ms) and are guarded by dropMu. They feed the recovery log
+	// and the drop gauges. Whether a given commit drops is a per-appender choice,
+	// but the accounting is shared here on the TSDB.
+	dropping       atomic.Bool
+	dropMu         sync.Mutex
+	dropEpisodeMin int64
+	dropEpisodeMax int64
+	dropGlobalMin  int64
+	dropGlobalMax  int64
 
 	// seenSeries caches the series registered in tsdb_tags, to avoid re-inserting
 	// them on every drain. Keyed by the canonical labels encoding (labels.Bytes),
@@ -178,27 +198,33 @@ func New(ctx context.Context, conn driver.Conn, logger zerolog.Logger, opts Opti
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.cancel = cancel
 
-	c.drainer = &walDrainer{
-		wal:        wal,
-		leaseKey:   opts.Redis.Keyspace + "clickhouse_wal_lease",
-		owner:      uuid.NewString(),
-		leaseTTL:   walLeaseTTL,
-		flushDelay: flushDelay,
-		soft:       soft,
-		maxPoints:  walInsertMaxPoints,
-		write:      c.drainWrite,
-		metrics:    c.metrics,
-		logger:     logger.With().Str("component", "wal-drainer").Logger(),
+	// Import-only targets bypass the WAL, so they run neither the drainer (which
+	// would otherwise join the shared-WAL lease election owned by the live daemon)
+	// nor the registration-cache sweeper (the import path does not use that cache).
+	// And in read-only it don't make sense to try drain the WAL
+	if !opts.ImportOnly && !opts.ReadOnly {
+		c.drainer = &walDrainer{
+			wal:        wal,
+			leaseKey:   opts.Redis.Keyspace + "clickhouse_wal_lease",
+			owner:      uuid.NewString(),
+			leaseTTL:   walLeaseTTL,
+			flushDelay: flushDelay,
+			soft:       soft,
+			maxPoints:  walInsertMaxPoints,
+			write:      c.drainWrite,
+			metrics:    c.metrics,
+			logger:     logger.With().Str("component", "wal-drainer").Logger(),
+		}
+
+		c.wg.Go(func() {
+			c.drainer.run(runCtx)
+		})
+
+		// Evict stale entries from the registration cache.
+		c.wg.Go(func() {
+			c.runSeenSweeper(runCtx)
+		})
 	}
-
-	c.wg.Go(func() {
-		c.drainer.run(runCtx)
-	})
-
-	// Evict stale entries from the registration cache.
-	c.wg.Go(func() {
-		c.runSeenSweeper(runCtx)
-	})
 
 	return c, nil
 }
@@ -211,6 +237,25 @@ func (c *ClickHouseTSDB) AppenderWithOptions(
 		c:   c,
 		ttl: opts.WriteTTL,
 		ctx: ctx,
+	}
+}
+
+// BestEffortAppenderWithOptions returns an appender whose Commit never blocks or
+// fails: instead of applying blocking WAL backpressure it drops points once the
+// WAL reaches the stop threshold (or the append fails), accounting the drop for
+// later repair. It is used by the dual-write composite for the extra
+// (migration-target) ClickHouse, so an unavailable ClickHouse cannot block or
+// fail the primary write. The reliable AppenderWithOptions (blocking) is what the
+// migrator itself uses.
+func (c *ClickHouseTSDB) BestEffortAppenderWithOptions(
+	ctx context.Context,
+	opts types.AppenderOptions,
+) storage.Appender {
+	return &appender{
+		c:          c,
+		ttl:        opts.WriteTTL,
+		ctx:        ctx,
+		bestEffort: true,
 	}
 }
 

@@ -55,7 +55,42 @@ func seriesKey(l labels.Labels) string {
 // arrays-per-series row; the MV fans them into tsdb_data). It is the walDrainer's
 // write function.
 func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) error {
+	return c.writeBatch(ctx, entries, c.registerSeries)
+}
+
+// writeBatch regroups the per-point entries by series, then hands them to
+// writeSeries. The live drain path uses this; the bulk import builds its
+// seriesBatch list directly (one chunk = one series, already arrays-per-series)
+// and calls writeSeries, skipping the regroup copy.
+func (c *ClickHouseTSDB) writeBatch(
+	ctx context.Context,
+	entries []walEntry,
+	register func(context.Context, []registration) error,
+) error {
 	if len(entries) == 0 {
+		return nil
+	}
+
+	return c.writeSeries(ctx, groupBySeries(entries), register, 0)
+}
+
+// writeSeries registers the given series via the supplied function
+// (registerSeries for the live drain — new/due only; or writeAllRegistrations
+// for the bulk import — every series, every time), then inserts their points
+// into datapoint_input (one arrays-per-series row; the MV fans them into
+// tsdb_data).
+//
+// flushEveryPoints, when > 0, streams the insert in intermediate blocks of about
+// that many points instead of one block for the whole call (see the flush inside
+// the loop). 0 keeps a single block — used by the live drain, whose batches are
+// already small.
+func (c *ClickHouseTSDB) writeSeries(
+	ctx context.Context,
+	series []*seriesBatch,
+	register func(context.Context, []registration) error,
+	flushEveryPoints int,
+) error {
+	if len(series) == 0 {
 		return nil
 	}
 
@@ -64,9 +99,7 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 		c.metrics.FlushSeconds.Observe(time.Since(start).Seconds())
 	}()
 
-	series := groupBySeries(entries)
-
-	if err := c.registerSeries(ctx, registrationsFor(series)); err != nil {
+	if err := register(ctx, registrationsFor(series)); err != nil {
 		return fmt.Errorf("register series: %w", err)
 	}
 
@@ -84,7 +117,10 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 	// the MV, which would re-evaluate per inserted block.
 	insertHour := time.Now().Truncate(time.Hour)
 
-	var rows int
+	var (
+		rows             int
+		pointsSinceFlush int
+	)
 
 	for _, s := range series {
 		cols := seriesToInput(s.labels, c.opts.TenantLabel, s.ttl, globalDays)
@@ -108,6 +144,34 @@ func (c *ClickHouseTSDB) drainWrite(ctx context.Context, entries []walEntry) err
 		}
 
 		rows += len(s.points)
+		pointsSinceFlush += len(s.points)
+
+		// Release our copy of this series' points now that clickhouse-go has copied
+		// them into its per-column buffers. clickhouse-go materialises the whole
+		// block's columns before Send, so without this the entire source batch would
+		// stay live alongside that full columnar copy for the length of the insert.
+		// Dropping the reference here lets the source be reclaimed as the columns
+		// fill. Safe: registrationsFor(series) above already consumed the points, and
+		// nothing below reads them. On the import path this is the caller's batch
+		// (see ImportRawData, which hands us ownership); on the drain path they are
+		// groupBySeries' throwaway slices.
+		s.points = nil
+
+		// Stream the insert in bounded blocks: once enough points have accumulated,
+		// send the current block and reset it (block.Reset keeps the column buffers'
+		// capacity, so they are reused, not reallocated). This caps clickhouse-go's
+		// columnar copy at ~flushEveryPoints instead of the whole batch. All flushed
+		// blocks stay in the SAME insert, so the server-side materialized-view squash
+		// still coalesces them — parts must be checked, but should stay low.
+		if flushEveryPoints > 0 && pointsSinceFlush >= flushEveryPoints {
+			if err := batch.Flush(); err != nil {
+				c.metrics.FlushErrorsTotal.Inc()
+
+				return fmt.Errorf("flush block: %w", err)
+			}
+
+			pointsSinceFlush = 0
+		}
 	}
 
 	c.metrics.FlushRowsPerBatch.Observe(float64(rows))

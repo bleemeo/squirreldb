@@ -76,7 +76,10 @@ const (
 // clusterIDKey is the single row key of telemetry_cluster_id.
 const clusterIDKey = "cluster_id"
 
-var errClaimContended = errors.New("could not claim a telemetry node ID")
+var (
+	errClaimContended = errors.New("could not claim a telemetry node ID")
+	errReadOnly       = errors.New("backend is read-only")
+)
 
 // SchemaObjects returns the ClickHouse objects owned by the telemetry store.
 // Exposed so the backend can create the whole schema up front and derive the
@@ -131,6 +134,7 @@ const (
 type Store struct {
 	conn        driver.Conn
 	clusterName string
+	readOnly    bool
 	logger      zerolog.Logger
 
 	// Lease timing, resolved from telemetry.StoreTiming at New (zero → default).
@@ -150,12 +154,13 @@ type Store struct {
 // Schema creation is owned by clickhouse/backend (created up front for every
 // store), so the store assumes its tables already exist.
 func New(
-	_ context.Context, conn driver.Conn, clusterName string,
+	_ context.Context, conn driver.Conn, clusterName string, readOnly bool,
 	timing telemetry.StoreTiming, logger zerolog.Logger,
 ) (*Store, error) {
 	return &Store{
 		conn:             conn,
 		clusterName:      clusterName,
+		readOnly:         readOnly,
 		logger:           logger,
 		refreshInterval:  orDefault(timing.RefreshInterval, defaultRefreshInterval),
 		leaseTTL:         orDefault(timing.LeaseTTL, defaultLeaseTTL),
@@ -246,7 +251,20 @@ func (s *Store) readClusterID(ctx context.Context) (string, bool, error) {
 	return id, true, rows.Err()
 }
 
+// SetClusterID overwrites the stored cluster ID (last-write-wins on the next
+// FINAL read). The Cassandra→ClickHouse migration uses it to carry the existing
+// cluster ID over, so the cluster keeps its identity and history instead of
+// ClickHouse minting a fresh one. It is intentionally not part of telemetry.Store
+// (only the migration needs it).
+func (s *Store) SetClusterID(ctx context.Context, id string) error {
+	return s.insertClusterID(ctx, id)
+}
+
 func (s *Store) insertClusterID(ctx context.Context, id string) error {
+	if s.readOnly {
+		return errReadOnly
+	}
+
 	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO telemetry_cluster_id (k, cluster_id)")
 	if err != nil {
 		return fmt.Errorf("prepare insert cluster id: %w", err)
@@ -329,6 +347,10 @@ func (l *nodeIDLease) setID(id string) {
 // reports the currently-owned ID, which the loop may change to heal a split (see
 // refreshLoop) — callers must read it afresh rather than cache it.
 func (s *Store) AcquireNodeID(ctx context.Context) (func() string, func(), error) { //nolint:contextcheck
+	if s.readOnly {
+		return nil, nil, errReadOnly
+	}
+
 	owner := uuid.New().String()
 
 	id, err := s.claim(ctx, owner)

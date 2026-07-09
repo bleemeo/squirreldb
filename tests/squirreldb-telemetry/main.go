@@ -108,7 +108,7 @@ func main() {
 	log.Info().Msg("telemetry store test succeeded")
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, _ context.Context) error {
 	cfg, warnings, err := daemon.Config()
 	if err != nil {
 		return err

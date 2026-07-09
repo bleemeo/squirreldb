@@ -20,7 +20,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	goflag "flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	zlogsentry "github.com/archdx/zerolog-sentry"
 	"github.com/bleemeo/squirreldb/api"
 	cassandrabackend "github.com/bleemeo/squirreldb/cassandra/backend"
 	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
@@ -42,6 +45,7 @@ import (
 	"github.com/bleemeo/squirreldb/redis/cluster"
 	"github.com/bleemeo/squirreldb/telemetry"
 	"github.com/bleemeo/squirreldb/types"
+	"github.com/spf13/pflag"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -73,6 +77,13 @@ type LockFactory interface {
 // clean skip — no fatal error, minimal output — so run-tests.sh can launch every
 // tool against any backend and let unsupported ones skip themselves.
 var ErrSkipBackend = errors.New("test skipped: not supported by the configured backend")
+
+// ErrNoExtraWriteBackend is returned by MigrateToBackend when no
+// extra_write_backend is configured.
+var ErrNoExtraWriteBackend = errors.New("no extra_write_backend configured")
+
+// ErrNormalExit is returned when process should exit normal (return code 0).
+var ErrNormalExit = errors.New("normal exit")
 
 // Backend is the uniform storage interface both Cassandra and ClickHouse satisfy.
 // A single backend (selected by the "backend" config option) provides every
@@ -108,12 +119,38 @@ type SquirrelDB struct {
 	// keyspace/database. To reset a shared store, set it on a single instance and
 	// start that instance before any other.
 	DropDataOnStartup bool
+	// PrimaryBackendReadOnly forces the primary backend (Backend()) read-only,
+	// on top of config's internal.read_only. The migrate subcommand sets it so the
+	// source is read-only (double safety: no writes to the store being migrated
+	// away); MigrateToBackend (the write target) is unaffected.
+	PrimaryBackendReadOnly bool
+	// MigrateTargetImportOnly builds the dual-write target (MigrateToBackend) for
+	// bulk import only: no WAL drainer. The migrate subcommand sets it so the target
+	// does not join the drainer lease of the live daemon that owns the shared WAL
+	// (and does not emit a shutdown "WAL not fully drained" warning about that WAL,
+	// which it bypasses). The daemon's dual-write leaves it false — it wants the
+	// drainer.
+	MigrateTargetImportOnly bool
 
 	backend         Backend
 	persistentStore types.TSDB
 	api             api.API
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
+
+	// extraBackend is the best-effort dual-write target (MigrateToBackend); nil
+	// unless configured. It is set by MigrateToBackend, which may run from the
+	// background retry goroutine (see attachExtraWhenReady) concurrently with the
+	// shutdown CloseAll, so it is guarded by extraBackendMu.
+	extraBackendMu sync.Mutex
+	extraBackend   Backend
+
+	// extraPending is set in TSDB() when the dual-write extra backend could not be
+	// started at startup; extraUnavailableSince stamps when primary-only began. The
+	// retry goroutine spawned in Start() attaches the extra once it is reachable and
+	// logs the [since, now] window to repair.
+	extraPending          bool
+	extraUnavailableSince time.Time
 }
 
 // Start will run SquirrelDB and Init()ializing it. It return when SquirrelDB
@@ -162,6 +199,20 @@ func (s *SquirrelDB) Start(ctx context.Context) error {
 		s.run(ctx, readiness)
 	}()
 
+	// If the dual-write extra backend was unreachable at startup (see TSDB), keep
+	// retrying it in the background on the daemon's long-lived context so it attaches
+	// when it comes up — without blocking startup or the primary.
+	if s.extraPending {
+		s.wg.Add(1)
+
+		go func() {
+			defer logger.ProcessPanic()
+			defer s.wg.Done()
+
+			s.attachExtraWhenReady(ctx)
+		}()
+	}
+
 	err = <-readiness
 	if err != nil {
 		s.cancel()
@@ -200,7 +251,9 @@ func (s *SquirrelDB) Init() error {
 	return nil
 }
 
-func (s *SquirrelDB) Run(ctx context.Context) error {
+func (s *SquirrelDB) Run(ctx context.Context, shutdownCtx context.Context) error {
+	_ = shutdownCtx
+
 	if err := s.Start(ctx); err != nil {
 		return err
 	}
@@ -211,78 +264,181 @@ func (s *SquirrelDB) Run(ctx context.Context) error {
 	return nil
 }
 
-// RunWithSignalHandler runs given function with a context that is canceled on kill or ctrl+c
-// If a second ctrl+c is received, return even if f didn't completed.
-func RunWithSignalHandler(f func(context.Context) error) error {
+// RunWithSignalHandler runs given function with two context:
+//   - The first context is canceled on kill or ctrl+c
+//   - The second context is canceled on a second kill or ctrl+c
+//
+// The function is allowed to perform closing action once first context expire
+// (but it should be "quick") and the function should exit immediately when second
+// context expire.
+//
+// In any case, on a third kill or ctrl+c, RunWithSignalHandler exit in any case.
+func RunWithSignalHandler(f func(context.Context, context.Context) error) error {
 	signalChan := make(chan os.Signal, 1)
 	runTerminated := make(chan error, 1)
 
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	largeCtx, largeCancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(largeCtx)
 
 	defer func() {
 		signal.Stop(signalChan)
 		close(signalChan)
 		cancel()
+		largeCancel()
 	}()
 
 	go func() {
 		defer logger.ProcessPanic()
 
-		runTerminated <- f(ctx)
+		runTerminated <- f(ctx, largeCtx)
 	}()
 
-	firstStop := true
+	stopCount := 0
 
 	for {
 		select {
 		case err := <-runTerminated:
 			cancel()
+			largeCancel()
 
 			return err
 		case <-signalChan:
-			if firstStop {
+			switch stopCount {
+			case 0:
 				log.Info().Msg("Received stop signal, start graceful shutdown")
 
 				cancel()
 
-				firstStop = false
-			} else {
+				stopCount++
+			case 1:
+				log.Warn().Msg("Received 2 stop signals, request immediate shutdown")
+
+				largeCancel()
+
+				stopCount++
+			default:
 				return errors.New("forced shutdown")
 			}
 		}
 	}
 }
 
-// Config return the configuration after validation.
-//
-//nolint:forbidigo // This function is allowed to use fmt.Print*
-func Config() (config.Config, error, error) {
-	flags, err := config.ParseFlags()
+// SetupSentryLogger sets the default zerolog logger to a Sentry logger, or a simple
+// console logger if Sentry is disabled. The closer returned should be closed at the
+// end of the program to flush the events to Sentry.
+func SetupSentryLogger(cfg config.Config) io.Closer {
+	consoleWriter := logger.NewConsoleWriter(cfg.Log.DisableColor)
+	logLevel := zerolog.Level(cfg.Log.Level) //nolint:gosec
+	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", Version, Commit))
+
+	if cfg.Sentry.DSN == "" {
+		log.Logger = logger.NewLogger(consoleWriter, logLevel)
+
+		return nil
+	}
+
+	sentryWriter, err := logger.NewSentryWriter(cfg.Sentry.DSN, zerolog.ErrorLevel, release)
 	if err != nil {
-		return config.Config{}, nil, err
+		log.Err(err).Msg("Failed to initialize sentry")
+
+		log.Logger = logger.NewLogger(consoleWriter, logLevel)
+
+		return nil
 	}
 
-	if showHelp, _ := flags.GetBool("help"); showHelp {
-		flags.PrintDefaults()
-		os.Exit(0)
+	// Set up logger with level filter.
+	multiWriter := zerolog.MultiLevelWriter(consoleWriter, sentryWriter)
+	log.Logger = logger.NewLogger(multiWriter, logLevel)
+
+	return sentryWriter
+}
+
+func CommonFlags() []config.Flag {
+	return []config.Flag{
+		{Name: "help", Short: "h", Value: false, Usage: "Display help"},
+		{Name: "version", Short: "v", Value: false, Usage: "Show version and exit"},
+		{Name: "build-info", Value: false, Usage: "Show build-info and exit"},
+		{
+			Name:  "config",
+			Short: "c",
+			Value: config.DefaultConfigPaths(),
+			Usage: "Files and folders from which to load the configuration",
+		},
+	}
+}
+
+// LoadConfigFromFlags will parse flags and load the configuration.
+// commandFlags is the sub-command specific flags (daemon, migrate, ...) and will
+// be available in the returned FlagSet. Some common flags (see CommonFlags) are
+// always added and processed; some of them stop the process normally (e.g.
+// --version, --help, ...), in which case ErrNormalExit is returned.
+// The two errors are warnings (from configuration loading) and error.
+//
+//nolint:forbidigo // This function is allowed to use fmt.Print* for CLI output.
+func LoadConfigFromFlags(
+	subcommandName string,
+	commandFlags []config.Flag,
+	args []string,
+) (*pflag.FlagSet, config.Config, error, error) {
+	allFlags := append(CommonFlags(), commandFlags...)
+	allFlags = append(allFlags, config.ConfigFlags()...)
+	flagSet := config.NewFlagSet("squirreldb "+subcommandName, allFlags)
+
+	// Add "Go" flags that are used in tests.
+	flagSet.AddGoFlagSet(goflag.CommandLine)
+
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, pflag.ErrHelp) {
+			return flagSet, config.Config{}, nil, ErrNormalExit
+		}
+
+		return flagSet, config.Config{}, nil, err
 	}
 
-	if showVersion, _ := flags.GetBool("version"); showVersion {
+	// Process common flags
+	if showHelp, _ := flagSet.GetBool("help"); showHelp {
+		flagSet.PrintDefaults()
+
+		return flagSet, config.Config{}, nil, ErrNormalExit
+	}
+
+	if showVersion, _ := flagSet.GetBool("version"); showVersion {
 		fmt.Printf("Version %s\n", Version)
-		os.Exit(0)
+
+		return flagSet, config.Config{}, nil, ErrNormalExit
 	}
 
-	if showBuildInfo, _ := flags.GetBool("build-info"); showBuildInfo {
+	if showBuildInfo, _ := flagSet.GetBool("build-info"); showBuildInfo {
 		fmt.Printf("Built at %s using %s from commit %s\n", Date, runtime.Version(), Commit)
 		fmt.Printf("Version %s\n", Version)
 
+		return flagSet, config.Config{}, nil, ErrNormalExit
+	}
+
+	configFiles, _ := flagSet.GetStringSlice("config")
+
+	cfg, warnings, err := LoadConfig(configFiles)
+
+	return flagSet, cfg, warnings, err
+}
+
+// Config parses the daemon command line from os.Args (used by the test tools),
+// handling help/version/build-info, then loads and validates the configuration.
+func Config() (config.Config, error, error) {
+	_, cfg, warnings, err := LoadConfigFromFlags("daemon", daemonCommandFlags(), os.Args)
+	if errors.Is(err, ErrNormalExit) {
 		os.Exit(0)
 	}
 
-	configFiles, _ := flags.GetStringSlice("config")
+	return cfg, warnings, err
+}
 
+// LoadConfig loads the configuration from the given files (plus environment and
+// command-line config overrides) and validates it. It is shared by the daemon
+// and the migrate subcommand so both load config identically.
+func LoadConfig(configFiles []string) (config.Config, config.Warnings, error) {
 	cfg, warnings, err := config.Load(true, configFiles...)
 	if err != nil {
 		return config.Config{}, nil, fmt.Errorf("can't load config: %w", err)
@@ -318,6 +474,24 @@ func validateConfig(cfg config.Config) error {
 			config.ErrInvalidValue,
 		)
 		warnings.Append(err)
+	}
+
+	if cfg.ExtraWriteBackend != "" {
+		knownBackends := map[string]bool{backendCassandra: true, backendClickHouse: true, backendDummy: true}
+
+		if !knownBackends[cfg.ExtraWriteBackend] {
+			warnings.Append(fmt.Errorf(
+				"%w: unknown backend %q in 'extra_write_backend'", config.ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		}
+
+		if cfg.ExtraWriteBackend == cfg.Backend {
+			warnings.Append(fmt.Errorf(
+				"%w: 'extra_write_backend' (%q) must differ from 'backend' "+
+					"(which is already the primary, must-succeed write target)",
+				config.ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		}
 	}
 
 	return warnings.MaybeUnwrap()
@@ -428,10 +602,10 @@ func SetTestEnvironment() {
 // cassandraBackendOptions builds the Cassandra backend options from the config
 // and the daemon-provided cluster. Index test hooks (DontStartIndex/
 // InternalNowFunction) are set later via Backend.SetCassandraIndexTestingOption.
-func (s *SquirrelDB) cassandraBackendOptions(cluster types.Cluster) cassandrabackend.Options {
+func (s *SquirrelDB) cassandraBackendOptions(cluster types.Cluster, readOnly bool) cassandrabackend.Options {
 	options := cassandrabackend.Options{
 		CassandraConfig:           s.Config.Cassandra,
-		ReadOnly:                  s.Config.Internal.ReadOnly,
+		ReadOnly:                  readOnly,
 		MetricRegistry:            s.MetricRegistry,
 		Cluster:                   cluster,
 		TenantLabel:               s.Config.TenantLabelName,
@@ -452,18 +626,24 @@ func (s *SquirrelDB) cassandraBackendOptions(cluster types.Cluster) cassandrabac
 	return options
 }
 
-// clickHouseBackendOptions builds the ClickHouse backend options.
-func (s *SquirrelDB) clickHouseBackendOptions(cluster types.Cluster) clickhousebackend.Options {
+// clickHouseBackendOptions builds the ClickHouse backend options. importOnly builds
+// the TSDB for bulk import only (no WAL drainer) — see MigrateTargetImportOnly.
+func (s *SquirrelDB) clickHouseBackendOptions(
+	cluster types.Cluster,
+	readOnly bool,
+	importOnly bool,
+) clickhousebackend.Options {
 	options := clickhousebackend.Options{
 		Config:            s.Config.ClickHouse,
 		MetricRegistry:    s.MetricRegistry,
-		ReadOnly:          s.Config.Internal.ReadOnly,
+		ReadOnly:          readOnly,
 		Cluster:           cluster,
 		TenantLabel:       s.Config.TenantLabelName,
 		DefaultTimeToLive: s.Config.DefaultTimeToLive,
 		ClusterName:       s.Config.ClickHouse.ClusterName,
 		TelemetryTiming:   s.TelemetryStoreTiming,
 		DropDataOnStartup: s.DropDataOnStartup,
+		ImportOnly:        importOnly,
 	}
 
 	if s.Config.Internal.TemporaryStore == "redis" {
@@ -500,8 +680,10 @@ func (s *SquirrelDB) Backend(ctx context.Context) (Backend, error) {
 	return s.getBackend(ctx)
 }
 
-// getBackend returns the (started, cached) storage backend selected by the
-// "backend" config option.
+// getBackend returns the (started, cached) primary storage backend
+// (Config.Backend) — the source of truth that serves reads, mutable labels and
+// telemetry. The optional extra write backend is a separate instance
+// (MigrateToBackend); the two are combined only at the TSDB level (see TSDB()).
 func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
 	if s.backend != nil {
 		return s.backend, nil
@@ -512,22 +694,8 @@ func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
 		return nil, err
 	}
 
-	var b Backend
-
-	switch s.Config.Backend {
-	case backendCassandra:
-		b, err = cassandrabackend.New(
-			ctx, s.Logger.With().Str("backend", "cassandra").Logger(), s.cassandraBackendOptions(cluster))
-	case backendClickHouse:
-		b, err = clickhousebackend.New(
-			ctx, s.Logger.With().Str("backend", "clickhouse").Logger(), s.clickHouseBackendOptions(cluster))
-	case backendDummy:
-		b, err = dummybackend.New(
-			ctx, s.Logger.With().Str("backend", "dummy").Logger(), s.dummyBackendOptions(cluster))
-	default:
-		return nil, fmt.Errorf("unknown backend: %v", s.Config.Backend)
-	}
-
+	b, err := s.newBackendByName(
+		ctx, s.Config.Backend, cluster, s.Config.Internal.ReadOnly || s.PrimaryBackendReadOnly, false)
 	if err != nil {
 		return nil, err
 	}
@@ -539,6 +707,78 @@ func (s *SquirrelDB) getBackend(ctx context.Context) (Backend, error) {
 	s.backend = b
 
 	return s.backend, nil
+}
+
+// MigrateToBackend returns the (started, cached) extra write backend — the
+// dual-write / migration target named by Config.ExtraWriteBackend. It is a plain
+// backend (not best-effort in itself: best-effort is a per-appender choice made
+// by the dual-write composite; the migrator writes to it reliably). Returns
+// ErrNoExtraWriteBackend if none is configured.
+func (s *SquirrelDB) MigrateToBackend(ctx context.Context) (Backend, error) {
+	if s.Config.ExtraWriteBackend == "" {
+		return nil, ErrNoExtraWriteBackend
+	}
+
+	s.extraBackendMu.Lock()
+	cached := s.extraBackend
+	s.extraBackendMu.Unlock()
+
+	if cached != nil {
+		return cached, nil
+	}
+
+	cluster, err := s.Cluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// The migration target must be writable — it is never forced read-only, even
+	// when the source (primary) is. It is import-only for the migrate subcommand
+	// (no WAL drainer), but not for the daemon's dual-write, which owns the WAL.
+	b, err := s.newBackendByName(
+		ctx, s.Config.ExtraWriteBackend, cluster, s.Config.Internal.ReadOnly, s.MigrateTargetImportOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := b.Start(ctx); err != nil {
+		return nil, err
+	}
+
+	s.extraBackendMu.Lock()
+	s.extraBackend = b
+	s.extraBackendMu.Unlock()
+
+	return b, nil
+}
+
+// extraAttachRetryInterval is how often attachExtraWhenReady retries starting the
+// dual-write extra backend after it was unavailable at startup.
+const extraAttachRetryInterval = 30 * time.Second
+
+// newBackendByName builds (unstarted) the concrete backend for a single name.
+// readOnly makes the backend refuse writes (the migrate source uses it).
+func (s *SquirrelDB) newBackendByName(
+	ctx context.Context,
+	name string,
+	cluster types.Cluster,
+	readOnly bool,
+	importOnly bool,
+) (Backend, error) {
+	switch name {
+	case backendCassandra:
+		return cassandrabackend.New(
+			ctx, s.Logger.With().Str("backend", "cassandra").Logger(), s.cassandraBackendOptions(cluster, readOnly))
+	case backendClickHouse:
+		return clickhousebackend.New(
+			ctx, s.Logger.With().Str("backend", "clickhouse").Logger(),
+			s.clickHouseBackendOptions(cluster, readOnly, importOnly))
+	case backendDummy:
+		return dummybackend.New(
+			ctx, s.Logger.With().Str("backend", "dummy").Logger(), s.dummyBackendOptions(cluster))
+	default:
+		return nil, fmt.Errorf("unknown backend: %v", name)
+	}
 }
 
 type namedTasks struct {
@@ -652,6 +892,16 @@ func (s *SquirrelDB) run(ctx context.Context, readiness chan error) {
 		s.backend.CloseAll(stopCtx) //nolint:contextcheck
 	}
 
+	// Read under the lock: the background retry goroutine (attachExtraWhenReady) may
+	// still be setting extraBackend as shutdown runs.
+	s.extraBackendMu.Lock()
+	extra := s.extraBackend
+	s.extraBackendMu.Unlock()
+
+	if extra != nil {
+		extra.CloseAll(stopCtx) //nolint:contextcheck
+	}
+
 	if err := s.ExistingCluster.Close(); err != nil {
 		s.Logger.Error().Msgf("Failed to stop cluster: %s", err.Error())
 	}
@@ -698,14 +948,95 @@ func (s *SquirrelDB) TSDB(ctx context.Context) (types.TSDB, error) {
 		return nil, err
 	}
 
-	tsdb, err := b.TSDB(ctx)
+	primaryTSDB, err := b.TSDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	s.persistentStore = tsdb
+	// No extra write backend → the primary TSDB is used directly.
+	if s.Config.ExtraWriteBackend == "" {
+		s.persistentStore = primaryTSDB
+
+		return s.persistentStore, nil
+	}
+
+	// Dual-write: combine the primary (must-succeed) with the extra (best-effort)
+	// at the TSDB level only. Reads still come from the primary.
+	composite := newCompositeTSDB(primaryTSDB, nil, s.Logger)
+	s.persistentStore = composite
+
+	// The extra (dual-write target) is best-effort, including at startup: if it
+	// cannot be started now — e.g. ClickHouse is unreachable — start primary-only
+	// and attach it in the background once it becomes reachable, rather than failing
+	// the whole daemon. Points written meanwhile are not dual-written and must be
+	// repaired for that window (logged when the extra attaches). The retry goroutine
+	// is spawned in Start(), which owns the daemon's long-lived context.
+	extraTSDB, err := s.startExtraTSDB(ctx)
+	if err != nil {
+		s.Logger.Warn().Err(err).
+			Msg("dual-write target unavailable at startup; starting primary-only and retrying in the background")
+
+		s.extraPending = true
+		s.extraUnavailableSince = time.Now()
+	} else {
+		composite.attachExtra(extraTSDB)
+	}
 
 	return s.persistentStore, nil
+}
+
+// startExtraTSDB starts the extra (dual-write target) backend and returns its
+// TSDB. A failure (e.g. ClickHouse unreachable) leaves no started state to leak:
+// MigrateToBackend does not cache on failure and routing.New cleans itself up.
+func (s *SquirrelDB) startExtraTSDB(ctx context.Context) (types.TSDB, error) {
+	extra, err := s.MigrateToBackend(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return extra.TSDB(ctx)
+}
+
+// attachExtraWhenReady retries starting the dual-write extra backend until it
+// succeeds (or ctx is cancelled), then attaches its TSDB to the composite so
+// dual-write resumes without a restart. It logs the window during which the extra
+// was unavailable — points written then were not dual-written and must be
+// repaired over that range.
+func (s *SquirrelDB) attachExtraWhenReady(ctx context.Context) {
+	ticker := time.NewTicker(extraAttachRetryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		extraTSDB, err := s.startExtraTSDB(ctx)
+		if err != nil {
+			s.Logger.Debug().Err(err).Msg("dual-write target still unavailable, will retry")
+
+			continue
+		}
+
+		composite, ok := s.persistentStore.(*compositeTSDB)
+		if !ok {
+			s.Logger.Error().Msg("cannot attach dual-write target: persistent store is not a composite")
+
+			return
+		}
+
+		composite.attachExtra(extraTSDB)
+
+		s.Logger.Warn().
+			Str("repair_from", s.extraUnavailableSince.Format(time.RFC3339)).
+			Str("repair_to", time.Now().Format(time.RFC3339)).
+			Msg("dual-write target attached; points written while it was unavailable were not dual-written — " +
+				"repair that window with `squirreldb migrate --repair-from <repair_from> --repair-to <repair_to>`")
+
+		return
+	}
 }
 
 func (s *SquirrelDB) Telemetry(ctx context.Context) error {

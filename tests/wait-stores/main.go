@@ -25,7 +25,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, _ context.Context) error {
 	cfg, warnings, err := daemon.Config()
 	if err != nil {
 		return err

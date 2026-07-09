@@ -79,6 +79,13 @@ func (b *Backend) Start(context.Context) error {
 	return nil
 }
 
+func (b *Backend) StateStore(ctx context.Context) (types.State, error) {
+	b.l.Lock()
+	defer b.l.Unlock()
+
+	return &dummy.States{}, nil
+}
+
 // TSDB returns the (single, cached) dummy TSDB: a plain discard TSDB, or a
 // batcher-backed discard TSDB when the Batcher option is set.
 func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {

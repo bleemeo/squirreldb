@@ -126,7 +126,10 @@ func New(
 
 		temporaryStore, err = redisTemporarystore.New(
 			ctx,
-			reg,
+			prometheus.WrapRegistererWith(
+				map[string]string{"backend": "cassandra"},
+				reg,
+			),
 			redisTemporarystore.Options{
 				RedisOptions: options.Redis,
 				Keyspace:     options.Redis.Keyspace,
@@ -138,7 +141,10 @@ func New(
 		}
 	} else {
 		temporaryStore = temporarystore.New( //nolint:contextcheck
-			reg,
+			prometheus.WrapRegistererWith(
+				map[string]string{"backend": "cassandra"},
+				reg,
+			),
 			logger.With().Str("component", "temporary_store").Logger(),
 		)
 	}
@@ -152,7 +158,10 @@ func New(
 		lockFactory: lockFactory,
 		state:       state,
 		batcher: batch.New(
-			reg,
+			prometheus.WrapRegistererWith(
+				map[string]string{"backend": "cassandra"},
+				reg,
+			),
 			options.BatchSize,
 			temporaryStore,
 			logger.With().Str("component", "batch").Logger(),
