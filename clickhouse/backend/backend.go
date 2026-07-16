@@ -143,7 +143,7 @@ func openConn(cfg config.ClickHouse) (driver.Conn, error) {
 // allSchemaObjects is every object the ClickHouse stores own, built from each
 // store's SchemaObjects so there is a single source of truth (no hardcoded list).
 func allSchemaObjects(opts Options) []ddl.Object {
-	objects := tsdb.SchemaObjects(opts.ClusterName, opts.DefaultTimeToLive)
+	objects := tsdb.SchemaObjects(opts.ClusterName)
 	objects = append(objects, chmutable.SchemaObjects(opts.ClusterName)...)
 	objects = append(objects, telemetrystore.SchemaObjects(opts.ClusterName)...)
 	objects = append(objects, chstate.SchemaObjects(opts.ClusterName)...)

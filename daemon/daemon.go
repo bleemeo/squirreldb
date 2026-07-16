@@ -421,7 +421,7 @@ func LoadConfigFromFlags(
 
 	cfg, warnings, err := LoadConfig(configFiles)
 
-	return flagSet, cfg, warnings, err
+	return flagSet, cfg, errors.Join(warnings...), err
 }
 
 // Config parses the daemon command line from os.Args (used by the test tools),
@@ -439,7 +439,7 @@ func Config() (config.Config, error, error) {
 // command-line config overrides) and validates it. It is shared by the daemon
 // and the migrate subcommand so both load config identically.
 func LoadConfig(configFiles []string) (config.Config, config.Warnings, error) {
-	cfg, warnings, err := config.Load(true, configFiles...)
+	cfg, warnings, err := config.Load(configFiles...)
 	if err != nil {
 		return config.Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}

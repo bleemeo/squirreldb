@@ -34,7 +34,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	"github.com/bleemeo/squirreldb/mutable"
@@ -59,26 +58,30 @@ type clickhouseStore struct {
 
 // version is set by the DEFAULT now64(3) on the table, so a later INSERT for the
 // same key always wins on read with FINAL.
+//
+// Both are single-node SQL, copy-pasteable as-is; ddl.ForCluster derives the
+// cluster form (ON CLUSTER + ReplicatedReplacingMergeTree), asserted in
+// TestSchemaObjects — do NOT hand-copy them for a cluster.
 const (
 	namesDDL = `
-		CREATE TABLE IF NOT EXISTS mutable_label_names{{ON_CLUSTER}} (
+		CREATE TABLE IF NOT EXISTS mutable_label_names (
 			tenant LowCardinality(String) CODEC(ZSTD(1)),
 			name String,
 			associated_name String,
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = {{ENGINE}}
+		ENGINE = ReplacingMergeTree(version)
 		ORDER BY (tenant, name)`
 
 	valuesDDL = `
-		CREATE TABLE IF NOT EXISTS mutable_label_values{{ON_CLUSTER}} (
+		CREATE TABLE IF NOT EXISTS mutable_label_values (
 			tenant LowCardinality(String) CODEC(ZSTD(1)),
 			name String,
 			value String,
 			associated_values Array(String) CODEC(ZSTD(1)),
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = {{ENGINE}}
+		ENGINE = ReplacingMergeTree(version)
 		ORDER BY (tenant, name, value)`
 )
 
@@ -110,9 +113,9 @@ func SchemaObjects(clusterName string) []ddl.Object {
 	objects := make([]ddl.Object, 0, len(statements))
 
 	for _, stmt := range statements {
-		engine := ddl.ReplicatedEngine(clusterName, stmt.table, "ReplacingMergeTree", "version")
-		stmtDDL := strings.Replace(stmt.ddl, "{{ENGINE}}", engine, 1)
-		objects = append(objects, ddl.Object{Name: stmt.table, DDL: ddl.Apply(stmtDDL, clusterName), Replicated: true})
+		objects = append(objects, ddl.Object{
+			Name: stmt.table, DDL: ddl.ForCluster(stmt.ddl, clusterName), Replicated: true,
+		})
 	}
 
 	return objects

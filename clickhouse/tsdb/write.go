@@ -65,18 +65,24 @@ func seriesToInput(lbls labels.Labels, tenantLabel string, ttlSeconds int64, glo
 }
 
 // rowTTLDays converts a per-request TTL (seconds) to whole days for the
-// row_ttl_days column. The store's TTL granularity is one day, so the value is
-// rounded UP — a 32h TTL keeps data for 2 days, never truncated down to 1, which
-// would drop data early. A positive sub-day TTL becomes 1 day. Only a
-// non-positive TTL (none requested) falls back to the global default; a positive
-// TTL is always honored (never silently replaced by the much larger default).
-// The result is capped at the uint16 column range.
+// row_ttl_days column. The store's TTL granularity is one day (ClickHouse stores
+// the retention in days, unlike Cassandra's seconds), so this is where the TTL is
+// quantized: to the NEAREST day, not ceil. Rounding matters because the source
+// retention can carry sub-day noise — e.g. the migration reconstructs it a
+// read-duration after sampling Cassandra's whole-second remaining — and ceil would
+// turn a few seconds of that noise into a whole extra day. A
+// positive sub-day TTL still keeps at least 1 day (never 0 = immediate drop). Only
+// a non-positive TTL (none requested) falls back to the global default; a positive
+// TTL is always honored (never silently replaced by the much larger default). The
+// result is capped at the uint16 column range.
 func rowTTLDays(ttlSeconds int64, globalDays uint16) uint16 {
 	if ttlSeconds <= 0 {
 		return globalDays
 	}
 
-	days := (ttlSeconds + secondsPerDay - 1) / secondsPerDay // ceil
+	days := (ttlSeconds + secondsPerDay/2) / secondsPerDay // round half up
+	days = max(days, 1)                                    // a positive TTL keeps at least a day
+
 	if days > math.MaxUint16 {
 		return math.MaxUint16
 	}

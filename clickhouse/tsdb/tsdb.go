@@ -93,9 +93,13 @@ type Options struct {
 	// Redis holds the write-ahead log shared by every node (durable, HA). When
 	// unset, the WAL falls back to an in-process, single-node store with reduced
 	// durability (see newWALClient / memWALClient) — like the Cassandra backend.
-	Redis             config.Redis
-	Reg               prometheus.Registerer
-	TenantLabel       string
+	Redis       config.Redis
+	Reg         prometheus.Registerer
+	TenantLabel string
+	// DefaultTimeToLive is the retention applied to points written without a
+	// per-request TTL. The TTL clause is unconditional (no "unlimited"): a value
+	// of 0 expires rows immediately, and it is clamped to ~179 years (the
+	// row_ttl_days column width) for near-permanent retention.
 	DefaultTimeToLive time.Duration
 	// WALFlushDelay / WALSoftThreshold override the drain cadence and the early-
 	// flush / backpressure thresholds (WALSoftThreshold is in POINTS); 0 uses the

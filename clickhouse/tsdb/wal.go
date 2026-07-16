@@ -125,6 +125,27 @@ func encodeWALEntry(e walEntry) []byte {
 	return buf.Bytes()
 }
 
+// pointEncodedSize is the on-wire size of one encoded point: two big-endian u64s
+// (timestamp + value). labelMinEncodedSize is the smallest a label can encode to:
+// two u32 length prefixes (empty name + value). Both bound slice pre-allocations
+// against a corrupt count.
+const (
+	pointEncodedSize    = 16
+	labelMinEncodedSize = 8
+)
+
+// capHint returns min(n, maxCap) as a non-negative int, comparing in uint64 so a
+// corrupt n above 2^31 does not wrap negative on 32-bit builds (int(n) would, and
+// a negative capacity panics make/NewScratchBuilder). maxCap is the small,
+// non-negative byte-derived bound (remaining bytes / per-element size).
+func capHint(n uint32, maxCap int) int {
+	if uint64(n) < uint64(maxCap) { //nolint:gosec
+		return int(n)
+	}
+
+	return maxCap
+}
+
 // decodeWALEntry is the inverse of encodeWALEntry.
 func decodeWALEntry(b []byte) (walEntry, error) {
 	r := decoder{b: b}
@@ -132,11 +153,20 @@ func decodeWALEntry(b []byte) (walEntry, error) {
 	ttl := r.u64()
 
 	nLabels := r.u32()
-	builder := labels.NewScratchBuilder(int(nLabels))
+
+	// Cap like points below: a corrupt nLabels can't drive a huge pre-allocation.
+	// Each label is at least two u32 length prefixes (empty name + value), so
+	// remaining/labelMinEncodedSize bounds it; a valid entry allocates exactly nLabels.
+	builder := labels.NewScratchBuilder(capHint(nLabels, r.remaining()/labelMinEncodedSize))
 
 	for range nLabels {
 		name := r.str()
 		value := r.str()
+
+		if r.err != nil {
+			break // truncated/corrupt: stop rather than add garbage labels nLabels times
+		}
+
 		builder.Add(name, value)
 	}
 
@@ -145,11 +175,20 @@ func decodeWALEntry(b []byte) (walEntry, error) {
 	var points []types.MetricPoint
 
 	if nPoints > 0 {
-		points = make([]types.MetricPoint, 0, nPoints)
+		// Cap the initial capacity at what the remaining bytes can actually hold (each
+		// point is two u64s). A valid entry has exactly nPoints points left, so this
+		// never re-allocs in the normal case; a corrupt nPoints (e.g. ~4e9 from a
+		// bit-flipped length prefix) can't drive a huge up-front allocation.
+		points = make([]types.MetricPoint, 0, capHint(nPoints, r.remaining()/pointEncodedSize))
 
 		for range nPoints {
 			ts := r.u64()
 			value := math.Float64frombits(r.u64())
+
+			if r.err != nil {
+				break // truncated/corrupt: stop rather than append zero points nPoints times
+			}
+
 			points = append(points, types.MetricPoint{Timestamp: int64(ts), Value: value}) //nolint:gosec
 		}
 	}
@@ -169,6 +208,11 @@ type decoder struct {
 	b   []byte
 	pos int
 	err error
+}
+
+// remaining is how many undecoded bytes are left in the buffer.
+func (d *decoder) remaining() int {
+	return len(d.b) - d.pos
 }
 
 func (d *decoder) take(n int) []byte {
@@ -229,6 +273,7 @@ type walClient interface {
 	LRange(ctx context.Context, key string, start, stop int64) ([]string, error)
 	LTrim(ctx context.Context, key string, start, stop int64) error
 	LeaseAcquire(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
+	LeaseHeld(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
 	LeaseRelease(ctx context.Context, key, owner string) error
 	Close()
 }

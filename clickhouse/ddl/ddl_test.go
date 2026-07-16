@@ -18,39 +18,6 @@ package ddl
 
 import "testing"
 
-func TestApply(t *testing.T) {
-	t.Parallel()
-
-	const template = "CREATE TABLE x{{ON_CLUSTER}} (...) ENGINE = MergeTree"
-
-	cases := []struct {
-		name        string
-		clusterName string
-		want        string
-	}{
-		{
-			name:        "single node strips ON CLUSTER",
-			clusterName: "",
-			want:        "CREATE TABLE x (...) ENGINE = MergeTree",
-		},
-		{
-			name:        "cluster injects ON CLUSTER",
-			clusterName: "main_cluster",
-			want:        "CREATE TABLE x ON CLUSTER main_cluster (...) ENGINE = MergeTree",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := Apply(template, tc.clusterName); got != tc.want {
-				t.Errorf("Apply(...) = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestReplicatedEngine(t *testing.T) {
 	t.Parallel()
 
@@ -98,8 +65,8 @@ func TestReplicatedEngine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := ReplicatedEngine(tc.clusterName, tc.table, tc.engine, tc.engineArgs...); got != tc.want {
-				t.Errorf("ReplicatedEngine(...) = %q, want %q", got, tc.want)
+			if got := replicatedEngine(tc.clusterName, tc.table, tc.engine, tc.engineArgs...); got != tc.want {
+				t.Errorf("replicatedEngine(...) = %q, want %q", got, tc.want)
 			}
 		})
 	}

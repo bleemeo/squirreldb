@@ -34,6 +34,7 @@ import (
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/export"
 	"github.com/bleemeo/squirreldb/types"
+	"golang.org/x/time/rate"
 
 	"github.com/rs/zerolog"
 )
@@ -159,7 +160,14 @@ func Run( //nolint:maintidx
 
 	defer it.Close()
 
-	pacer := newPacer(opts.ThrottleWrites)
+	// Burst of up to 10 seconds' worth of inserts, but at least 1: a burst of 0 makes
+	// the limiter reject every Wait(n=1), so max(1, ...) is required.
+	pacer := rate.NewLimiter(rate.Limit(opts.ThrottleWrites), max(1, int(opts.ThrottleWrites*10)))
+
+	if opts.ThrottleWrites <= 0 {
+		// Special case of no rate limit
+		pacer = rate.NewLimiter(rate.Inf, 1)
+	}
 
 	batchLimit := opts.BatchPoints
 	if batchLimit <= 0 {
@@ -202,8 +210,6 @@ func Run( //nolint:maintidx
 		batch = batch[:0]
 		batchPoints = 0
 		writeCount++
-
-		pacer.wait(ctx, 1) // throttle on inserts/s: one insert per flush
 
 		return nil
 	}
@@ -268,6 +274,14 @@ func Run( //nolint:maintidx
 		// insert block size is set to the batch's point count (see ImportRawData),
 		// so an over-limit batch would be split into several parts.
 		if len(batch) > 0 && batchPoints+len(chunk.Points) > batchLimit {
+			if err := pacer.Wait(ctx); err != nil {
+				if ctx.Err() != nil {
+					break
+				}
+
+				return fmt.Errorf("pacer.Wait failed: %w", err)
+			}
+
 			if err := flush(); err != nil {
 				return fail(err)
 			}
@@ -299,6 +313,14 @@ func Run( //nolint:maintidx
 
 		// A single chunk at/over the limit is flushed on its own right away.
 		if batchPoints >= batchLimit {
+			if err := pacer.Wait(ctx); err != nil {
+				if ctx.Err() != nil {
+					break
+				}
+
+				return fmt.Errorf("pacer.Wait failed: %w", err)
+			}
+
 			if err := flush(); err != nil {
 				return fail(err)
 			}

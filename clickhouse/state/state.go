@@ -31,7 +31,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	"github.com/bleemeo/squirreldb/types"
@@ -39,13 +38,16 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+// stateDDL is single-node SQL, copy-pasteable as-is; ddl.ForCluster derives the
+// cluster form (ON CLUSTER + ReplicatedReplacingMergeTree). The cluster DDL is
+// asserted in TestSchemaObjects — do NOT hand-copy it for a cluster.
 const stateDDL = `
-	CREATE TABLE IF NOT EXISTS state{{ON_CLUSTER}} (
+	CREATE TABLE IF NOT EXISTS state (
 		name String,
 		value String,
 		version DateTime64(3) DEFAULT now64(3)
 	)
-	ENGINE = {{ENGINE}}
+	ENGINE = ReplacingMergeTree(version)
 	ORDER BY (name)`
 
 var errReadOnly = errors.New("backend is read-only")
@@ -54,10 +56,7 @@ var errReadOnly = errors.New("backend is read-only")
 // so the backend can create the whole schema up front, independently of whether
 // the store is ever instantiated.
 func SchemaObjects(clusterName string) []ddl.Object {
-	engine := ddl.ReplicatedEngine(clusterName, "state", "ReplacingMergeTree", "version")
-	stmtDDL := strings.Replace(stateDDL, "{{ENGINE}}", engine, 1)
-
-	return []ddl.Object{{Name: "state", DDL: ddl.Apply(stmtDDL, clusterName), Replicated: true}}
+	return []ddl.Object{{Name: "state", DDL: ddl.ForCluster(stateDDL, clusterName), Replicated: true}}
 }
 
 // Store is a key/value store backed by ClickHouse.

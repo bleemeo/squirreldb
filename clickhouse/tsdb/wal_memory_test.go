@@ -139,6 +139,44 @@ func TestMemWALLease(t *testing.T) {
 	}
 }
 
+// TestMemWALLeaseHeld checks LeaseHeld refreshes for the current owner but, unlike
+// LeaseAcquire, never grants a free or expired lease — the property the drainer's
+// trim fence relies on to avoid re-claiming a lapsed lease and dropping entries.
+func TestMemWALLeaseHeld(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	c := newMemWALClient()
+
+	// A free lease is not held (and not granted, unlike LeaseAcquire).
+	if held, _ := c.LeaseHeld(ctx, "lease", "node-a", time.Minute); held {
+		t.Fatal("LeaseHeld granted a free lease")
+	}
+
+	if _, err := c.LeaseAcquire(ctx, "lease", "node-a", time.Minute); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// The current owner is held (and refreshed).
+	if held, _ := c.LeaseHeld(ctx, "lease", "node-a", time.Minute); !held {
+		t.Fatal("owner should hold its own lease")
+	}
+
+	// Another owner does not hold it.
+	if held, _ := c.LeaseHeld(ctx, "lease", "node-b", time.Minute); held {
+		t.Fatal("a non-owner should not hold the lease")
+	}
+
+	// An expired lease is not held, even by its former owner.
+	c.mu.Lock()
+	c.leases["lease"] = memLease{owner: "node-a", expiry: time.Now().Add(-time.Second)}
+	c.mu.Unlock()
+
+	if held, _ := c.LeaseHeld(ctx, "lease", "node-a", time.Minute); held {
+		t.Fatal("an expired lease should not be held")
+	}
+}
+
 func TestNormalizeRange(t *testing.T) {
 	t.Parallel()
 

@@ -65,6 +65,58 @@ func TestSeriesToRegister(t *testing.T) {
 	}
 }
 
+// TestSeriesToRegisterBacklog checks the coverage trigger: with the wall clock
+// frozen (so nextRegister never elapses), a series is re-registered only when a
+// batch's timestamps fall outside the indexed [min_time, max_time] range — the
+// case a fast backlog hits, its point timestamps outrunning the wall clock.
+func TestSeriesToRegisterBacklog(t *testing.T) {
+	c := &ClickHouseTSDB{seenSeries: make(map[string]seenEntry), metrics: newMetrics(nil)}
+
+	now := time.Unix(1000, 0) // frozen: only the coverage trigger can fire below
+
+	const hourMs = int64(3_600_000)
+
+	base := int64(2_000_000_000_000) // arbitrary ms
+
+	// step runs one drain batch [minMs, maxMs] through the cache and reports whether
+	// the series was (re-)registered.
+	step := func(minMs, maxMs int64) bool {
+		r := reg("m")
+		r.minTS, r.maxTS = minMs, maxMs
+
+		due := c.seriesToRegister([]registration{r}, now)
+		c.markRegistered(due, now)
+
+		return len(due) == 1
+	}
+
+	if !step(base, base) {
+		t.Fatal("new series should register")
+	}
+
+	// Within the indexed range + reRegisterGap margin -> not re-registered.
+	if step(base+hourMs, base+hourMs) {
+		t.Error("points within coverage must not re-register")
+	}
+
+	// Backlog: maxTS jumps past the indexed max_time (base + reRegisterGap) while the
+	// wall clock is unchanged, so nextRegister cannot fire — only the coverage trigger.
+	past := base + reRegisterGap.Milliseconds() + hourMs
+	if !step(past, past) {
+		t.Error("points past the indexed max_time must re-register (backlog)")
+	}
+
+	// Now covered up to past + reRegisterGap -> a batch below it does not re-register.
+	if step(past+hourMs, past+hourMs) {
+		t.Error("points within the extended coverage must not re-register")
+	}
+
+	// Backfill older than the indexed min_time -> re-registered.
+	if !step(base-hourMs, past+hourMs) {
+		t.Error("points older than the indexed min_time must re-register (backfill)")
+	}
+}
+
 func TestComputeMaxExpiration(t *testing.T) {
 	storeMax := time.UnixMilli(storeMaxTimeMillis)
 

@@ -140,6 +140,25 @@ func (m *memWALClient) LeaseAcquire(_ context.Context, key, owner string, ttl ti
 	return true, nil
 }
 
+// LeaseHeld reports whether owner still holds the lease, refreshing its expiry when
+// it does and never granting a free lease (mirrors the Redis client). With one
+// drainer per TSDB this process is always the holder unless the lease has expired.
+func (m *memWALClient) LeaseHeld(_ context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+
+	cur, ok := m.leases[key]
+	if !ok || cur.owner != owner || !now.Before(cur.expiry) {
+		return false, nil
+	}
+
+	m.leases[key] = memLease{owner: owner, expiry: now.Add(ttl)}
+
+	return true, nil
+}
+
 func (m *memWALClient) LeaseRelease(_ context.Context, key, owner string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

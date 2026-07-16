@@ -296,12 +296,9 @@ func reconstructWriteTTL(ttlSeconds int64, points []types.MetricPoint, now time.
 		return 0
 	}
 
+	// MigrationReadRaw returns points newest-first (mergePoints sorts descending), so
+	// points[0] is the newest — the row closest to when it was written.
 	newest := points[0].Timestamp
-	for _, p := range points[1:] {
-		if p.Timestamp > newest {
-			newest = p.Timestamp
-		}
-	}
 
 	age := max(now.Sub(time.UnixMilli(newest)), 0)
 

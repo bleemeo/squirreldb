@@ -153,10 +153,14 @@ func (d *walDrainer) drainCycle(ctx context.Context) {
 			return // leave the entries in the WAL, retry next cycle
 		}
 
-		// Fence: only trim if we still hold the lease. If it lapsed during the insert
-		// another node may already be re-draining the same head, so skip the trim and
-		// let it re-drain — duplicate rows are deduplicated on read.
-		if held, err := d.wal.client.LeaseAcquire(ctx, d.leaseKey, d.owner, d.leaseTTL); err != nil || !held {
+		// Fence: only trim if we still hold the lease. LeaseHeld (not LeaseAcquire)
+		// so a lease that lapsed during the insert — and is now free — is not silently
+		// re-granted to us: another node may already have re-drained and trimmed the
+		// same head, and trimming again would drop its not-yet-persisted entries. It
+		// also refreshes the TTL, closing the window between this check and the Trim.
+		// On a lost lease we skip the trim and let the new leader re-drain — duplicate
+		// rows are deduplicated on read.
+		if held, err := d.wal.client.LeaseHeld(ctx, d.leaseKey, d.owner, d.leaseTTL); err != nil || !held {
 			d.logger.Warn().Msg("lost drainer lease during insert; skipping trim (entries will be re-drained)")
 
 			return

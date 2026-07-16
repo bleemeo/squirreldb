@@ -302,6 +302,16 @@ if redis.call('get', KEYS[1]) == ARGV[1] then
 end
 return 0`
 
+// leaseHeldScript refreshes KEYS[1]'s PX ttl only if it is still owned by owner.
+// Unlike leaseAcquireScript it has no `exists == 0` branch, so it never grants a
+// free lease. Returns 1 when owner still holds it, else 0.
+const leaseHeldScript = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+	redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+	return 1
+end
+return 0`
+
 // LeaseAcquire atomically acquires OR refreshes the lease at key for owner with
 // the given TTL. Returns true if owner holds the lease afterwards (i.e. it was
 // free or already owned by owner), false if another owner holds it.
@@ -312,6 +322,23 @@ func (c *Client) LeaseAcquire(ctx context.Context, key, owner string, ttl time.D
 	}
 
 	res, err := cmd.Eval(ctx, leaseAcquireScript, []string{key}, owner, ttl.Milliseconds()).Int()
+	if err != nil {
+		return false, fmt.Errorf("redis: %w", err)
+	}
+
+	return res == 1, nil
+}
+
+// LeaseHeld reports whether owner still holds the lease at key, refreshing its TTL
+// when it does. Unlike LeaseAcquire it never grants a free lease, so it fences an
+// action on continued ownership without a lapsed lease silently re-granting itself.
+func (c *Client) LeaseHeld(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	res, err := cmd.Eval(ctx, leaseHeldScript, []string{key}, owner, ttl.Milliseconds()).Int()
 	if err != nil {
 		return false, fmt.Errorf("redis: %w", err)
 	}

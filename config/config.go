@@ -45,6 +45,10 @@ const (
 var (
 	errWrongMapFormat = errors.New("could not parse map from string")
 	ErrInvalidValue   = errors.New("invalid config value")
+	ErrZeroTTL        = errors.New(
+		"a TTL of zero or less drops points immediately; use a large value like " +
+			"876000h (~100 years) for near-unlimited retention",
+	)
 )
 
 // deprecatedKeys maps a deprecated configuration key to the key that replaces it.
@@ -54,17 +58,24 @@ var deprecatedKeys = map[string]string{ //nolint:gochecknoglobals
 	"cassandra.default_time_to_live": "default_time_to_live",
 }
 
-type Warnings error
+type Warnings []error
 
 // Load loads the configuration from files and directories to a struct.
 // Returns the config, warnings and an error.
-func Load(withDefaultAndFlags bool, paths ...string) (Config, Warnings, error) {
-	cfg, warnings, err := loadToStruct(withDefaultAndFlags, os.Args, paths...)
+func Load(paths ...string) (Config, Warnings, error) {
+	cfg, warnings, err := loadToStruct(true, os.Args, paths...)
+	if err != nil {
+		return cfg, warnings, err
+	}
 
-	return cfg, warnings.MaybeUnwrap(), err
+	if err := sanityCheck(cfg); err != nil {
+		return cfg, warnings, err
+	}
+
+	return cfg, warnings, nil
 }
 
-func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Config, prometheus.MultiError, error) {
+func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Config, Warnings, error) {
 	k, warnings, err := load(withDefaultAndFlags, args, paths...)
 
 	var config Config
@@ -89,7 +100,11 @@ func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Con
 	warning := k.UnmarshalWithConf("", &config, unmarshalConf)
 	warnings.Append(warning)
 
-	return config, unwrapErrors(warnings), err
+	if err != nil {
+		return config, unwrapErrors(warnings), err
+	}
+
+	return config, unwrapErrors(warnings), nil
 }
 
 // load the configuration from files and directories.
@@ -311,22 +326,22 @@ func loadFile(k *koanf.Koanf, path string) error {
 }
 
 // unwrapErrors unwrap all errors in the list than contain multiple errors.
-func unwrapErrors(errs prometheus.MultiError) prometheus.MultiError {
+func unwrapErrors(errs prometheus.MultiError) Warnings {
 	if len(errs) == 0 {
 		return nil
 	}
 
-	unwrapped := make(prometheus.MultiError, 0, len(errs))
+	unwrapped := make(Warnings, 0, len(errs))
 
 	for _, err := range errs {
 		for _, subErr := range unwrapRecurse(err) {
 			var yamlErr *yaml.TypeError
 			if errors.As(subErr, &yamlErr) {
 				for _, wrappedErr := range yamlErr.Errors {
-					unwrapped.Append(errors.New(wrappedErr)) //nolint:err113
+					unwrapped = append(unwrapped, errors.New(wrappedErr)) //nolint:err113
 				}
 			} else {
-				unwrapped.Append(subErr)
+				unwrapped = append(unwrapped, subErr)
 			}
 		}
 	}
@@ -360,4 +375,12 @@ func unwrapRecurse(err error) []error {
 	}
 
 	return []error{err}
+}
+
+func sanityCheck(config Config) error {
+	if config.DefaultTimeToLive <= 0 {
+		return ErrZeroTTL
+	}
+
+	return nil
 }

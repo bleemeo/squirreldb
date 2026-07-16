@@ -130,6 +130,47 @@ func TestFinalDrainEmptyWAL(t *testing.T) {
 	}
 }
 
+// TestDrainCycleFenceSkipsTrimOnLostLease reproduces the data-loss scenario the
+// trim fence guards against: our lease lapses during the ClickHouse insert, a
+// takeover node re-drains and trims the same head, then its lease also lapses (so
+// the lease is now FREE). The fence must NOT re-claim that free lease and trim,
+// which would drop entries appended after the takeover's trim.
+func TestDrainCycleFenceSkipsTrimOnLostLease(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mem := newMemWALClient()
+	w := &walStore{client: mem, key: "wal"}
+	fillWAL(t, w, 10)
+
+	// The write func simulates, mid-insert, a takeover node draining the same 10-entry
+	// head (Trim) and 5 fresh points arriving afterwards, then the lease going free.
+	var d *walDrainer
+
+	d = newTestDrainer(w, func(_ context.Context, _ []walEntry) error {
+		if err := w.Trim(ctx, 10); err != nil {
+			t.Fatalf("simulated takeover Trim: %v", err)
+		}
+
+		fillWAL(t, w, 5) //nolint:contextcheck
+
+		mem.mu.Lock()
+		delete(mem.leases, d.leaseKey) // lease lapsed and is now free
+		mem.mu.Unlock()
+
+		return nil
+	}, 10)
+
+	d.drainCycle(ctx)
+
+	// The 5 post-takeover entries must survive: the fence sees a free (not held)
+	// lease and skips the trim. With the old LeaseAcquire fence the free lease would
+	// be re-granted and Trim(10) would delete them.
+	if n, _ := w.Len(ctx); n != 5 {
+		t.Fatalf("WAL length after fenced drainCycle = %d, want 5 (post-takeover entries preserved)", n)
+	}
+}
+
 // TestFinalDrainReleasesLease verifies the lease is free after finalDrain, so a
 // takeover node acquires it immediately instead of waiting out the TTL. Checked for
 // both the drained path and the empty-WAL fast path.

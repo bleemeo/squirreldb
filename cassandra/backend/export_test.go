@@ -48,10 +48,13 @@ func TestReconstructWriteTTL(t *testing.T) {
 			want:       0,
 		},
 		{
-			name:       "retention = remaining + age of newest point",
+			// Points arrive newest-first (mergePoints sorts descending), so points[0]
+			// (900s) is the newest; age = 1000-900 = 100s. Raw seconds, no day rounding
+			// here — rowTTLDays quantizes.
+			name:       "retention = remaining + age of newest point (points[0])",
 			ttlSeconds: 300,
-			points:     []types.MetricPoint{{Timestamp: 800_000}, {Timestamp: 900_000}}, // newest = 900s
-			want:       (300 + 100) * time.Second,                                       // age = 1000-900 = 100s
+			points:     []types.MetricPoint{{Timestamp: 900_000}, {Timestamp: 800_000}},
+			want:       (300 + 100) * time.Second,
 		},
 		{
 			name:       "future point floors age at zero",

@@ -17,14 +17,13 @@
 // Package ddl helps the ClickHouse stores produce cluster-aware DDL from a
 // single template, so the same schema works on a single node and on a cluster.
 //
-// A DDL template carries the {{ON_CLUSTER}} placeholder right after the created
-// object name. On a cluster it becomes " ON CLUSTER <name>" so the statement
-// runs on every node; on a single node it vanishes.
-//
-// The MergeTree-family engine clause is built by ReplicatedEngine, not by a
-// placeholder, because the replica path/name must be injected inside the engine
-// parentheses (before any engine argument such as the ReplacingMergeTree
-// version column).
+// A DDL template is written as plain, copy-pasteable single-node SQL (a real
+// MergeTree-family engine, no ON CLUSTER). ForCluster derives the cluster form:
+// it inserts " ON CLUSTER <name>" after the created object so the statement runs
+// on every node, and rewrites the engine into its Replicated* variant. An empty
+// clusterName returns the template verbatim (the single-node form). The cluster
+// form of each store's real schema is asserted in its SchemaObjects test, so the
+// generated cluster DDL is under review without a second copy of the schema.
 //
 // On a cluster, Replicated*MergeTree engines are created with an EXPLICIT,
 // UUID-free Keeper path derived from the table name
@@ -44,6 +43,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -58,9 +58,9 @@ import (
 const codeReplicaAlreadyExists = 253
 
 // Object is a schema object (table, view) to ensure exists. DDL is the full
-// CREATE statement with {{ON_CLUSTER}} and the engine already applied. Replicated
-// marks the MergeTree-family tables (those a SYSTEM DROP REPLICA applies to),
-// versus the Null table and materialized view which are not replicated.
+// CREATE statement, already run through ForCluster. Replicated marks the
+// MergeTree-family tables (those a SYSTEM DROP REPLICA applies to), versus the
+// Null table and materialized view which are not replicated.
 type Object struct {
 	Name       string
 	DDL        string
@@ -80,13 +80,66 @@ func (e *ReplicaExistsError) Error() string {
 			"(lost/rebuilt replica — SYSTEM DROP REPLICA needed)", e.Table)
 }
 
-// Apply fills the {{ON_CLUSTER}} placeholder of a template. An empty clusterName
-// yields plain single-node DDL.
-func Apply(template, clusterName string) string {
-	return strings.ReplaceAll(template, "{{ON_CLUSTER}}", OnCluster(clusterName))
+// createObjectRe captures the created object's name in a CREATE TABLE / CREATE
+// MATERIALIZED VIEW statement: it is where " ON CLUSTER" is inserted and the
+// source of the replicated-table Keeper path. Anchored at a line start; the name
+// is an unqualified identifier (the schemas use no db-qualified names).
+var createObjectRe = regexp.MustCompile(
+	`(?m)^\s*CREATE\s+(?:TABLE|MATERIALIZED\s+VIEW)\s+(?:IF NOT EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+// mergeTreeEngineRe matches a MergeTree-family ENGINE clause (optional args), so
+// it can be swapped for its Replicated* variant. Anchored at a line start so a
+// MergeTree name inside a comment is not matched; a non-MergeTree engine (Null)
+// and the TO-target materialized view (no ENGINE clause) never match, so they
+// keep their single-node form and only receive the ON CLUSTER clause.
+var mergeTreeEngineRe = regexp.MustCompile(`(?m)^(\s*)ENGINE\s*=\s*(\w*MergeTree)(?:\(([^)]*)\))?`)
+
+// ForCluster turns a single-node DDL template into cluster DDL: it inserts
+// " ON CLUSTER <name>" after the created object and rewrites a MergeTree-family
+// engine into its Replicated* variant (with the name-based Keeper path, see
+// replicatedEngine). An empty clusterName returns the template unchanged — it is
+// already valid single-node SQL.
+func ForCluster(template, clusterName string) string {
+	if clusterName == "" {
+		return template
+	}
+
+	loc := createObjectRe.FindStringSubmatchIndex(template)
+	if loc == nil {
+		// Programming error: a DDL template must open with CREATE TABLE/VIEW.
+		panic("ddl: ForCluster: no CREATE TABLE/MATERIALIZED VIEW in template")
+	}
+
+	name := template[loc[2]:loc[3]]
+
+	// Insert ON CLUSTER right after the object name (loc[3] is the name's end).
+	result := template[:loc[3]] + OnCluster(clusterName) + template[loc[3]:]
+
+	// Rewrite the MergeTree-family engine, if any, into its Replicated* variant.
+	return mergeTreeEngineRe.ReplaceAllStringFunc(result, func(match string) string {
+		sub := mergeTreeEngineRe.FindStringSubmatch(match)
+		indent, engine, argList := sub[1], sub[2], sub[3]
+
+		var args []string
+		if strings.TrimSpace(argList) != "" {
+			args = splitEngineArgs(argList)
+		}
+
+		return indent + "ENGINE = " + replicatedEngine(clusterName, name, engine, args...)
+	})
 }
 
-// ReplicatedEngine builds a MergeTree-family engine clause. On a single node it
+// splitEngineArgs splits an engine argument list on commas, trimming each arg.
+func splitEngineArgs(argList string) []string {
+	args := strings.Split(argList, ",")
+	for i := range args {
+		args[i] = strings.TrimSpace(args[i])
+	}
+
+	return args
+}
+
+// replicatedEngine builds a MergeTree-family engine clause. On a single node it
 // is the plain engine (e.g. "MergeTree", "ReplacingMergeTree(version)"). On a
 // cluster it is the Replicated* variant with an explicit, UUID-free Keeper path
 // derived from the table name, so a rebuilt replica re-creating the table
@@ -96,15 +149,15 @@ func Apply(template, clusterName string) string {
 // the implicit {database} macro. Because the table name is embedded in the
 // path, these tables must NEVER be RENAMEd.
 //
-//	ReplicatedEngine("", "tsdb_data", "MergeTree")
+//	replicatedEngine("", "tsdb_data", "MergeTree")
 //	  -> "MergeTree"
-//	ReplicatedEngine("c", "tsdb_data", "MergeTree")
+//	replicatedEngine("c", "tsdb_data", "MergeTree")
 //	  -> "ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_data', '{replica}')"
-//	ReplicatedEngine("", "x", "ReplacingMergeTree", "version")
+//	replicatedEngine("", "x", "ReplacingMergeTree", "version")
 //	  -> "ReplacingMergeTree(version)"
-//	ReplicatedEngine("c", "x", "ReplacingMergeTree", "version")
+//	replicatedEngine("c", "x", "ReplacingMergeTree", "version")
 //	  -> "ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/{database}/x', '{replica}', version)"
-func ReplicatedEngine(clusterName, table, engine string, engineArgs ...string) string {
+func replicatedEngine(clusterName, table, engine string, engineArgs ...string) string {
 	if clusterName == "" {
 		if len(engineArgs) == 0 {
 			return engine

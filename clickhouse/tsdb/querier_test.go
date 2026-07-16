@@ -109,6 +109,31 @@ func TestBuildWhere(t *testing.T) {
 	})
 }
 
+func TestWhereWithTime(t *testing.T) {
+	lq := &labelQuerier{tenantLabel: "__bleemeo_account__", mint: 5, maxt: 9}
+
+	where, args := lq.whereWithTime([]*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"),
+	})
+
+	// The matcher condition is kept, plus the [mint, maxt] activity filter on the
+	// min_time/max_time columns. This is what Select uses so a recent-window query
+	// resolves only series active in range, not the whole matching history.
+	wantWhere := "(metric_name = ?)" +
+		" AND (max_time IS NULL OR max_time >= fromUnixTimestamp64Milli(?))" +
+		" AND (min_time IS NULL OR min_time <= fromUnixTimestamp64Milli(?))"
+	if where != wantWhere {
+		t.Errorf("where = %q, want %q", where, wantWhere)
+	}
+
+	// Args follow the ? order: the matcher value, then the clamped mint (max_time >=)
+	// and maxt (min_time <=).
+	want := []any{"cpu_used", clampStoreTime(5), clampStoreTime(9)}
+	if diff := cmp.Diff(want, args); diff != "" {
+		t.Errorf("args mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestPointsQuery(t *testing.T) {
 	where := "metric_name = ?"
 	whereArgs := []any{"cpu_used"}

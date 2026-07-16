@@ -17,6 +17,7 @@
 package tsdb
 
 import (
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -79,6 +80,40 @@ func TestDecodeWALEntryTruncated(t *testing.T) {
 
 	if _, err := decodeWALEntry(full[:len(full)-3]); err == nil {
 		t.Error("decoding a truncated entry should error")
+	}
+}
+
+// TestDecodeWALEntryCorruptPointCount guards the points pre-allocation against a
+// corrupt count: a bit-flipped nPoints (~4e9) with no point data must error
+// cheaply. Without the buffer-bounded capacity + early break, this would attempt a
+// multi-GB allocation and OOM the test.
+func TestDecodeWALEntryCorruptPointCount(t *testing.T) {
+	t.Parallel()
+
+	var buf []byte
+
+	buf = binary.BigEndian.AppendUint64(buf, 0)          // TTL
+	buf = binary.BigEndian.AppendUint32(buf, 0)          // nLabels = 0
+	buf = binary.BigEndian.AppendUint32(buf, 0xFFFFFFFF) // nPoints huge, but no point bytes follow
+
+	if _, err := decodeWALEntry(buf); err == nil {
+		t.Error("decoding an entry with a corrupt point count should error")
+	}
+}
+
+// TestDecodeWALEntryCorruptLabelCount is the label-count counterpart of
+// TestDecodeWALEntryCorruptPointCount: a bit-flipped nLabels (~4e9) with no label
+// data must error cheaply rather than pre-allocate a multi-GB label builder.
+func TestDecodeWALEntryCorruptLabelCount(t *testing.T) {
+	t.Parallel()
+
+	var buf []byte
+
+	buf = binary.BigEndian.AppendUint64(buf, 0)          // TTL
+	buf = binary.BigEndian.AppendUint32(buf, 0xFFFFFFFF) // nLabels huge, but no label bytes follow
+
+	if _, err := decodeWALEntry(buf); err == nil {
+		t.Error("decoding an entry with a corrupt label count should error")
 	}
 }
 

@@ -40,7 +40,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -96,32 +95,35 @@ func SchemaObjects(clusterName string) []ddl.Object {
 	objects := make([]ddl.Object, 0, len(statements))
 
 	for _, stmt := range statements {
-		engine := ddl.ReplicatedEngine(clusterName, stmt.table, "ReplacingMergeTree", "version")
-		stmtDDL := strings.Replace(stmt.ddl, "{{ENGINE}}", engine, 1)
-		objects = append(objects, ddl.Object{Name: stmt.table, DDL: ddl.Apply(stmtDDL, clusterName), Replicated: true})
+		objects = append(objects, ddl.Object{
+			Name: stmt.table, DDL: ddl.ForCluster(stmt.ddl, clusterName), Replicated: true,
+		})
 	}
 
 	return objects
 }
 
+// Both are single-node SQL, copy-pasteable as-is; ddl.ForCluster derives the
+// cluster form (ON CLUSTER + ReplicatedReplacingMergeTree), asserted in
+// TestSchemaObjects — do NOT hand-copy them for a cluster.
 const (
 	clusterDDL = `
-		CREATE TABLE IF NOT EXISTS telemetry_cluster_id{{ON_CLUSTER}} (
+		CREATE TABLE IF NOT EXISTS telemetry_cluster_id (
 			k String,
 			cluster_id String,
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = {{ENGINE}}
+		ENGINE = ReplacingMergeTree(version)
 		ORDER BY k`
 
 	nodeIDsDDL = `
-		CREATE TABLE IF NOT EXISTS telemetry_node_ids{{ON_CLUSTER}} (
+		CREATE TABLE IF NOT EXISTS telemetry_node_ids (
 			telemetry_id String,
 			owner String,
 			lease_until DateTime64(3),
 			version DateTime64(3) DEFAULT now64(3)
 		)
-		ENGINE = {{ENGINE}}
+		ENGINE = ReplacingMergeTree(version)
 		ORDER BY telemetry_id`
 )
 

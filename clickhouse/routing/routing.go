@@ -518,18 +518,6 @@ func (c *Conn) Hosts() []HostStatus {
 	return statuses
 }
 
-// AnyReady reports whether at least one host holds the expected tables and is
-// not lagging.
-func (c *Conn) AnyReady() bool {
-	for _, h := range c.hosts {
-		if _, ready := h.state(); ready {
-			return true
-		}
-	}
-
-	return false
-}
-
 // pick returns a host to route a call to: a ready one if any, otherwise a
 // merely-reachable one (so a fresh cluster can still create its schema), in
 // round-robin order. It errors when no host is reachable.

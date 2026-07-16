@@ -65,7 +65,12 @@ func (q *sqlQuerier) Select(
 	_ *storage.SelectHints,
 	matchers ...*labels.Matcher,
 ) storage.SeriesSet {
-	where, args := q.buildWhere(matchers)
+	// whereWithTime (not buildWhere): resolveSeries must count only series active in
+	// [mint, maxt], like the label endpoints. Without it a high-churn tenant's whole
+	// history of matching series is resolved and trips maxSeries on a recent-window
+	// query, even when almost none have points in range. The same where feeds
+	// pointsQuery's subquery fallback, keeping its id set identical to what resolveSeries found.
+	where, args := q.whereWithTime(matchers)
 
 	labelsByID, err := q.resolveSeries(ctx, where, args)
 	if err != nil {

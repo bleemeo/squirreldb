@@ -115,7 +115,7 @@ func TestSeriesToInput(t *testing.T) {
 		}
 	})
 
-	t.Run("TTL rounds up; sub-day stays 1 day; only zero falls back to global", func(t *testing.T) {
+	t.Run("TTL rounds to nearest day; sub-day stays 1 day; only zero falls back to global", func(t *testing.T) {
 		// No TTL requested: fall back to the global default.
 		if cols := seriesToInput(lbls, tenantLabelForTest, 0, 365); cols.rowTTLDays != 365 {
 			t.Errorf("row_ttl_days(0) = %d, want 365 (global default)", cols.rowTTLDays)
@@ -126,9 +126,9 @@ func TestSeriesToInput(t *testing.T) {
 			t.Errorf("row_ttl_days(1h) = %d, want 1", cols.rowTTLDays)
 		}
 
-		// 32h rounds up to 2 days (one-day granularity, never truncated to 1).
-		if cols := seriesToInput(lbls, tenantLabelForTest, 32*3600, 365); cols.rowTTLDays != 2 {
-			t.Errorf("row_ttl_days(32h) = %d, want 2", cols.rowTTLDays)
+		// 32h (1.33 days) rounds to the nearest day: 1.
+		if cols := seriesToInput(lbls, tenantLabelForTest, 32*3600, 365); cols.rowTTLDays != 1 {
+			t.Errorf("row_ttl_days(32h) = %d, want 1", cols.rowTTLDays)
 		}
 	})
 }
@@ -143,14 +143,17 @@ func TestRowTTLDays(t *testing.T) {
 	}{
 		{"zero falls back to global", 0, global},
 		{"negative falls back to global", -10, global},
-		{"one hour rounds up to 1 day", 3600, 1},
-		{"just under a day rounds up to 1", 86399, 1},
+		{"sub-day keeps at least 1 day", 3600, 1},
+		{"just under a day rounds to 1", 86399, 1},
 		{"exactly one day stays 1", 86400, 1},
-		{"25h rounds up to 2", 25 * 3600, 2},
-		{"32h rounds up to 2", 32 * 3600, 2},
+		{"just above day keeps 1 day", 86401, 1},
+		{"32h (1.33d) rounds down to 1", 32 * 3600, 1},
+		{"36h (1.5d) rounds half up to 2", 36 * 3600, 2},
 		{"exactly two days stays 2", 2 * 86400, 2},
 		{"seven days", 7 * 86400, 7},
 		{"365 days", 365 * 86400, 365},
+		// A few seconds of migration read jitter on a large TTL must NOT add a day.
+		{"400 days plus jitter stays 400", 400*86400 + 5, 400},
 		{"overflow capped at uint16 max", int64(70000) * 86400, math.MaxUint16},
 	}
 

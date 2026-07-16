@@ -30,7 +30,7 @@ func DefaultConfigPaths() []string {
 func DefaultConfig() Config {
 	return Config{
 		Backend:           backendCassandra,
-		DefaultTimeToLive: 365 * 24 * time.Hour, // 1 year
+		DefaultTimeToLive: 5 * 365 * 24 * time.Hour, // 5 years (no "unlimited"; see squirreldb.conf)
 		Cassandra: Cassandra{
 			Addresses:              []string{"127.0.0.1:9042"},
 			Keyspace:               "squirreldb",

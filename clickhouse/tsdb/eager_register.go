@@ -73,6 +73,19 @@ const (
 type seenEntry struct {
 	lastSeen     time.Time // last write; drives eviction of idle series
 	nextRegister time.Time // when to re-register, to refresh max_time/max_expiration
+
+	// coverMinTS/coverMaxTS are the [min_time, max_time] range currently indexed for
+	// the series in tsdb_tags (ms; coverMaxTS includes the reRegisterGap margin, as
+	// written by writeAllRegistrations). A batch whose points fall outside this range
+	// forces a re-registration even before nextRegister: nextRegister is wall-clock,
+	// but a backlog advances point timestamps far faster, so it alone would leave
+	// max_time behind the points actually written.
+	//
+	// Every entry in seenSeries has been through markRegistered, so these are always
+	// set (no zero-value ambiguity): markRegistered is the sole entry creator,
+	// seriesToRegister only refreshes lastSeen of existing entries.
+	coverMinTS int64
+	coverMaxTS int64
 }
 
 // registerSeries writes into tsdb_tags the series that are new or due for a
@@ -121,7 +134,7 @@ func (c *ClickHouseTSDB) writeAllRegistrations(ctx context.Context, regs []regis
 
 	defer batch.Close()
 
-	globalDays := uint16(c.ttlDays()) //nolint:gosec
+	globalDays := c.ttlDays()
 
 	for _, r := range regs {
 		cols := seriesToInput(r.labels, c.opts.TenantLabel, r.ttl, globalDays)
@@ -151,6 +164,9 @@ func (c *ClickHouseTSDB) writeAllRegistrations(ctx context.Context, regs []regis
 
 // seriesToRegister returns the series that are new or due for re-registration,
 // and refreshes the last-seen time of every series (so active ones aren't evicted).
+// A series is due when it is new, when its wall-clock nextRegister has passed, or
+// when its points fall outside the indexed [coverMinTS, coverMaxTS] range — the
+// last covers a backlog, whose point timestamps outrun the wall-clock nextRegister.
 func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []registration {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
@@ -159,7 +175,15 @@ func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []
 
 	for _, r := range regs {
 		entry, ok := c.seenSeries[r.key]
-		if !ok || !now.Before(entry.nextRegister) {
+		if !ok {
+			// New series: due, and left for markRegistered to create the entry (so an
+			// entry in seenSeries always carries a valid coverage/nextRegister).
+			toRegister = append(toRegister, r)
+
+			continue
+		}
+
+		if !now.Before(entry.nextRegister) || r.maxTS > entry.coverMaxTS || r.minTS < entry.coverMinTS {
 			toRegister = append(toRegister, r)
 		}
 
@@ -172,15 +196,30 @@ func (c *ClickHouseTSDB) seriesToRegister(regs []registration, now time.Time) []
 	return toRegister
 }
 
-// markRegistered schedules the next re-registration of each series (after a
-// successful insert), with per-series jitter to spread the load.
+// markRegistered records, after a successful insert, each series' next
+// re-registration time (with per-series jitter to spread the load), refreshes
+// lastSeen, and extends the indexed coverage: min_time is written without margin,
+// max_time with the reRegisterGap margin (see writeAllRegistrations), and the
+// AggregatingMergeTree keeps the min/max across rows, so the cached coverage
+// tracks that same aggregate. It is the sole creator of seenSeries entries — a
+// missing entry (ok == false) is a new series, whose coverage is set outright.
 func (c *ClickHouseTSDB) markRegistered(regs []registration, now time.Time) {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
 
 	for _, r := range regs {
-		entry := c.seenSeries[r.key]
+		entry, ok := c.seenSeries[r.key]
+		entry.lastSeen = now
 		entry.nextRegister = now.Add(reRegisterBase + time.Duration(rand.Int64N(int64(reRegisterJitter)))) //nolint:gosec
+
+		maxWritten := r.maxTS + reRegisterGap.Milliseconds()
+		if ok {
+			entry.coverMinTS = min(entry.coverMinTS, r.minTS)
+			entry.coverMaxTS = max(entry.coverMaxTS, maxWritten)
+		} else {
+			entry.coverMinTS, entry.coverMaxTS = r.minTS, maxWritten
+		}
+
 		c.seenSeries[r.key] = entry
 	}
 }

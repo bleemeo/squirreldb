@@ -110,7 +110,7 @@ func (c *ClickHouseTSDB) writeSeries(
 
 	defer batch.Close()
 
-	globalDays := uint16(c.ttlDays()) //nolint:gosec
+	globalDays := c.ttlDays()
 
 	// One hour-truncated stamp for the whole batch, used as the read-side
 	// last-write-wins tiebreaker (see tsdbDataDDL). Stamped here, not via now() in
