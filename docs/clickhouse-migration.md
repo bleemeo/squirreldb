@@ -27,6 +27,29 @@ The migration has three parts:
 > covers everything before it. Together they leave no gap, which is what makes the
 > final cutover clean.
 
+## Limitation: data written before version 25.01.31.100908
+
+Due to a bug introduced in version 25.01.31.100908 (January 2025), shards
+created by an earlier version have an unreadable expiration date, and the
+backfill **skips them** — their data is not migrated.
+
+This only risks data loss if **both** are true:
+- your SquirrelDB predates 25.01.31.100908 (it wrote shards before ~February
+  2025), and
+- your highest TTL is long enough that some of that pre-upgrade data is still
+  within its retention when you run the migration.
+
+If your deployment started on 25.01.31.100908 or later, or your TTL is short
+enough that all pre-upgrade data has already expired, there is nothing to lose.
+
+To check, look at the backfill log line `planned migration export shards ...
+skipped_dead_shards=N`:
+- `N = 0` — nothing was skipped, you are safe.
+- `N > 0` — some shards were skipped. Harmless if their data had already expired;
+  you only lose data if your TTL still covers data from before your
+  25.01.31.100908 upgrade.
+
+
 ## Before you begin
 
 - **A running ClickHouse**, reachable from SquirrelDB and configured in the

@@ -28,6 +28,7 @@ import (
 
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -133,6 +134,13 @@ func RunMigrate(args []string) int {
 		// explicitly — otherwise it stays nil and the backends register their
 		// metrics nowhere, leaving --print-metrics / --metrics-listen-address empty.
 		MetricRegistry: prometheus.DefaultRegisterer,
+		// An in-process cluster: migrate builds both the source and the target on the
+		// shared Cluster otherwise, so the target's cache-invalidation broadcasts (a
+		// flood during the drop-then-rewrite Import) would hit the live source cluster
+		// over Redis. A LocalCluster keeps them in this process. Its listeners are
+		// per-object, so the source and target still cross-invalidate each other's
+		// in-memory caches, but nothing leaves the migrate.
+		ExistingCluster: &dummy.LocalCluster{},
 		// The source is read-only: the migration only reads it, and this is a double
 		// safety against writing to the store being migrated away. The write target
 		// (MigrateToBackend) is unaffected.

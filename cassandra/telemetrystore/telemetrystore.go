@@ -42,7 +42,10 @@ const (
 	defaultIDLockRetryDelay = 5 * time.Second
 )
 
-var errFailedLock = errors.New("failed to acquire lock")
+var (
+	errFailedLock  = errors.New("failed to acquire lock")
+	errNoClusterID = errors.New("no telemetry cluster id in a read-only store")
+)
 
 // LockFactory builds the distributed locks the store relies on.
 type LockFactory interface {
@@ -53,6 +56,7 @@ type LockFactory interface {
 type Store struct {
 	state       types.State
 	lockFactory LockFactory
+	readOnly    bool
 	logger      zerolog.Logger
 
 	// Lock timing, resolved from telemetry.StoreTiming at New (zero → default).
@@ -62,11 +66,20 @@ type Store struct {
 
 // New returns a telemetry store backed by a state and a lock factory. timing
 // overrides the per-ID lock timing (zero fields keep the built-in defaults); it
-// is a test hook, not a user-facing config option.
-func New(state types.State, lockFactory LockFactory, timing telemetry.StoreTiming, logger zerolog.Logger) *Store {
+// is a test hook, not a user-facing config option. readOnly makes ClusterID read
+// without taking a lock (the migration source is read-only, so its locks — which
+// are Cassandra writes — would fail).
+func New(
+	state types.State,
+	lockFactory LockFactory,
+	readOnly bool,
+	timing telemetry.StoreTiming,
+	logger zerolog.Logger,
+) *Store {
 	return &Store{
 		state:            state,
 		lockFactory:      lockFactory,
+		readOnly:         readOnly,
 		logger:           logger,
 		idLockTTL:        orDefault(timing.IDLockTTL, defaultIDLockTTL),
 		idLockRetryDelay: orDefault(timing.IDLockRetryDelay, defaultIDLockRetryDelay),
@@ -84,6 +97,24 @@ func orDefault(v, def time.Duration) time.Duration {
 
 func (s *Store) ClusterID(ctx context.Context) (string, error) {
 	var clusterID string
+
+	// Read-only (the migration source): only read, never create. The lock guards
+	// the create-if-missing path only, and taking it would fail anyway since locks
+	// are Cassandra writes. A real source always has a cluster ID.
+	if s.readOnly {
+		hasClusterID, err := s.state.Read(ctx, "cluster_id", &clusterID)
+		if err != nil {
+			return "", fmt.Errorf("unable to read cluster id for telemetry: %w", err)
+		}
+
+		if !hasClusterID {
+			return "", errNoClusterID
+		}
+
+		s.logger.Debug().Msgf("Read telemetry cluster ID %s", clusterID)
+
+		return clusterID, nil
+	}
 
 	lock := s.lockFactory.CreateLock("create cluster id", 5*time.Second)
 	if ok := lock.TryLock(ctx, 10*time.Second); !ok {

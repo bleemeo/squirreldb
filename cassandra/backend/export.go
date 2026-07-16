@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -127,7 +128,10 @@ func (b *Backend) ExportRawData(ctx context.Context, opts export.ExportOptions) 
 
 	// Descending (newest-first), keeping only shards that overlap [start, end] and
 	// — when resuming — are not newer than the resume shard (those are done).
+	now := time.Now()
 	shards := make([]int32, 0, len(ascShards))
+
+	var skippedDead int
 
 	for _, shard := range slices.Backward(ascShards) {
 		shardStart, shardEnd := index.ShardTimeRange(shard)
@@ -140,8 +144,45 @@ func (b *Backend) ExportRawData(ctx context.Context, opts export.ExportOptions) 
 			continue
 		}
 
+		// Skip dead shards: a zero (pre-expiration-feature) or past index-expiration
+		// means the raw data is already gone — the index expiration is set to outlive
+		// the data — so the shard would yield only empty reads. Skipping them here (vs.
+		// discovering the emptiness one series at a time) avoids hammering Cassandra
+		// with tens of thousands of point-less reads that, producing no writes, are not
+		// throttled by the write pacer.
+		expiration, err := idx.MigrationShardExpiration(ctx, shard)
+		if err != nil {
+			return nil, fmt.Errorf("shard %s expiration: %w", shardStart.Format(time.DateOnly), err)
+		}
+
+		// An expiration == zero occur on shard created before 25.01.31.100908 (commit f38b938).
+		// This commit introduced a bug in expirationShardLabel serialization:
+		//   - shard created before use `{__shard|expiration="N"}`
+		//   - shard created after use `{"__shard|expiration"="N"}` (key is quoted)
+		//   - Due to this change, the metric that was used to store the shard expiration get lost,
+		//     and we return zero.
+		//
+		// The migration ignore those shard because:
+		//   - Processing them will significantly slow down migration and hammer Cassandra for unless query
+		//     - Production had ~57 shard in this situation
+		//     - Without this, migration would try to access every metrics for each shard, resulting in thousand of
+		//       TSDB requests which all will return 0 points
+		//     - And because the throttle is only applied when on write (so when point are returned), this won't be
+		//       throttled
+		//   - All known deployment use this version from the beginning or for more than highest TTL
+		if expiration.IsZero() || !expiration.After(now) {
+			skippedDead++
+
+			continue
+		}
+
 		shards = append(shards, shard)
 	}
+
+	b.logger.Info().
+		Int("shards", len(shards)).
+		Int("skipped_dead_shards", skippedDead).
+		Msg("planned migration export shards")
 
 	return &cassandraRawIterator{
 		index:   idx,

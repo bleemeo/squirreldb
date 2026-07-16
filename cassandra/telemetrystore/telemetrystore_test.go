@@ -76,7 +76,7 @@ func TestNodeID(t *testing.T) {
 }
 
 func newStore(lockFactory *dummy.Locks, state *dummy.States) *Store {
-	return New(state, lockFactory, telemetry.StoreTiming{}, log.With().Str("component", "telemetry").Logger())
+	return New(state, lockFactory, false, telemetry.StoreTiming{}, log.With().Str("component", "telemetry").Logger())
 }
 
 func acquire(t *testing.T, store *Store) (string, func()) {

@@ -314,6 +314,7 @@ func (b *Backend) TelemetryStore(ctx context.Context) (telemetry.Store, error) {
 	return cassandratelemetrystore.New(
 		state,
 		lockFactory,
+		b.options.ReadOnly,
 		b.options.TelemetryTiming,
 		b.logger.With().Str("component", "telemetry").Logger(),
 	), nil
@@ -371,7 +372,9 @@ func (b *Backend) getMutableStack(ctx context.Context) (*mutable.Provider, *muta
 
 	provider, processor := mutable.NewProviderAndProcessor(
 		ctx,
-		b.options.MetricRegistry,
+		// The mutable package registers backend-agnostic metric names; tag them with
+		// the backend so a source and a target (migrate) can coexist in one registry.
+		prometheus.WrapRegistererWith(map[string]string{"backend": "cassandra"}, b.options.MetricRegistry),
 		b.options.Cluster,
 		store,
 		b.options.TenantLabel,
