@@ -68,9 +68,10 @@ func (q *Queryable) fixTime(t int64) int64 {
 }
 
 func (q *Queryable) QuerierWithOptions(opts types.QuerierOptions, mint, maxt int64) (storage.Querier, error) {
-	// Surface the limit to the backend so it can reject/bound a broad matcher
-	// up-front; this wrapper still enforces it cumulatively across the request.
+	// Surface the limits to the backend so it can reject/bound a broad matcher or a
+	// huge read up-front; this wrapper still enforces them cumulatively across the request.
 	opts.MaxEvaluatedSeries = q.opts.MaxEvaluatedSeries
+	opts.MaxEvaluatedPoints = q.opts.MaxEvaluatedPoints
 
 	qInner, err := q.q.QuerierWithOptions(opts, q.fixTime(mint), q.fixTime(maxt))
 	if err != nil {
@@ -84,8 +85,9 @@ func (q *Queryable) QuerierWithOptions(opts types.QuerierOptions, mint, maxt int
 }
 
 func (q *Queryable) ChunkQuerierWithOptions(opts types.QuerierOptions, mint, maxt int64) (storage.ChunkQuerier, error) {
-	// See QuerierWithOptions: surface the limit to the backend.
+	// See QuerierWithOptions: surface the limits to the backend.
 	opts.MaxEvaluatedSeries = q.opts.MaxEvaluatedSeries
+	opts.MaxEvaluatedPoints = q.opts.MaxEvaluatedPoints
 
 	inner, err := q.q.ChunkQuerierWithOptions(opts, q.fixTime(mint), q.fixTime(maxt))
 	if err != nil {

@@ -168,6 +168,87 @@ ARRAY JOIN
     timestamps AS timestamp,
     values AS value`
 
+// tsdbDataAgg15mDDL holds the pre-aggregated points, one row per (series, 15-min
+// bucket), fed by mv_datapoint_agg_15m off the same datapoint_input as the raw
+// path — so it is populated with no background job and the same freshness as
+// tsdb_data. The read path uses it for coarse-step queries (see the routing in
+// sql_read.go), keeping the point count bounded on long ranges.
+//
+// bucket is the RIGHT edge of the interval it covers: bucket B covers (B-15min, B]
+// (left-open, right-closed — the PromQL range-selector semantics). The bucket
+// currently filling therefore carries a future label and is naturally excluded
+// from any past/now query, so a partial (still-mutating) bucket is never returned.
+//
+// Columns are mergeable partial aggregates finalized on read (GROUP BY, see
+// aggPointsQuery). Only commutative aggregates are kept — min/max/sum/count — so
+// the result is exact and stable regardless of how the AggregatingMergeTree merges
+// parts. (Order-dependent aggregates like argMin/argMax or any/anyLast were tried
+// for first/last but are neither exact nor merge-stable under ClickHouse's
+// unordered merges, so they were dropped; counters use max, see aggValueExpr.)
+//
+// AggregatingMergeTree merges rows sharing the ORDER BY key (tenant, id, bucket).
+// TTL expires each bucket on its own row_ttl_days (carried from datapoint_input,
+// aggregated by max), matching the raw retention.
+const tsdbDataAgg15mDDL = `
+CREATE TABLE IF NOT EXISTS tsdb_data_agg_15m
+(
+    id UUID,
+    tenant LowCardinality(String) CODEC(ZSTD(1)),
+    bucket DateTime CODEC(Delta(4), ZSTD(1)),
+    min SimpleAggregateFunction(min, Float64) CODEC(ZSTD(1)),
+    max SimpleAggregateFunction(max, Float64) CODEC(ZSTD(1)),
+    sum SimpleAggregateFunction(sum, Float64) CODEC(ZSTD(1)),
+    count SimpleAggregateFunction(sum, UInt64) CODEC(ZSTD(1)),
+    row_ttl_days SimpleAggregateFunction(max, UInt16) CODEC(ZSTD(1))
+)
+ENGINE = AggregatingMergeTree
+PARTITION BY toStartOfInterval(bucket, INTERVAL 7 DAY, 'UTC')
+ORDER BY (tenant, id, bucket)
+TTL bucket + toIntervalDay(row_ttl_days)`
+
+// mvDatapointAgg15mDDL aggregates each series row into 15-min buckets, mirroring
+// mv_datapoint_data but writing partial aggregates instead of raw points. Both MVs
+// fire on the same datapoint_input insert, so live drain and migration
+// (ImportRawData) populate the aggregate the same way.
+//
+// The bucket expression labels on the right edge (see tsdbDataAgg15mDDL): a point
+// exactly on a 15-min grid instant belongs to the bucket ending on it (the -1ms
+// before toStartOfInterval makes the boundary right-closed), the next point starts
+// the following bucket.
+//
+// StaleNaN and any NaN are filtered out — they carry no aggregatable value and
+// would poison min/max/avg.
+//
+//nolint:lll
+const mvDatapointAgg15mDDL = `
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_agg_15m TO tsdb_data_agg_15m AS
+SELECT
+    reinterpretAsUUID(sipHash128(metric_name, tenant, tags)) AS id,
+    tenant,
+    toDateTime(toStartOfInterval(timestamp - toIntervalMillisecond(1), INTERVAL 15 MINUTE) + toIntervalMinute(15)) AS bucket,
+    min(value) AS min,
+    max(value) AS max,
+    sum(value) AS sum,
+    count() AS count,
+    max(row_ttl_days) AS row_ttl_days
+FROM datapoint_input
+ARRAY JOIN
+    timestamps AS timestamp,
+    values AS value
+WHERE NOT isNaN(value)
+GROUP BY id, tenant, bucket`
+
+// aggBucket is the width of the pre-aggregation buckets. It MUST stay equal to the
+// INTERVAL used in tsdbDataAgg15mDDL / mvDatapointAgg15mDDL above (they sit side by
+// side on purpose; changing it means recreating the MV and rebuilding the table
+// from the raw points). aggMinStep is the query step at/above which reads route to
+// the aggregate (see aggSelection): kept at several buckets per step so range
+// functions never evaluate over a single downsampled point.
+const (
+	aggBucket  = 15 * time.Minute
+	aggMinStep = 4 * aggBucket
+)
+
 // SchemaObjects returns the ClickHouse objects owned by the TSDB store. The
 // templates are single-node SQL; ddl.ForCluster derives the cluster form (ON
 // CLUSTER + Replicated* engine), asserted in TestSchemaObjectsCluster — do NOT
@@ -180,6 +261,8 @@ func SchemaObjects(clusterName string) []ddl.Object {
 		{Name: "tsdb_tags", DDL: ddl.ForCluster(tsdbTagsDDL, clusterName), Replicated: true},
 		{Name: "datapoint_input", DDL: ddl.ForCluster(datapointInputDDL, clusterName)},
 		{Name: "mv_datapoint_data", DDL: ddl.ForCluster(mvDatapointDataDDL, clusterName)},
+		{Name: "tsdb_data_agg_15m", DDL: ddl.ForCluster(tsdbDataAgg15mDDL, clusterName), Replicated: true},
+		{Name: "mv_datapoint_agg_15m", DDL: ddl.ForCluster(mvDatapointAgg15mDDL, clusterName)},
 	}
 }
 

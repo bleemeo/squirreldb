@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:lll
 package tsdb
 
 import (
@@ -87,6 +88,41 @@ ARRAY JOIN
     timestamps AS timestamp,
     values AS value`
 
+const tsdbDataAgg15mDDLCluster = `
+CREATE TABLE IF NOT EXISTS tsdb_data_agg_15m ON CLUSTER test_cluster
+(
+    id UUID,
+    tenant LowCardinality(String) CODEC(ZSTD(1)),
+    bucket DateTime CODEC(Delta(4), ZSTD(1)),
+    min SimpleAggregateFunction(min, Float64) CODEC(ZSTD(1)),
+    max SimpleAggregateFunction(max, Float64) CODEC(ZSTD(1)),
+    sum SimpleAggregateFunction(sum, Float64) CODEC(ZSTD(1)),
+    count SimpleAggregateFunction(sum, UInt64) CODEC(ZSTD(1)),
+    row_ttl_days SimpleAggregateFunction(max, UInt16) CODEC(ZSTD(1))
+)
+ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_data_agg_15m', '{replica}')
+PARTITION BY toStartOfInterval(bucket, INTERVAL 7 DAY, 'UTC')
+ORDER BY (tenant, id, bucket)
+TTL bucket + toIntervalDay(row_ttl_days)`
+
+const mvDatapointAgg15mDDLCluster = `
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_datapoint_agg_15m ON CLUSTER test_cluster TO tsdb_data_agg_15m AS
+SELECT
+    reinterpretAsUUID(sipHash128(metric_name, tenant, tags)) AS id,
+    tenant,
+    toDateTime(toStartOfInterval(timestamp - toIntervalMillisecond(1), INTERVAL 15 MINUTE) + toIntervalMinute(15)) AS bucket,
+    min(value) AS min,
+    max(value) AS max,
+    sum(value) AS sum,
+    count() AS count,
+    max(row_ttl_days) AS row_ttl_days
+FROM datapoint_input
+ARRAY JOIN
+    timestamps AS timestamp,
+    values AS value
+WHERE NOT isNaN(value)
+GROUP BY id, tenant, bucket`
+
 // TestSchemaObjectsCluster locks the cluster DDL that ddl.ForCluster derives from
 // the single-node templates. This IS the reviewed cluster schema: any change to a
 // template (or the transform) must be reflected here on purpose — a schema change
@@ -101,10 +137,12 @@ func TestSchemaObjectsCluster(t *testing.T) {
 	}
 
 	want := map[string]expect{
-		"tsdb_data":         {tsdbDataDDLCluster, tsdbDataDDL, true},
-		"tsdb_tags":         {tsdbTagsDDLCluster, tsdbTagsDDL, true},
-		"datapoint_input":   {datapointInputDDLCluster, datapointInputDDL, false},
-		"mv_datapoint_data": {mvDatapointDataDDLCluster, mvDatapointDataDDL, false},
+		"tsdb_data":            {tsdbDataDDLCluster, tsdbDataDDL, true},
+		"tsdb_tags":            {tsdbTagsDDLCluster, tsdbTagsDDL, true},
+		"datapoint_input":      {datapointInputDDLCluster, datapointInputDDL, false},
+		"mv_datapoint_data":    {mvDatapointDataDDLCluster, mvDatapointDataDDL, false},
+		"tsdb_data_agg_15m":    {tsdbDataAgg15mDDLCluster, tsdbDataAgg15mDDL, true},
+		"mv_datapoint_agg_15m": {mvDatapointAgg15mDDLCluster, mvDatapointAgg15mDDL, false},
 	}
 
 	seen := map[string]bool{}

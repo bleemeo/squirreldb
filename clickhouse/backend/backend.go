@@ -504,6 +504,148 @@ func (b *Backend) RegisterHTTPEndpoints(register func(method, path, description 
 		"Force CREATE ... IF NOT EXISTS ON CLUSTER for every table — re-attaches a rebuilt node "+
 			"AFTER its stale replica was dropped (run SYSTEM DROP REPLICA first; see recovery runbook).",
 		b.createTablesHandler)
+	register(http.MethodGet, "/agg/diff",
+		"Compare the pre-aggregate to a fresh recomputation of the raw points over ?from=&to= "+
+			"(RFC3339), in ?chunk= windows (Go duration, default 168h = one partition) — reports how "+
+			"many buckets drifted (e.g. a WAL re-drain).",
+		b.aggDiffHandler)
+	register(http.MethodPost, "/agg/rebuild",
+		"Recompute the pre-aggregate over ?from=&to= (RFC3339) from the raw points, in ?chunk= "+
+			"windows (Go duration, default 168h = one partition) — backfill or rebuild after a "+
+			"bucket-size change. ?dedup collapses re-drained duplicates (canonical, ~90x more memory; "+
+			"use on the bounded range a diff flagged). ?no-drop skips the pre-insert delete (only if "+
+			"the rows were already removed).",
+		b.aggRebuildHandler)
+}
+
+// aggChunk parses the optional ?chunk= window size (a Go duration, e.g. 168h). An
+// empty value returns 0, which the TSDB replaces with its default.
+func aggChunk(w http.ResponseWriter, r *http.Request) (time.Duration, bool) {
+	v := r.URL.Query().Get("chunk")
+	if v == "" {
+		return 0, true
+	}
+
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		http.Error(w, "invalid 'chunk' (want a positive Go duration, e.g. 168h): "+v, http.StatusBadRequest)
+
+		return 0, false
+	}
+
+	return d, true
+}
+
+// aggTimeRange parses the ?from=&to= RFC3339 query parameters common to the
+// aggregate debug endpoints, writing a 400 and returning ok=false on any problem.
+func aggTimeRange(w http.ResponseWriter, r *http.Request) (from, to time.Time, ok bool) {
+	from, err := time.Parse(time.RFC3339, r.URL.Query().Get("from"))
+	if err != nil {
+		http.Error(w, "invalid or missing 'from' (want RFC3339): "+err.Error(), http.StatusBadRequest)
+
+		return time.Time{}, time.Time{}, false
+	}
+
+	to, err = time.Parse(time.RFC3339, r.URL.Query().Get("to"))
+	if err != nil {
+		http.Error(w, "invalid or missing 'to' (want RFC3339): "+err.Error(), http.StatusBadRequest)
+
+		return time.Time{}, time.Time{}, false
+	}
+
+	if !to.After(from) {
+		http.Error(w, "'to' must be after 'from'", http.StatusBadRequest)
+
+		return time.Time{}, time.Time{}, false
+	}
+
+	return from, to, true
+}
+
+// aggDiffHandler reports the aggregate-vs-raw drift over the requested range.
+func (b *Backend) aggDiffHandler(w http.ResponseWriter, r *http.Request) {
+	b.l.Lock()
+	t := b.tsdb
+	b.l.Unlock()
+
+	if t == nil {
+		http.Error(w, "ClickHouse TSDB not started", http.StatusServiceUnavailable)
+
+		return
+	}
+
+	from, to, ok := aggTimeRange(w, r)
+	if !ok {
+		return
+	}
+
+	chunk, ok := aggChunk(w, r)
+	if !ok {
+		return
+	}
+
+	summary, err := t.DiffAggregate(r.Context(), w, from, to, chunk)
+	if err != nil {
+		fmt.Fprintf(w, "DiffAggregate failed: %s\n", //nolint:gosec
+			err.Error())
+
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(summary); err != nil {
+		b.logger.Warn().Err(err).Msg("write agg diff response")
+	}
+}
+
+// aggRebuildHandler recomputes the pre-aggregate over the requested range.
+func (b *Backend) aggRebuildHandler(w http.ResponseWriter, r *http.Request) {
+	if b.options.ReadOnly {
+		http.Error(w, "read-only mode: not rebuilding the aggregate", http.StatusForbidden)
+
+		return
+	}
+
+	b.l.Lock()
+	t := b.tsdb
+	b.l.Unlock()
+
+	if t == nil {
+		http.Error(w, "ClickHouse TSDB not started", http.StatusServiceUnavailable)
+
+		return
+	}
+
+	from, to, ok := aggTimeRange(w, r)
+	if !ok {
+		return
+	}
+
+	chunk, ok := aggChunk(w, r)
+	if !ok {
+		return
+	}
+
+	// Drop the stale rows before re-inserting, unless the operator asserts (via
+	// ?no-drop) they were already removed. ?dedup collapses re-drained duplicates
+	// (canonical, but ~90× more memory) — reserve it for the bounded range a diff
+	// flagged; the default matches the live MV and scales.
+	drop := !r.URL.Query().Has("no-drop")
+	dedup := r.URL.Query().Has("dedup")
+
+	t0 := time.Now()
+
+	chunks, err := t.RebuildAggregate(r.Context(), w, from, to, chunk, drop, dedup)
+	if err != nil {
+		fmt.Fprintf(w, "Aggregation rebuild failed: %s\n", //nolint:gosec
+			err.Error())
+
+		return
+	}
+
+	duration := time.Since(t0).Truncate(time.Second)
+
+	fmt.Fprintf(w, "pre-aggregate rebuilt for [%s, %s] in %d chunk(s) and %s (drop=%v, dedup=%v)\n", //nolint:gosec
+		from.Format(time.RFC3339), to.Format(time.RFC3339), chunks, duration, drop, dedup)
 }
 
 // hostsHandler reports the per-host health view used for routing.

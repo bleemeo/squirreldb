@@ -35,6 +35,8 @@ package tsdb
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -263,12 +265,60 @@ func (c *ClickHouseTSDB) BestEffortAppenderWithOptions(
 	}
 }
 
+// querierOptions carries the per-request options parsed from HTTP headers by
+// ParseHTTPOptions, forcing the read to the raw or the pre-aggregated points
+// regardless of the step-based routing (see aggSelection).
+type querierOptions struct {
+	ForcePreAggregated bool
+	ForceRaw           bool
+}
+
+// ParseHTTPOptions reads the ForcePreAggregated/ForceRaw request headers. ForceRaw
+// wins when both are set. The result is carried in QuerierOptions.BackendOptions
+// and consumed by QuerierWithOptions.
+func (c *ClickHouseTSDB) ParseHTTPOptions(header http.Header) (any, error) {
+	result := querierOptions{}
+
+	if value := header.Get(types.HeaderForcePreAggregated); value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return result, err
+		}
+
+		result.ForcePreAggregated = tmp
+	}
+
+	if value := header.Get(types.HeaderForceRaw); value != "" {
+		tmp, err := strconv.ParseBool(value)
+		if err != nil {
+			return result, err
+		}
+
+		result.ForceRaw = tmp
+		if result.ForceRaw {
+			result.ForcePreAggregated = false
+		}
+	}
+
+	return result, nil
+}
+
 func (c *ClickHouseTSDB) QuerierWithOptions(
 	opts types.QuerierOptions,
 	mint int64,
 	maxt int64,
 ) (storage.Querier, error) {
-	return c.newSQLQuerier(opts.Tenant, mint, maxt, opts.MaxEvaluatedSeries)
+	backendOption, _ := opts.BackendOptions.(querierOptions)
+
+	return c.newSQLQuerier(
+		opts.Tenant,
+		mint,
+		maxt,
+		opts.MaxEvaluatedSeries,
+		opts.MaxEvaluatedPoints,
+		backendOption,
+		opts.RequestDebug,
+	)
 }
 
 func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
@@ -276,7 +326,17 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 	mint int64,
 	maxt int64,
 ) (storage.ChunkQuerier, error) {
-	q, err := c.newSQLQuerier(opts.Tenant, mint, maxt, opts.MaxEvaluatedSeries)
+	backendOption, _ := opts.BackendOptions.(querierOptions)
+
+	q, err := c.newSQLQuerier(
+		opts.Tenant,
+		mint,
+		maxt,
+		opts.MaxEvaluatedSeries,
+		opts.MaxEvaluatedPoints,
+		backendOption,
+		opts.RequestDebug,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +348,10 @@ func (c *ClickHouseTSDB) ChunkQuerierWithOptions(
 // it to release the shared connection. The matching queries.Done runs in
 // sqlQuerier.Close. It is refused once Close has started, so the connection is
 // never used after it.
-func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64, maxSeries uint32) (*sqlQuerier, error) {
+func (c *ClickHouseTSDB) newSQLQuerier(
+	tenant string, mint, maxt int64, maxSeries uint32, maxPoints uint64,
+	bo querierOptions, requestDebug types.DebugLevel,
+) (*sqlQuerier, error) {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 
@@ -299,10 +362,15 @@ func (c *ClickHouseTSDB) newSQLQuerier(tenant string, mint, maxt int64, maxSerie
 	c.queries.Add(1)
 
 	return &sqlQuerier{
-		labelQuerier: c.newLabelQuerier(tenant, mint, maxt),
-		metrics:      c.metrics,
-		maxSeries:    maxSeries,
-		onClose:      c.queries.Done,
+		labelQuerier:       c.newLabelQuerier(tenant, mint, maxt),
+		metrics:            c.metrics,
+		maxSeries:          maxSeries,
+		maxPoints:          maxPoints,
+		onClose:            c.queries.Done,
+		forcePreAggregated: bo.ForcePreAggregated,
+		forceRaw:           bo.ForceRaw,
+		requestDebug:       requestDebug,
+		logger:             c.logger,
 	}, nil
 }
 

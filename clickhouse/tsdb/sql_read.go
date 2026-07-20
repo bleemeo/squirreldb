@@ -27,13 +27,16 @@ import (
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 	"github.com/google/uuid"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
+	"github.com/rs/zerolog"
 )
 
 // sqlQuerier serves Select entirely through SQL: it resolves the matching series
@@ -49,9 +52,21 @@ type sqlQuerier struct {
 	// with limitqueryable.ErrTooManySeries; 0 means unlimited. It bounds both the
 	// resolve memory and the size of the id set pointsQuery inlines (see Select).
 	maxSeries uint32
+	// maxPoints caps how many points a single read may return before ClickHouse
+	// aborts it (max_result_rows, see pointReadContext); 0 means unlimited. It stops
+	// a wide raw read (e.g. a small [range] over a huge span routed to raw) from
+	// materializing server-side or buffering client-side before limitqueryable —
+	// which only counts once the caller iterates — would notice.
+	maxPoints uint64
 	// onClose releases this querier's in-flight registration (queries.Done); see
 	// ClickHouseTSDB.newSQLQuerier. Called once, from Close.
 	onClose func()
+	// forcePreAggregated / forceRaw override the step-based routing (see
+	// aggSelection): the ForcePreAggregated / ForceRaw request headers.
+	forcePreAggregated bool
+	forceRaw           bool
+	requestDebug       types.DebugLevel
+	logger             zerolog.Logger
 	// sets are the streaming sets produced by Select (a querier may be queried
 	// several times, each set consumed independently); Close releases their
 	// cursors. setsMu guards the slice against concurrent Select calls.
@@ -62,7 +77,7 @@ type sqlQuerier struct {
 func (q *sqlQuerier) Select(
 	ctx context.Context,
 	sortSeries bool,
-	_ *storage.SelectHints,
+	hints *storage.SelectHints,
 	matchers ...*labels.Matcher,
 ) storage.SeriesSet {
 	// whereWithTime (not buildWhere): resolveSeries must count only series active in
@@ -94,10 +109,40 @@ func (q *sqlQuerier) Select(
 		ids = append(ids, id)
 	}
 
-	query, queryArgs := q.pointsQuery(ids, where, args)
+	var (
+		query     string
+		queryArgs []any
+		source    = "raw"
+	)
 
-	rows, err := q.conn.Query(ctx, query, queryArgs...)
+	if aggExpr, ok := q.aggSelection(hints); ok {
+		query, queryArgs = q.aggPointsQuery(ids, aggExpr, where, args)
+		source = "aggregated"
+	} else {
+		query, queryArgs = q.pointsQuery(ids, where, args)
+	}
+
+	q.metrics.ReadSourceTotal.WithLabelValues(source).Inc()
+
+	if q.requestDebug >= types.DebugLevelSimple {
+		fn := ""
+		step := int64(0)
+
+		if hints != nil {
+			fn, step = hints.Func, hints.Step
+		}
+
+		q.logger.Info().Msgf(
+			"clickhouse Select: series=%d source=%s func=%q step=%d forceRaw=%v forcePreAgg=%v",
+			len(labelsByID), source, fn, step, q.forceRaw, q.forcePreAggregated)
+	}
+
+	rows, err := q.conn.Query(q.pointReadContext(ctx), query, queryArgs...)
 	if err != nil {
+		if mapped, ok := asTooManyPoints(err); ok {
+			return storage.ErrSeriesSet(mapped)
+		}
+
 		return storage.ErrSeriesSet(fmt.Errorf("clickhouse: read points: %w", err))
 	}
 
@@ -292,6 +337,156 @@ func (q *sqlQuerier) pointsQuery(ids []uuid.UUID, where string, whereArgs []any)
 	return query, queryArgs
 }
 
+// aggValueExpr maps a PromQL function to the SQL expression that reconstructs the
+// downsampled value from the min/max/sum/count columns, evaluated under GROUP BY
+// (id, bucket) so it re-merges the parts the AggregatingMergeTree has not merged
+// yet. ok is false for functions those four columns cannot serve soundly — the
+// caller then reads raw.
+func aggValueExpr(fn string) (string, bool) {
+	switch fn {
+	case "min", "min_over_time":
+		return "min(min)", true
+	case "max", "max_over_time":
+		return "max(max)", true
+	case "sum", "sum_over_time":
+		return "sum(sum)", true
+	case "count", "count_over_time":
+		return "toFloat64(sum(count))", true
+	case "avg", "avg_over_time":
+		return "sum(sum) / sum(count)", true
+	case "rate", "irate", "increase", "delta", "idelta", "deriv":
+		// Counter/trend family: use the bucket max as the representative value (like
+		// the Cassandra backend). On a monotonic counter it equals the last cumulative
+		// value; PromQL still detects resets on the downsampled series.
+		return "max(max)", true
+	case "last_over_time", "stddev_over_time", "stdvar_over_time":
+		// Approximation: as above, on a monotonic counter max is equals the last value (so exact),
+		// and for non-counter, max() is assumed to be good enough.
+		return "max(max)", true
+	case "first_over_time":
+		// Symmetrical to last_over_time
+		return "min(min)", true
+	case "resets", "changes":
+		// Not soundly served by min/max/sum/count (resets/changes need per-point order): read raw.
+		return "", false
+	default:
+		return "sum(sum) / sum(count)", true // average, like the Cassandra default
+	}
+}
+
+// aggSelection decides whether this Select reads the pre-aggregated table and, if
+// so, returns the value expression for hints.Func. ForceRaw wins; ForcePreAggregated
+// then forces the aggregate for any aggregatable function. Otherwise the aggregate
+// is used only when both hold: the step reaches aggMinStep (resolution — don't
+// over-downsample), and the range-vector window spans at least two buckets
+// (fidelity — a [range] narrower than the bucket can't be served from the
+// downsampled series). A non-aggregatable function always reads raw.
+func (q *sqlQuerier) aggSelection(hints *storage.SelectHints) (string, bool) {
+	if q.forceRaw {
+		return "", false
+	}
+
+	fn := ""
+	if hints != nil {
+		fn = hints.Func
+	}
+
+	expr, ok := aggValueExpr(fn)
+	if !ok {
+		return "", false
+	}
+
+	if q.forcePreAggregated {
+		return expr, true
+	}
+
+	if hints == nil || hints.Step < aggMinStep.Milliseconds() {
+		return "", false
+	}
+
+	// Range is the [range] selector width in ms (0 for an instant vector, which
+	// only needs one point per step). A narrower window than two buckets would see
+	// zero or one downsampled point, so keep it on raw.
+	if hints.Range != 0 && hints.Range < 2*aggBucket.Milliseconds() {
+		return "", false
+	}
+
+	return expr, true
+}
+
+// aggPointsQuery builds the query over tsdb_data_agg_15m. It mirrors pointsQuery
+// (same tenant/id scoping and inline-vs-subquery fallback) but selects the bucket
+// timestamp and the reconstructed value, grouping by (id, bucket) to finalize the
+// partial aggregates. No dedup is needed on read: the GROUP BY collapses duplicate
+// parts (including WAL re-drains) into one row per bucket.
+func (q *sqlQuerier) aggPointsQuery(ids []uuid.UUID, valueExpr, where string, whereArgs []any) (string, []any) {
+	queryArgs := make([]any, 0, len(whereArgs)+4)
+
+	var tenantCond string
+
+	if q.tenant != "" {
+		tenantCond = "tenant = ? AND "
+
+		queryArgs = append(queryArgs, q.tenant)
+	}
+
+	var idCond string
+
+	if len(ids) <= pointsInlineThreshold {
+		idCond = "id IN (?)"
+
+		queryArgs = append(queryArgs, ids)
+	} else {
+		idCond = "id IN (SELECT id FROM tsdb_tags WHERE " + where + ")"
+
+		queryArgs = append(queryArgs, whereArgs...)
+	}
+
+	// valueExpr is a fixed expression chosen by aggValueExpr (never user input).
+	query := "SELECT id, bucket, " + valueExpr + " AS value FROM tsdb_data_agg_15m" +
+		" WHERE " + tenantCond + idCond +
+		" AND bucket >= fromUnixTimestamp64Milli(?) AND bucket <= fromUnixTimestamp64Milli(?)" +
+		" GROUP BY id, bucket" +
+		" ORDER BY id, bucket"
+
+	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
+
+	return query, queryArgs
+}
+
+// clickhouse error codes raised when a result/read row limit is exceeded with the
+// throw overflow mode (max_result_rows -> TOO_MANY_ROWS_OR_BYTES, max_rows_to_read
+// -> TOO_MANY_ROWS). Either means the read would evaluate more points than allowed.
+const (
+	codeTooManyRows        = 158
+	codeTooManyRowsOrBytes = 396
+)
+
+// pointReadContext caps a point read at maxPoints result rows, so ClickHouse aborts
+// it (throwing) instead of streaming an unbounded raw read; 0 leaves ctx untouched.
+func (q *sqlQuerier) pointReadContext(ctx context.Context) context.Context {
+	if q.maxPoints == 0 {
+		return ctx
+	}
+
+	return clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"max_result_rows":      q.maxPoints,
+		"result_overflow_mode": "throw",
+	}))
+}
+
+// asTooManyPoints maps a ClickHouse result-limit overflow to
+// limitqueryable.ErrTooManyPoints (the same client-facing error the Go-side counter
+// raises), so the API reports it uniformly; ok is false for any other error.
+func asTooManyPoints(err error) (error, bool) {
+	var ex *proto.Exception
+	if errors.As(err, &ex) && (ex.Code == codeTooManyRows || ex.Code == codeTooManyRowsOrBytes) {
+		return fmt.Errorf("%w (%s)", limitqueryable.ErrTooManyPoints, ex.Message), true
+	}
+
+	return err, false
+}
+
 // buildLabels reconstructs a series' label set from its tsdb_tags columns.
 func (lq *labelQuerier) buildLabels(metricName, tenant string, tags map[string]string) labels.Labels {
 	b := labels.NewScratchBuilder(len(tags) + 2)
@@ -434,7 +629,9 @@ func (s *sqlSeriesSet) Next() bool {
 func (s *sqlSeriesSet) readRow() (sqlPoint, bool) {
 	if !s.rows.Next() {
 		if err := s.rows.Err(); err != nil {
-			s.err = err
+			// A result-limit overflow surfaces here (the read is streamed); map it to
+			// the shared too-many-points error, otherwise keep the driver error.
+			s.err, _ = asTooManyPoints(err)
 		}
 
 		s.close()

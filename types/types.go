@@ -64,6 +64,11 @@ type QuerierOptions struct {
 	// bound the work (and query size) of a broad matcher up-front rather than
 	// only once the caller iterates the result.
 	MaxEvaluatedSeries uint32
+	// MaxEvaluatedPoints caps how many points a single Select may read; 0 means
+	// unlimited. Like MaxEvaluatedSeries it mirrors the limitqueryable limit, but a
+	// backend needs it to abort a read server-side (limitqueryable only counts
+	// points once the caller iterates, after the backend may have buffered them).
+	MaxEvaluatedPoints uint64
 	// BackendOptions is filled by calls like ParseHTTPOptions()
 	BackendOptions any
 }

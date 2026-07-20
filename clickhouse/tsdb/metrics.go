@@ -44,6 +44,9 @@ type metrics struct {
 
 	ReadSeconds     *prometheus.SummaryVec
 	ReadSeriesTotal prometheus.Counter
+	// ReadSourceTotal counts Select calls by the point source they read, "raw" or
+	// "aggregated" (the pre-aggregation routing decision, see aggSelection).
+	ReadSourceTotal *prometheus.CounterVec
 
 	// WAL / drainer.
 	WALLength            prometheus.Gauge       // current number of buffered points in the Redis WAL
@@ -132,6 +135,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name:      "read_series_total",
 			Help:      "Total series resolved by Select (SQL mode)",
 		}),
+		ReadSourceTotal: newReadSourceTotal(reg, namespace, subSystem),
 		WALLength: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subSystem,
@@ -179,6 +183,22 @@ func newWALBackpressureTotal(reg prometheus.Registerer, namespace, subSystem str
 
 	c.WithLabelValues("slow")
 	c.WithLabelValues("block")
+
+	return c
+}
+
+// newReadSourceTotal builds the read-source counter with both label values
+// pre-initialized to 0, so "raw" and "aggregated" show even before the first read.
+func newReadSourceTotal(reg prometheus.Registerer, namespace, subSystem string) *prometheus.CounterVec {
+	c := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subSystem,
+		Name:      "read_source_total",
+		Help:      "Select calls by point source read (raw or pre-aggregated), see the step-based routing",
+	}, []string{"source"})
+
+	c.WithLabelValues("raw")
+	c.WithLabelValues("aggregated")
 
 	return c
 }

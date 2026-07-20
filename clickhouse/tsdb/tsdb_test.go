@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 // TestQuerierLifecycle checks that queriers are tracked as in-flight (so Close
@@ -34,7 +36,7 @@ func TestQuerierLifecycle(t *testing.T) {
 		t.Fatal("waitInflightQueries returned false with no in-flight query")
 	}
 
-	q, err := c.newSQLQuerier("", 0, 1000, 0)
+	q, err := c.newSQLQuerier("", 0, 1000, 0, 0, querierOptions{}, types.DebugLevelNone)
 	if err != nil {
 		t.Fatalf("newSQLQuerier: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestNewSQLQuerierRefusedAfterClose(t *testing.T) {
 	c.closed = true
 	c.closeMu.Unlock()
 
-	if _, err := c.newSQLQuerier("", 0, 1000, 0); !errors.Is(err, errClosed) {
+	if _, err := c.newSQLQuerier("", 0, 1000, 0, 0, querierOptions{}, types.DebugLevelNone); !errors.Is(err, errClosed) {
 		t.Fatalf("newSQLQuerier after close = %v, want errClosed", err)
 	}
 }
