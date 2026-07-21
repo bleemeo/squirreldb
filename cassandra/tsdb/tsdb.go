@@ -264,7 +264,7 @@ func (c *CassandraTSDB) Index() types.Index {
 }
 
 func (c *CassandraTSDB) Flush(ctx context.Context) error {
-	return c.batcher.Flush(ctx)
+	return c.batcher.Flush(ctx, c.writerInterface())
 }
 
 func (c *CassandraTSDB) ParseHTTPOptions(header http.Header) (any, error) {

@@ -29,6 +29,7 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -118,25 +119,6 @@ func generatePoint(fromTS, toTS, step int) []types.MetricPoint { //nolint:unpara
 	}
 
 	return points
-}
-
-// startFlushHandler starts a goroutine that handles backlog flush requests sent by write().
-// Returns a cancel function to stop the handler. Must be restarted when the Batch is recreated.
-func startFlushHandler(ctx context.Context, b *Batch, w *recordingWriter, nowFunc func() time.Time) context.CancelFunc {
-	handlerCtx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		for {
-			select {
-			case req := <-b.synchroniousFlushCh:
-				b.processRequest(handlerCtx, w, req, nowFunc())
-			case <-handlerCtx.Done():
-				return
-			}
-		}
-	}()
-
-	return cancel
 }
 
 func Test_flushTimestamp(t *testing.T) {
@@ -516,12 +498,11 @@ func TestBatch_flush(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			writer := &recordingWriter{}
 			b := &Batch{
-				batchSize:           tt.batchSize,
-				states:              tt.states,
-				memoryStore:         tt.memoryStore,
-				synchroniousFlushCh: make(chan flushRequest),
-				metrics:             newMetrics(prometheus.NewRegistry()),
-				logger:              log.With().Logger(),
+				batchSize:   tt.batchSize,
+				states:      tt.states,
+				memoryStore: tt.memoryStore,
+				metrics:     newMetrics(prometheus.NewRegistry()),
+				logger:      log.With().Logger(),
 			}
 
 			if err := b.flush(t.Context(), writer, tt.ids, tt.now, tt.shutdown); err != nil {
@@ -542,37 +523,46 @@ func TestBatch_flush(t *testing.T) {
 	}
 }
 
+type batchingTSDB struct {
+	writer  *recordingWriter
+	batcher *Batch
+}
+
 // Test_takeover verifies multi-instance ownership and takeover logic using two Batch
 // instances sharing the same TemporaryStore (simulating two SquirrelDB nodes).
 func Test_takeover(t *testing.T) {
 	batchSize := 100 * time.Second
 	memoryStore := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
-	writer1 := &recordingWriter{}
-	writer2 := &recordingWriter{}
 	logger1 := log.With().Str("component", "batch1").Logger()
-	batch1 := New(prometheus.NewRegistry(), batchSize, memoryStore, logger1)
 	logger2 := log.With().Str("component", "batch2").Logger()
-	batch2 := New(prometheus.NewRegistry(), batchSize, memoryStore, logger2)
+	writer1 := &batchingTSDB{
+		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger1),
+		writer:  &recordingWriter{},
+	}
+	writer2 := &batchingTSDB{
+		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger2),
+		writer:  &recordingWriter{},
+	}
 	ctx := t.Context()
 
 	// batch1 owns metric1, batch2 owns metric2; batch1 also receives points for metric2
 	for _, step := range []struct {
-		b       *Batch
+		wr      *batchingTSDB
 		metrics []types.MetricData
 		now     time.Time
 	}{
 		{
-			b:       batch1,
+			wr:      writer1,
 			metrics: []types.MetricData{{ID: metricIDTest1, TimeToLive: 42, Points: []types.MetricPoint{{Timestamp: 10000}}}},
 			now:     time.Unix(10, 0),
 		},
 		{
-			b:       batch2,
+			wr:      writer2,
 			metrics: []types.MetricData{{ID: metricIDTest2, TimeToLive: 42, Points: []types.MetricPoint{{Timestamp: 10000}}}},
 			now:     time.Unix(12, 0),
 		},
 		{
-			b: batch1,
+			wr: writer1,
 			metrics: []types.MetricData{
 				{ID: metricIDTest1, TimeToLive: 42, Points: []types.MetricPoint{{Timestamp: 20000}}},
 				{ID: metricIDTest2, TimeToLive: 42, Points: []types.MetricPoint{{Timestamp: 21000}}},
@@ -580,18 +570,18 @@ func Test_takeover(t *testing.T) {
 			now: time.Unix(20, 0),
 		},
 	} {
-		if err := step.b.write(ctx, step.metrics, step.now); err != nil {
+		if err := step.wr.batcher.write(ctx, step.wr.writer, step.metrics, step.now); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Verify initial state: nothing written yet, correct ownership
-	if len(writer1.Data) != 0 {
-		t.Errorf("initial writer1: got %v, want empty", writer1.Data)
+	if len(writer1.writer.Data) != 0 {
+		t.Errorf("initial writer1: got %v, want empty", writer1.writer.Data)
 	}
 
-	if len(writer2.Data) != 0 {
-		t.Errorf("initial writer2: got %v, want empty", writer2.Data)
+	if len(writer2.writer.Data) != 0 {
+		t.Errorf("initial writer2: got %v, want empty", writer2.writer.Data)
 	}
 
 	wantState1 := map[types.MetricID]stateData{
@@ -601,12 +591,12 @@ func Test_takeover(t *testing.T) {
 		metricIDTest2: {flushDeadline: flushTimestamp(metricIDTest2, time.Unix(10, 0), batchSize)},
 	}
 
-	if !reflect.DeepEqual(batch1.states, wantState1) {
-		t.Errorf("initial state1 = %v, want %v", batch1.states, wantState1)
+	if !reflect.DeepEqual(writer1.batcher.states, wantState1) {
+		t.Errorf("initial state1 = %v, want %v", writer1.batcher.states, wantState1)
 	}
 
-	if !reflect.DeepEqual(batch2.states, wantState2) {
-		t.Errorf("initial state2 = %v, want %v", batch2.states, wantState2)
+	if !reflect.DeepEqual(writer2.batcher.states, wantState2) {
+		t.Errorf("initial state2 = %v, want %v", writer2.batcher.states, wantState2)
 	}
 
 	wantMemoryStore := []types.MetricData{
@@ -618,14 +608,14 @@ func Test_takeover(t *testing.T) {
 		t.Errorf("initial memory store = %v, want %v", dumpMemoryStore(ctx, memoryStore), wantMemoryStore)
 	}
 
-	writer1.Data = nil
-	writer2.Data = nil
+	writer1.writer.Data = nil
+	writer2.writer.Data = nil
 
 	// Phase 1: deadline not overdue yet — batch2 flushes only its own metric2
 	now := time.Unix(0, 0).Add(overdueThreshold)
-	batch2.checkTakeover(ctx, now, writer2)
+	writer2.batcher.checkTakeover(ctx, now, writer2.writer)
 
-	if err := batch2.check(ctx, now, writer2, false, false); err != nil {
+	if err := writer2.batcher.check(ctx, now, writer2.writer, false, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -637,34 +627,34 @@ func Test_takeover(t *testing.T) {
 		{ID: metricIDTest1, TimeToLive: 42, Points: []types.MetricPoint{{Timestamp: 10000}, {Timestamp: 20000}}},
 	}
 
-	if len(writer1.Data) != 0 {
-		t.Errorf("phase1 writer1: got %v, want empty", writer1.Data)
+	if len(writer1.writer.Data) != 0 {
+		t.Errorf("phase1 writer1: got %v, want empty", writer1.writer.Data)
 	}
 
-	if !reflect.DeepEqual(writer2.Data, wantWriter2) {
-		t.Errorf("phase1 writer2 = %v, want %v", writer2.Data, wantWriter2)
+	if !reflect.DeepEqual(writer2.writer.Data, wantWriter2) {
+		t.Errorf("phase1 writer2 = %v, want %v", writer2.writer.Data, wantWriter2)
 	}
 
-	if !reflect.DeepEqual(batch1.states, wantState1) {
-		t.Errorf("phase1 state1 = %v, want %v", batch1.states, wantState1)
+	if !reflect.DeepEqual(writer1.batcher.states, wantState1) {
+		t.Errorf("phase1 state1 = %v, want %v", writer1.batcher.states, wantState1)
 	}
 
-	if !reflect.DeepEqual(batch2.states, wantState2) {
-		t.Errorf("phase1 state2 = %v, want %v", batch2.states, wantState2)
+	if !reflect.DeepEqual(writer2.batcher.states, wantState2) {
+		t.Errorf("phase1 state2 = %v, want %v", writer2.batcher.states, wantState2)
 	}
 
 	if !dataEqual(true, dumpMemoryStore(ctx, memoryStore), wantMemoryStore) {
 		t.Errorf("phase1 memory store = %v, want %v", dumpMemoryStore(ctx, memoryStore), wantMemoryStore)
 	}
 
-	writer1.Data = nil
-	writer2.Data = nil
+	writer1.writer.Data = nil
+	writer2.writer.Data = nil
 
 	// Phase 2: deadline is now overdue — batch2 takes over metric1 and flushes it
 	now = time.Unix(100, 0).Add(overdueThreshold)
-	batch2.checkTakeover(ctx, now, writer2)
+	writer2.batcher.checkTakeover(ctx, now, writer2.writer)
 
-	if err := batch2.check(ctx, now, writer2, false, false); err != nil {
+	if err := writer2.batcher.check(ctx, now, writer2.writer, false, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -673,42 +663,42 @@ func Test_takeover(t *testing.T) {
 	}
 	wantMemoryStore = []types.MetricData{}
 
-	if len(writer1.Data) != 0 {
-		t.Errorf("phase2 writer1: got %v, want empty", writer1.Data)
+	if len(writer1.writer.Data) != 0 {
+		t.Errorf("phase2 writer1: got %v, want empty", writer1.writer.Data)
 	}
 
-	if !reflect.DeepEqual(writer2.Data, wantWriter2) {
-		t.Errorf("phase2 writer2 = %v, want %v", writer2.Data, wantWriter2)
+	if !reflect.DeepEqual(writer2.writer.Data, wantWriter2) {
+		t.Errorf("phase2 writer2 = %v, want %v", writer2.writer.Data, wantWriter2)
 	}
 
-	if !reflect.DeepEqual(batch1.states, wantState1) {
-		t.Errorf("phase2 state1 = %v, want %v", batch1.states, wantState1)
+	if !reflect.DeepEqual(writer1.batcher.states, wantState1) {
+		t.Errorf("phase2 state1 = %v, want %v", writer1.batcher.states, wantState1)
 	}
 
 	if !dataEqual(true, dumpMemoryStore(ctx, memoryStore), wantMemoryStore) {
 		t.Errorf("phase2 memory store = %v, want %v", dumpMemoryStore(ctx, memoryStore), wantMemoryStore)
 	}
 
-	writer1.Data = nil
-	writer2.Data = nil
+	writer1.writer.Data = nil
+	writer2.writer.Data = nil
 
 	// Phase 3: batch1 runs check and detects that metric1 was taken over — it clears its state
-	if err := batch1.check(ctx, now, writer1, false, false); err != nil {
+	if err := writer1.batcher.check(ctx, now, writer1.writer, false, false); err != nil {
 		t.Fatal(err)
 	}
 
 	wantState1 = map[types.MetricID]stateData{}
 
-	if len(writer1.Data) != 0 {
-		t.Errorf("phase3 writer1: got %v, want empty", writer1.Data)
+	if len(writer1.writer.Data) != 0 {
+		t.Errorf("phase3 writer1: got %v, want empty", writer1.writer.Data)
 	}
 
-	if len(writer2.Data) != 0 {
-		t.Errorf("phase3 writer2: got %v, want empty", writer2.Data)
+	if len(writer2.writer.Data) != 0 {
+		t.Errorf("phase3 writer2: got %v, want empty", writer2.writer.Data)
 	}
 
-	if !reflect.DeepEqual(batch1.states, wantState1) {
-		t.Errorf("phase3 state1 = %v, want %v", batch1.states, wantState1)
+	if !reflect.DeepEqual(writer1.batcher.states, wantState1) {
+		t.Errorf("phase3 state1 = %v, want %v", writer1.batcher.states, wantState1)
 	}
 
 	if !dataEqual(true, dumpMemoryStore(ctx, memoryStore), wantMemoryStore) {
@@ -742,43 +732,23 @@ func (c *fakeClock) GetTime() time.Time {
 func TestBatch_write(t *testing.T) { //nolint:maintidx
 	batchSize := 100 * time.Second
 	memoryStore := temporarystore.New(prometheus.NewRegistry(), log.With().Str("component", "temporary_store").Logger())
-	writer1 := &recordingWriter{}
-	writer2 := &recordingWriter{}
-	logger1 := log.With().Str("component", "batch1").Logger()
-	logger2 := log.With().Str("component", "batch2").Logger()
-
 	ctx := t.Context()
 	clock := new(fakeClock)
 	clock.SetTime(time.Now())
 
-	var (
-		batch1, batch2     *Batch
-		cancelH1, cancelH2 context.CancelFunc
-	)
-
-	newBatch1 := func() {
-		if cancelH1 != nil {
-			cancelH1()
+	newBatch := func(writer *recordingWriter, logger zerolog.Logger) *batchingTSDB {
+		return &batchingTSDB{
+			batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger),
+			writer:  writer,
 		}
-
-		batch1 = New(prometheus.NewRegistry(), batchSize, memoryStore, logger1)
-		cancelH1 = startFlushHandler(ctx, batch1, writer1, clock.GetTime)
 	}
 
-	newBatch2 := func() {
-		if cancelH2 != nil {
-			cancelH2()
-		}
-
-		batch2 = New(prometheus.NewRegistry(), batchSize, memoryStore, logger2)
-		cancelH2 = startFlushHandler(ctx, batch2, writer2, clock.GetTime)
+	renewBatch := func(b *batchingTSDB) *batchingTSDB {
+		return newBatch(b.writer, b.batcher.logger)
 	}
 
-	newBatch1()
-	newBatch2()
-
-	defer cancelH1()
-	defer cancelH2()
+	batch1 := newBatch(&recordingWriter{}, log.With().Str("component", "batch1").Logger())
+	batch2 := newBatch(&recordingWriter{}, log.With().Str("component", "batch2").Logger())
 
 	tests := []struct {
 		nowCheck2       time.Time
@@ -1115,7 +1085,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			if tt.write1 != nil {
 				clock.SetTime(tt.nowWrite1)
 
-				if err := batch1.write(ctx, tt.write1, tt.nowWrite1); err != nil {
+				if err := batch1.batcher.write(ctx, batch1.writer, tt.write1, tt.nowWrite1); err != nil {
 					t.Fatalf("batch1.write: %v", err)
 				}
 			}
@@ -1123,7 +1093,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			if tt.write2 != nil {
 				clock.SetTime(tt.nowWrite2)
 
-				if err := batch2.write(ctx, tt.write2, tt.nowWrite2); err != nil {
+				if err := batch2.batcher.write(ctx, batch2.writer, tt.write2, tt.nowWrite2); err != nil {
 					t.Fatalf("batch2.write: %v", err)
 				}
 			}
@@ -1131,7 +1101,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			if !tt.nowCheck1.IsZero() {
 				clock.SetTime(tt.nowCheck1)
 
-				if err := batch1.check(ctx, tt.nowCheck1, writer1, tt.shutdown1, tt.shutdown1); err != nil {
+				if err := batch1.batcher.check(ctx, tt.nowCheck1, batch1.writer, tt.shutdown1, tt.shutdown1); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1139,7 +1109,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			if !tt.nowCheck2.IsZero() {
 				clock.SetTime(tt.nowCheck2)
 
-				if err := batch2.check(ctx, tt.nowCheck2, writer2, tt.shutdown2, tt.shutdown2); err != nil {
+				if err := batch2.batcher.check(ctx, tt.nowCheck2, batch2.writer, tt.shutdown2, tt.shutdown2); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1148,26 +1118,26 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 				// Order-insensitive: a flush of several metrics writes them in
 				// b.states map-iteration order, which is non-deterministic. Only the
 				// set of (metric, points) written matters, not the cross-metric order.
-				if !dataEqual(false, writer1.Data, tt.wantWriter1) {
-					t.Errorf("writer1 = %v, want = %v", writer1.Data, tt.wantWriter1)
+				if !dataEqual(false, batch1.writer.Data, tt.wantWriter1) {
+					t.Errorf("writer1 = %v, want = %v", batch1.writer.Data, tt.wantWriter1)
 				}
 			}
 
 			if tt.wantState1 != nil {
-				if !reflect.DeepEqual(batch1.states, tt.wantState1) {
-					t.Errorf("state1 = %v, want = %v", batch1.states, tt.wantState1)
+				if !reflect.DeepEqual(batch1.batcher.states, tt.wantState1) {
+					t.Errorf("state1 = %v, want = %v", batch1.batcher.states, tt.wantState1)
 				}
 			}
 
 			if tt.wantWriter2 != nil {
-				if !dataEqual(false, writer2.Data, tt.wantWriter2) {
-					t.Errorf("writer2 = %v, want = %v", writer2.Data, tt.wantWriter2)
+				if !dataEqual(false, batch2.writer.Data, tt.wantWriter2) {
+					t.Errorf("writer2 = %v, want = %v", batch2.writer.Data, tt.wantWriter2)
 				}
 			}
 
 			if tt.wantState2 != nil {
-				if !reflect.DeepEqual(batch2.states, tt.wantState2) {
-					t.Errorf("state2 = %v, want = %v", batch2.states, tt.wantState2)
+				if !reflect.DeepEqual(batch2.batcher.states, tt.wantState2) {
+					t.Errorf("state2 = %v, want = %v", batch2.batcher.states, tt.wantState2)
 				}
 			}
 
@@ -1179,15 +1149,15 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 			}
 
 			if tt.shutdown1 {
-				newBatch1()
+				batch1 = renewBatch(batch1)
 			}
 
 			if tt.shutdown2 {
-				newBatch2()
+				batch2 = renewBatch(batch2)
 			}
 
-			writer1.Data = nil
-			writer2.Data = nil
+			batch1.writer.Data = nil
+			batch2.writer.Data = nil
 		})
 
 		if !ok {

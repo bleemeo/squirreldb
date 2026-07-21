@@ -115,23 +115,14 @@ type stateData struct {
 	flushDeadline time.Time
 }
 
-type flushRequest struct {
-	isForcedFlush bool
-	ids           []types.MetricID
-	// response channel will receive a single reply (the error code) and will be closed.
-	// A buffered channel (size 1) should be used, because background thread will never wait to send the reply.
-	response chan error
-}
-
 // Batch receive a stream of points and send batch for points to the writer. It use a memory store to keep points before
 // flushing them to the writer.
 // It also allow to read points merging value from the persistent store (reader) and the memory store.
 type Batch struct {
 	batchSize time.Duration
 
-	synchroniousFlushCh chan flushRequest
-	states              map[types.MetricID]stateData
-	mutex               sync.Mutex
+	states map[types.MetricID]stateData
+	mutex  sync.Mutex
 
 	memoryStore TemporaryStore
 	metrics     *metrics
@@ -146,20 +137,19 @@ func New(
 	logger zerolog.Logger,
 ) *Batch {
 	batch := &Batch{
-		batchSize:           batchSize,
-		states:              make(map[types.MetricID]stateData),
-		synchroniousFlushCh: make(chan flushRequest),
-		memoryStore:         memoryStore,
-		metrics:             newMetrics(reg),
-		logger:              logger,
+		batchSize:   batchSize,
+		states:      make(map[types.MetricID]stateData),
+		memoryStore: memoryStore,
+		metrics:     newMetrics(reg),
+		logger:      logger,
 	}
 
 	return batch
 }
 
 // Write implements MetricWriter.
-func (b *Batch) Write(ctx context.Context, metrics []types.MetricData) error {
-	return b.write(ctx, metrics, time.Now())
+func (b *Batch) Write(ctx context.Context, writer types.MetricWriter, metrics []types.MetricData) error {
+	return b.write(ctx, writer, metrics, time.Now())
 }
 
 // Run starts Batch service (e.g. flushing points after a deadline).
@@ -178,8 +168,6 @@ func (b *Batch) Run(ctx context.Context, writer types.MetricWriter) {
 			if err != nil {
 				b.logger.Err(err).Msg("Batch service background check failed")
 			}
-		case flushReq := <-b.synchroniousFlushCh:
-			b.processRequest(ctx, writer, flushReq, time.Now())
 		case <-tickerTakeover.C:
 			b.checkTakeover(ctx, time.Now(), writer)
 		case <-ctx.Done():
@@ -195,45 +183,10 @@ func (b *Batch) Run(ctx context.Context, writer types.MetricWriter) {
 	}
 }
 
-func (b *Batch) processRequest(ctx context.Context, writer types.MetricWriter, flushReq flushRequest, now time.Time) {
-	var err error
-
-	if flushReq.isForcedFlush {
-		err = b.check(ctx, now, writer, true, false)
-	} else {
-		err = b.flush(ctx, writer, flushReq.ids, now, false)
-	}
-
-	select {
-	case flushReq.response <- err:
-	default:
-	}
-
-	close(flushReq.response)
-}
-
 // Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB.
 // The batcher must be running for this call to works.
-func (b *Batch) Flush(ctx context.Context) error {
-	req := flushRequest{
-		isForcedFlush: true,
-		response:      make(chan error, 1),
-	}
-
-	select {
-	case b.synchroniousFlushCh <- req:
-	case <-ctx.Done():
-	}
-
-	var err error
-
-	select {
-	case err = <-req.response:
-	case <-ctx.Done():
-		err = ctx.Err()
-	}
-
-	return err
+func (b *Batch) Flush(ctx context.Context, writer types.MetricWriter) error {
+	return b.check(ctx, time.Now(), writer, true, false)
 }
 
 // Checks the current states and flush those whose flush date has expired.
@@ -860,6 +813,7 @@ func filterTemporaryPoints(
 // If this is the case, the state is added to the list of states to flush.
 func (b *Batch) write(
 	ctx context.Context,
+	writer types.MetricWriter,
 	metrics []types.MetricData,
 	now time.Time,
 ) error {
@@ -966,23 +920,7 @@ func (b *Batch) write(
 			i++
 		}
 
-		req := flushRequest{
-			ids:      tmp,
-			response: make(chan error, 1),
-		}
-
-		select {
-		case b.synchroniousFlushCh <- req:
-		case <-ctx.Done():
-		}
-
-		select {
-		case err = <-req.response:
-		case <-ctx.Done():
-			err = ctx.Err()
-		}
-
-		if err != nil {
+		if err := b.flush(ctx, writer, tmp, now, false); err != nil {
 			return err
 		}
 	}

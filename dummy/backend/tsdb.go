@@ -158,7 +158,7 @@ func (t *batchingTSDB) ChunkQuerierWithOptions(_ types.QuerierOptions, _, _ int6
 // Flush flushes points still buffered in the batcher to the discard writer. It
 // mirrors clickhouse/tsdb's Flush; it is not part of types.TSDB.
 func (t *batchingTSDB) Flush(ctx context.Context) error {
-	return t.batcher.Flush(ctx)
+	return t.batcher.Flush(ctx, &discardWriter{})
 }
 
 func (t *batchingTSDB) Close(context.Context) error {
@@ -229,7 +229,7 @@ func (app *batchingAppender) Commit() error {
 		}
 	}
 
-	if err := app.t.batcher.Write(app.ctx, metrics); err != nil {
+	if err := app.t.batcher.Write(app.ctx, discardWriter{}, metrics); err != nil {
 		return fmt.Errorf("write metrics: %w", err)
 	}
 

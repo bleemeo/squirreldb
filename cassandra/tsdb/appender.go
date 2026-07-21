@@ -81,7 +81,7 @@ func (app *batchingAppender) Commit() error {
 		return fmt.Errorf("unable to convert metrics: %w", err)
 	}
 
-	if err := app.c.batcher.Write(app.ctx, metrics); err != nil {
+	if err := app.c.batcher.Write(app.ctx, app.c.writerInterface(), metrics); err != nil {
 		return fmt.Errorf("unable to write metrics: %w", err)
 	}
 
