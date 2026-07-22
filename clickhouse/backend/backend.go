@@ -94,6 +94,9 @@ type Backend struct {
 	telemetryStore   *telemetrystore.Store
 	stateStore       *chstate.Store
 	tsdb             *tsdb.ClickHouseTSDB
+	// tsdbReadable is tsdb wrapped so mutable labels work on read; it is what
+	// TSDB() returns. tsdb stays the concrete type for the close and admin paths.
+	tsdbReadable types.TSDB
 }
 
 // New returns a new unstarted backend.
@@ -276,8 +279,8 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 		return nil, ErrNotStarted
 	}
 
-	if b.tsdb != nil {
-		return b.tsdb, nil
+	if b.tsdbReadable != nil {
+		return b.tsdbReadable, nil
 	}
 
 	t, err := tsdb.New(
@@ -300,9 +303,19 @@ func (b *Backend) TSDB(ctx context.Context) (types.TSDB, error) {
 		return nil, err
 	}
 
-	b.tsdb = t
+	_, processor, err := b.getMutableStack(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	return t, nil
+	b.tsdb = t
+	b.tsdbReadable = mutable.NewQueryableWrapper(
+		t,
+		processor,
+		b.logger.With().Str("component", "mutable-tsdb").Logger(),
+	)
+
+	return b.tsdbReadable, nil
 }
 
 // MutableProvider returns the mutable label provider (used by the API to read
@@ -475,6 +488,7 @@ func (b *Backend) CloseAll(ctx context.Context) {
 		}
 
 		b.tsdb = nil
+		b.tsdbReadable = nil
 	}
 
 	b.mutableStore = nil
