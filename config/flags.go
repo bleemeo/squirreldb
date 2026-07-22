@@ -33,10 +33,17 @@ type Flag struct {
 	Hidden bool
 }
 
-// ConfigFlags returns the flags that override configuration keys on the command
-// line. They are shared by every entry point and applied on top of files and
-// environment by Load.
+// ConfigFlags returns every flag that overrides a configuration key on the
+// command line. It is the source of truth for the flag→config binding applied by
+// Load on top of files and environment. What each entry point *exposes* is a
+// subset of this (see SharedConfigFlags / DaemonConfigFlags).
 func ConfigFlags() []Flag {
+	return append(SharedConfigFlags(), DaemonConfigFlags()...)
+}
+
+// SharedConfigFlags are the config-override flags every entry point exposes: they
+// configure the backend connections used by all of them (daemon and migrate).
+func SharedConfigFlags() []Flag {
 	defaultCfg := DefaultConfig()
 
 	return []Flag{
@@ -50,6 +57,17 @@ func ConfigFlags() []Flag {
 			Value: defaultCfg.Redis.Addresses,
 			Usage: "Set the Redis addresses",
 		},
+	}
+}
+
+// DaemonConfigFlags are config-override flags only the daemon exposes on its
+// command line: they configure the server it runs, which subcommands like
+// `migrate` don't. They stay part of ConfigFlags so the flag→config binding still
+// applies when the daemon sets them.
+func DaemonConfigFlags() []Flag {
+	defaultCfg := DefaultConfig()
+
+	return []Flag{
 		{
 			Name:  "listen_address",
 			Value: defaultCfg.ListenAddress,

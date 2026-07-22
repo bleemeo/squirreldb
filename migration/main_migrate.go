@@ -39,9 +39,10 @@ import (
 )
 
 // migrateCommandFlags are the command flags specific to `squirreldb migrate`.
-// They are combined with config.ConfigFlags() the same way the daemon combines
-// DaemonCommandFlags() — so migrate accepts the same config flags (and the same
-// default config file) as the daemon; only these command flags differ.
+// They are combined with the shared config flags (config.SharedConfigFlags) and
+// the same default config file as the daemon; migrate does not expose the
+// daemon-only config flags (e.g. listen_address — it runs no server), so its own
+// --metrics-listen-address is the only listen option here.
 func migrateCommandFlags() []config.Flag {
 	return []config.Flag{
 		{

@@ -383,7 +383,10 @@ func LoadConfigFromFlags(
 	args []string,
 ) (*pflag.FlagSet, config.Config, error, error) {
 	allFlags := append(CommonFlags(), commandFlags...)
-	allFlags = append(allFlags, config.ConfigFlags()...)
+	// Only the config flags shared by every entry point are exposed here; a
+	// command that needs the daemon-only ones (listen_address) adds them via its
+	// commandFlags. The full binding still comes from config.ConfigFlags() in Load.
+	allFlags = append(allFlags, config.SharedConfigFlags()...)
 	flagSet := config.NewFlagSet("squirreldb "+subcommandName, allFlags)
 
 	// Add "Go" flags that are used in tests.
