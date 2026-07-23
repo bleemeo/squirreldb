@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
@@ -67,11 +66,6 @@ type sqlQuerier struct {
 	forceRaw           bool
 	requestDebug       types.DebugLevel
 	logger             zerolog.Logger
-	// sets are the streaming sets produced by Select (a querier may be queried
-	// several times, each set consumed independently); Close releases their
-	// cursors. setsMu guards the slice against concurrent Select calls.
-	setsMu sync.Mutex
-	sets   []*sqlSeriesSet
 }
 
 func (q *sqlQuerier) Select(
@@ -148,24 +142,23 @@ func (q *sqlQuerier) Select(
 
 	set := &sqlSeriesSet{rows: rows, labelsByID: labelsByID}
 
-	// Track the set so Close releases its cursor even if the caller abandons the
-	// iteration early (a fully-drained cursor closes itself, see readRow). Earlier
-	// sets are left untouched — a querier may be Select-ed several times and each
-	// set is consumed independently.
-	q.trackSet(set)
-
-	// The cursor (and thus the streaming set) yields series in id order. When the
-	// caller requires label order, drain and sort in memory. This is the rare
-	// path: PromQL always calls Select with sortSeries=false.
-	if sortSeries {
-		return sortedByLabels(set)
-	}
-
-	return set
+	// Drain the cursor into memory before returning, which closes it — and so
+	// releases the routing read slot it holds — right here. Were the streaming set
+	// returned instead (slot held until the querier closes), a querier that opens
+	// several selector cursors would hold one read slot per open cursor at once, and
+	// concurrent multi-selector PromQL queries could each take a subset of the read
+	// budget then block forever waiting for the rest (a hold-and-wait deadlock,
+	// surfacing as a query timeout). PromQL drains every SeriesSet before evaluating,
+	// so this buffers nothing it would not already. The cursor yields series in id
+	// order; sort in memory only when the caller requires label order (the rare path:
+	// PromQL always passes sortSeries=false).
+	return materialize(set, sortSeries)
 }
 
-// sortedByLabels fully reads a SeriesSet and returns it sorted by labels.
-func sortedByLabels(set storage.SeriesSet) storage.SeriesSet {
+// materialize fully reads set into memory and returns an in-memory set, sorted by
+// labels when the caller requires it. Draining here closes set's cursor (see
+// readRow), releasing the routing read slot before materialize returns.
+func materialize(set storage.SeriesSet, sortSeries bool) storage.SeriesSet {
 	var series []storage.Series
 
 	for set.Next() {
@@ -176,38 +169,24 @@ func sortedByLabels(set storage.SeriesSet) storage.SeriesSet {
 		return storage.ErrSeriesSet(err)
 	}
 
-	sort.Slice(series, func(i, j int) bool {
-		return labels.Compare(series[i].Labels(), series[j].Labels()) < 0
-	})
+	if sortSeries {
+		sort.Slice(series, func(i, j int) bool {
+			return labels.Compare(series[i].Labels(), series[j].Labels()) < 0
+		})
+	}
 
 	return &sliceSeriesSet{series: series, index: -1}
 }
 
 func (q *sqlQuerier) Close() error {
-	// Release every cursor before signalling done, so the connection is free of
-	// this querier's work by the time Close (the TSDB one) stops waiting.
-	q.setsMu.Lock()
-	sets := q.sets
-	q.sets = nil
-	q.setsMu.Unlock()
-
-	for _, set := range sets {
-		set.close()
-	}
-
+	// Select drains and closes every cursor before returning (see materialize), so
+	// there is no open cursor to release here — only the in-flight registration.
 	if q.onClose != nil {
 		q.onClose()
 		q.onClose = nil
 	}
 
 	return nil
-}
-
-// trackSet records a streaming set so Close releases its cursor.
-func (q *sqlQuerier) trackSet(set *sqlSeriesSet) {
-	q.setsMu.Lock()
-	q.sets = append(q.sets, set)
-	q.setsMu.Unlock()
 }
 
 // resolveSeries returns the labels of every series matching the where clause,
@@ -284,7 +263,7 @@ const pointsInlineThreshold = 5000
 
 // pointsQuery builds the tsdb_data query and its arguments. Rows are ordered by
 // id so the streaming SeriesSet can group points per series; series order does
-// not matter (the caller sorts when it requires label order, see sortedByLabels).
+// not matter (the caller sorts when it requires label order, see materialize).
 //
 // For up to pointsInlineThreshold ids it binds `id IN (?)` with the ids
 // resolveSeries already resolved, so the matchers (including regex match()) are
@@ -662,7 +641,7 @@ func (s *sqlSeriesSet) Err() error         { return s.err }
 func (s *sqlSeriesSet) Warnings() annotations.Annotations { return nil }
 
 // sliceSeriesSet is an in-memory storage.SeriesSet over a pre-built slice, used
-// to return series sorted by labels (see sortedByLabels).
+// to return series sorted by labels (see materialize).
 type sliceSeriesSet struct {
 	series []storage.Series
 	index  int

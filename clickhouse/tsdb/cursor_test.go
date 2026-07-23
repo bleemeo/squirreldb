@@ -17,6 +17,8 @@
 package tsdb
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,41 +91,13 @@ func twoSeriesRows() (*fakeRows, map[uuid.UUID]labels.Labels) {
 	return rows, byID
 }
 
-// TestSeriesSetClosedOnAbandon checks that a querier abandoned mid-iteration
-// still releases its cursor on Close (the early-abandonment leak).
-func TestSeriesSetClosedOnAbandon(t *testing.T) {
+// TestSeriesSetClosesCursorOnDrain checks that a fully-drained sqlSeriesSet closes
+// its cursor exactly once (readRow's self-close), and that a further close() is a
+// no-op. This self-close is what releases the routing read slot when Select drains
+// the set (see materialize), so the property must hold.
+func TestSeriesSetClosesCursorOnDrain(t *testing.T) {
 	rows, byID := twoSeriesRows()
 	set := &sqlSeriesSet{rows: rows, labelsByID: byID}
-
-	q := &sqlQuerier{onClose: func() {}}
-	q.trackSet(set)
-
-	// Consume only the first series, then abandon the rest (cursor still open).
-	if !set.Next() {
-		t.Fatal("expected at least one series")
-	}
-
-	if rows.closeCalls != 0 {
-		t.Fatalf("cursor closed too early: %d", rows.closeCalls)
-	}
-
-	if err := q.Close(); err != nil {
-		t.Fatalf("querier Close: %v", err)
-	}
-
-	if rows.closeCalls != 1 {
-		t.Fatalf("cursor close calls after abandon = %d, want 1", rows.closeCalls)
-	}
-}
-
-// TestSeriesSetClosedOnDrainIsIdempotent checks a fully-drained cursor is closed
-// once by readRow, and the querier's Close does not close it a second time.
-func TestSeriesSetClosedOnDrainIsIdempotent(t *testing.T) {
-	rows, byID := twoSeriesRows()
-	set := &sqlSeriesSet{rows: rows, labelsByID: byID}
-
-	q := &sqlQuerier{onClose: func() {}}
-	q.trackSet(set)
 
 	for set.Next() {
 	}
@@ -136,42 +110,121 @@ func TestSeriesSetClosedOnDrainIsIdempotent(t *testing.T) {
 		t.Fatalf("cursor close calls after drain = %d, want 1", rows.closeCalls)
 	}
 
-	if err := q.Close(); err != nil {
-		t.Fatalf("querier Close: %v", err)
-	}
+	// A redundant close (e.g. an abandoned set closed by its owner) must not double-close.
+	set.close()
 
 	if rows.closeCalls != 1 {
-		t.Fatalf("cursor close calls after drain + Close = %d, want 1 (double close)", rows.closeCalls)
+		t.Fatalf("cursor close calls after drain + close = %d, want 1 (double close)", rows.closeCalls)
 	}
 }
 
-// TestMultipleSelectsAllClosedOnClose checks that a querier Select-ed several
-// times does not close an earlier set's cursor when a later Select runs, and
-// that Close releases every set's cursor. This guards the storage.Querier
-// contract: multiple SeriesSets from one querier may be alive at once.
-func TestMultipleSelectsAllClosedOnClose(t *testing.T) {
-	rows1, byID := twoSeriesRows()
-	rows2, _ := twoSeriesRows()
+// TestSeriesSetCloseReleasesOpenCursor checks that close() releases a cursor that
+// was only partially consumed, so an abandoned set never leaks its cursor.
+func TestSeriesSetCloseReleasesOpenCursor(t *testing.T) {
+	rows, byID := twoSeriesRows()
+	set := &sqlSeriesSet{rows: rows, labelsByID: byID}
 
-	set1 := &sqlSeriesSet{rows: rows1, labelsByID: byID}
-	set2 := &sqlSeriesSet{rows: rows2, labelsByID: byID}
-
-	q := &sqlQuerier{onClose: func() {}}
-
-	// Two Selects on the same querier, both sets still in flight.
-	q.trackSet(set1)
-	q.trackSet(set2)
-
-	// Tracking the second set must NOT have closed the first.
-	if rows1.closeCalls != 0 {
-		t.Fatalf("first set's cursor closed by a later Select: %d", rows1.closeCalls)
+	if !set.Next() {
+		t.Fatal("expected at least one series")
 	}
 
-	if err := q.Close(); err != nil {
-		t.Fatalf("querier Close: %v", err)
+	if rows.closeCalls != 0 {
+		t.Fatalf("cursor closed too early: %d", rows.closeCalls)
 	}
 
-	if rows1.closeCalls != 1 || rows2.closeCalls != 1 {
-		t.Fatalf("cursor close calls after Close = (%d, %d), want (1, 1)", rows1.closeCalls, rows2.closeCalls)
+	set.close()
+
+	if rows.closeCalls != 1 {
+		t.Fatalf("cursor close calls after close = %d, want 1", rows.closeCalls)
+	}
+}
+
+// fakeConn is a driver.Conn stub for Select: it answers resolveSeries (the
+// tsdb_tags query) and the point read (the tsdb_data query) with canned rows and
+// counts Close on the point cursor. Every other driver.Conn method is unused by
+// Select and panics via the nil embedded interface if ever called.
+type fakeConn struct {
+	driver.Conn
+
+	tagsRows  driver.Rows
+	pointRows *fakeRows
+}
+
+func (c *fakeConn) Query(_ context.Context, query string, _ ...any) (driver.Rows, error) {
+	if strings.Contains(query, "tsdb_data") {
+		return c.pointRows, nil
+	}
+
+	return c.tagsRows, nil
+}
+
+// fakeTagsRows answers resolveSeries: one row per series, scanned as
+// (id, metric_name, tenant, tags).
+type fakeTagsRows struct {
+	*fakeRows
+
+	names []string
+}
+
+func (r *fakeTagsRows) Scan(dest ...any) error {
+	*dest[0].(*uuid.UUID) = r.cur.id                    //nolint:forcetypeassert
+	*dest[1].(*string) = r.names[r.idx-1]               //nolint:forcetypeassert
+	*dest[2].(*string) = ""                             //nolint:forcetypeassert
+	*dest[3].(*map[string]string) = map[string]string{} //nolint:forcetypeassert
+
+	return nil
+}
+
+// TestSelectMaterializesAndReleasesCursor is the regression test for the routing
+// read-limiter deadlock: Select must drain and close its point cursor BEFORE
+// returning, so a querier never holds a read slot across selectors. It asserts the
+// cursor is closed by the time Select returns and that the returned set is a fully
+// iterable in-memory copy.
+func TestSelectMaterializesAndReleasesCursor(t *testing.T) {
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+	pointRows := &fakeRows{rows: []fakeRow{
+		{id: id, ts: time.UnixMilli(1000), value: 1},
+		{id: id, ts: time.UnixMilli(2000), value: 2},
+	}}
+	tagsRows := &fakeTagsRows{
+		fakeRows: &fakeRows{rows: []fakeRow{{id: id}}},
+		names:    []string{"a"},
+	}
+
+	q := &sqlQuerier{
+		labelQuerier: labelQuerier{
+			conn: &fakeConn{tagsRows: tagsRows, pointRows: pointRows},
+			mint: 0,
+			maxt: 10000,
+		},
+		metrics: newMetrics(nil),
+		onClose: func() {},
+	}
+
+	set := q.Select(context.Background(), false, nil, labels.MustNewMatcher(labels.MatchEqual, "__name__", "a"))
+	if err := set.Err(); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// The point cursor must already be closed — the read slot is released before the
+	// caller iterates. This is the invariant that prevents the hold-and-wait deadlock.
+	if pointRows.closeCalls != 1 {
+		t.Fatalf("point cursor close calls after Select = %d, want 1 (Select must drain before returning)",
+			pointRows.closeCalls)
+	}
+
+	var series int
+
+	for set.Next() {
+		series++
+	}
+
+	if err := set.Err(); err != nil {
+		t.Fatalf("iterate set: %v", err)
+	}
+
+	if series != 1 {
+		t.Fatalf("series count = %d, want 1", series)
 	}
 }
