@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/bleemeo/squirreldb/queryable/convert"
-	"github.com/bleemeo/squirreldb/tests/testcases"
+	"github.com/bleemeo/squirreldb/tests/common/testcases"
 	"github.com/bleemeo/squirreldb/types"
 )
 

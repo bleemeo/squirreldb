@@ -31,7 +31,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
 	"github.com/bleemeo/squirreldb/export"
 	"github.com/bleemeo/squirreldb/types"
 	"golang.org/x/time/rate"
@@ -111,7 +111,7 @@ type Options struct {
 func Run( //nolint:maintidx
 	ctx context.Context,
 	shutdownCtx context.Context,
-	sq *daemon.SquirrelDB,
+	sq *core.SquirrelDB,
 	opts Options,
 	logger zerolog.Logger,
 ) error {
@@ -120,15 +120,11 @@ func Run( //nolint:maintidx
 		return err
 	}
 
-	targetTSDB, err := target.TSDB(ctx)
-	if err != nil {
-		return fmt.Errorf("open target TSDB: %w", err)
-	}
-
 	// The migrator writes directly to the target (bypassing the WAL): the source
 	// is the durable copy and the checkpoint covers resume, so the WAL's buffering
-	// only throttles the backfill.
-	importer, ok := targetTSDB.(export.RawImporter)
+	// only throttles the backfill. The importer is a backend capability (like the
+	// source's exporter), reached on the unwrapped backend.
+	importer, ok := target.(export.RawImporter)
 	if !ok {
 		return errTargetNotImporter
 	}
@@ -415,9 +411,9 @@ type StateStoreBackend interface {
 // state store.
 func resolve(
 	ctx context.Context,
-	sq *daemon.SquirrelDB,
-) (export.RawExporter, daemon.Backend, types.State, error) {
-	source, err := sq.Backend(ctx)
+	sq *core.SquirrelDB,
+) (export.RawExporter, core.Backend, types.State, error) {
+	source, err := sq.Primary(ctx)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open source backend: %w", err)
 	}
@@ -427,7 +423,7 @@ func resolve(
 		return nil, nil, nil, errSourceNotExporter
 	}
 
-	target, err := sq.MigrateToBackend(ctx)
+	target, err := sq.Extra(ctx)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open target backend: %w", err)
 	}
@@ -546,13 +542,13 @@ func resolveDualWriteBoundary(
 // It then carries over the telemetry cluster ID (but not node IDs, which would
 // clash if the source cluster keeps running). Used for the migration's metadata,
 // which the raw-data backfill does not touch.
-func importMutableLabels(ctx context.Context, sq *daemon.SquirrelDB, logger zerolog.Logger) error {
-	source, err := sq.Backend(ctx)
+func importMutableLabels(ctx context.Context, sq *core.SquirrelDB, logger zerolog.Logger) error {
+	source, err := sq.Primary(ctx)
 	if err != nil {
 		return fmt.Errorf("open source backend: %w", err)
 	}
 
-	target, err := sq.MigrateToBackend(ctx)
+	target, err := sq.Extra(ctx)
 	if err != nil {
 		return fmt.Errorf("open target backend: %w", err)
 	}
@@ -592,7 +588,7 @@ func importMutableLabels(ctx context.Context, sq *daemon.SquirrelDB, logger zero
 // alone on purpose: copying them would make a still-running source cluster and the
 // target share IDs and clash. The target store must support setting the cluster ID
 // otherwise this is a no-op with a warning.
-func copyTelemetryClusterID(ctx context.Context, source, target daemon.Backend, logger zerolog.Logger) error {
+func copyTelemetryClusterID(ctx context.Context, source, target core.Backend, logger zerolog.Logger) error {
 	tgtTelemetry, err := target.TelemetryStore(ctx)
 	if err != nil {
 		return fmt.Errorf("target telemetry store: %w", err)

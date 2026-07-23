@@ -35,7 +35,6 @@ import (
 
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/api/requestscoped"
-	"github.com/bleemeo/squirreldb/appendable/fixedappender"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/mutable"
@@ -70,7 +69,6 @@ var allowedProtoMsgs = []config.RemoteWriteProtoMsg{ //nolint:gochecknoglobals
 var (
 	regexErrInvalidLabel        = regexp.MustCompile(fmt.Sprintf("^%s", requestappender.ErrInvalidLabel))
 	regexErrMissingTenantHeader = regexp.MustCompile(fmt.Sprintf("^%s", requestscoped.ErrMissingTenantHeader))
-	ErrIsReadOnly               = errors.New("trying to write but read-only mode is enabled")
 )
 
 // TSDBDebugEndpoint define the (legacy) troubleshooting endpoints exposed by API.
@@ -90,9 +88,15 @@ type TSDBDebugEndpoint interface {
 
 // API it the SquirrelDB HTTP API server.
 type API struct {
-	ListenAddress               string
-	ReadOnly                    bool
-	TSDB                        types.TSDB
+	ListenAddress string
+	Queryable     types.QueryableWithOptions
+	Appendable    types.AppendableWithOptions
+	// OptionsParser (optional) parses per-request backend options from HTTP headers;
+	// DebugEndpoint (optional) exposes the legacy index/flush/pre-aggregate debug
+	// operations. Both are backend capabilities, set only when the backend provides
+	// them (nil otherwise).
+	OptionsParser               types.HTTPOptionsParser
+	DebugEndpoint               TSDBDebugEndpoint
 	MutableLabelWriter          MutableLabelInterface
 	DefaultTTL                  time.Duration
 	MaxConcurrentRemoteRequests int
@@ -254,19 +258,11 @@ func (a *API) init(ctx context.Context) error {
 		DefaultTTL:                int64(a.DefaultTTL.Seconds()),
 		TenantLabelName:           a.TenantLabelName,
 		RequireTenantHeader:       a.RequireTenantHeader,
-		Queryable:                 a.TSDB,
+		Queryable:                 a.Queryable,
+		Appendable:                a.Appendable,
+		OptionsParser:             a.OptionsParser,
 		MutableLabelDetector:      a.MutableLabelDetector,
 		MetricRegistry:            a.MetricRegistry,
-	}
-
-	if optParser, ok := a.TSDB.(types.HTTPOptionsParser); ok {
-		storeOption.OptionsParser = optParser
-	}
-
-	if a.ReadOnly {
-		storeOption.Appendable = fixedappender.NewErrorAppendableWithOptions(ErrIsReadOnly)
-	} else {
-		storeOption.Appendable = a.TSDB
 	}
 
 	requestScopedStore := requestscoped.NewStore(storeOption)
@@ -489,8 +485,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (a *API) flushHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
-		err := tsdbDebug.Flush(r.Context())
+	if a.DebugEndpoint != nil {
+		err := a.DebugEndpoint.Flush(r.Context())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
 
@@ -593,10 +589,10 @@ The CSV format is: metricID, labels,expirationDate
 func (a *API) getIndexDumperOrReplyError(w http.ResponseWriter) types.IndexDumper {
 	var index types.Index
 
-	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
-		index = tsdbDebug.Index()
+	if a.DebugEndpoint != nil {
+		index = a.DebugEndpoint.Index()
 	} else {
-		http.Error(w, "TSDB does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
+		http.Error(w, "backend does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
 
 		return nil
 	}
@@ -613,10 +609,10 @@ func (a *API) getIndexDumperOrReplyError(w http.ResponseWriter) types.IndexDumpe
 func (a *API) getIndexOrReplyError(w http.ResponseWriter) types.Index {
 	var index types.Index
 
-	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
-		index = tsdbDebug.Index()
+	if a.DebugEndpoint != nil {
+		index = a.DebugEndpoint.Index()
 	} else {
-		http.Error(w, "TSDB does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
+		http.Error(w, "backend does not implement TSDBDebugEndpoint", http.StatusNotImplemented)
 
 		return nil
 	}
@@ -1035,15 +1031,15 @@ func (a *API) aggregateHandler(w http.ResponseWriter, req *http.Request) {
 
 	// Flush the points from the temporary store so they can be pre-aggregated.
 	// Recent points are still kept in memory for faster reads.
-	if tsdbDebug, ok := a.TSDB.(TSDBDebugEndpoint); ok {
-		err := tsdbDebug.Flush(req.Context())
+	if a.DebugEndpoint != nil {
+		err := a.DebugEndpoint.Flush(req.Context())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Flush failed: %v", err), http.StatusInternalServerError)
 
 			return
 		}
 
-		err = tsdbDebug.ForcePreAggregation(ctx, thread, from, to, matchers)
+		err = a.DebugEndpoint.ForcePreAggregation(ctx, thread, from, to, matchers)
 		if err != nil {
 			http.Error(w, "pre-aggregation failed", http.StatusInternalServerError)
 

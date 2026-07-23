@@ -14,16 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package daemon
+package core
 
 import (
 	"context"
-	"errors"
-	"slices"
-	"sync"
-	"time"
 
-	"github.com/bleemeo/squirreldb/api"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/prometheus/model/exemplar"
@@ -34,57 +29,24 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var errCompositeUnsupported = errors.New("operation not supported by the primary TSDB")
-
-// bestEffortAppendable is implemented by a TSDB (ClickHouse) that can hand out a
-// best-effort, non-blocking appender for dual-write. When an extra TSDB
-// implements it, the composite uses it so an unavailable extra never blocks or
-// fails the request; otherwise it falls back to the normal appender.
-type bestEffortAppendable interface {
-	BestEffortAppenderWithOptions(ctx context.Context, options types.AppenderOptions) storage.Appender
+// dualWriteAppendable is the write path when an extra (dual-write) backend is
+// configured: it fans each request out to the primary (must-succeed) and every
+// extra (best-effort). It is a narrow types.AppendableWithOptions — it wraps no
+// full TSDB, so it hides none of a backend's capabilities. Reads never go through
+// it (they come from the primary Backend directly).
+type dualWriteAppendable struct {
+	primary types.AppendableWithOptions
+	// extras returns the live extra TSDB(s) at request time, so an extra attached
+	// after startup starts receiving writes without rebuilding this appendable.
+	extras func(ctx context.Context) []types.TSDB
+	logger zerolog.Logger
 }
 
-// compositeTSDB writes to the primary TSDB (must succeed) and every extra TSDB
-// (best-effort), and reads from the primary. It is the ONLY composite layer for
-// dual-write: the primary and extra Backends stay unwrapped (reads, mutable
-// labels, telemetry, debug endpoints all come from the primary Backend
-// directly). It satisfies types.TSDB and forwards the legacy
-// api.TSDBDebugEndpoint methods (reads to the primary, flush to primary + extras).
-type compositeTSDB struct {
-	primary types.TSDB
-	logger  zerolog.Logger
-
-	// extras may be attached after construction (attachExtra) — a best-effort extra
-	// whose backend was unreachable at startup is added once it comes up — so every
-	// access is guarded by mu.
-	mu     sync.RWMutex
-	extras []types.TSDB
-}
-
-func newCompositeTSDB(primary types.TSDB, extras []types.TSDB, logger zerolog.Logger) *compositeTSDB {
-	return &compositeTSDB{primary: primary, extras: extras, logger: logger}
-}
-
-// attachExtra adds an extra dual-write TSDB after construction (the daemon uses it
-// to attach an extra whose backend only became reachable after startup).
-func (t *compositeTSDB) attachExtra(extra types.TSDB) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.extras = append(t.extras, extra)
-}
-
-// extrasSnapshot returns the current extras under the read lock, so callers can
-// iterate without holding it (and without racing attachExtra).
-func (t *compositeTSDB) extrasSnapshot() []types.TSDB {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return slices.Clone(t.extras)
-}
-
-func (t *compositeTSDB) AppenderWithOptions(ctx context.Context, options types.AppenderOptions) storage.Appender {
-	extras := t.extrasSnapshot()
+func (d *dualWriteAppendable) AppenderWithOptions(
+	ctx context.Context,
+	options types.AppenderOptions,
+) storage.Appender {
+	extras := d.extras(ctx)
 	extraAppenders := make([]storage.Appender, len(extras))
 
 	for i, e := range extras {
@@ -96,90 +58,10 @@ func (t *compositeTSDB) AppenderWithOptions(ctx context.Context, options types.A
 	}
 
 	return &compositeAppender{
-		primary: t.primary.AppenderWithOptions(ctx, options),
+		primary: d.primary.AppenderWithOptions(ctx, options),
 		extras:  extraAppenders,
-		logger:  t.logger,
+		logger:  d.logger,
 	}
-}
-
-func (t *compositeTSDB) QuerierWithOptions(
-	opts types.QuerierOptions,
-	mint int64,
-	maxt int64,
-) (storage.Querier, error) {
-	return t.primary.QuerierWithOptions(opts, mint, maxt)
-}
-
-func (t *compositeTSDB) ChunkQuerierWithOptions(
-	opts types.QuerierOptions,
-	mint int64,
-	maxt int64,
-) (storage.ChunkQuerier, error) {
-	return t.primary.ChunkQuerierWithOptions(opts, mint, maxt)
-}
-
-func (t *compositeTSDB) Close(ctx context.Context) error {
-	// The underlying backends own their TSDBs and close them via CloseAll; closing
-	// here too is safe because TSDB.Close is idempotent.
-	var firstErr error
-
-	if err := t.primary.Close(ctx); err != nil {
-		firstErr = err
-	}
-
-	for _, e := range t.extrasSnapshot() {
-		if err := e.Close(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-
-	return firstErr
-}
-
-// Index forwards to the primary TSDB (api.TSDBDebugEndpoint).
-func (t *compositeTSDB) Index() types.Index {
-	if d, ok := t.primary.(api.TSDBDebugEndpoint); ok {
-		return d.Index()
-	}
-
-	return nil
-}
-
-// ForcePreAggregation forwards to the primary TSDB (api.TSDBDebugEndpoint).
-func (t *compositeTSDB) ForcePreAggregation(
-	ctx context.Context,
-	threadCount int,
-	from time.Time,
-	to time.Time,
-	matchers []*labels.Matcher,
-) error {
-	if d, ok := t.primary.(api.TSDBDebugEndpoint); ok {
-		return d.ForcePreAggregation(ctx, threadCount, from, to, matchers)
-	}
-
-	return errCompositeUnsupported
-}
-
-// Flush forwards to the primary and every extra TSDB that supports it, so a
-// manual flush drains all write pipelines.
-func (t *compositeTSDB) Flush(ctx context.Context) error {
-	var firstErr error
-
-	if d, ok := t.primary.(api.TSDBDebugEndpoint); ok {
-		if err := d.Flush(ctx); err != nil {
-			firstErr = err
-		}
-	}
-
-	for _, e := range t.extrasSnapshot() {
-		if d, ok := e.(api.TSDBDebugEndpoint); ok {
-			if err := d.Flush(ctx); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-
-	return firstErr
 }
 
 // compositeAppender fans a single remote-write request out to the primary

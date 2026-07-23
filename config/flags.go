@@ -21,6 +21,20 @@ import (
 	"github.com/spf13/pflag"
 )
 
+func CommonFlags() []Flag {
+	return []Flag{
+		{Name: "help", Short: "h", Value: false, Usage: "Display help"},
+		{Name: "version", Short: "v", Value: false, Usage: "Show version and exit"},
+		{Name: "build-info", Value: false, Usage: "Show build-info and exit"},
+		{
+			Name:  "config",
+			Short: "c",
+			Value: DefaultConfigPaths(),
+			Usage: "Files and folders from which to load the configuration",
+		},
+	}
+}
+
 // Flag describes one command-line flag. Command flags (help, version, config
 // files, subcommand-specific options) are defined by each entry point (the
 // daemon, the migrate subcommand, the test tools); the config flags below are

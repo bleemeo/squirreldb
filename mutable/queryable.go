@@ -30,28 +30,30 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// queryableWrapper handles mutable labels on read by decorating a TSDB at the
-// storage.Querier seam: it replaces mutable matchers by their non-mutable form
-// before querying and re-adds the mutable labels to the results. It is the
-// counterpart of indexWrapper for a backend that resolves matchers itself
-// (translates them to SQL) instead of exposing a types.Index to wrap.
+// queryableWrapper handles mutable labels on read by decorating a queryable: it
+// replaces mutable matchers by their non-mutable form before querying and re-adds
+// the mutable labels to the results. It wraps the NARROW types.QueryableWithOptions
+// (never the full types.TSDB), so it hides none of the backend's extra capabilities
+// (HTTPOptionsParser, RawImporter, ...). It is the counterpart of indexWrapper for a
+// backend that resolves matchers itself (translates them to SQL) instead of exposing
+// a types.Index to wrap.
 type queryableWrapper struct {
-	types.TSDB
+	types.QueryableWithOptions
 
 	labelProcessor *LabelProcessor
 	logger         zerolog.Logger
 }
 
-// NewQueryableWrapper returns a TSDB that handles mutable labels on the read path.
-func NewQueryableWrapper(
-	inner types.TSDB,
+// NewQueryable returns a queryable that handles mutable labels on the read path.
+func NewQueryable(
+	inner types.QueryableWithOptions,
 	labelProcessor *LabelProcessor,
 	logger zerolog.Logger,
-) types.TSDB {
+) types.QueryableWithOptions {
 	return &queryableWrapper{
-		TSDB:           inner,
-		labelProcessor: labelProcessor,
-		logger:         logger,
+		QueryableWithOptions: inner,
+		labelProcessor:       labelProcessor,
+		logger:               logger,
 	}
 }
 
@@ -59,7 +61,7 @@ func (w *queryableWrapper) QuerierWithOptions(
 	opts types.QuerierOptions,
 	mint, maxt int64,
 ) (storage.Querier, error) {
-	inner, err := w.TSDB.QuerierWithOptions(opts, mint, maxt)
+	inner, err := w.QueryableWithOptions.QuerierWithOptions(opts, mint, maxt)
 	if err != nil {
 		return nil, err
 	}

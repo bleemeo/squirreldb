@@ -22,7 +22,7 @@ import (
 
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/queryable/convert"
-	"github.com/bleemeo/squirreldb/tests/testcases"
+	"github.com/bleemeo/squirreldb/tests/common/testcases"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"

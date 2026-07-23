@@ -30,7 +30,7 @@ import (
 
 // newMutableQueryable returns a MemoryTSDB pre-filled with four server metrics,
 // wrapped so mutable labels work on read.
-func newMutableQueryable(t *testing.T) types.TSDB {
+func newMutableQueryable(t *testing.T) types.QueryableWithOptions {
 	t.Helper()
 
 	db := &dummy.MemoryTSDB{}
@@ -50,11 +50,11 @@ func newMutableQueryable(t *testing.T) types.TSDB {
 	provider := mutable.NewProvider(t.Context(), nil, &dummy.LocalCluster{}, store, logger.NewTestLogger(true))
 	processor := mutable.NewLabelProcessor(provider, "__account_id")
 
-	return mutable.NewQueryableWrapper(db, processor, logger.NewTestLogger(true))
+	return mutable.NewQueryable(db, processor, logger.NewTestLogger(true))
 }
 
 // selectLabels runs Select and returns the label set of every matching series.
-func selectLabels(t *testing.T, q types.TSDB, matchers ...*labels.Matcher) []labels.Labels {
+func selectLabels(t *testing.T, q types.QueryableWithOptions, matchers ...*labels.Matcher) []labels.Labels {
 	t.Helper()
 
 	querier, err := q.QuerierWithOptions(types.QuerierOptions{}, 0, 2000)

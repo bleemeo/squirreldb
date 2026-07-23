@@ -12,7 +12,7 @@ import (
 
 	"github.com/bleemeo/squirreldb/cassandra/index"
 	"github.com/bleemeo/squirreldb/config"
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -81,7 +81,12 @@ var (
 	}
 )
 
-func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nolint:maintidx
+func bench( //nolint:maintidx
+	ctx context.Context,
+	shutdownCtx context.Context,
+	cfg config.Config,
+	rnd *rand.Rand,
+) error {
 	now := time.Now()
 
 	proc, err := procfs.NewProc(os.Getpid())
@@ -93,16 +98,23 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 
 	cluster := &dummy.LocalCluster{}
 
-	squirreldb := &daemon.SquirrelDB{
-		Config:          cfg,
-		ExistingCluster: cluster,
-		MetricRegistry: prometheus.WrapRegistererWith(
-			map[string]string{"process": "bench-query"},
-			prometheus.DefaultRegisterer,
-		),
-		Logger: log.With().Str("component", "daemon").Logger(),
-	}
-	defer squirreldb.Stop()
+	squirreldb := core.New(
+		core.Deps{
+			MetricRegistry: prometheus.WrapRegistererWith(
+				map[string]string{"process": "bench-query"},
+				prometheus.DefaultRegisterer,
+			),
+			Logger: log.With().Str("component", "daemon").Logger(),
+		},
+		cfg,
+		core.SquirrelDBOption{
+			ExistingCluster: cluster,
+			InternalTesting: core.InternalTestingOption{
+				DropDataOnStartup: true, // the backend drops its data when it first starts
+			},
+		},
+	)
+	defer squirreldb.CloseAll(shutdownCtx)
 
 	idx, err := getIndex(ctx, squirreldb, true)
 	if err != nil {
@@ -135,17 +147,20 @@ func bench(ctx context.Context, cfg config.Config, rnd *rand.Rand) error { //nol
 		}
 
 		for p := range *workerProcesses {
-			squirreldb := &daemon.SquirrelDB{
-				Config: cfg,
-				MetricRegistry: prometheus.WrapRegistererWith(
-					map[string]string{"process": fmt.Sprintf("bench%d", p)},
-					prometheus.DefaultRegisterer,
-				),
-				ExistingCluster: cluster,
-				Logger:          log.With().Str("component", "daemon").Int("process", p).Logger(),
-			}
-
-			defer squirreldb.Stop()
+			squirreldb := core.New(
+				core.Deps{
+					MetricRegistry: prometheus.WrapRegistererWith(
+						map[string]string{"process": fmt.Sprintf("bench%d", p)},
+						prometheus.DefaultRegisterer,
+					),
+					Logger: log.With().Str("component", "daemon").Int("process", p).Logger(),
+				},
+				cfg,
+				core.SquirrelDBOption{
+					ExistingCluster: cluster,
+				},
+			)
+			defer squirreldb.CloseAll(shutdownCtx)
 
 			localIndex, err := getIndex(ctx, squirreldb, false)
 			if err != nil {

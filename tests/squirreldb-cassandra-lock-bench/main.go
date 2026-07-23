@@ -13,7 +13,9 @@ import (
 	"time"
 
 	cassandralocks "github.com/bleemeo/squirreldb/cassandra/locks"
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -66,11 +68,11 @@ type result struct {
 }
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 
-	if errors.Is(err, daemon.ErrSkipBackend) {
+	if errors.Is(err, testsetup.ErrSkipBackend) {
 		log.Info().Msg(err.Error())
 
 		return
@@ -86,8 +88,8 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, _ context.Context) error {
-	cfg, warnings, err := daemon.Config()
+func run(ctx context.Context, shutdownCtx context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -108,18 +110,20 @@ func run(ctx context.Context, _ context.Context) error {
 	start := time.Now()
 
 	for p := 0; p < *workerProcesses; p++ {
-		squirreldb := &daemon.SquirrelDB{
-			Config: cfg,
-			MetricRegistry: prometheus.WrapRegistererWith(
-				map[string]string{"process": strconv.FormatInt(int64(p), 10)},
-				prometheus.DefaultRegisterer,
-			),
-			Logger: log.With().Str("component", "daemon").Int("process", p).Logger(),
-		}
+		squirreldb := core.New(
+			core.Deps{
+				MetricRegistry: prometheus.WrapRegistererWith(
+					map[string]string{"process": strconv.FormatInt(int64(p), 10)},
+					prometheus.DefaultRegisterer,
+				),
+				Logger: log.With().Str("component", "daemon").Int("process", p).Logger(),
+			},
+			cfg,
+			core.SquirrelDBOption{},
+		)
+		defer squirreldb.CloseAll(shutdownCtx)
 
-		defer squirreldb.Stop()
-
-		b, err := squirreldb.Backend(ctx)
+		b, err := squirreldb.Primary(ctx)
 		if err != nil {
 			return err
 		}
@@ -129,7 +133,7 @@ func run(ctx context.Context, _ context.Context) error {
 		// can be launched unconditionally for any backend.
 		provider, ok := b.(lockFactoryProvider)
 		if !ok {
-			return daemon.ErrSkipBackend
+			return testsetup.ErrSkipBackend
 		}
 
 		lockFactory, err := provider.LockFactory(ctx)
@@ -232,13 +236,17 @@ func run(ctx context.Context, _ context.Context) error {
 	return nil
 }
 
+type LockFactory interface {
+	CreateLock(name string, timeToLive time.Duration) types.TryLocker
+}
+
 func worker(
 	ctx context.Context,
 	p int,
 	t int,
 	workerSeed int64,
 	jobRunning *int32,
-	lockFactory daemon.LockFactory,
+	lockFactory LockFactory,
 	subLockName string,
 	lock types.TryLocker,
 ) result {
@@ -333,7 +341,7 @@ func worker(
 	return r
 }
 
-func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory daemon.LockFactory) result {
+func blockerWorker(ctx context.Context, jobRunning []int32, lockFactory LockFactory) result {
 	r := result{}
 	blockCount := 0
 

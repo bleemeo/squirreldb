@@ -36,7 +36,7 @@ import (
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/mutable"
-	"github.com/bleemeo/squirreldb/tests/testcases"
+	"github.com/bleemeo/squirreldb/tests/common/testcases"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -369,7 +369,8 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			t.Parallel()
 
 			api := API{
-				TSDB:                store,
+				Queryable:           store,
+				Appendable:          store,
 				RequireTenantHeader: tt.requireTenantHeader,
 				TenantLabelName:     tenantLabelName,
 			}
@@ -1384,7 +1385,6 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 			store := makeTSDB(tt.storeData)
 			squirrelDBAPI := makeAPI(store, nil)
-			squirrelDBAPI.ReadOnly = true
 			squirrelDBAPI.PromQLMaxEvaluatedPoints = tt.apiOption.MaxEvaluatedPoints
 			squirrelDBAPI.PromQLMaxEvaluatedSeries = tt.apiOption.MaxEvaluatedSeries
 
@@ -1521,8 +1521,8 @@ func makeAPI(
 
 	return &API{
 		ListenAddress:               "not used",
-		ReadOnly:                    config.DefaultConfig().Internal.ReadOnly,
-		TSDB:                        backend,
+		Queryable:                   backend,
+		Appendable:                  backend,
 		PromQLMaxEvaluatedPoints:    uint64(config.DefaultConfig().PromQL.MaxEvaluatedPoints),
 		PromQLMaxEvaluatedSeries:    uint32(config.DefaultConfig().PromQL.MaxEvaluatedSeries),
 		MaxConcurrentRemoteRequests: config.DefaultConfig().RemoteStorage.MaxConcurrentRequests,

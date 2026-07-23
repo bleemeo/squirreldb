@@ -14,13 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package daemon
+package core
 
 import (
 	"errors"
 	"testing"
-
-	"github.com/bleemeo/squirreldb/config"
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -29,66 +27,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/rs/zerolog"
 )
-
-func TestValidateConfigExtraWriteBackends(t *testing.T) {
-	t.Parallel()
-
-	base := config.DefaultConfig()
-
-	cases := []struct {
-		name    string
-		mutate  func(*config.Config)
-		wantErr bool
-	}{
-		{
-			name:    "no extra_write_backend is fine",
-			mutate:  func(*config.Config) {},
-			wantErr: false,
-		},
-		{
-			name: "dual write: clickhouse extra alongside cassandra",
-			mutate: func(c *config.Config) {
-				c.Backend = "cassandra"
-				c.ExtraWriteBackend = "clickhouse"
-			},
-			wantErr: false,
-		},
-		{
-			name: "extra equal to backend is rejected",
-			mutate: func(c *config.Config) {
-				c.Backend = "cassandra"
-				c.ExtraWriteBackend = "cassandra"
-			},
-			wantErr: true,
-		},
-		{
-			name: "unknown extra backend name",
-			mutate: func(c *config.Config) {
-				c.Backend = "cassandra"
-				c.ExtraWriteBackend = "postgres"
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := base
-			tc.mutate(&cfg)
-
-			err := validateConfig(cfg)
-			if tc.wantErr && err == nil {
-				t.Fatal("expected an error, got nil")
-			}
-
-			if !tc.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
 
 func TestCompositeAppenderFanOut(t *testing.T) {
 	t.Parallel()

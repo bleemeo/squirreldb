@@ -22,6 +22,8 @@ import (
 	"runtime/pprof"
 
 	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/core/processsetup"
+	"github.com/bleemeo/squirreldb/core/version"
 	"github.com/bleemeo/squirreldb/logger"
 
 	"github.com/rs/zerolog/log"
@@ -39,8 +41,8 @@ func daemonCommandFlags() []config.Flag {
 // loads the configuration from args and runs SquirrelDB until a stop signal. It
 // returns a process exit code.
 func RunDaemon(args []string) int {
-	_, cfg, warnings, err := LoadConfigFromFlags("daemon", daemonCommandFlags(), args)
-	if errors.Is(err, ErrNormalExit) {
+	_, cfg, warnings, err := config.LoadConfigFromFlags("daemon", daemonCommandFlags(), args)
+	if errors.Is(err, config.ErrNormalExit) {
 		return 0
 	}
 
@@ -52,7 +54,7 @@ func RunDaemon(args []string) int {
 		log.Warn().Err(warnings).Msg("Got warnings while loading config")
 	}
 
-	if sentryCloser := SetupSentryLogger(cfg); sentryCloser != nil {
+	if sentryCloser := processsetup.SetupSentryLogger(cfg); sentryCloser != nil {
 		defer sentryCloser.Close()
 	}
 
@@ -63,7 +65,7 @@ func RunDaemon(args []string) int {
 		Logger: log.With().Str("component", "daemon").Logger(),
 	}
 
-	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", Version, Commit)
+	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", version.Version, version.Commit)
 
 	defer func() {
 		log.Debug().Msg("SquirrelDB is stopped")
@@ -73,7 +75,7 @@ func RunDaemon(args []string) int {
 		}
 	}()
 
-	if err := RunWithSignalHandler(squirreldb.Run); err != nil {
+	if err := processsetup.RunWithSignalHandler(squirreldb.Run); err != nil {
 		log.Err(err).Msg("Failed to run SquirrelDB")
 
 		return 1

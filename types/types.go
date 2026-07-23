@@ -258,3 +258,11 @@ const (
 )
 
 const PrometheusValidationScheme = model.UTF8Validation
+
+// BackendInfo contains some information about how the backend behaves so core.SquirrelDB can
+// adjust some features.
+type BackendInfo struct {
+	// ApplyMutableLabelInternally tells whether the Backend TSDB gives "raw" access (without mutable labels) or
+	// if the backend already applies mutable labels.
+	ApplyMutableLabelInternally bool
+}

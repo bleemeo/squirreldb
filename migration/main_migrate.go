@@ -27,7 +27,8 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/config"
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
 
@@ -80,8 +81,8 @@ func migrateCommandFlags() []config.Flag {
 // data from the source backend (config `backend`) into the target
 // (`extra_write_backend`). It returns a process exit code.
 func RunMigrate(args []string) int {
-	flagSet, cfg, warnings, err := daemon.LoadConfigFromFlags("migrate", migrateCommandFlags(), args)
-	if errors.Is(err, daemon.ErrNormalExit) {
+	flagSet, cfg, warnings, err := config.LoadConfigFromFlags("migrate", migrateCommandFlags(), args)
+	if errors.Is(err, config.ErrNormalExit) {
 		return 0
 	}
 
@@ -122,36 +123,37 @@ func RunMigrate(args []string) int {
 		return 2
 	}
 
-	if sentryCloser := daemon.SetupSentryLogger(cfg); sentryCloser != nil {
+	if sentryCloser := processsetup.SetupSentryLogger(cfg); sentryCloser != nil {
 		defer sentryCloser.Close()
 	}
 
 	defer logger.ProcessPanic()
 
-	squirreldb := &daemon.SquirrelDB{
-		Config: cfg,
-		Logger: log.With().Str("component", "migrate").Logger(),
-		// We don't call Init() (no daemon run loop), so set the metric registry
-		// explicitly — otherwise it stays nil and the backends register their
-		// metrics nowhere, leaving --print-metrics / --metrics-listen-address empty.
-		MetricRegistry: prometheus.DefaultRegisterer,
-		// An in-process cluster: migrate builds both the source and the target on the
-		// shared Cluster otherwise, so the target's cache-invalidation broadcasts (a
-		// flood during the drop-then-rewrite Import) would hit the live source cluster
-		// over Redis. A LocalCluster keeps them in this process. Its listeners are
-		// per-object, so the source and target still cross-invalidate each other's
-		// in-memory caches, but nothing leaves the migrate.
-		ExistingCluster: &dummy.LocalCluster{},
-		// The source is read-only: the migration only reads it, and this is a double
-		// safety against writing to the store being migrated away. The write target
-		// (MigrateToBackend) is unaffected.
-		PrimaryBackendReadOnly: true,
-		// The target is import-only: `migrate` writes via ImportRawData (bypassing the
-		// WAL), so it must not run a WAL drainer — that would join the drainer lease
-		// election of the live daemon that owns the shared WAL, and emit a misleading
-		// "WAL not fully drained" warning at shutdown about points it never wrote.
-		MigrateTargetImportOnly: true,
-	}
+	squirreldb := core.New(
+		core.Deps{
+			Logger:         log.With().Str("component", "migrate").Logger(),
+			MetricRegistry: prometheus.DefaultRegisterer,
+		},
+		cfg,
+		core.SquirrelDBOption{
+			// An in-process cluster: migrate builds both the source and the target on the
+			// shared Cluster otherwise, so the target's cache-invalidation broadcasts (a
+			// flood during the drop-then-rewrite Import) would hit the live source cluster
+			// over Redis. A LocalCluster keeps them in this process. Its listeners are
+			// per-object, so the source and target still cross-invalidate each other's
+			// in-memory caches, but nothing leaves the migrate.
+			ExistingCluster: &dummy.LocalCluster{},
+			// The source is read-only: the migration only reads it, and this is a double
+			// safety against writing to the store being migrated away. The write target
+			// (MigrateToBackend) is unaffected.
+			PrimaryBackendReadOnly: true,
+			// The target is import-only: `migrate` writes via ImportRawData (bypassing the
+			// WAL), so it must not run a WAL drainer — that would join the drainer lease
+			// election of the live daemon that owns the shared WAL, and emit a misleading
+			// "WAL not fully drained" warning at shutdown about points it never wrote.
+			MigrateTargetImportOnly: true,
+		},
+	)
 
 	logger := log.With().Str("component", "migrate").Logger()
 	logger.Info().Str("source", cfg.Backend).Str("target", cfg.ExtraWriteBackend).Msg("Starting migration")
@@ -185,7 +187,7 @@ func RunMigrate(args []string) int {
 		}
 	}()
 
-	if err := daemon.RunWithSignalHandler(run); err != nil {
+	if err := processsetup.RunWithSignalHandler(run); err != nil {
 		logger.Error().Err(err).Msg("Migration failed")
 
 		return 1
@@ -286,17 +288,17 @@ func printAllMetrics(logger zerolog.Logger) {
 	}
 }
 
-func closeBackends(ctx context.Context, squirreldb *daemon.SquirrelDB, logger zerolog.Logger) {
+func closeBackends(ctx context.Context, squirreldb *core.SquirrelDB, logger zerolog.Logger) {
 	closeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if b, err := squirreldb.Backend(closeCtx); err == nil {
+	if b, err := squirreldb.Primary(closeCtx); err == nil {
 		b.CloseAll(closeCtx)
 	} else {
 		logger.Warn().Err(err).Msg("close source backend")
 	}
 
-	if b, err := squirreldb.MigrateToBackend(closeCtx); err == nil {
+	if b, err := squirreldb.Extra(closeCtx); err == nil {
 		b.CloseAll(closeCtx)
 	} else {
 		logger.Warn().Err(err).Msg("close target backend")

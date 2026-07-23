@@ -5,7 +5,10 @@ import (
 	"flag"
 	"time"
 
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/config"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
@@ -17,16 +20,16 @@ var (
 )
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
 func run(ctx context.Context, _ context.Context) error {
-	cfg, warnings, err := daemon.Config()
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -35,24 +38,31 @@ func run(ctx context.Context, _ context.Context) error {
 		return warnings
 	}
 
-	squirreldb := &daemon.SquirrelDB{
-		Config:         cfg,
-		MetricRegistry: prometheus.NewRegistry(),
-		Logger:         log.With().Str("component", "daemon").Logger(),
-	}
+	squirreldb := core.New(
+		core.Deps{
+			Logger: log.With().Str("component", "wait-store").Logger(),
+			// A private registry per process avoids duplicate-registration panics when
+			// several instances (and restarts) register the same backend metrics.
+			MetricRegistry: prometheus.NewRegistry(),
+		},
+		cfg,
+		core.SquirrelDBOption{},
+	)
 
 	ctx, cancel := context.WithTimeout(ctx, *maxWaitTime)
 	defer cancel()
 
 	// Redis (clustering) first: the backend needs the cluster to start.
-	waitRedis(ctx, squirreldb)
+	waitRedis(ctx, cfg)
 	waitBackend(ctx, squirreldb, cfg.Cassandra.ReplicationFactor)
+
+	log.Printf("Backend %s is ready", cfg.Backend)
 
 	return ctx.Err()
 }
 
 // waitRedis waits until the cluster (Redis) is reachable.
-func waitRedis(ctx context.Context, squirreldb *daemon.SquirrelDB) {
+func waitRedis(ctx context.Context, cfg config.Config) {
 	firstLoop := true
 
 	for ctx.Err() == nil {
@@ -66,18 +76,28 @@ func waitRedis(ctx context.Context, squirreldb *daemon.SquirrelDB) {
 
 		firstLoop = false
 
+		// We need one squirreldb per try, because re-trying Cluster don't work
+		// because the same MetricRegistry could be used for the same metrics.
+		squirreldb := core.New(
+			core.Deps{
+				Logger: log.With().Str("component", "wait-store").Logger(),
+				// A private registry per process avoids duplicate-registration panics when
+				// several instances (and restarts) register the same backend metrics.
+				MetricRegistry: prometheus.NewRegistry(),
+			},
+			cfg,
+			core.SquirrelDBOption{},
+		)
+
 		if _, err := squirreldb.Cluster(ctx); err != nil {
 			log.Printf("connection to Redis failed: %s", err)
-
-			// Because the cluster might very likely already have registrered metrics in
-			// the MetricRegistry (and re-regisreting the same metrics will fail),
-			// we re-new the MetricRegistry to allow next loop to work
-			squirreldb.MetricRegistry = prometheus.NewRegistry()
 
 			continue
 		}
 
 		log.Printf("Redis is ready")
+
+		squirreldb.CloseAll(ctx)
 
 		return
 	}
@@ -91,7 +111,7 @@ type nodeCounter interface {
 
 // waitBackend waits until the configured backend is reachable (its connection
 // starts). For Cassandra it also waits until at least replication nodes are up.
-func waitBackend(ctx context.Context, squirreldb *daemon.SquirrelDB, replication int) {
+func waitBackend(ctx context.Context, squirreldb *core.SquirrelDB, replication int) {
 	firstLoop := true
 
 	for ctx.Err() == nil {
@@ -105,7 +125,7 @@ func waitBackend(ctx context.Context, squirreldb *daemon.SquirrelDB, replication
 
 		firstLoop = false
 
-		b, err := squirreldb.Backend(ctx)
+		b, err := squirreldb.Primary(ctx)
 		if err != nil {
 			log.Printf("backend not ready: %s", err)
 
@@ -126,8 +146,6 @@ func waitBackend(ctx context.Context, squirreldb *daemon.SquirrelDB, replication
 				continue
 			}
 		}
-
-		log.Printf("Backend %s is ready", squirreldb.Config.Backend)
 
 		return
 	}

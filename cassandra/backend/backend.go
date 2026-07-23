@@ -103,6 +103,12 @@ type Backend struct {
 	cassandraIndex *index.CassandraIndex
 }
 
+func (b *Backend) BackendInfo() types.BackendInfo {
+	return types.BackendInfo{
+		ApplyMutableLabelInternally: true,
+	}
+}
+
 func (b *Backend) Start(ctx context.Context) error {
 	b.l.Lock()
 	defer b.l.Unlock()
@@ -191,7 +197,7 @@ func (b *Backend) CloseAll(ctx context.Context) {
 }
 
 // RegisterHTTPEndpoints registers no Cassandra-specific debug endpoints yet (the
-// index debug endpoints may move here later). It satisfies daemon.Backend.
+// index debug endpoints may move here later). It satisfies core.Backend.
 func (b *Backend) RegisterHTTPEndpoints(_ func(method, path, description string, handler http.HandlerFunc)) {
 }
 

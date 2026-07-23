@@ -20,7 +20,7 @@
 // backend, the bottleneck is the test harness (or, when the batcher is enabled,
 // the batcher/temporary store), not Cassandra or ClickHouse.
 //
-// It satisfies the same daemon.Backend interface as the Cassandra and ClickHouse
+// It satisfies the same core.Backend interface as the Cassandra and ClickHouse
 // backends, so it is selected the same way, through the "backend" config option.
 package backend
 
@@ -57,7 +57,7 @@ type Options struct {
 	Batcher bool
 }
 
-// Backend is the dummy daemon.Backend.
+// Backend is the dummy core.Backend.
 type Backend struct {
 	options Options
 	logger  zerolog.Logger
@@ -72,6 +72,12 @@ type Backend struct {
 // New returns a new unstarted dummy backend.
 func New(_ context.Context, logger zerolog.Logger, options Options) (*Backend, error) {
 	return &Backend{options: options, logger: logger}, nil
+}
+
+func (b *Backend) BackendInfo() types.BackendInfo {
+	return types.BackendInfo{
+		ApplyMutableLabelInternally: false,
+	}
 }
 
 // Start is a no-op: the dummy backend has nothing to connect to.

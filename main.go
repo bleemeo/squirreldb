@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	versionPkg "github.com/bleemeo/squirreldb/core/version"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/migration"
@@ -38,9 +39,9 @@ var (
 )
 
 func main() {
-	daemon.Version = version
-	daemon.Commit = commit
-	daemon.Date = date
+	versionPkg.Version = version
+	versionPkg.Commit = commit
+	versionPkg.Date = date
 
 	// Change the default time format of zerolog to allow millisecond precision.
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs

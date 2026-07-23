@@ -18,6 +18,12 @@ package config
 
 import "time"
 
+const (
+	BackendCassandra  = "cassandra"
+	BackendClickHouse = "clickhouse"
+	BackendDummy      = "dummy"
+)
+
 // Config is the main structured configuration.
 type Config struct {
 	Backend string `yaml:"backend"`

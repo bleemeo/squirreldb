@@ -47,11 +47,12 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/config"
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/telemetry"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -91,11 +92,11 @@ var storeTiming = telemetry.StoreTiming{
 func main() {
 	flag.Parse()
 
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 
-	if errors.Is(err, daemon.ErrSkipBackend) {
+	if errors.Is(err, testsetup.ErrSkipBackend) {
 		log.Info().Msg(err.Error())
 
 		return
@@ -108,8 +109,8 @@ func main() {
 	log.Info().Msg("telemetry store test succeeded")
 }
 
-func run(ctx context.Context, _ context.Context) error {
-	cfg, warnings, err := daemon.Config()
+func run(ctx context.Context, shutdownCtx context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -120,7 +121,7 @@ func run(ctx context.Context, _ context.Context) error {
 
 	if cfg.Backend == "dummy" {
 		// The dummy backend's telemetry store is a no-op with no real IDs.
-		return daemon.ErrSkipBackend
+		return testsetup.ErrSkipBackend
 	}
 
 	if *processes < 2 || *processes%2 != 0 {
@@ -157,7 +158,7 @@ func run(ctx context.Context, _ context.Context) error {
 	// Closure (not a direct call) so cleanup stops whatever procs holds at return,
 	// including the processes started later at the restart step. Already-stopped
 	// processes are a no-op (process.stop is idempotent).
-	defer func() { stopAll(context.Background(), procs) }() //nolint:contextcheck
+	defer func() { stopAll(shutdownCtx, procs) }()
 
 	rest, err := startProcesses(ctx, cfg, 1, n-1)
 	if err != nil {
@@ -247,8 +248,8 @@ func run(ctx context.Context, _ context.Context) error {
 // process is one simulated SquirrelDB instance holding a telemetry node ID.
 type process struct {
 	idx     int
-	sqDB    *daemon.SquirrelDB
-	backend daemon.Backend
+	sqDB    *core.SquirrelDB
+	backend core.Backend
 	cluster types.Cluster
 	idFn    func() string
 	release func()
@@ -285,24 +286,25 @@ func (p *process) stop(ctx context.Context) {
 // recreates the schema, so afterwards the store is clean and its keyspace/database
 // exists — which the test processes then rely on rather than racing to create.
 func resetStore(ctx context.Context, cfg config.Config) error {
-	sqDB := &daemon.SquirrelDB{
-		ID:                uuid.New(),
-		Config:            cfg,
-		MetricRegistry:    prometheus.NewRegistry(),
-		Logger:            log.With().Str("component", "reset").Logger(),
-		DropDataOnStartup: true,
-	}
+	sqDB := core.New(
+		core.Deps{
+			Logger: log.With().Str("component", "reset").Logger(),
+			// A private registry per process avoids duplicate-registration panics when
+			// several instances (and restarts) register the same backend metrics.
+			MetricRegistry: prometheus.NewRegistry(),
+		},
+		cfg,
+		core.SquirrelDBOption{
+			InternalTesting: core.InternalTestingOption{DropDataOnStartup: true},
+		},
+	)
 
-	backend, err := sqDB.Backend(ctx)
+	backend, err := sqDB.Primary(ctx)
 	if err != nil {
 		return err
 	}
 
 	backend.CloseAll(ctx)
-
-	if sqDB.ExistingCluster != nil {
-		_ = sqDB.ExistingCluster.Close()
-	}
 
 	return nil
 }
@@ -341,15 +343,18 @@ func startProcesses(ctx context.Context, cfg config.Config, baseIdx, count int) 
 // startProcess builds one independent daemon.SquirrelDB, starts its backend and
 // acquires a telemetry node ID from it.
 func startProcess(ctx context.Context, cfg config.Config, idx int) (*process, error) {
-	sqDB := &daemon.SquirrelDB{
-		ID:     uuid.New(),
-		Config: cfg,
-		// A private registry per process avoids duplicate-registration panics when
-		// several instances (and restarts) register the same backend metrics.
-		MetricRegistry:       prometheus.NewRegistry(),
-		Logger:               log.With().Str("component", "daemon").Int("process", idx).Logger(),
-		TelemetryStoreTiming: storeTiming,
-	}
+	sqDB := core.New(
+		core.Deps{
+			Logger: log.With().Str("component", "daemon").Int("process", idx).Logger(),
+			// A private registry per process avoids duplicate-registration panics when
+			// several instances (and restarts) register the same backend metrics.
+			MetricRegistry: prometheus.NewRegistry(),
+		},
+		cfg,
+		core.SquirrelDBOption{
+			InternalTesting: core.InternalTestingOption{TelemetryStoreTiming: storeTiming},
+		},
+	)
 
 	p := &process{idx: idx, sqDB: sqDB}
 
@@ -360,7 +365,7 @@ func startProcess(ctx context.Context, cfg config.Config, idx int) (*process, er
 
 	p.cluster = cluster
 
-	backend, err := sqDB.Backend(ctx)
+	backend, err := sqDB.Primary(ctx)
 	if err != nil {
 		p.stop(ctx)
 

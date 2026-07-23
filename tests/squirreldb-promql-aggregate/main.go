@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 
 	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/api"
@@ -63,16 +65,16 @@ func retryUntilConsistent(ctx context.Context, fn func() error) error {
 }
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Run daemon failed")
 	}
 }
 
 func run(ctx context.Context, _ context.Context) error {
-	cfg, warnings, err := daemon.Config()
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -88,7 +90,7 @@ func run(ctx context.Context, _ context.Context) error {
 		DropDataOnStartup: true, // the backend drops its data when it first starts
 	}
 
-	err = squirreldb.DropTemporaryStore(ctx, false)
+	err = squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false)
 	if err != nil {
 		return err
 	}

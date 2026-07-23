@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -78,9 +80,9 @@ func retryUntilConsistent(ctx context.Context, fn func() error) error {
 }
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 
 	if *argURL == "" {
 		metricResult, _ := prometheus.DefaultGatherer.Gather()
@@ -95,7 +97,7 @@ func main() {
 }
 
 func run(ctx context.Context, _ context.Context) error {
-	cfg, warnings, err := daemon.Config()
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -122,7 +124,7 @@ func run(ctx context.Context, _ context.Context) error {
 		}
 		defer squirreldb.Stop()
 
-		err = squirreldb.DropTemporaryStore(ctx, false)
+		err = squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -167,7 +169,7 @@ func run(ctx context.Context, _ context.Context) error {
 				// backend requires it (the earlier read already drained the WAL, so
 				// nothing is lost by clearing it). Safe: the previous read succeeded,
 				// meaning the data is queryable = drained to ClickHouse.
-				if err := squirreldb.DropTemporaryStore(ctx, false); err != nil {
+				if err := squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false); err != nil {
 					return err
 				}
 
