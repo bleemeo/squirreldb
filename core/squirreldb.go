@@ -207,11 +207,17 @@ func (b *SquirrelDB) Primary(ctx context.Context) (Backend, error) {
 		return b.primary, nil
 	}
 
+	cluster, err := b.clusterLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	p, err := b.startBackend(
 		ctx,
 		b.config.Backend,
 		b.config.Internal.ReadOnly || b.option.PrimaryBackendReadOnly,
 		false,
+		cluster,
 	)
 	if err != nil {
 		return nil, err
@@ -236,11 +242,17 @@ func (b *SquirrelDB) Extra(ctx context.Context) (Backend, error) {
 	if extra == nil {
 		var err error
 
+		cluster, err := b.Cluster(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		extra, err = b.startBackend(
 			ctx,
 			b.config.ExtraWriteBackend,
 			b.config.Internal.ReadOnly,
 			b.option.MigrateTargetImportOnly,
+			cluster,
 		)
 		if err != nil {
 			return nil, err
@@ -268,12 +280,8 @@ func (b *SquirrelDB) startBackend(
 	name string,
 	readOnly bool,
 	importOnly bool,
+	cluster types.Cluster,
 ) (Backend, error) {
-	cluster, err := b.clusterLocked(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	result, err := b.newBackendByName(ctx, name, cluster, readOnly, importOnly)
 	if err != nil {
 		return nil, err
@@ -550,17 +558,23 @@ func (b *SquirrelDB) attachExtraWhenReady(ctx context.Context) {
 // CloseAll closes the primary and (if started) the extra backend.
 func (b *SquirrelDB) CloseAll(ctx context.Context) {
 	b.mu.Lock()
-	primary := b.primary
-	extra := b.extra
-	cluster := b.cluster
 
 	if b.cancelExtraAttach != nil {
 		b.cancelExtraAttach()
+		b.cancelExtraAttach = nil
 	}
 
 	b.mu.Unlock()
 
 	b.wg.Wait()
+
+	b.mu.Lock()
+
+	primary := b.primary
+	extra := b.extra
+	cluster := b.cluster
+
+	b.mu.Unlock()
 
 	if primary != nil {
 		primary.CloseAll(ctx)

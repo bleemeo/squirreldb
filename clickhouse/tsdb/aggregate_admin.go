@@ -22,6 +22,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 // aggBucketExpr maps a raw `timestamp` column to its right-edge 15-min bucket. It
@@ -332,6 +334,11 @@ func (c *ClickHouseTSDB) diffChunk(ctx context.Context, fromMs, toMs int64) (Agg
 		") r USING (id, bucket)"
 
 	var s AggDiffSummary
+
+	// pin join_use_nulls=0 so missing-side counts are 0, not NULL
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"join_use_nulls": 0,
+	}))
 
 	row := c.conn.QueryRow(ctx, query, fromMs, toMs, fromMs, toMs)
 	if err := row.Scan(&s.DiscrepantBuckets, &s.AggCountTotal, &s.RawCountTotal); err != nil {
