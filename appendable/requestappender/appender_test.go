@@ -18,6 +18,7 @@ package requestappender
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/prometheus/prometheus/model/exemplar"
@@ -149,6 +150,42 @@ func TestAppend_NoTenantConfigured(t *testing.T) {
 
 	if !labels.Equal(inner.gotLabels, want) {
 		t.Fatalf("forwarded labels mismatch:\n got  %s\n want %s", inner.gotLabels, want)
+	}
+}
+
+// TestAppend_RejectsInvalidEmptyValuedLabel guards the validation ordering:
+// invalid labels carrying an empty value must be rejected, not silently dropped
+// by the empty-value purge before validation runs.
+func TestAppend_RejectsInvalidEmptyValuedLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		input labels.Labels
+	}{
+		{
+			name:  "empty metric name",
+			input: labels.FromStrings("__name__", ""),
+		},
+		{
+			name:  "invalid label name with empty value",
+			input: labels.FromStrings("__name__", "up", "one|two", ""),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := &recordingAppender{}
+			app := NewAppender(context.Background(), inner, Options{
+				TenantLabel: labels.Label{Name: "__account_id", Value: "tenant-A"},
+			})
+
+			if _, err := app.Append(0, tt.input, 0, 0); !errors.Is(err, ErrInvalidLabel) {
+				t.Fatalf("Append error = %v, want ErrInvalidLabel", err)
+			}
+
+			if inner.gotLabels.Len() != 0 {
+				t.Fatalf("rejected request must not be forwarded, got %s", inner.gotLabels)
+			}
+		})
 	}
 }
 

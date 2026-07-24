@@ -69,6 +69,13 @@ func (app appender) Append(
 	t int64,
 	v float64,
 ) (storage.SeriesRef, error) {
+	// Validate the client-supplied labels up front. The processing below only
+	// removes labels (empty-value drop, mutable-label drop) or injects the
+	// tenant, so labels valid here stay valid; the tenant name is config-trusted.
+	if err := validateLabels(l); err != nil {
+		return 0, err
+	}
+
 	builder := labels.NewBuilder(l)
 
 	// Drop empty-valued labels first (Prometheus treats an empty label as
@@ -107,10 +114,6 @@ func (app appender) Append(
 	}
 
 	l = builder.Labels()
-
-	if err := validateLabels(l); err != nil {
-		return 0, err
-	}
 
 	if offset := app.ctx.Value(types.BackdateContextKey{}); offset != nil {
 		backdateOffset, ok := offset.(int64)

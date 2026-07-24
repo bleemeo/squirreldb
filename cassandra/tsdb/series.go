@@ -19,9 +19,9 @@ package tsdb
 import (
 	"fmt"
 
+	"github.com/bleemeo/squirreldb/queryable/convert"
 	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -98,75 +98,5 @@ func (s series) Labels() labels.Labels {
 // Depending on implementation, the iterator can
 // be re-used or a new iterator can be allocated.
 func (s series) Iterator(chunkenc.Iterator) chunkenc.Iterator {
-	return &seriesSample{
-		data:   s.data,
-		offset: -1,
-	}
-}
-
-type seriesSample struct {
-	data   types.MetricData
-	offset int
-}
-
-// Next advances the iterator by one and returns the type of the value
-// at the new position (or ValNone if the iterator is exhausted).
-func (s *seriesSample) Next() chunkenc.ValueType {
-	if s.offset+1 >= len(s.data.Points) {
-		return chunkenc.ValNone
-	}
-
-	s.offset++
-
-	return chunkenc.ValFloat
-}
-
-// Seek advances the iterator forward to the first sample with a
-// timestamp equal or greater than t. If the current sample found by a
-// previous `Next` or `Seek` operation already has this property, Seek
-// has no effect. If a sample has been found, Seek returns the type of
-// its value. Otherwise, it returns ValNone, after with the iterator is
-// exhausted.
-func (s *seriesSample) Seek(t int64) chunkenc.ValueType { //nolint: govet
-	for ; s.offset < len(s.data.Points); s.offset++ {
-		if s.data.Points[s.offset].Timestamp >= t {
-			return chunkenc.ValFloat
-		}
-	}
-
-	s.offset = len(s.data.Points) - 1
-
-	return chunkenc.ValNone
-}
-
-// At returns the current timestamp/value pair.
-// Before the iterator has advanced At behaviour is unspecified.
-func (s *seriesSample) At() (int64, float64) {
-	return s.data.Points[s.offset].Timestamp, s.data.Points[s.offset].Value
-}
-
-// AtT returns the current timestamp.
-// Before the iterator has advanced, the behaviour is unspecified.
-func (s *seriesSample) AtT() int64 {
-	return s.data.Points[s.offset].Timestamp
-}
-
-// AtHistogram returns the current timestamp/value pair if the value is
-// a histogram with integer counts.
-// Not implemented.
-func (s *seriesSample) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
-	return 0, nil
-}
-
-// AtFloatHistogram returns the current timestamp/value pair if the
-// value is a histogram with floating-point counts.
-// Not implemented.
-func (s *seriesSample) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
-	return 0, nil
-}
-
-// Err returns the current error. It should be used only after iterator is
-// exhausted, that is `Next` or `Seek` returns false.
-func (s *seriesSample) Err() error {
-	return nil
+	return convert.NewSampleIterator(s.data.Points)
 }

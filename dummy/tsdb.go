@@ -376,57 +376,7 @@ func (s series) Labels() labels.Labels {
 }
 
 func (s series) Iterator(chunkenc.Iterator) chunkenc.Iterator {
-	return &samplesIter{
-		data:   s.points,
-		offset: -1,
-	}
-}
-
-type samplesIter struct {
-	data   []types.MetricPoint
-	offset int
-}
-
-func (s *samplesIter) Next() chunkenc.ValueType {
-	if s.offset+1 >= len(s.data) {
-		return chunkenc.ValNone
-	}
-
-	s.offset++
-
-	return chunkenc.ValFloat
-}
-
-func (s *samplesIter) Seek(t int64) chunkenc.ValueType { //nolint: govet
-	for ; s.offset < len(s.data); s.offset++ {
-		if s.data[s.offset].Timestamp >= t {
-			return chunkenc.ValFloat
-		}
-	}
-
-	s.offset = len(s.data) - 1
-
-	return chunkenc.ValNone
-}
-
-func (s *samplesIter) At() (int64, float64) {
-	return s.data[s.offset].Timestamp, s.data[s.offset].Value
-}
-
-func (s *samplesIter) AtT() int64 {
-	return s.data[s.offset].Timestamp
-}
-
-func (s *samplesIter) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
-	return 0, nil
-}
-
-func (s *samplesIter) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
-	return 0, nil
-}
-
-func (s *samplesIter) Err() error {
-	return nil
+	return convert.NewSampleIterator(s.points)
 }
 
 func (db *MemoryTSDB) write(pendingTimeSeries map[uint64]types.Timeseries, ttl int64) {

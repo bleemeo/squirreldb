@@ -187,10 +187,9 @@ func (i *readIter) innerNext() bool {
 	toTimestamp := i.request.ToTimestamp
 
 	var (
-		memoryPointRead int
-		aggrPointRead   int
-		rawPointRead    int
-		readRaw         bool
+		aggrPointRead int
+		rawPointRead  int
+		readRaw       bool
 	)
 
 	memoryData, err := i.c.batcher.ReadTemporary(i.ctx, id, fromTimestamp-memoryOverreadMs, toTimestamp)
@@ -214,8 +213,6 @@ func (i *readIter) innerNext() bool {
 		if readAggregate {
 			memoryData = AggregateWithFuncType(memoryData, i.request.Function)
 		}
-
-		memoryPointRead = len(memoryData.Points)
 	}
 
 	if readAggregate && fromTimestamp <= toTimestamp {
@@ -243,7 +240,7 @@ func (i *readIter) innerNext() bool {
 			fromTimestamp = i.aggregatedToTimestamp
 		}
 
-		aggrPointRead = len(data.Points) - memoryPointRead
+		aggrPointRead = len(data.Points)
 	}
 
 	if fromTimestamp <= toTimestamp {
@@ -261,7 +258,7 @@ func (i *readIter) innerNext() bool {
 
 		i.tmp = newTmp
 		data = newData
-		rawPointRead = len(data.Points) - aggrPointRead - memoryPointRead
+		rawPointRead = len(data.Points) - aggrPointRead
 
 		if err != nil {
 			i.err = fmt.Errorf("readRawData: %w", err)
@@ -289,7 +286,7 @@ func (i *readIter) innerNext() bool {
 			len(data.Points),
 			readAggregate,
 			readRaw,
-			memoryPointRead,
+			len(memoryData.Points),
 			aggrPointRead,
 			rawPointRead,
 		)

@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/bleemeo/squirreldb/queryable/convert"
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 	"github.com/google/uuid"
-	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -666,53 +666,5 @@ type sqlSeries struct {
 func (s sqlSeries) Labels() labels.Labels { return s.labels }
 
 func (s sqlSeries) Iterator(chunkenc.Iterator) chunkenc.Iterator {
-	return &samplesIterator{points: s.points, offset: -1}
+	return convert.NewSampleIterator(s.points)
 }
-
-// samplesIterator is a chunkenc.Iterator over a slice of float samples.
-type samplesIterator struct {
-	points []types.MetricPoint
-	offset int
-}
-
-func (it *samplesIterator) Next() chunkenc.ValueType {
-	if it.offset+1 >= len(it.points) {
-		return chunkenc.ValNone
-	}
-
-	it.offset++
-
-	return chunkenc.ValFloat
-}
-
-func (it *samplesIterator) Seek(t int64) chunkenc.ValueType { //nolint:govet
-	if it.offset < 0 {
-		it.offset = 0
-	}
-
-	for ; it.offset < len(it.points); it.offset++ {
-		if it.points[it.offset].Timestamp >= t {
-			return chunkenc.ValFloat
-		}
-	}
-
-	return chunkenc.ValNone
-}
-
-func (it *samplesIterator) At() (int64, float64) {
-	return it.points[it.offset].Timestamp, it.points[it.offset].Value
-}
-
-func (it *samplesIterator) AtT() int64 {
-	return it.points[it.offset].Timestamp
-}
-
-func (it *samplesIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
-	return 0, nil
-}
-
-func (it *samplesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
-	return 0, nil
-}
-
-func (it *samplesIterator) Err() error { return nil }
