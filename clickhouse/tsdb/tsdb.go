@@ -266,27 +266,18 @@ func (c *ClickHouseTSDB) BestEffortAppenderWithOptions(
 }
 
 // querierOptions carries the per-request options parsed from HTTP headers by
-// ParseHTTPOptions, forcing the read to the raw or the pre-aggregated points
-// regardless of the step-based routing (see aggSelection).
+// ParseHTTPOptions. ForceRaw pins the read to raw points regardless of the
+// step-based routing (see aggSelection). There is no force-pre-aggregated: the
+// aggregate is reached by the natural step-based routing, and forcing it below the
+// resolution threshold would silently over-downsample.
 type querierOptions struct {
-	ForcePreAggregated bool
-	ForceRaw           bool
+	ForceRaw bool
 }
 
-// ParseHTTPOptions reads the ForcePreAggregated/ForceRaw request headers. ForceRaw
-// wins when both are set. The result is carried in QuerierOptions.BackendOptions
-// and consumed by QuerierWithOptions.
+// ParseHTTPOptions reads the ForceRaw request header. The result is carried in
+// QuerierOptions.BackendOptions and consumed by QuerierWithOptions.
 func (c *ClickHouseTSDB) ParseHTTPOptions(header http.Header) (any, error) {
 	result := querierOptions{}
-
-	if value := header.Get(types.HeaderForcePreAggregated); value != "" {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			return result, err
-		}
-
-		result.ForcePreAggregated = tmp
-	}
 
 	if value := header.Get(types.HeaderForceRaw); value != "" {
 		tmp, err := strconv.ParseBool(value)
@@ -295,9 +286,6 @@ func (c *ClickHouseTSDB) ParseHTTPOptions(header http.Header) (any, error) {
 		}
 
 		result.ForceRaw = tmp
-		if result.ForceRaw {
-			result.ForcePreAggregated = false
-		}
 	}
 
 	return result, nil
@@ -362,15 +350,14 @@ func (c *ClickHouseTSDB) newSQLQuerier(
 	c.queries.Add(1)
 
 	return &sqlQuerier{
-		labelQuerier:       c.newLabelQuerier(tenant, mint, maxt),
-		metrics:            c.metrics,
-		maxSeries:          maxSeries,
-		maxPoints:          maxPoints,
-		onClose:            c.queries.Done,
-		forcePreAggregated: bo.ForcePreAggregated,
-		forceRaw:           bo.ForceRaw,
-		requestDebug:       requestDebug,
-		logger:             c.logger,
+		labelQuerier: c.newLabelQuerier(tenant, mint, maxt),
+		metrics:      c.metrics,
+		maxSeries:    maxSeries,
+		maxPoints:    maxPoints,
+		onClose:      c.queries.Done,
+		forceRaw:     bo.ForceRaw,
+		requestDebug: requestDebug,
+		logger:       c.logger,
 	}, nil
 }
 

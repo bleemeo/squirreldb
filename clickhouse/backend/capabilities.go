@@ -27,11 +27,11 @@ import (
 )
 
 // The ClickHouse backend exposes its TSDB's extra capabilities on the Backend
-// itself (never on a wrapped TSDB): the HTTP option parser (ForceRaw /
-// ForcePreAggregated headers) and the raw importer used by the migration target.
-// Each delegates to the started TSDB, so callers reach them without type-asserting
-// a possibly-wrapped store. (ClickHouse has no index / forced pre-aggregation, so
-// it does not implement the legacy api.TSDBDebugEndpoint.)
+// itself (never on a wrapped TSDB): the HTTP option parser (ForceRaw header) and
+// the raw importer used by the migration target. Each delegates to the started
+// TSDB, so callers reach them without type-asserting a possibly-wrapped store.
+// (ClickHouse has no index / forced pre-aggregation, so it does not implement the
+// legacy api.TSDBDebugEndpoint.)
 
 var (
 	_ types.HTTPOptionsParser = (*Backend)(nil)

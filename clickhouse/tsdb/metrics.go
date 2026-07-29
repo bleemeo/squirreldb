@@ -45,7 +45,8 @@ type metrics struct {
 	ReadSeconds     *prometheus.SummaryVec
 	ReadSeriesTotal prometheus.Counter
 	// ReadSourceTotal counts Select calls by the point source they read, "raw" or
-	// "aggregated" (the pre-aggregation routing decision, see aggSelection).
+	// "aggregated" (the pre-aggregation routing decision, see aggSelection). Instant-
+	// vector snap reads (aggModeInstantSnap) count as "aggregated" too.
 	ReadSourceTotal *prometheus.CounterVec
 
 	// WAL / drainer.
@@ -187,14 +188,14 @@ func newWALBackpressureTotal(reg prometheus.Registerer, namespace, subSystem str
 	return c
 }
 
-// newReadSourceTotal builds the read-source counter with both label values
-// pre-initialized to 0, so "raw" and "aggregated" show even before the first read.
+// newReadSourceTotal builds the read-source counter with every label value
+// pre-initialized to 0, so all sources show even before the first read.
 func newReadSourceTotal(reg prometheus.Registerer, namespace, subSystem string) *prometheus.CounterVec {
 	c := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subSystem,
 		Name:      "read_source_total",
-		Help:      "Select calls by point source read (raw or pre-aggregated), see the step-based routing",
+		Help:      "Select calls by point source read (raw, aggregated)",
 	}, []string{"source"})
 
 	c.WithLabelValues("raw")

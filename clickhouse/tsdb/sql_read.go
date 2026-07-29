@@ -60,12 +60,11 @@ type sqlQuerier struct {
 	// onClose releases this querier's in-flight registration (queries.Done); see
 	// ClickHouseTSDB.newSQLQuerier. Called once, from Close.
 	onClose func()
-	// forcePreAggregated / forceRaw override the step-based routing (see
-	// aggSelection): the ForcePreAggregated / ForceRaw request headers.
-	forcePreAggregated bool
-	forceRaw           bool
-	requestDebug       types.DebugLevel
-	logger             zerolog.Logger
+	// forceRaw pins the read to raw points regardless of the step-based routing (see
+	// aggSelection): the ForceRaw request header.
+	forceRaw     bool
+	requestDebug types.DebugLevel
+	logger       zerolog.Logger
 }
 
 func (q *sqlQuerier) Select(
@@ -109,10 +108,14 @@ func (q *sqlQuerier) Select(
 		source    = "raw"
 	)
 
-	if aggExpr, ok := q.aggSelection(hints); ok {
-		query, queryArgs = q.aggPointsQuery(ids, aggExpr, where, args)
+	switch plan := q.aggSelection(hints); plan.mode { //nolint:exhaustive
+	case aggModeRange:
+		query, queryArgs = q.aggPointsQuery(ids, plan.expr, where, args)
 		source = "aggregated"
-	} else {
+	case aggModeInstantSnap:
+		query, queryArgs = q.aggSnapQuery(ids, hints, where, args)
+		source = "aggregated"
+	default:
 		query, queryArgs = q.pointsQuery(ids, where, args)
 	}
 
@@ -127,8 +130,8 @@ func (q *sqlQuerier) Select(
 		}
 
 		q.logger.Info().Msgf(
-			"clickhouse Select: series=%d source=%s func=%q step=%d forceRaw=%v forcePreAgg=%v",
-			len(labelsByID), source, fn, step, q.forceRaw, q.forcePreAggregated)
+			"clickhouse Select: series=%d source=%s func=%q step=%d forceRaw=%v",
+			len(labelsByID), source, fn, step, q.forceRaw)
 	}
 
 	rows, err := q.conn.Query(q.pointReadContext(ctx), query, queryArgs...)
@@ -319,78 +322,126 @@ func (q *sqlQuerier) pointsQuery(ids []uuid.UUID, where string, whereArgs []any)
 // aggValueExpr maps a PromQL function to the SQL expression that reconstructs the
 // downsampled value from the min/max/sum/count columns, evaluated under GROUP BY
 // (id, bucket) so it re-merges the parts the AggregatingMergeTree has not merged
-// yet. ok is false for functions those four columns cannot serve soundly — the
-// caller then reads raw.
+// yet. It is an allowlist: only range-vector functions that min/max/sum/count can
+// reproduce return ok=true. ok is false for everything else — the caller reads raw.
+//
+// Note hints.Func is the nearest enclosing function OR aggregation operator, so it
+// carries both "sum_over_time" (a range aggregation over time — downsamplable) and
+// "sum" (an instant operator aggregating across series, which wants each series'
+// value at the eval instant, NOT a time aggregate). Only the *_over_time / counter
+// forms belong here; the bare operators fall through to raw.
 func aggValueExpr(fn string) (string, bool) {
 	switch fn {
-	case "min", "min_over_time":
+	// Range-vector aggregations over time: PromQL applies fn to every point in the
+	// [range] window, so evaluating it over the bucketed series reproduces the raw
+	// result — exactly for min/max/sum, approximately for avg (buckets weighted equally).
+	case "min_over_time":
 		return "min(min)", true
-	case "max", "max_over_time":
+	case "max_over_time":
 		return "max(max)", true
-	case "sum", "sum_over_time":
+	case "sum_over_time":
 		return "sum(sum)", true
-	case "count", "count_over_time":
-		return "toFloat64(sum(count))", true
-	case "avg", "avg_over_time":
+	case "avg_over_time":
 		return "sum(sum) / sum(count)", true
+	case "last_over_time", "stddev_over_time", "stdvar_over_time":
+		// Approximation: on a monotonic counter max equals the last value (so exact);
+		// for non-counters max() is assumed good enough.
+		return "max(max)", true
+	case "first_over_time":
+		// Symmetrical to last_over_time.
+		return "min(min)", true
 	case "rate", "irate", "increase", "delta", "idelta", "deriv":
 		// Counter/trend family: use the bucket max as the representative value (like
 		// the Cassandra backend). On a monotonic counter it equals the last cumulative
 		// value; PromQL still detects resets on the downsampled series.
 		return "max(max)", true
-	case "last_over_time", "stddev_over_time", "stdvar_over_time":
-		// Approximation: as above, on a monotonic counter max is equals the last value (so exact),
-		// and for non-counter, max() is assumed to be good enough.
+	case "present_over_time", "absent_over_time":
+		// Depend only on whether the window holds ANY point, not on values or their
+		// count; the downsampled series keeps one point per non-empty bucket, so
+		// presence is preserved. (A sub-bucket [range] stays on raw via the range-width
+		// guard in aggSelection.) The value is irrelevant here; max(max) is fine.
 		return "max(max)", true
-	case "first_over_time":
-		// Symmetrical to last_over_time
-		return "min(min)", true
+
+	case "count_over_time":
+		// Counts points, not values: the downsampled series has ~one point per bucket
+		// instead of the raw samples, so the count is off by the samples-per-bucket factor.
+		return "", false
+	case "quantile_over_time", "mad_over_time":
+		// Need the per-point distribution, which min/max/sum/count don't preserve.
+		return "", false
 	case "resets", "changes":
-		// Not soundly served by min/max/sum/count (resets/changes need per-point order): read raw.
+		// Need per-point order, which the bucketed series loses.
 		return "", false
 	default:
-		return "sum(sum) / sum(count)", true // average, like the Cassandra default
+		// A bare selector ("") and the instant aggregation operators (sum/min/max/...
+		// across series at one instant) don't decide their routing here — aggSelection
+		// sends an instant vector to the snapping path.
+		// Any other unrecognised function reads "average".
+		return "sum(sum) / sum(count)", true
 	}
 }
 
-// aggSelection decides whether this Select reads the pre-aggregated table and, if
-// so, returns the value expression for hints.Func. ForceRaw wins; ForcePreAggregated
-// then forces the aggregate for any aggregatable function. Otherwise the aggregate
-// is used only when both hold: the step reaches aggMinStep (resolution — don't
-// over-downsample), and the range-vector window spans at least two buckets
-// (fidelity — a [range] narrower than the bucket can't be served from the
-// downsampled series). A non-aggregatable function always reads raw.
-func (q *sqlQuerier) aggSelection(hints *storage.SelectHints) (string, bool) {
-	if q.forceRaw {
-		return "", false
+// aggMode is the point source aggSelection routes a Select to.
+type aggMode int
+
+const (
+	aggModeRaw         aggMode = iota // read raw points from tsdb_data
+	aggModeRange                      // read tsdb_data_agg_15m, one point per bucket (aggPointsQuery)
+	aggModeInstantSnap                // read tsdb_data_agg_15m, one point per eval step (aggSnapQuery)
+)
+
+// aggPlan is aggSelection's decision: the mode and, for aggModeRange, the value
+// expression aggValueExpr chose for hints.Func.
+type aggPlan struct {
+	mode aggMode
+	expr string
+}
+
+// aggSelection decides which point source this Select reads. ForceRaw wins;
+// otherwise, by the shape of the read:
+//
+//   - a range-vector function (min/max/sum/avg_over_time, counter family) routes to
+//     the plain aggregate when aggValueExpr can reconstruct it and the [range] spans
+//     at least two buckets. The decision is on the [range] width, NOT the step: a
+//     range QUERY (Step > 0) additionally keeps a fine step on raw (don't downsample a
+//     zoomed-in view), but an instant QUERY (Step == 0) evaluates a single point over
+//     the whole [range], so it always uses the aggregate — this is the big instant
+//     query, e.g. avg_over_time(m[740h]), that the aggregate exists for;
+//   - an instant vector (Range == 0: a bare selector, or an instant aggregation
+//     operator like sum()/max()) routes to the snapped aggregate — one representative
+//     point per eval step, stamped on the step so PromQL's lookback, shorter than the
+//     bucket spacing, lands on it (aggModeInstantSnap, see aggSnapQuery) — but only on
+//     a coarse step; a fine step, or an instant query (Step == 0, a single read served
+//     cheaply from raw's small lookback window), stays raw;
+//   - everything else reads raw.
+func (q *sqlQuerier) aggSelection(hints *storage.SelectHints) aggPlan {
+	if q.forceRaw || hints == nil {
+		return aggPlan{mode: aggModeRaw}
 	}
 
-	fn := ""
-	if hints != nil {
-		fn = hints.Func
+	if hints.Range > 0 {
+		rangeExpr, rangeOK := aggValueExpr(hints.Func)
+		// A [range] narrower than two buckets would see zero or one downsampled point.
+		if !rangeOK || hints.Range < 2*aggBucket.Milliseconds() {
+			return aggPlan{mode: aggModeRaw}
+		}
+
+		// A range query zoomed in below the resolution keeps raw fidelity; an instant
+		// query (Step == 0) always uses the aggregate.
+		if hints.Step > 0 && hints.Step < aggMinStep.Milliseconds() {
+			return aggPlan{mode: aggModeRaw}
+		}
+
+		return aggPlan{mode: aggModeRange, expr: rangeExpr}
 	}
 
-	expr, ok := aggValueExpr(fn)
-	if !ok {
-		return "", false
+	// Instant vector. Snapping needs a coarse step grid; Step == 0 (instant query)
+	// reads a tiny lookback window from raw instead.
+	if hints.Step < aggMinStep.Milliseconds() {
+		return aggPlan{mode: aggModeRaw}
 	}
 
-	if q.forcePreAggregated {
-		return expr, true
-	}
-
-	if hints == nil || hints.Step < aggMinStep.Milliseconds() {
-		return "", false
-	}
-
-	// Range is the [range] selector width in ms (0 for an instant vector, which
-	// only needs one point per step). A narrower window than two buckets would see
-	// zero or one downsampled point, so keep it on raw.
-	if hints.Range != 0 && hints.Range < 2*aggBucket.Milliseconds() {
-		return "", false
-	}
-
-	return expr, true
+	return aggPlan{mode: aggModeInstantSnap}
 }
 
 // aggPointsQuery builds the query over tsdb_data_agg_15m. It mirrors pointsQuery
@@ -429,6 +480,78 @@ func (q *sqlQuerier) aggPointsQuery(ids []uuid.UUID, valueExpr, where string, wh
 		" ORDER BY id, bucket"
 
 	queryArgs = append(queryArgs, clampStoreTime(q.mint), clampStoreTime(q.maxt))
+
+	return query, queryArgs
+}
+
+// aggSnapQuery builds the instant-vector query over tsdb_data_agg_15m. Where
+// aggPointsQuery returns one point per bucket labelled on the bucket's right edge,
+// this returns one point per PromQL eval instant T_i = Start + i*Step, valued from
+// the bucket covering T_i and stamped AT T_i:
+//
+//   - the covering bucket is toStartOfInterval(T_i, 15min) — the last bucket whose
+//     right edge is at/before T_i, so within aggBucket of it (the join matches that
+//     one bucket, which enforces the aggBucket staleness cap: a T_i whose bucket has
+//     no data yields no row, i.e. a gap, so a series idle for more than one bucket
+//     drops out);
+//   - the value is max(max), an actual observed value — not an average, which would
+//     turn a discrete metric (1, 2, 3) into a fractional one;
+//   - stamping on the eval grid is what lets PromQL's lookback, shorter than the
+//     15-min bucket spacing, land on a point (the reason a bare selector routed to
+//     the bucket-labelled aggregate would drop half its steps).
+//
+// GROUP BY re-merges the AggregatingMergeTree parts, as in aggPointsQuery. Step is
+// guaranteed positive by aggSelection (aggModeInstantSnap requires Step > 0).
+func (q *sqlQuerier) aggSnapQuery(
+	ids []uuid.UUID,
+	hints *storage.SelectHints,
+	where string,
+	whereArgs []any,
+) (string, []any) {
+	queryArgs := make([]any, 0, len(whereArgs)+7)
+
+	// The eval grid [Start, End] stepping by Step; End+1 includes an aligned End
+	// (range() is exclusive on its upper bound).
+	queryArgs = append(queryArgs, hints.Start, hints.End+1, hints.Step)
+
+	var tenantCond string
+
+	if q.tenant != "" {
+		tenantCond = "a.tenant = ? AND "
+
+		queryArgs = append(queryArgs, q.tenant)
+	}
+
+	var idCond string
+
+	if len(ids) <= pointsInlineThreshold {
+		idCond = "a.id IN (?)"
+
+		queryArgs = append(queryArgs, ids)
+	} else {
+		idCond = "a.id IN (SELECT id FROM tsdb_tags WHERE " + where + ")"
+
+		queryArgs = append(queryArgs, whereArgs...)
+	}
+
+	// Coarse bucket filter (partition pruning); the join key does the exact matching.
+	// The lower bound is one bucket before Start, since a T_i near Start maps to a
+	// bucket up to aggBucket earlier.
+	//
+	// The grid subquery is the RIGHT (build) side of the join so ClickHouse hashes the
+	// small step grid, not the large tsdb_data_agg_15m slice. The range() placeholders
+	// still precede the WHERE ones textually, so the positional arg order is unchanged.
+	query := "SELECT a.id AS id, grid.ts AS ts, max(a.max) AS value" +
+		" FROM tsdb_data_agg_15m AS a" +
+		" INNER JOIN (SELECT ts, toDateTime(toStartOfInterval(ts, INTERVAL 15 MINUTE)) AS bucket FROM" +
+		" (SELECT fromUnixTimestamp64Milli(arrayJoin(range(toUInt64(?), toUInt64(?), toUInt64(?)))) AS ts)) AS grid" +
+		" ON a.bucket = grid.bucket" +
+		" WHERE " + tenantCond + idCond +
+		" AND a.bucket >= fromUnixTimestamp64Milli(?) AND a.bucket <= fromUnixTimestamp64Milli(?)" +
+		" GROUP BY a.id, grid.ts" +
+		" ORDER BY a.id, ts"
+
+	queryArgs = append(queryArgs, clampStoreTime(hints.Start-aggBucket.Milliseconds()), clampStoreTime(hints.End))
 
 	return query, queryArgs
 }

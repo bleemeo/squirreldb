@@ -209,19 +209,28 @@ func TestAggValueExpr(t *testing.T) {
 		{"min_over_time", "min(min)", true},
 		{"max_over_time", "max(max)", true},
 		{"sum_over_time", "sum(sum)", true},
-		{"count_over_time", "toFloat64(sum(count))", true},
 		{"avg_over_time", "sum(sum) / sum(count)", true},
 		{"last_over_time", "max(max)", true},
 		{"stddev_over_time", "max(max)", true},
 		// Counters and trends reconstruct the bucket's last cumulative value.
 		{"rate", "max(max)", true},
 		{"increase", "max(max)", true},
-		// Not soundly pre-aggregatable: caller must read raw.
+		// count_over_time counts points, not values: the downsampled series has far
+		// fewer points than raw, so it must read raw.
+		{"count_over_time", "", false},
+		// present/absent_over_time depend only on presence, preserved by the bucketed
+		// series, so they are served from the aggregate.
+		{"present_over_time", "max(max)", true},
+		{"absent_over_time", "max(max)", true},
+		// Distribution / order functions can't be served by min/max/sum/count.
+		{"quantile_over_time", "", false},
 		{"resets", "", false},
 		{"changes", "", false},
-		// Unknown / no function falls back to the average, like Cassandra.
-		{"", "sum(sum) / sum(count)", true},
+		// Fallback is aggregated with average
 		{"holt_winters", "sum(sum) / sum(count)", true},
+		{"new_unknown_function", "sum(sum) / sum(count)", true},
+		// We don't test bare selector and the instant aggregation operators, since they shouldn't be
+		// routed to aggValueExpr (since only Range function are).
 	}
 
 	for _, tc := range cases {
@@ -242,84 +251,97 @@ func TestAggSelection(t *testing.T) {
 		name     string
 		q        *sqlQuerier
 		hints    *storage.SelectHints
+		wantMode aggMode
 		wantExpr string
-		wantUse  bool
 	}{
 		{
-			name:    "force raw wins over everything",
-			q:       &sqlQuerier{forceRaw: true},
-			hints:   &storage.SelectHints{Step: bigStep, Func: "avg_over_time"},
-			wantUse: false,
+			name:     "force raw wins over everything",
+			q:        &sqlQuerier{forceRaw: true},
+			hints:    &storage.SelectHints{Step: bigStep, Range: (2 * time.Hour).Milliseconds(), Func: "avg_over_time"},
+			wantMode: aggModeRaw,
 		},
 		{
-			name:     "force pre-aggregated ignores the step",
-			q:        &sqlQuerier{forcePreAggregated: true},
-			hints:    &storage.SelectHints{Step: 0, Func: "avg_over_time"},
-			wantExpr: "sum(sum) / sum(count)",
-			wantUse:  true,
-		},
-		{
-			name:    "force pre-aggregated still reads raw for a non-aggregatable function",
-			q:       &sqlQuerier{forcePreAggregated: true},
-			hints:   &storage.SelectHints{Step: bigStep, Func: "resets"},
-			wantUse: false,
-		},
-		{
-			name:     "step at the threshold routes to the aggregate",
+			name:     "range function at the threshold routes to the aggregate",
 			q:        &sqlQuerier{},
-			hints:    &storage.SelectHints{Step: bigStep, Func: "max_over_time"},
+			hints:    &storage.SelectHints{Step: bigStep, Range: (2 * time.Hour).Milliseconds(), Func: "max_over_time"},
+			wantMode: aggModeRange,
 			wantExpr: "max(max)",
-			wantUse:  true,
 		},
 		{
-			name:    "step below the threshold reads raw",
-			q:       &sqlQuerier{},
-			hints:   &storage.SelectHints{Step: smallStep, Func: "max_over_time"},
-			wantUse: false,
+			name:     "step below the threshold reads raw",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: smallStep, Range: (2 * time.Hour).Milliseconds(), Func: "max_over_time"},
+			wantMode: aggModeRaw,
 		},
 		{
-			name:    "range narrower than two buckets reads raw",
-			q:       &sqlQuerier{},
-			hints:   &storage.SelectHints{Step: bigStep, Range: (20 * time.Second).Milliseconds(), Func: "rate"},
-			wantUse: false,
+			name:     "range narrower than two buckets reads raw",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: bigStep, Range: (20 * time.Second).Milliseconds(), Func: "rate"},
+			wantMode: aggModeRaw,
 		},
 		{
 			name:     "range of at least two buckets routes to the aggregate",
 			q:        &sqlQuerier{},
 			hints:    &storage.SelectHints{Step: bigStep, Range: (2 * time.Hour).Milliseconds(), Func: "rate"},
+			wantMode: aggModeRange,
 			wantExpr: "max(max)",
-			wantUse:  true,
 		},
 		{
-			name:     "instant vector (range 0) routes on step alone",
+			// An instant query (Step == 0) over a large [range] must use the aggregate,
+			// not read the whole raw window — the case force-pre-aggregated used to cover.
+			name:     "instant query with a large range routes to the aggregate",
 			q:        &sqlQuerier{},
-			hints:    &storage.SelectHints{Step: bigStep, Range: 0, Func: "max_over_time"},
-			wantExpr: "max(max)",
-			wantUse:  true,
+			hints:    &storage.SelectHints{Step: 0, Range: (740 * time.Hour).Milliseconds(), Func: "avg_over_time"},
+			wantMode: aggModeRange,
+			wantExpr: "sum(sum) / sum(count)",
 		},
 		{
-			name:    "nil hints reads raw",
-			q:       &sqlQuerier{},
-			hints:   nil,
-			wantUse: false,
+			name:     "instant query with a sub-two-bucket range reads raw",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: 0, Range: (20 * time.Second).Milliseconds(), Func: "avg_over_time"},
+			wantMode: aggModeRaw,
 		},
 		{
-			name:    "large step but non-aggregatable function reads raw",
-			q:       &sqlQuerier{},
-			hints:   &storage.SelectHints{Step: bigStep, Func: "changes"},
-			wantUse: false,
+			name:     "instant query bare selector reads raw",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: 0, Range: 0, Func: ""},
+			wantMode: aggModeRaw,
+		},
+		{
+			name:     "bare instant selector (range 0) snaps to the eval grid",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: bigStep, Range: 0, Func: ""},
+			wantMode: aggModeInstantSnap,
+		},
+		{
+			name:     "instant aggregation operator (range 0) snaps to the eval grid",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: bigStep, Range: 0, Func: "sum"},
+			wantMode: aggModeInstantSnap,
+		},
+		{
+			name:     "nil hints reads raw",
+			q:        &sqlQuerier{},
+			hints:    nil,
+			wantMode: aggModeRaw,
+		},
+		{
+			name:     "large step but non-aggregatable range function reads raw",
+			q:        &sqlQuerier{},
+			hints:    &storage.SelectHints{Step: bigStep, Range: (2 * time.Hour).Milliseconds(), Func: "changes"},
+			wantMode: aggModeRaw,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			expr, use := tc.q.aggSelection(tc.hints)
-			if use != tc.wantUse {
-				t.Fatalf("aggSelection use = %v, want %v", use, tc.wantUse)
+			plan := tc.q.aggSelection(tc.hints)
+			if plan.mode != tc.wantMode {
+				t.Fatalf("aggSelection mode = %v, want %v", plan.mode, tc.wantMode)
 			}
 
-			if use && expr != tc.wantExpr {
-				t.Errorf("aggSelection expr = %q, want %q", expr, tc.wantExpr)
+			if plan.mode == aggModeRange && plan.expr != tc.wantExpr {
+				t.Errorf("aggSelection expr = %q, want %q", plan.expr, tc.wantExpr)
 			}
 		})
 	}
@@ -373,6 +395,91 @@ func TestAggPointsQuery(t *testing.T) {
 		}
 
 		want := []any{oneID, clampStoreTime(5), clampStoreTime(9)}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestAggSnapQuery(t *testing.T) {
+	where := "metric_name = ?"
+	whereArgs := []any{"cpu_used"}
+	oneID := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}
+	bucketMs := aggBucket.Milliseconds()
+
+	// A range query: Start .. End every Step, well inside the store bounds.
+	start := int64(10_000_000)
+	end := start + 4*bucketMs
+	step := bucketMs
+
+	t.Run("tenant-scoped snaps to the eval grid and matches the covering bucket", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1"}}
+		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
+
+		query, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
+
+		for _, want := range []string{
+			"max(a.max) AS value",
+			// The grid is the RIGHT (build) side of the join, big table on the left.
+			"FROM tsdb_data_agg_15m AS a INNER JOIN (",
+			"AS grid ON a.bucket = grid.bucket",
+			"toStartOfInterval(ts, INTERVAL 15 MINUTE)",
+			"a.id IN (?)",
+			"GROUP BY a.id, grid.ts",
+		} {
+			if !strings.Contains(query, want) {
+				t.Errorf("query missing %q, got:\n%s", want, query)
+			}
+		}
+
+		// grid bounds (Start, End+1, Step), tenant, ids, then the coarse bucket filter
+		// (Start - one bucket, End), all clamped where they hit the store bounds.
+		want := []any{
+			start, end + 1, step,
+			"tenant-1", oneID,
+			clampStoreTime(start - bucketMs), clampStoreTime(end),
+		}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("id set over the threshold falls back to a subquery", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1"}}
+		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
+		bigIDs := make([]uuid.UUID, pointsInlineThreshold+1)
+
+		query, args := q.aggSnapQuery(bigIDs, hints, where, whereArgs)
+
+		if !strings.Contains(query, "a.id IN (SELECT id FROM tsdb_tags WHERE "+where+")") {
+			t.Errorf("query should use the subquery fallback, got:\n%s", query)
+		}
+
+		want := []any{
+			start, end + 1, step,
+			"tenant-1", "cpu_used",
+			clampStoreTime(start - bucketMs), clampStoreTime(end),
+		}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("unscoped query omits the tenant predicate", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: ""}}
+		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
+
+		query, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
+
+		if strings.Contains(query, "a.tenant = ?") {
+			t.Errorf("unscoped query must not filter tenant, got:\n%s", query)
+		}
+
+		want := []any{
+			start, end + 1, step,
+			oneID,
+			clampStoreTime(start - bucketMs), clampStoreTime(end),
+		}
 		if diff := cmp.Diff(want, args); diff != "" {
 			t.Errorf("args mismatch (-want +got):\n%s", diff)
 		}
