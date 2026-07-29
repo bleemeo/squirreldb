@@ -10,8 +10,10 @@ WITH_RACE=0
 WITH_COVER=0
 WITH_NOSTOP=0
 WITH_SHELL=0
-WITH_SCYLLADB=0
-WITH_CLICKHOUSE=0
+START_STORE_SCYLLADB=0
+START_STORE_CASSANDRA=0
+START_STORE_CLICKHOUSE=0
+BACKEND=
 WITH_LONG=""
 
 USER_UID=$(id -u)
@@ -37,10 +39,16 @@ while [ "$#" -gt 0 ]; do
         WITH_SHELL=1
         ;;
     "scylladb")
-        WITH_SCYLLADB=1
+        START_STORE_SCYLLADB=1
+        BACKEND=cassandra  # ScyllaDB is a Cassandra-like
+        ;;
+    "cassandra")
+        START_STORE_CASSANDRA=1
+        BACKEND=cassandra
         ;;
     "clickhouse")
-        WITH_CLICKHOUSE=1
+        START_STORE_CLICKHOUSE=1
+        BACKEND=clickhouse
         ;;
     *)
         cat << EOF
@@ -54,10 +62,12 @@ Usage: $0 [cluster|race|long|nostop|scylladb|clickhouse]
      shell: Open a shell instead of running tests. It will start Redis & Cassandra.
             It also forward the port 9200 to a SquirrelDB running inside this shell
             The shell container will be named "squirreldb-test-shell"
+ cassandra: Use Cassandra as store [default]
   scylladb: Use ScyllaDB instead of Cassandra
-clickhouse: Use the ClickHouse TSDB and mutable labels backends (locks/states
-            stay on Cassandra). Skips the Cassandra-index benches; the other
-            tests run against ClickHouse.
+clickhouse: Use the ClickHouse as store.
+
+If multiple store are specified, they are all started (could be useful in shell session),
+but last one is used as backend. Multiple store is only supported in non-cluster environment.
 EOF
 
         exit 1
@@ -70,7 +80,21 @@ if docker volume ls | grep -q squirreldb-buildcache; then
    GO_MOUNT_CACHE="-v squirreldb-buildcache:/go/pkg"
 fi
 
-if [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 1 ]; then
+# Ensure that Cassandra is the default backend and started by default
+if [ "${BACKEND}" = "" ]; then
+    BACKEND="cassandra"
+    START_STORE_CASSANDRA=1
+fi
+
+_store_started=0
+
+if [ "${WITH_CLUSTER}" = "1" ] && [ "${START_STORE_CLICKHOUSE}" = 1 ]; then
+    if [ "${_store_started}" = "1" ]; then
+        echo "Multiple store is not supported in Cluster mode"
+        exit 1
+    fi
+    _store_started=1
+
     echo
     echo "== Starting cluster component using examples/squirreldb_ha_clickhouse/"
     (cd examples/squirreldb_ha_clickhouse/; docker compose up -d clickhouse-keeper-0 clickhouse-keeper-1 clickhouse-keeper-2 clickhouse-server-0 clickhouse-server-1 redis1 redis2 redis3 redis4 redis5 redis6 redis_init)
@@ -80,12 +104,25 @@ if [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 1 ]; then
     export SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=main_cluster
     export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
     export SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
-    export SQUIRRELDB_BACKEND=clickhouse
-elif [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 0 ]; then
-    if [ "${WITH_SCYLLADB}" = "1" ]; then
-        echo "ScyllaDB is not yet supported in cluster with run-tests.sh"
+fi
+
+if [ "${WITH_CLUSTER}" = "1" ] && [ "${START_STORE_SCYLLADB}" = "1" ]; then
+    if [ "${_store_started}" = "1" ]; then
+        echo "Multiple store is not supported in Cluster mode"
         exit 1
     fi
+    _store_started=1
+
+    echo "ScyllaDB is not yet supported in cluster with run-tests.sh"
+    exit 1
+fi
+
+if [ "${WITH_CLUSTER}" = "1" ] && [ "${START_STORE_CASSANDRA}" = 1 ]; then
+    if [ "${_store_started}" = "1" ]; then
+        echo "Multiple store is not supported in Cluster mode"
+        exit 1
+    fi
+    _store_started=1
 
     echo
     echo "== Starting cluster component using examples/squirreldb_ha/"
@@ -94,44 +131,50 @@ elif [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 0 ]; then
     export SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra1:9042,cassandra2:9042
     export SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=3
-    export SQUIRRELDB_BACKEND=cassandra
-elif [ "${WITH_SCYLLADB}" = "1" ]; then
+fi
+
+if [ "${WITH_CLUSTER}" = "0" ]; then
+    echo
+    echo "== Starting common component"
+    docker run --name squirreldb-test-redis -d redis || true
+
+    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
+fi
+
+if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_SCYLLADB}" = "1" ]; then
     echo
     echo "== Starting ScyllaDB & Redis"
     docker run --name squirreldb-test-scylla -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M scylladb/scylla || true
-    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-scylla  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
-    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
-    export SQUIRRELDB_BACKEND=cassandra  # ScyllaDB is a Cassandra-like
-elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
+fi
+
+if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_CLICKHOUSE}" = "1" ]; then
     # The database is created by the ClickHouse image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
     echo
     echo "== Starting ClickHouse & Redis"
     docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_USER=squirreldb_user -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
-    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000
-    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=""
     export SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
     export SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
-    export SQUIRRELDB_BACKEND=clickhouse
-else
+fi
+
+if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_CASSANDRA}" = "1" ]; then
     echo
     echo "== Starting Cassandra & Redis"
     docker run --name squirreldb-test-cassandra -d -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=24M cassandra || true
-    docker run --name squirreldb-test-redis -d redis || true
 
     docker_network=""
     export SQUIRRELDB_CASSANDRA_ADDRESSES=$(docker inspect squirreldb-test-cassandra  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9042
-    export SQUIRRELDB_REDIS_ADDRESSES=$(docker inspect squirreldb-test-redis  -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):6379
     export SQUIRRELDB_CASSANDRA_REPLICATION_FACTOR=1
-    export SQUIRRELDB_BACKEND=cassandra
 fi
+
+export SQUIRRELDB_BACKEND=${BACKEND}
 
 build_opt=""
 if [ "${WITH_COVER}" = "1" ]; then
@@ -288,29 +331,39 @@ chown -R $USER_UID coverage-run-tests/
 fi
 
 if [ ! "${WITH_NOSTOP}" = "1" ]; then
-    if [ "${WITH_CLUSTER}" = "1" ] && [ "${WITH_CLICKHOUSE}" = 1 ]; then
+    if [ "${WITH_CLUSTER}" = "1" ] && [ "${START_STORE_CLICKHOUSE}" = 1 ]; then
         echo
         echo "== Stopping cluster component using examples/squirreldb_ha_clickhouse/"
         (cd examples/squirreldb_ha_clickhouse/; docker compose down -v)
-    elif [ "${WITH_CLUSTER}" = "1" ]; then
+    fi
+    if [ "${WITH_CLUSTER}" = "1" ] && [ "${START_STORE_CASSANDRA}" = 1 ]; then
         echo
         echo "== Stopping cluster component using examples/squirreldb_ha/"
         (cd examples/squirreldb_ha/; docker compose down -v)
-    elif [ "${WITH_CLICKHOUSE}" = "1" ]; then
+    fi
+
+    if [ "${WITH_CLUSTER}" = "0" ]; then
+        echo "== Stop common component (Redis)"
+        docker rm -f squirreldb-test-redis
+    fi
+
+    if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_CLICKHOUSE}" = "1" ]; then
         echo
-        echo "== Stopping ClickHouse & Redis"
+        echo "== Stopping ClickHouse"
         docker rm -f squirreldb-test-clickhouse
-        docker rm -f squirreldb-test-redis
-    else
+    fi
+
+    if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_CASSANDRA}" = 1 ]; then
         echo
-        echo "== Stopping Cassandra & Redis"
+        echo "== Stopping Cassandra"
 
-        if [ "${WITH_SCYLLADB}" = "1" ]; then
-            docker rm -f squirreldb-test-scylla
-        else
-            docker rm -f squirreldb-test-cassandra
-        fi
+        docker rm -f squirreldb-test-cassandra
+    fi
 
-        docker rm -f squirreldb-test-redis
+    if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_SCYLLADB}" = 1 ]; then
+        echo
+        echo "== Stopping ScyllaDB"
+
+        docker rm -f squirreldb-test-scylla
     fi
 fi
