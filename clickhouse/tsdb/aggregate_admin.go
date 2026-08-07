@@ -218,15 +218,22 @@ func (c *ClickHouseTSDB) rebuildChunk(ctx context.Context, fromMs, toMs int64, d
 	return nil
 }
 
+// aggInsertColumns names the tsdb_data_agg_15m columns the rebuild writes, so the
+// SELECT below is matched by name and not by position (mv_datapoint_agg_15m relies on
+// its aliases the same way): adding a column to the table can no longer silently shift
+// the values of another one.
+const aggInsertColumns = "(id, tenant, bucket, min, max, sum, count, last, row_ttl_days)"
+
 // rebuildInsertSQL returns the INSERT ... SELECT that recomputes the aggregate for
 // a (fromMs, toMs] window (two ? bound to those millisecond bounds).
 func rebuildInsertSQL(dedup bool) string {
 	if !dedup {
 		// Aggregate the raw points straight into buckets, like mvDatapointAgg15mDDL.
 		// One group per (series, bucket): cheap and scalable.
-		return "INSERT INTO tsdb_data_agg_15m " +
+		return "INSERT INTO tsdb_data_agg_15m " + aggInsertColumns + " " +
 			"SELECT id, tenant, " + aggBucketExpr + " AS bucket, " +
-			"min(value), max(value), sum(value), count(), max(row_ttl_days) " +
+			"min(value), max(value), sum(value), count(), " +
+			"argMinState(value, toUInt16(bucket - timestamp)), max(row_ttl_days) " +
 			"FROM tsdb_data " +
 			"WHERE timestamp > fromUnixTimestamp64Milli(?) AND timestamp <= fromUnixTimestamp64Milli(?) " +
 			"AND NOT isNaN(value) " +
@@ -241,9 +248,10 @@ func rebuildInsertSQL(dedup bool) string {
 	// The inner aggregates are aliased v / ttl (NOT value / row_ttl_days): reusing
 	// the raw column names would shadow them and ClickHouse then resolves the column
 	// in the inner WHERE to the aggregate alias, rejecting the query.
-	return "INSERT INTO tsdb_data_agg_15m " +
+	return "INSERT INTO tsdb_data_agg_15m " + aggInsertColumns + " " +
 		"SELECT id, tenant, " + aggBucketExpr + " AS bucket, " +
-		"min(v), max(v), sum(v), count(), max(ttl) " +
+		"min(v), max(v), sum(v), count(), " +
+		"argMinState(v, toUInt16(bucket - timestamp)), max(ttl) " +
 		"FROM (" +
 		"SELECT id, tenant, timestamp, argMax(value, insert_hour) AS v, max(row_ttl_days) AS ttl " +
 		"FROM tsdb_data " +

@@ -182,9 +182,16 @@ ARRAY JOIN
 // Columns are mergeable partial aggregates finalized on read (GROUP BY, see
 // aggPointsQuery). Only commutative aggregates are kept — min/max/sum/count — so
 // the result is exact and stable regardless of how the AggregatingMergeTree merges
-// parts. (Order-dependent aggregates like argMin/argMax or any/anyLast were tried
-// for first/last but are neither exact nor merge-stable under ClickHouse's
-// unordered merges, so they were dropped; counters use max, see aggValueExpr.)
+// parts. any/anyLast were tried for first/last and dropped: they are order-dependent,
+// so neither exact nor stable under ClickHouse's unordered merges. Counters use max
+// instead, see aggValueExpr.
+//
+// last is the exception, and the one non-commutative-looking column that IS exact and
+// merge-stable: an argMin state keyed on the sample's distance to the bucket's right
+// edge, so merging parts keeps the state with the smallest distance — the bucket's last
+// sample, whatever order the merges happen in. It gives an instant vector PromQL's real
+// semantics (the last sample at/before the bucket edge) instead of a bucket extremum,
+// see aggSnapQuery.
 //
 // AggregatingMergeTree merges rows sharing the ORDER BY key (tenant, id, bucket).
 // TTL expires each bucket on its own row_ttl_days (carried from datapoint_input,
@@ -199,6 +206,7 @@ CREATE TABLE IF NOT EXISTS tsdb_data_agg_15m
     max SimpleAggregateFunction(max, Float64) CODEC(ZSTD(1)),
     sum SimpleAggregateFunction(sum, Float64) CODEC(ZSTD(1)),
     count SimpleAggregateFunction(sum, UInt64) CODEC(ZSTD(1)),
+    last AggregateFunction(argMin, Float64, UInt16) CODEC(ZSTD(1)),
     row_ttl_days SimpleAggregateFunction(max, UInt16) CODEC(ZSTD(1))
 )
 ENGINE = AggregatingMergeTree
@@ -214,7 +222,8 @@ TTL bucket + toIntervalDay(row_ttl_days)`
 // The bucket expression labels on the right edge (see tsdbDataAgg15mDDL): a point
 // exactly on a 15-min grid instant belongs to the bucket ending on it (the -1ms
 // before toStartOfInterval makes the boundary right-closed), the next point starts
-// the following bucket.
+// the following bucket. `bucket - timestamp` is therefore never negative, which the
+// UInt16 key of last relies on.
 //
 // StaleNaN and any NaN are filtered out — they carry no aggregatable value and
 // would poison min/max/avg.
@@ -230,6 +239,7 @@ SELECT
     max(value) AS max,
     sum(value) AS sum,
     count() AS count,
+    argMinState(value, toUInt16(bucket - timestamp)) AS last,
     max(row_ttl_days) AS row_ttl_days
 FROM datapoint_input
 ARRAY JOIN

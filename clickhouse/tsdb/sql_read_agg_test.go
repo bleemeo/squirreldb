@@ -210,7 +210,7 @@ func TestAggValueExpr(t *testing.T) {
 		{"max_over_time", "max(max)", true},
 		{"sum_over_time", "sum(sum)", true},
 		{"avg_over_time", "sum(sum) / sum(count)", true},
-		{"last_over_time", "max(max)", true},
+		{"last_over_time", "argMinMerge(last)", true},
 		{"stddev_over_time", "max(max)", true},
 		// Counters and trends reconstruct the bucket's last cumulative value.
 		{"rate", "max(max)", true},
@@ -407,10 +407,13 @@ func TestAggSnapQuery(t *testing.T) {
 	oneID := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}
 	bucketMs := aggBucket.Milliseconds()
 
-	// A range query: Start .. End every Step, well inside the store bounds.
+	// A range query: Start .. End every Step, well inside the store bounds. Start is
+	// deliberately not a multiple of Step (as a lookback-shifted hints.Start is), so
+	// the two grid anchors differ.
+	step := bucketMs
 	start := int64(10_000_000)
 	end := start + 4*bucketMs
-	step := bucketMs
+	alignedStart := start - start%step + step
 
 	t.Run("tenant-scoped snaps to the eval grid and matches the covering bucket", func(t *testing.T) {
 		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1"}}
@@ -419,11 +422,14 @@ func TestAggSnapQuery(t *testing.T) {
 		query, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
 
 		for _, want := range []string{
-			"max(a.max) AS value",
+			"argMinMerge(a.last) AS value",
 			// The grid is the RIGHT (build) side of the join, big table on the left.
 			"FROM tsdb_data_agg_15m AS a INNER JOIN (",
 			"AS grid ON a.bucket = grid.bucket",
 			"toStartOfInterval(ts, INTERVAL 15 MINUTE)",
+			// Both grids, deduplicated: the Start-anchored one and the step-aligned one.
+			"arrayDistinct(arrayConcat(range(toUInt64(?), toUInt64(?), toUInt64(?)), " +
+				"range(toUInt64(?), toUInt64(?), toUInt64(?))))",
 			"a.id IN (?)",
 			"GROUP BY a.id, grid.ts",
 		} {
@@ -432,12 +438,31 @@ func TestAggSnapQuery(t *testing.T) {
 			}
 		}
 
-		// grid bounds (Start, End+1, Step), tenant, ids, then the coarse bucket filter
-		// (Start - one bucket, End), all clamped where they hit the store bounds.
+		// Both grid bounds (Start then the aligned start, each to End+1 by Step), tenant,
+		// ids, then the coarse bucket filter (Start - one bucket, End), all clamped where
+		// they hit the store bounds.
 		want := []any{
 			start, end + 1, step,
+			alignedStart, end + 1, step,
 			"tenant-1", oneID,
 			clampStoreTime(start - bucketMs), clampStoreTime(end),
+		}
+		if diff := cmp.Diff(want, args); diff != "" {
+			t.Errorf("args mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("a step-aligned Start yields two identical grids", func(t *testing.T) {
+		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: ""}}
+		hints := &storage.SelectHints{Start: alignedStart, End: end, Step: step, Range: 0}
+
+		_, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
+
+		want := []any{
+			alignedStart, end + 1, step,
+			alignedStart, end + 1, step,
+			oneID,
+			clampStoreTime(alignedStart - bucketMs), clampStoreTime(end),
 		}
 		if diff := cmp.Diff(want, args); diff != "" {
 			t.Errorf("args mismatch (-want +got):\n%s", diff)
@@ -457,6 +482,7 @@ func TestAggSnapQuery(t *testing.T) {
 
 		want := []any{
 			start, end + 1, step,
+			alignedStart, end + 1, step,
 			"tenant-1", "cpu_used",
 			clampStoreTime(start - bucketMs), clampStoreTime(end),
 		}
@@ -477,6 +503,7 @@ func TestAggSnapQuery(t *testing.T) {
 
 		want := []any{
 			start, end + 1, step,
+			alignedStart, end + 1, step,
 			oneID,
 			clampStoreTime(start - bucketMs), clampStoreTime(end),
 		}
@@ -484,4 +511,26 @@ func TestAggSnapQuery(t *testing.T) {
 			t.Errorf("args mismatch (-want +got):\n%s", diff)
 		}
 	})
+}
+
+func TestAlignUp(t *testing.T) {
+	cases := []struct {
+		v, step, want int64
+	}{
+		{v: 0, step: 100, want: 0},
+		{v: 100, step: 100, want: 100},
+		{v: 1, step: 100, want: 100},
+		{v: 99, step: 100, want: 100},
+		{v: 101, step: 100, want: 200},
+		// Pre-1970 hints (storeMinTimeMillis is negative): still at/after v.
+		{v: -1, step: 100, want: 0},
+		{v: -100, step: 100, want: -100},
+		{v: -101, step: 100, want: -100},
+	}
+
+	for _, c := range cases {
+		if got := alignUp(c.v, c.step); got != c.want {
+			t.Errorf("alignUp(%d, %d) = %d, want %d", c.v, c.step, got, c.want)
+		}
+	}
 }

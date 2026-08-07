@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS tsdb_data_agg_15m ON CLUSTER test_cluster
     max SimpleAggregateFunction(max, Float64) CODEC(ZSTD(1)),
     sum SimpleAggregateFunction(sum, Float64) CODEC(ZSTD(1)),
     count SimpleAggregateFunction(sum, UInt64) CODEC(ZSTD(1)),
+    last AggregateFunction(argMin, Float64, UInt16) CODEC(ZSTD(1)),
     row_ttl_days SimpleAggregateFunction(max, UInt16) CODEC(ZSTD(1))
 )
 ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_data_agg_15m', '{replica}')
@@ -115,6 +116,7 @@ SELECT
     max(value) AS max,
     sum(value) AS sum,
     count() AS count,
+    argMinState(value, toUInt16(bucket - timestamp)) AS last,
     max(row_ttl_days) AS row_ttl_days
 FROM datapoint_input
 ARRAY JOIN

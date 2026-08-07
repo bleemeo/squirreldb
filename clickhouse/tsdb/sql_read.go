@@ -343,17 +343,24 @@ func aggValueExpr(fn string) (string, bool) {
 		return "sum(sum)", true
 	case "avg_over_time":
 		return "sum(sum) / sum(count)", true
-	case "last_over_time", "stddev_over_time", "stdvar_over_time":
-		// Approximation: on a monotonic counter max equals the last value (so exact);
-		// for non-counters max() is assumed good enough.
+	case "last_over_time":
+		// The bucket's own last sample: exact when the [range] ends on a bucket edge,
+		// else the last sample of the last bucket that ended inside the range.
+		return "argMinMerge(last)", true
+	case "stddev_over_time", "stdvar_over_time":
+		// Approximation: max() is assumed good enough for a spread over a downsampled
+		// series (min/max/sum/count cannot reconstruct one).
 		return "max(max)", true
 	case "first_over_time":
-		// Symmetrical to last_over_time.
+		// No symmetrical column to last: min(min) is the approximation kept.
 		return "min(min)", true
 	case "rate", "irate", "increase", "delta", "idelta", "deriv":
-		// Counter/trend family: use the bucket max as the representative value (like
-		// the Cassandra backend). On a monotonic counter it equals the last cumulative
-		// value; PromQL still detects resets on the downsampled series.
+		// Counter/trend family: the bucket max, and NOT last — they only differ on a
+		// bucket holding a reset, and max is the one that keeps the rate right. Max
+		// carries the pre-reset peak, which is what PromQL's reset correction consumes to
+		// recover the climb that happened inside that bucket; last carries the post-reset
+		// value, and that climb is then lost from the increase. The "rate with resets"
+		// case in tests/squirreldb-promql-aggregate is the guard.
 		return "max(max)", true
 	case "present_over_time", "absent_over_time":
 		// Depend only on whether the window holds ANY point, not on values or their
@@ -486,33 +493,55 @@ func (q *sqlQuerier) aggPointsQuery(ids []uuid.UUID, valueExpr, where string, wh
 
 // aggSnapQuery builds the instant-vector query over tsdb_data_agg_15m. Where
 // aggPointsQuery returns one point per bucket labelled on the bucket's right edge,
-// this returns one point per PromQL eval instant T_i = Start + i*Step, valued from
-// the bucket covering T_i and stamped AT T_i:
+// this returns one point per candidate PromQL eval instant, valued from the bucket
+// covering that instant and stamped ON it:
 //
-//   - the covering bucket is toStartOfInterval(T_i, 15min) — the last bucket whose
-//     right edge is at/before T_i, so within aggBucket of it (the join matches that
-//     one bucket, which enforces the aggBucket staleness cap: a T_i whose bucket has
+//   - the covering bucket is toStartOfInterval(ts, 15min) — the last bucket whose
+//     right edge is at/before ts, so within aggBucket of it (the join matches that
+//     one bucket, which enforces the aggBucket staleness cap: a ts whose bucket has
 //     no data yields no row, i.e. a gap, so a series idle for more than one bucket
 //     drops out);
-//   - the value is max(max), an actual observed value — not an average, which would
-//     turn a discrete metric (1, 2, 3) into a fractional one;
+//   - the value is that bucket's last sample (argMinMerge(last), see
+//     tsdbDataAgg15mDDL), which is what PromQL would itself return for an instant
+//     vector over the 15-min-downsampled series: exactly the raw value whenever the
+//     instant falls on a bucket edge, at most one bucket stale otherwise;
 //   - stamping on the eval grid is what lets PromQL's lookback, shorter than the
 //     15-min bucket spacing, land on a point (the reason a bare selector routed to
 //     the bucket-labelled aggregate would drop half its steps).
 //
-// GROUP BY re-merges the AggregatingMergeTree parts, as in aggPointsQuery. Step is
-// guaranteed positive by aggSelection (aggModeInstantSnap requires Step > 0).
+// The instants are not recoverable from the hints, so the grid unions the two
+// families PromQL evaluates on — at most two points per step:
+//
+//   - Start + i*Step. For a range query hints.Start is the first eval instant less
+//     (lookbackDelta - 1) — Prometheus widens it for the instant-vector lookback —
+//     so each point lands just inside its instant's lookback window, whatever
+//     lookbackDelta the engine is configured with;
+//   - the multiples of Step, from the first one at/after Start. That is the grid a
+//     subquery evaluates on, and hints.Start there is also shifted by the subquery
+//     range, so a Start-anchored point can fall a whole Step from the instant —
+//     outside the lookback, dropping every step of the query.
+//
+// A point no instant uses is harmless: each carries the bucket covering itself, and
+// PromQL takes the latest point at/before its instant, i.e. the freshest of the two.
+// Aligning up (never below Start) keeps the bucket scan bound below unchanged.
+//
+// GROUP BY re-merges the AggregatingMergeTree parts, as in aggPointsQuery, and
+// collapses the two grids where they coincide. Step is guaranteed positive by
+// aggSelection (aggModeInstantSnap requires Step > 0).
 func (q *sqlQuerier) aggSnapQuery(
 	ids []uuid.UUID,
 	hints *storage.SelectHints,
 	where string,
 	whereArgs []any,
 ) (string, []any) {
-	queryArgs := make([]any, 0, len(whereArgs)+7)
+	queryArgs := make([]any, 0, len(whereArgs)+10)
 
-	// The eval grid [Start, End] stepping by Step; End+1 includes an aligned End
+	// The two grids over [Start, End] stepping by Step; End+1 includes an aligned End
 	// (range() is exclusive on its upper bound).
-	queryArgs = append(queryArgs, hints.Start, hints.End+1, hints.Step)
+	queryArgs = append(queryArgs,
+		hints.Start, hints.End+1, hints.Step,
+		alignUp(hints.Start, hints.Step), hints.End+1, hints.Step,
+	)
 
 	var tenantCond string
 
@@ -535,16 +564,18 @@ func (q *sqlQuerier) aggSnapQuery(
 	}
 
 	// Coarse bucket filter (partition pruning); the join key does the exact matching.
-	// The lower bound is one bucket before Start, since a T_i near Start maps to a
-	// bucket up to aggBucket earlier.
+	// The lower bound is one bucket before Start, since a grid point near Start maps to
+	// a bucket up to aggBucket earlier.
 	//
 	// The grid subquery is the RIGHT (build) side of the join so ClickHouse hashes the
 	// small step grid, not the large tsdb_data_agg_15m slice. The range() placeholders
 	// still precede the WHERE ones textually, so the positional arg order is unchanged.
-	query := "SELECT a.id AS id, grid.ts AS ts, max(a.max) AS value" +
+	query := "SELECT a.id AS id, grid.ts AS ts, argMinMerge(a.last) AS value" +
 		" FROM tsdb_data_agg_15m AS a" +
 		" INNER JOIN (SELECT ts, toDateTime(toStartOfInterval(ts, INTERVAL 15 MINUTE)) AS bucket FROM" +
-		" (SELECT fromUnixTimestamp64Milli(arrayJoin(range(toUInt64(?), toUInt64(?), toUInt64(?)))) AS ts)) AS grid" +
+		" (SELECT fromUnixTimestamp64Milli(arrayJoin(arrayDistinct(arrayConcat(" +
+		"range(toUInt64(?), toUInt64(?), toUInt64(?)), range(toUInt64(?), toUInt64(?), toUInt64(?))" +
+		")))) AS ts)) AS grid" +
 		" ON a.bucket = grid.bucket" +
 		" WHERE " + tenantCond + idCond +
 		" AND a.bucket >= fromUnixTimestamp64Milli(?) AND a.bucket <= fromUnixTimestamp64Milli(?)" +
@@ -554,6 +585,21 @@ func (q *sqlQuerier) aggSnapQuery(
 	queryArgs = append(queryArgs, clampStoreTime(hints.Start-aggBucket.Milliseconds()), clampStoreTime(hints.End))
 
 	return query, queryArgs
+}
+
+// alignUp returns the smallest multiple of step at/after v; step must be positive.
+func alignUp(v, step int64) int64 {
+	rem := v % step
+	if rem == 0 {
+		return v
+	}
+
+	// Go truncates toward zero, so a negative v is already at/after its multiple.
+	if rem < 0 {
+		return v - rem
+	}
+
+	return v - rem + step
 }
 
 // clickhouse error codes raised when a result/read row limit is exceeded with the
