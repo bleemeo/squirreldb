@@ -196,11 +196,13 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 			pointsCount int
 		)
 
+		rg, rgErr := pw.AppendRowGroupChecked()
+		if rgErr != nil {
+			return 0, 0, 0, batchTimings{}, fmt.Errorf("appending row group: %w", rgErr)
+		}
+
 		if opts.exportUseFixedSchema {
-			rowsCount, pointsCount, totalSeries, err = writeTimeSeriesFixedSchema(opts, pw.AppendRowGroup(), series, &timings)
-			if err != nil {
-				return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
-			}
+			rowsCount, pointsCount, totalSeries, err = writeTimeSeriesFixedSchema(opts, rg, series, &timings)
 		} else {
 			samplesBySeriesName := make(map[string][]prompb.Sample, len(series))
 
@@ -212,10 +214,11 @@ func exportSeries(opts options, seriesLabels []map[string]string) (
 
 			totalSeries = len(actualSeries)
 
-			rowsCount, pointsCount, err = writeTimeSeries(opts, seriesNames, pw.AppendRowGroup(), samplesBySeriesName, &timings)
-			if err != nil {
-				return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
-			}
+			rowsCount, pointsCount, err = writeTimeSeries(opts, seriesNames, rg, samplesBySeriesName, &timings)
+		}
+
+		if err != nil {
+			return 0, 0, 0, batchTimings{}, fmt.Errorf("writing series: %w", err)
 		}
 
 		totalRows += int64(rowsCount)
