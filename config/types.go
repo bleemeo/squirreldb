@@ -146,7 +146,8 @@ type ClickHouse struct {
 	//
 	// The replicated tables use an explicit, name-based Keeper path, so they
 	// must never be RENAMEd; see examples/squirreldb_ha_clickhouse for the
-	// node-recovery runbook.
+	// node-recovery runbook. Setting this on a ClickHouse that already holds
+	// single-node tables needs a migration: docs/clickhouse-cluster.md.
 	ClusterName string `yaml:"cluster_name"`
 	// MaxConcurrentQueries caps the total in-flight queries (reads + writes)
 	// SquirrelDB sends to ClickHouse, so it stays under the server's

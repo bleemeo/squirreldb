@@ -16,7 +16,13 @@
 
 package ddl
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/rs/zerolog"
+)
 
 func TestReplicatedEngine(t *testing.T) {
 	t.Parallel()
@@ -81,5 +87,105 @@ func TestOnCluster(t *testing.T) {
 
 	if got := OnCluster("main_cluster"); got != " ON CLUSTER main_cluster" {
 		t.Errorf("OnCluster = %q", got)
+	}
+}
+
+func TestEngineMatchesMode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		engine    string
+		clustered bool
+		want      bool
+	}{
+		{"MergeTree", false, true},
+		{"AggregatingMergeTree", false, true},
+		{"ReplicatedMergeTree", true, true},
+		{"ReplicatedAggregatingMergeTree", true, true},
+		// The mismatches: a single-node table used in cluster mode replicates
+		// nothing, a replicated one used without ON CLUSTER only ever gets DDL on
+		// the node SquirrelDB happened to reach.
+		{"MergeTree", true, false},
+		{"ReplicatedReplacingMergeTree", false, false},
+	}
+
+	for _, tc := range cases {
+		if got := EngineMatchesMode(tc.engine, tc.clustered); got != tc.want {
+			t.Errorf("EngineMatchesMode(%q, %t) = %t, want %t", tc.engine, tc.clustered, got, tc.want)
+		}
+	}
+}
+
+// TestLogEngineMismatch checks the operator gets a named, actionable error for each
+// direction, and silence when the engines match — the whole point of the check is
+// that a cluster-mode SquirrelDB writing to non-replicated tables cannot stay quiet.
+func TestLogEngineMismatch(t *testing.T) {
+	t.Parallel()
+
+	objects := []Object{
+		{Name: "tsdb_data", Replicated: true},
+		{Name: "state", Replicated: true},
+		{Name: "datapoint_input"},
+	}
+
+	cases := []struct {
+		name        string
+		clusterName string
+		engines     map[string]string
+		wantLogged  []string
+		wantQuiet   bool
+	}{
+		{
+			name:        "cluster mode, tables not replicated",
+			clusterName: "main_cluster",
+			engines: map[string]string{
+				"tsdb_data": "MergeTree", "state": "ReplicatedReplacingMergeTree", "datapoint_input": "Null",
+			},
+			wantLogged: []string{"tsdb_data (MergeTree)", "migrate_to_cluster"},
+		},
+		{
+			name:    "single-node mode, tables replicated",
+			engines: map[string]string{"tsdb_data": "ReplicatedMergeTree", "datapoint_input": "Null"},
+			wantLogged: []string{
+				"tsdb_data (ReplicatedMergeTree)", "AS NOT REPLICATED",
+			},
+		},
+		{
+			name:        "engines match",
+			clusterName: "main_cluster",
+			engines: map[string]string{
+				"tsdb_data": "ReplicatedMergeTree", "state": "ReplicatedReplacingMergeTree",
+				"datapoint_input": "Null",
+			},
+			wantQuiet: true,
+		},
+		{
+			name:        "absent tables are not a mismatch",
+			clusterName: "main_cluster",
+			engines:     map[string]string{},
+			wantQuiet:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			logEngineMismatch(zerolog.New(&buf), objects, tc.engines, tc.clusterName)
+
+			got := buf.String()
+
+			if tc.wantQuiet && got != "" {
+				t.Fatalf("expected no log, got %s", got)
+			}
+
+			for _, want := range tc.wantLogged {
+				if !strings.Contains(got, want) {
+					t.Errorf("log does not mention %q: %s", want, got)
+				}
+			}
+		})
 	}
 }

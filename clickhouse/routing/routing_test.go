@@ -240,3 +240,77 @@ func TestQueryConcurrencyUnlimited(t *testing.T) {
 
 	c.releaseWrite()
 }
+
+// TestClassifyTables checks the readiness classification of the expected tables,
+// including the mid-migration state a per-host check exists for: the node holding
+// the single-node data still has plain MergeTree tables.
+func TestClassifyTables(t *testing.T) {
+	t.Parallel()
+
+	expected := []ExpectedTable{
+		{Name: "tsdb_data", Replicated: true},
+		{Name: "datapoint_input"},
+		{Name: "mv_datapoint_data"},
+	}
+
+	cases := []struct {
+		name           string
+		engines        map[string]string
+		clustered      bool
+		wantMissing    []string
+		wantMismatched []string
+	}{
+		{
+			name: "single node, all plain",
+			engines: map[string]string{
+				"tsdb_data": "MergeTree", "datapoint_input": "Null", "mv_datapoint_data": "MaterializedView",
+			},
+		},
+		{
+			name:      "cluster, all replicated",
+			clustered: true,
+			engines: map[string]string{
+				"tsdb_data":       "ReplicatedMergeTree",
+				"datapoint_input": "Null", "mv_datapoint_data": "MaterializedView",
+			},
+		},
+		{
+			name:      "cluster mode against single-node tables",
+			clustered: true,
+			engines: map[string]string{
+				"tsdb_data": "MergeTree", "datapoint_input": "Null", "mv_datapoint_data": "MaterializedView",
+			},
+			wantMismatched: []string{"tsdb_data (MergeTree)"},
+		},
+		{
+			name: "single-node mode against replicated tables",
+			engines: map[string]string{
+				"tsdb_data":       "ReplicatedAggregatingMergeTree",
+				"datapoint_input": "Null", "mv_datapoint_data": "MaterializedView",
+			},
+			wantMismatched: []string{"tsdb_data (ReplicatedAggregatingMergeTree)"},
+		},
+		{
+			name:        "missing wins over engine check",
+			clustered:   true,
+			engines:     map[string]string{"datapoint_input": "Null"},
+			wantMissing: []string{"tsdb_data", "mv_datapoint_data"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			missing, mismatched := classifyTables(expected, tc.engines, tc.clustered)
+
+			if strings.Join(missing, ",") != strings.Join(tc.wantMissing, ",") {
+				t.Errorf("missing = %v, want %v", missing, tc.wantMissing)
+			}
+
+			if strings.Join(mismatched, ",") != strings.Join(tc.wantMismatched, ",") {
+				t.Errorf("mismatched = %v, want %v", mismatched, tc.wantMismatched)
+			}
+		})
+	}
+}

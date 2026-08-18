@@ -27,7 +27,8 @@
 // specific host, demote it immediately instead of waiting for the next probe.
 //
 // A host is classified as:
-//   - ready: reachable AND holds all expected tables AND replica lag < threshold;
+//   - ready: reachable AND holds all expected tables, with an engine matching the
+//     configured mode (replicated or not), AND replica lag < threshold;
 //   - reachable: ping succeeds but not ready (no tables yet, or lagging);
 //   - down: ping fails.
 //
@@ -49,6 +50,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
+	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
@@ -57,6 +59,9 @@ import (
 // query targets a table that does not exist on the node it reached — the signal
 // that the node is degraded (e.g. rebuilt empty), not that the query is wrong.
 const codeUnknownTable = 60
+
+// errUnknownHost is returned by OnHost for an address this Conn does not own.
+var errUnknownHost = errors.New("routing: address is not a configured ClickHouse host")
 
 // Defaults for the health monitor.
 const (
@@ -87,9 +92,10 @@ type Options struct {
 	Compression *clickhouse.Compression
 	// ExpectedTables are the tables a host must hold to be considered ready. When
 	// empty, the table check is skipped (a reachable host is ready).
-	ExpectedTables []string
-	// ClusterName, when set, is used only to warn (at startup) if the number of
-	// configured addresses does not match the cluster's node count. It is never
+	ExpectedTables []ExpectedTable
+	// ClusterName, when set, is used to warn (at startup) if the number of
+	// configured addresses does not match the cluster's node count, and to decide
+	// which engine the expected tables must have (see checkTables). It is never
 	// used to discover addresses (that would break NAT/proxy setups).
 	ClusterName   string
 	ProbeInterval time.Duration // default DefaultProbeInterval
@@ -105,6 +111,15 @@ type Options struct {
 	// Registerer, when set, receives per-host health gauges.
 	Registerer prometheus.Registerer
 	Logger     zerolog.Logger
+}
+
+// ExpectedTable is a table a host must hold to be ready, and whether it is one of
+// the MergeTree-family tables the schema replicates in cluster mode (mirrors
+// ddl.Object.Replicated). Only those have their engine checked, against
+// Options.ClusterName.
+type ExpectedTable struct {
+	Name       string
+	Replicated bool
 }
 
 type host struct {
@@ -678,7 +693,7 @@ func (c *Conn) probe(parent context.Context, h *host) {
 		return
 	}
 
-	missing, err := c.missingTables(ctx, h)
+	missing, mismatched, err := c.checkTables(ctx, h)
 	if err != nil {
 		// Reachable, but we cannot determine readiness: keep it out of the ready
 		// set without logging a scary transition.
@@ -690,6 +705,15 @@ func (c *Conn) probe(parent context.Context, h *host) {
 	if len(missing) > 0 {
 		h.set(true, false,
 			fmt.Sprintf("missing expected tables %v — excluded (rebuilt node? see recovery runbook)", missing),
+			c.logger)
+
+		return
+	}
+
+	if len(mismatched) > 0 {
+		h.set(true, false,
+			fmt.Sprintf("tables %v do not match the configured mode (cluster_name=%q) — excluded "+
+				"(see the migration runbook)", mismatched, c.opts.ClusterName),
 			c.logger)
 
 		return
@@ -711,48 +735,52 @@ func (c *Conn) probe(parent context.Context, h *host) {
 	h.set(true, true, "", c.logger)
 }
 
-// missingTables returns the expected tables the host does not hold. Checking
-// names (rather than just a count) keeps it correct even if an operator created
-// some table manually, and lets us log exactly which table is missing.
-func (c *Conn) missingTables(ctx context.Context, h *host) ([]string, error) {
+// checkTables returns the expected tables the host does not hold, and those whose
+// engine contradicts ClusterName (a non-replicated table in cluster mode, or the
+// reverse — see ddl.EngineMatchesMode). Checking names (rather than just a count)
+// keeps it correct even if an operator created some table manually, and lets us
+// report exactly which table is at fault.
+//
+// The engine is checked per host, not once cluster-wide, because that is the state
+// a migration goes through: the node holding the single-node data still has plain
+// MergeTree tables while a freshly added node already has replicated ones.
+func (c *Conn) checkTables(ctx context.Context, h *host) (missing, mismatched []string, err error) {
 	if len(c.opts.ExpectedTables) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	rows, err := h.conn.Query(ctx,
-		"SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN (?)",
-		c.opts.ExpectedTables,
-	)
+	names := make([]string, len(c.opts.ExpectedTables))
+	for i, table := range c.opts.ExpectedTables {
+		names[i] = table.Name
+	}
+
+	engines, err := ddl.TableEngines(ctx, h.conn, names)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	present := make(map[string]bool, len(c.opts.ExpectedTables))
-
-	for rows.Next() {
-		var name string
-
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-
-		present[name] = true
+		return nil, nil, err
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+	missing, mismatched = classifyTables(c.opts.ExpectedTables, engines, c.opts.ClusterName != "")
 
-	var missing []string
+	return missing, mismatched, nil
+}
 
-	for _, table := range c.opts.ExpectedTables {
-		if !present[table] {
-			missing = append(missing, table)
+// classifyTables splits the expected tables into the absent ones and those whose
+// engine contradicts clustered (reported as "<name> (<engine>)").
+func classifyTables(
+	expected []ExpectedTable, engines map[string]string, clustered bool,
+) (missing, mismatched []string) {
+	for _, table := range expected {
+		engine, exists := engines[table.Name]
+
+		switch {
+		case !exists:
+			missing = append(missing, table.Name)
+		case table.Replicated && !ddl.EngineMatchesMode(engine, clustered):
+			mismatched = append(mismatched, table.Name+" ("+engine+")")
 		}
 	}
 
-	return missing, nil
+	return missing, mismatched
 }
 
 // lagging reports whether the host's most-delayed replica is behind by more than
@@ -1060,56 +1088,73 @@ func (r errorRow) ScanStruct(any) error { return r.err }
 // It shares the underlying per-host connections and health monitor; Close is a
 // no-op (the underlying Conn is owned by whoever created it).
 func (c *Conn) Sticky() driver.Conn {
-	return &stickyConn{c: c}
+	return &viewConn{c: c, pick: c.pickSticky}
 }
 
-type stickyConn struct {
-	c *Conn
+// OnHost returns a driver.Conn that routes every call to one configured address,
+// whatever its health. The single-node → cluster migration needs it: the tables it
+// renames and attaches partitions from live on a SINGLE host, which is by
+// definition not "ready" (its engines do not match the configured mode yet), and a
+// round-robin call would hit a node where those tables do not exist.
+func (c *Conn) OnHost(addr string) (driver.Conn, error) {
+	for _, h := range c.hosts {
+		if h.addr == addr {
+			return &viewConn{c: c, pick: func() (*host, error) { return h, nil }}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("%w: %s", errUnknownHost, addr)
 }
 
-var _ driver.Conn = (*stickyConn)(nil)
-
-// The data-plane methods share Conn's implementation, differing only by routing
-// through pickSticky (deterministic single host) instead of pick (round-robin).
-
-func (s *stickyConn) Exec(ctx context.Context, query string, args ...any) error {
-	return s.c.exec(ctx, s.c.pickSticky, query, args...)
+// viewConn is a driver.Conn over a Conn that sends every call through one fixed
+// picking strategy instead of round-robin (see Sticky, OnHost).
+type viewConn struct {
+	c    *Conn
+	pick pickFunc
 }
 
-func (s *stickyConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
-	return s.c.query(ctx, s.c.pickSticky, query, args...)
+var _ driver.Conn = (*viewConn)(nil)
+
+// The data-plane methods share Conn's implementation, differing only by the pick.
+
+func (s *viewConn) Exec(ctx context.Context, query string, args ...any) error {
+	return s.c.exec(ctx, s.pick, query, args...)
 }
 
-func (s *stickyConn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
-	return s.c.queryRow(ctx, s.c.pickSticky, query, args...)
+func (s *viewConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	return s.c.query(ctx, s.pick, query, args...)
 }
 
-func (s *stickyConn) Select(ctx context.Context, dest any, query string, args ...any) error {
-	return s.c.doSelect(ctx, s.c.pickSticky, dest, query, args...)
+func (s *viewConn) QueryRow(ctx context.Context, query string, args ...any) driver.Row {
+	return s.c.queryRow(ctx, s.pick, query, args...)
 }
 
-func (s *stickyConn) PrepareBatch(
+func (s *viewConn) Select(ctx context.Context, dest any, query string, args ...any) error {
+	return s.c.doSelect(ctx, s.pick, dest, query, args...)
+}
+
+func (s *viewConn) PrepareBatch(
 	ctx context.Context, query string, opts ...driver.PrepareBatchOption,
 ) (driver.Batch, error) {
-	return s.c.prepareBatch(ctx, s.c.pickSticky, query, opts...)
+	return s.c.prepareBatch(ctx, s.pick, query, opts...)
 }
 
-func (s *stickyConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
-	return s.c.asyncInsert(ctx, s.c.pickSticky, query, wait, args...)
+func (s *viewConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
+	return s.c.asyncInsert(ctx, s.pick, query, wait, args...)
 }
 
-func (s *stickyConn) Ping(ctx context.Context) error {
-	return s.c.ping(ctx, s.c.pickSticky)
+func (s *viewConn) Ping(ctx context.Context) error {
+	return s.c.ping(ctx, s.pick)
 }
 
 // Contributors/ServerVersion/Stats don't depend on the picking strategy.
-func (s *stickyConn) Contributors() []string                        { return s.c.Contributors() }
-func (s *stickyConn) ServerVersion() (*driver.ServerVersion, error) { return s.c.ServerVersion() }
-func (s *stickyConn) Stats() driver.Stats                           { return s.c.Stats() }
+func (s *viewConn) Contributors() []string                        { return s.c.Contributors() }
+func (s *viewConn) ServerVersion() (*driver.ServerVersion, error) { return s.c.ServerVersion() }
+func (s *viewConn) Stats() driver.Stats                           { return s.c.Stats() }
 
 // Close is a no-op: the underlying Conn (and its monitor) is owned by the caller
 // that built it, not by this view.
-func (s *stickyConn) Close() error { return nil }
+func (s *viewConn) Close() error { return nil }
 
 // healthCollector exposes the number of reachable and ready ClickHouse hosts as
 // Prometheus gauges, read live on each scrape from the monitor's current view.

@@ -14,6 +14,11 @@ To achieve this goal, you will need:
 For the details on how to configure a Clickhouse cluster or Redis cluster, look at their
 respective documentation or follow the quickstart below.
 
+If you are not there yet, [docs/clickhouse-cluster.md](../../docs/clickhouse-cluster.md) describes
+the three supported ClickHouse deployments (single node, single-node cluster, multi-node cluster),
+which one to pick, and how to move from one to the next — including migrating an existing
+single-node ClickHouse to a cluster without losing its data.
+
 SquirrelDB instance will be stateless (they are stateless, because short term data will be stored in Redis) and
 need the following configurations:
 
@@ -110,7 +115,9 @@ here `clickhouse-server-1`):
    stale registration is the one thing blocking re-creation; dropping it is kept
    manual on purpose, since `SYSTEM DROP REPLICA` is destructive:
    ```
-   for t in tsdb_data tsdb_tags mutable_label_names mutable_label_values telemetry_cluster_id telemetry_node_ids; do
+   # The table list is read from a healthy node, so it cannot go stale as the schema grows.
+   for t in $(docker compose exec clickhouse-server-1 clickhouse-client -q \
+       "SELECT name FROM system.tables WHERE database = 'squirreldb' AND engine LIKE 'Replicated%'"); do
      docker compose exec clickhouse-server-1 clickhouse-client -q "SYSTEM DROP REPLICA 'replica01' FROM TABLE squirreldb.$t"
    done
    ```

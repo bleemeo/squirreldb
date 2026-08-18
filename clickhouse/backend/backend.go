@@ -151,18 +151,19 @@ func allSchemaObjects(opts Options) []ddl.Object {
 	return objects
 }
 
-// expectedTables lists every table a host must hold to be routed to (see
-// clickhouse/routing). It always includes the mutable tables, even in read-only
-// mode: a read-only node still needs them to serve mutable-label reads.
-func expectedTables(opts Options) []string {
+// expectedTables lists every table a host must hold to be routed to, and whether
+// it is replicated in cluster mode (see clickhouse/routing). It always includes the
+// mutable tables, even in read-only mode: a read-only node still needs them to
+// serve mutable-label reads.
+func expectedTables(opts Options) []routing.ExpectedTable {
 	objects := allSchemaObjects(opts)
-	names := make([]string, len(objects))
+	tables := make([]routing.ExpectedTable, len(objects))
 
 	for i, o := range objects {
-		names[i] = o.Name
+		tables[i] = routing.ExpectedTable{Name: o.Name, Replicated: o.Replicated}
 	}
 
-	return names
+	return tables
 }
 
 // schemaObjects is the set this backend creates: everything, or NOTHING in
@@ -263,7 +264,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	// Create the whole schema up front (idempotent), so a host can become "ready"
 	// regardless of which stores are later instantiated — the health check expects
 	// every table, and stores are built lazily.
-	if err := ddl.EnsureTables(ctx, b.routing, b.logger, b.schemaObjects()); err != nil {
+	if err := ddl.EnsureTables(ctx, b.routing, b.logger, b.schemaObjects(), b.options.ClusterName); err != nil {
 		_ = conn.Close()
 		b.routing = nil
 
@@ -522,6 +523,14 @@ func (b *Backend) RegisterHTTPEndpoints(register func(method, path, description 
 			"use on the bounded range a diff flagged). ?no-drop skips the pre-insert delete (only if "+
 			"the rows were already removed).",
 		b.aggRebuildHandler)
+	register(http.MethodPost, "/migrate_to_cluster",
+		"Turn the tables of a single-node ClickHouse into the replicated tables cluster_name needs, "+
+			"keeping their data: rename to <table>_pre_cluster, create replicated, attach the "+
+			"partitions (hardlinks). WRITES TO CLICKHOUSE ARE DOWN for the duration (points stay in the WAL) "+
+			"and stay down if it fails, to keep a rollback possible. Re-callable: it resumes. "+
+			"?dry_run reports the plan only; ?cleanup=1 also drops the emptied <table>_pre_cluster "+
+			"tables (they are the rollback net — keep them until you have checked the data).",
+		b.migrateClusterHandler)
 }
 
 // aggChunk parses the optional ?chunk= window size (a Go duration, e.g. 168h). An

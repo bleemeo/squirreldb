@@ -57,6 +57,10 @@ import (
 // degraded/recovering node, not a fresh bootstrap.
 const codeReplicaAlreadyExists = 253
 
+// replicatedPrefix is the prefix ClickHouse gives the replicated variant of every
+// MergeTree-family engine.
+const replicatedPrefix = "Replicated"
+
 // Object is a schema object (table, view) to ensure exists. DDL is the full
 // CREATE statement, already run through ForCluster. Replicated marks the
 // MergeTree-family tables (those a SYSTEM DROP REPLICA applies to), versus the
@@ -171,7 +175,17 @@ func replicatedEngine(clusterName, table, engine string, engineArgs ...string) s
 		"'{replica}'",
 	}, engineArgs...)
 
-	return "Replicated" + engine + "(" + strings.Join(args, ", ") + ")"
+	return replicatedPrefix + engine + "(" + strings.Join(args, ", ") + ")"
+}
+
+// EngineMatchesMode reports whether an engine, as named by system.tables (e.g.
+// "MergeTree", "ReplicatedAggregatingMergeTree"), matches the mode in use:
+// Replicated* on a cluster, plain on a single node.
+//
+// Only meaningful for the replicable tables (Object.Replicated): the Null table
+// and the materialized views keep the same engine in both modes.
+func EngineMatchesMode(engine string, clustered bool) bool {
+	return strings.HasPrefix(engine, replicatedPrefix) == clustered
 }
 
 // EnsureTables creates the given objects if they are missing. It is safe to call
@@ -186,32 +200,79 @@ func replicatedEngine(clusterName, table, engine string, engineArgs ...string) s
 //     logged and tolerated so startup proceeds.
 //   - Any other creation error is returned (a real bootstrap failure the operator
 //     must see, e.g. a timed-out ON CLUSTER DDL on a fresh cluster).
-func EnsureTables(ctx context.Context, conn driver.Conn, logger zerolog.Logger, objects []Object) error {
+//
+// An existing table whose engine does not match clusterName is logged (see
+// logEngineMismatch) but never a boot failure: the operator needs a running
+// SquirrelDB to run the migration endpoint that fixes it.
+func EnsureTables(
+	ctx context.Context, conn driver.Conn, logger zerolog.Logger, objects []Object, clusterName string,
+) error {
 	names := make([]string, len(objects))
 	for i, o := range objects {
 		names[i] = o.Name
 	}
 
-	present, err := existingTables(ctx, conn, names)
+	engines, err := TableEngines(ctx, conn, names)
 	if err != nil {
 		// Cannot determine what exists; fall through and attempt creation, which
 		// is idempotent (CREATE ... IF NOT EXISTS).
 		logger.Warn().Err(err).Msg("could not list existing ClickHouse tables; will attempt creation")
 
-		present = map[string]bool{}
+		engines = map[string]string{}
 	}
 
 	missing := make([]Object, 0, len(objects))
 
 	for _, o := range objects {
-		if !present[o.Name] {
+		if _, ok := engines[o.Name]; !ok {
 			missing = append(missing, o)
 		}
 	}
 
+	logEngineMismatch(logger, objects, engines, clusterName)
+
 	// Startup tolerates REPLICA_ALREADY_EXISTS: it means the table exists
 	// cluster-wide (this node is degraded/recovering) — not a reason to fail boot.
 	return createObjects(ctx, conn, logger, missing, true)
+}
+
+// logEngineMismatch reports the existing tables whose engine contradicts
+// clusterName. Without it a cluster-mode SquirrelDB pointed at tables created by a
+// single-node one finds every table present, creates nothing, and writes to
+// non-replicated tables — replicating nothing, silently.
+func logEngineMismatch(logger zerolog.Logger, objects []Object, engines map[string]string, clusterName string) {
+	clustered := clusterName != ""
+
+	var notReplicated, replicated []string
+
+	for _, o := range objects {
+		engine, exists := engines[o.Name]
+		if !o.Replicated || !exists || EngineMatchesMode(engine, clustered) {
+			continue
+		}
+
+		if clustered {
+			notReplicated = append(notReplicated, o.Name+" ("+engine+")")
+		} else {
+			replicated = append(replicated, o.Name+" ("+engine+")")
+		}
+	}
+
+	if len(notReplicated) > 0 {
+		logger.Error().Msgf(
+			"cluster_name is set (%s) but these ClickHouse tables are NOT replicated: %s. "+
+				"Their data stays on one node — POST /debug/clickhouse/migrate_to_cluster to migrate them "+
+				"(see the migration runbook)",
+			clusterName, strings.Join(notReplicated, ", "))
+	}
+
+	if len(replicated) > 0 {
+		logger.Error().Msgf(
+			"cluster_name is empty but these ClickHouse tables are replicated: %s. "+
+				"SquirrelDB will use them without ON CLUSTER DDL, so schema changes reach only one node — "+
+				"set cluster_name back, or convert each table with ATTACH TABLE ... AS NOT REPLICATED",
+			strings.Join(replicated, ", "))
+	}
 }
 
 // CreateTables runs the CREATE ... IF NOT EXISTS statement of every object,
@@ -253,28 +314,31 @@ func createObjects(
 	return nil
 }
 
-// existingTables returns, among names, those that exist in the current database.
-func existingTables(ctx context.Context, conn driver.Conn, names []string) (map[string]bool, error) {
+// TableEngines returns the engine of each of names that exists in the current
+// database (absent from the map means the table does not exist). The engine is the
+// system.tables name, e.g. "MergeTree", "ReplicatedAggregatingMergeTree",
+// "MaterializedView" — compare it with EngineMatchesMode.
+func TableEngines(ctx context.Context, conn driver.Conn, names []string) (map[string]string, error) {
 	rows, err := conn.Query(ctx,
-		"SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN (?)", names)
+		"SELECT name, engine FROM system.tables WHERE database = currentDatabase() AND name IN (?)", names)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	present := make(map[string]bool, len(names))
+	engines := make(map[string]string, len(names))
 
 	for rows.Next() {
-		var name string
+		var name, engine string
 
-		if err := rows.Scan(&name); err != nil {
+		if err := rows.Scan(&name, &engine); err != nil {
 			return nil, err
 		}
 
-		present[name] = true
+		engines[name] = engine
 	}
 
-	return present, rows.Err()
+	return engines, rows.Err()
 }
 
 // OnCluster returns the " ON CLUSTER <name>" clause (empty for a single node),
