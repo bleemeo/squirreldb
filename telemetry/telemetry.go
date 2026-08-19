@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -30,32 +28,68 @@ import (
 
 	"github.com/bleemeo/squirreldb/facts"
 	"github.com/bleemeo/squirreldb/logger"
-	"github.com/bleemeo/squirreldb/types"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
-const (
-	idLockTTL        = time.Minute
-	idLockRetryDelay = 5 * time.Second
-)
+// Store persists the small amount of state the telemetry needs: the shared
+// cluster ID and a pool of per-node IDs with a crash-tolerant ownership lease.
+//
+// The node-ID contract is intentionally soft (a violation only makes Bleemeo's
+// telemetry slightly inaccurate, never breaks SquirrelDB):
+//   - a fixed-size cluster reuses the same pool of IDs across restarts/crashes;
+//   - two live nodes should not hold the same ID at the same time;
+//   - a crashed node's ID becomes free again on its own.
+type Store interface {
+	// ClusterID returns the shared cluster ID, creating it on first use.
+	ClusterID(ctx context.Context) (string, error)
+	// AcquireNodeID claims a node ID and returns a getter for it together with a
+	// release function that frees it. Keeping the claim alive (lease refresh, lock
+	// keep-alive, ...) is the Store's own concern; the caller only has to call
+	// release once it no longer needs the ID. ctx bounds the initial claim only.
+	//
+	// The ID is returned as a getter (not a plain string) because a Store may
+	// change it after the fact — e.g. the ClickHouse store re-acquires a fresh ID
+	// if it detects it lost its slot to a concurrent claimer. Callers must read it
+	// through the getter each time rather than cache the value.
+	AcquireNodeID(ctx context.Context) (id func() string, release func(), err error)
+}
 
-var errFailedLock = errors.New("failed to acquire lock")
+// StoreTiming overrides the timing constants a telemetry Store uses to keep a
+// node-ID claim alive. It exists so tests can run the ownership dance in seconds
+// instead of minutes; it is NOT a user-facing config option. Every field is
+// optional: a zero value keeps the store's built-in default. Each backend reads
+// only the fields relevant to its own mechanism (the others are ignored).
+type StoreTiming struct {
+	// ClickHouse lease-based store (clickhouse/telemetrystore):
+	//
+	// RefreshInterval is how often the background loop renews the lease; it must
+	// stay smaller than LeaseTTL. LeaseTTL is how long a lease stays valid without
+	// a refresh (a crashed node frees its ID after at most this long).
+	// ClaimSettleDelay is how long a claim waits, in cluster mode only, between
+	// writing its lease and reading it back so a concurrent claim can replicate.
+	RefreshInterval  time.Duration
+	LeaseTTL         time.Duration
+	ClaimSettleDelay time.Duration
+
+	// Cassandra lock-based store (cassandra/telemetrystore):
+	//
+	// IDLockTTL is the TTL of the per-ID lock that stands in for ownership.
+	// IDLockRetryDelay is how long to wait for the lock when creating a brand-new
+	// ID.
+	IDLockTTL        time.Duration
+	IDLockRetryDelay time.Duration
+}
 
 type Telemetry struct {
 	opts Options
 
 	// Common ID between all SquirrelDB in the cluster.
 	clusterID string
-	// ID of this SquirrelDB instance.
-	id string
-	// Lock used to avoid other SquirrelDB taking the same ID.
-	idLock types.TryLocker
-}
-
-type lockFactory interface {
-	CreateLock(name string, timeToLive time.Duration) types.TryLocker
+	// Getter for the ID of this SquirrelDB instance (the Store may change it, so
+	// it is read afresh each report), and the function that releases it.
+	idFn      func() string
+	releaseID func()
 }
 
 type Options struct {
@@ -66,8 +100,7 @@ type Options struct {
 	// SquirrelDB version.
 	Version       string
 	ClusterSizeFn func() int
-	LockFactory   lockFactory
-	State         types.State
+	Store         Store
 	Logger        zerolog.Logger
 }
 
@@ -88,6 +121,9 @@ func (t *Telemetry) Start(ctx context.Context) {
 }
 
 func (t *Telemetry) run(ctx context.Context) {
+	// The initial delay means a node only claims an ID once it has been alive
+	// for a few minutes: short-lived pods (and the extra pod during a rolling
+	// deploy) never grab a slot, so the pool stays at the steady-state size.
 	select {
 	case <-time.After(2*time.Minute + time.Duration(rand.Intn(5))*time.Minute): //nolint:gosec
 	case <-ctx.Done():
@@ -109,8 +145,9 @@ func (t *Telemetry) run(ctx context.Context) {
 
 func (t *Telemetry) stop() {
 	// Free our telemetry ID before stopping.
-	if t.idLock != nil {
-		t.idLock.Unlock()
+	if t.releaseID != nil {
+		t.releaseID()
+		t.releaseID = nil
 	}
 }
 
@@ -169,81 +206,22 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 	_ = resp.Body.Close()
 }
 
-// The telemetry ID is stored both as a lock and in the state.
-// The state contains the list of all known IDs.
-// To get an ID, SquirrelDB checks if the IDs in the list are already taken.
-// An ID is taken if the lock associated to this ID is taken.
-// If it finds a free ID, it takes it, else it adds a new ID to the state and lock the new ID.
-// Note that this means the IDs can be swapped between SquirrelDB nodes after a restart.
+// getTelemetryID returns this node's telemetry ID, acquiring one from the Store
+// (and caching it, with its release function) on first use.
 func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
-	if t.id != "" {
-		return t.id, nil
-	}
-
-	// Use a lock to read and write to the list of telemetry IDs from the state.
-	lock := t.opts.LockFactory.CreateLock("create telemetry id", 5*time.Second)
-	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
+	if t.idFn == nil {
+		idFn, release, err := t.opts.Store.AcquireNodeID(ctx)
+		if err != nil {
+			return "", err
 		}
 
-		return "", fmt.Errorf("%w: create telemetry id", errFailedLock)
+		t.idFn = idFn
+		t.releaseID = release
 	}
 
-	defer lock.Unlock()
-
-	telemetryIDs := make([]string, 0, 1)
-
-	_, err := t.opts.State.Read(ctx, "telemetry-ids", &telemetryIDs)
-	if err != nil {
-		return "", fmt.Errorf("failed to read telemetry ID from state: %w", err)
-	}
-
-	// Find a free ID in the list.
-	for _, id := range telemetryIDs {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-
-		lock := t.opts.LockFactory.CreateLock("telemetry-id-"+id, idLockTTL)
-		if ok := lock.TryLock(ctx, 0); !ok {
-			// The lock is taken, another SquirrelDB already uses this ID.
-			continue
-		}
-
-		// Lock successfully taken, we found a free ID.
-		t.opts.Logger.Debug().Msgf("Found free telemetry ID %s", id)
-
-		t.id = id
-		t.idLock = lock
-
-		break
-	}
-
-	if t.id != "" {
-		return t.id, nil
-	}
-
-	// No free ID found, create a new one, add it to the state and lock it.
-	id := uuid.New().String()
-	telemetryIDs = append(telemetryIDs, id)
-
-	err = t.opts.State.Write(ctx, "telemetry-ids", telemetryIDs)
-	if err != nil {
-		return "", fmt.Errorf("failed to write telemetry ID in state: %w", err)
-	}
-
-	lock = t.opts.LockFactory.CreateLock("telemetry-id-"+id, 5*time.Second)
-	if ok := lock.TryLock(ctx, idLockRetryDelay); !ok {
-		return "", fmt.Errorf("%w: telemetry-id-%s", errFailedLock, id)
-	}
-
-	t.opts.Logger.Debug().Msgf("Created telemetry ID %s", id)
-
-	t.idLock = lock
-	t.id = id
-
-	return id, nil
+	// Read afresh: the Store may have re-acquired a different ID since (see
+	// AcquireNodeID), so this must not be cached.
+	return t.idFn(), nil
 }
 
 func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {
@@ -251,36 +229,9 @@ func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {
 		return t.clusterID, nil
 	}
 
-	var clusterID string
-
-	lock := t.opts.LockFactory.CreateLock("create cluster id", 5*time.Second)
-	if ok := lock.TryLock(ctx, 10*time.Second); !ok {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-
-		return "", fmt.Errorf("%w: create cluster id", errFailedLock)
-	}
-
-	defer lock.Unlock()
-
-	hasClusterID, err := t.opts.State.Read(ctx, "cluster_id", &clusterID)
+	clusterID, err := t.opts.Store.ClusterID(ctx)
 	if err != nil {
-		return "", fmt.Errorf("unable to read cluster id for telemetry: %w", err)
-	}
-
-	if !hasClusterID {
-		// The cluster ID doesn't exist, create it.
-		clusterID = uuid.New().String()
-
-		err = t.opts.State.Write(ctx, "cluster_id", clusterID)
-		if err != nil {
-			return "", fmt.Errorf("unable to set cluster id for telemetry: %w", err)
-		}
-
-		t.opts.Logger.Debug().Msgf("Created telemetry cluster ID %s", clusterID)
-	} else {
-		t.opts.Logger.Debug().Msgf("Read telemetry cluster ID %s", clusterID)
+		return "", err
 	}
 
 	t.clusterID = clusterID

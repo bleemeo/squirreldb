@@ -27,6 +27,7 @@ import (
 // TestStructuredConfig tests loading the full configuration file.
 func TestStructuredConfig(t *testing.T) {
 	expectedConfig := Config{
+		Backend: "clickhouse",
 		Cassandra: Cassandra{
 			Addresses: []string{
 				"127.0.0.1:9000",
@@ -34,7 +35,6 @@ func TestStructuredConfig(t *testing.T) {
 			},
 			Keyspace:          "squirreldb",
 			ReplicationFactor: 3,
-			DefaultTimeToLive: 4 * time.Hour,
 			Aggregate: Aggregate{
 				IntendedDuration: 60 * time.Second,
 			},
@@ -56,8 +56,9 @@ func TestStructuredConfig(t *testing.T) {
 			CAPath:      "/ca.pem",
 			Keyspace:    "squirreldb",
 		},
-		ListenAddress:   "127.0.0.1:9090",
-		TenantLabelName: "account",
+		DefaultTimeToLive: 4 * time.Hour,
+		ListenAddress:     "127.0.0.1:9090",
+		TenantLabelName:   "account",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 1,
 		},
@@ -76,18 +77,12 @@ func TestStructuredConfig(t *testing.T) {
 			DSN: "my_dsn",
 		},
 		Internal: Internal{
-			Index:                   backendCassandra,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       1,
 			Installation: Installation{
 				Format: "manual",
 			},
-			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 backendCassandra,
-			States:                backendCassandra,
-			Store:                 "batcher",
-			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: true,
 		},
 		Telemetry: Telemetry{
@@ -172,7 +167,7 @@ func TestFlags(t *testing.T) {
 }
 
 // TestloadToStruct tests loading the config and the warnings and errors returned.
-func TestLoad(t *testing.T) {
+func TestLoadToStruct(t *testing.T) {
 	tests := []struct {
 		Name         string
 		Files        []string
@@ -249,6 +244,49 @@ func TestLoad(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name:  "deprecated default_time_to_live from file",
+			Files: []string{"testdata/deprecated_ttl.conf"},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated, ` +
+					`please use "default_time_to_live" instead`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 4 * time.Hour,
+			},
+		},
+		{
+			Name: "deprecated default_time_to_live from env",
+			Environment: map[string]string{
+				"SQUIRRELDB_CASSANDRA_DEFAULT_TIME_TO_LIVE": "4h",
+			},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated, ` +
+					`please use "default_time_to_live" instead`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 4 * time.Hour,
+			},
+		},
+		{
+			Name:  "deprecated and new default_time_to_live both set",
+			Files: []string{"testdata/deprecated_ttl_both.conf"},
+			WantWarnings: []string{
+				`config key "cassandra.default_time_to_live" is deprecated and ignored ` +
+					`because "default_time_to_live" is also set, please remove "cassandra.default_time_to_live"`,
+			},
+			WantConfig: Config{
+				DefaultTimeToLive: 10 * time.Hour,
+			},
+		},
+	}
+
+	safeErrorStr := func(e error) string {
+		if e == nil {
+			return "<no error>"
+		}
+
+		return e.Error()
 	}
 
 	for _, test := range tests {
@@ -258,8 +296,17 @@ func TestLoad(t *testing.T) {
 			}
 
 			config, warnings, err := loadToStruct(false, nil, test.Files...)
-			if diff := cmp.Diff(test.WantError, err); diff != "" {
-				t.Fatalf("Unexpected error for files %s\n%s", test.Files, diff)
+			if (test.WantError == nil) != (err == nil) {
+				t.Fatalf(
+					"Unexpected error for files %s: got %q, want %q",
+					test.Files,
+					safeErrorStr(err),
+					safeErrorStr(test.WantError),
+				)
+			} else if test.WantError != nil {
+				if diff := cmp.Diff(test.WantError.Error(), err.Error()); diff != "" {
+					t.Fatalf("Unexpected error for files %s\n%s", test.Files, diff)
+				}
 			}
 
 			var strWarnings []string
@@ -278,6 +325,94 @@ func TestLoad(t *testing.T) {
 
 			if diff := cmp.Diff(test.WantConfig, config); diff != "" {
 				t.Fatalf("Unexpected config:\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestLoad tests loading the full config and the warnings and errors returned.
+func TestLoad(t *testing.T) {
+	defaultConfig := DefaultConfig()
+
+	cfg_simple := DefaultConfig()
+	cfg_simple.Redis.SSL = true
+
+	tests := []struct {
+		Name         string
+		Files        []string
+		Environment  map[string]string
+		WantConfig   Config
+		WantWarnings []string
+		WantError    error
+	}{
+		{
+			Name: "empty file",
+			Files: []string{
+				"testdata/empty.conf",
+			},
+			WantConfig: defaultConfig,
+		},
+		{
+			Name: "simple",
+			Files: []string{
+				"testdata/simple.conf",
+			},
+			WantConfig: cfg_simple,
+		},
+		{
+			Name:       "zero_ttl",
+			Files:      []string{"testdata/zero_ttl.conf"},
+			WantConfig: defaultConfig,
+			WantError:  ErrZeroTTL,
+		},
+	}
+
+	safeErrorStr := func(e error) string {
+		if e == nil {
+			return "<no error>"
+		}
+
+		return e.Error()
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			for k, v := range test.Environment {
+				t.Setenv(k, v)
+			}
+
+			config, warnings, err := Load(test.Files...)
+			if (test.WantError == nil) != (err == nil) {
+				t.Fatalf(
+					"Unexpected error for files %s: got %q, want %q",
+					test.Files,
+					safeErrorStr(err),
+					safeErrorStr(test.WantError),
+				)
+			} else if test.WantError != nil {
+				if diff := cmp.Diff(test.WantError.Error(), err.Error()); diff != "" {
+					t.Errorf("Unexpected error for files %s\n%s", test.Files, diff)
+				}
+
+				return
+			}
+
+			var strWarnings []string
+
+			for _, warning := range warnings {
+				strWarnings = append(strWarnings, warning.Error())
+			}
+
+			lessFunc := func(a, b string) bool {
+				return a < b
+			}
+
+			if diff := cmp.Diff(test.WantWarnings, strWarnings, cmpopts.SortSlices(lessFunc)); diff != "" {
+				t.Fatalf("Unexpected warnings: (-want +got)\n%s", diff)
+			}
+
+			if diff := cmp.Diff(test.WantConfig, config); diff != "" {
+				t.Fatalf("Unexpected config: (-want +got)\n%s", diff)
 			}
 		})
 	}

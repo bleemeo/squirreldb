@@ -34,10 +34,14 @@ import (
 
 const concurrentWriterCount = 4 // Number of Gorouting writing concurrently
 
+type tsdbWriter struct {
+	c *CassandraTSDB
+}
+
 // Write writes all specified metrics.
 // Metric points should be sorted in ascending order and deduplicated.
-func (c *CassandraTSDB) Write(ctx context.Context, metrics []types.MetricData) error {
-	return c.InternalWrite(ctx, metrics, 0)
+func (wr *tsdbWriter) Write(ctx context.Context, metrics []types.MetricData) error {
+	return wr.c.InternalWrite(ctx, metrics, 0)
 }
 
 // InternalWrite writes all specified metrics as aggregated data

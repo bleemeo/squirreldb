@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/aggregate"
+	"github.com/bleemeo/squirreldb/batch"
 	"github.com/bleemeo/squirreldb/compare"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -108,7 +109,10 @@ func AggregateWithFuncType(data types.MetricData, function string) types.MetricD
 }
 
 // ReadIter returns metrics according to the request made.
-func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricRequest) (types.MetricDataSet, error) {
+func (c *CassandraTSDB) readIter(
+	ctx context.Context,
+	request types.MetricRequest,
+) types.MetricDataSet {
 	c.l.Lock()
 
 	aggregatedToTimestamp := c.fullyAggregatedAt.UnixNano() / 1e6
@@ -130,7 +134,7 @@ func (c *CassandraTSDB) ReadIter(ctx context.Context, request types.MetricReques
 		request:               request,
 		tmp:                   tmp,
 		aggregatedToTimestamp: aggregatedToTimestamp,
-	}, nil
+	}
 }
 
 func (i *readIter) close() {
@@ -151,6 +155,20 @@ func (i *readIter) At() types.MetricData {
 }
 
 func (i *readIter) Next() bool {
+	for i.innerNext() {
+		if len(i.current.Points) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (i *readIter) innerNext() bool {
+	// over-read from memory store of this amount. This is done to skip trying read from persistent
+	// store if point timestamp and request timestamp aren't aligned.
+	const memoryOverreadMs = 60000
+
 	readAggregate := RequestUseAggregatedData(i.request)
 
 	if i.offset >= len(i.request.IDs) {
@@ -166,6 +184,7 @@ func (i *readIter) Next() bool {
 		ID: id,
 	}
 	fromTimestamp := i.request.FromTimestamp
+	toTimestamp := i.request.ToTimestamp
 
 	var (
 		aggrPointRead int
@@ -173,9 +192,32 @@ func (i *readIter) Next() bool {
 		readRaw       bool
 	)
 
-	if readAggregate {
+	memoryData, err := i.c.batcher.ReadTemporary(i.ctx, id, fromTimestamp-memoryOverreadMs, toTimestamp)
+
+	if err != nil && !errors.Is(err, batch.ErrNoData) {
+		i.err = fmt.Errorf("ReadTemporary failed: %w", err)
+
+		i.close()
+
+		return false
+	}
+
+	if len(memoryData.Points) > 0 {
+		toTimestamp = memoryData.Points[0].Timestamp - 1
+
+		// because we over-read, we need to filter first point. They are sorted which make it simple
+		for len(memoryData.Points) > 0 && memoryData.Points[0].Timestamp < fromTimestamp {
+			memoryData.Points = memoryData.Points[1:]
+		}
+
+		if readAggregate {
+			memoryData = AggregateWithFuncType(memoryData, i.request.Function)
+		}
+	}
+
+	if readAggregate && fromTimestamp <= toTimestamp {
 		newData, newTmp, err := i.c.readAggregateData(
-			i.ctx, id, data, fromTimestamp, i.request.ToTimestamp, i.tmp, i.request.Function,
+			i.ctx, id, data, fromTimestamp, toTimestamp, i.tmp, i.request.Function,
 		)
 
 		i.tmp = newTmp
@@ -201,7 +243,7 @@ func (i *readIter) Next() bool {
 		aggrPointRead = len(data.Points)
 	}
 
-	if fromTimestamp <= i.request.ToTimestamp {
+	if fromTimestamp <= toTimestamp {
 		readRaw = true
 
 		newData, newTmp, err := i.c.readRawData(
@@ -209,7 +251,7 @@ func (i *readIter) Next() bool {
 			id,
 			data,
 			fromTimestamp,
-			i.request.ToTimestamp,
+			toTimestamp,
 			i.tmp,
 			i.request.Function,
 		)
@@ -239,11 +281,12 @@ func (i *readIter) Next() bool {
 
 	if i.request.EnableDebug {
 		i.c.logger.Info().Msgf(
-			"Read ID=%d: %d points (useAggr=%v useRaw=%v. aggr points read=%d, raw points read=%d)",
+			"Read ID=%d: %d points (useAggr=%v useRaw=%v. from-memory point read=%d, aggr points read=%d, raw points read=%d)",
 			data.ID,
 			len(data.Points),
 			readAggregate,
 			readRaw,
+			len(memoryData.Points),
 			aggrPointRead,
 			rawPointRead,
 		)
@@ -254,6 +297,8 @@ func (i *readIter) Next() bool {
 	}
 
 	reversePoints(data.Points)
+
+	data.Points = append(data.Points, memoryData.Points...)
 
 	i.current = data
 

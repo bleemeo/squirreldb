@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -42,10 +44,45 @@ const (
 	valYes        = "yes"
 )
 
-func main() {
-	daemon.SetTestEnvironment()
+// A just-written point is only queryable once the ClickHouse backend has drained
+// its write-ahead log (normally ~5s); reads are eventually consistent. Retry a read
+// until it succeeds or the budget elapses — a consistent read passes on the first
+// try, so this only adds delay right after a write. Reads are idempotent, so
+// retrying the whole read phase is safe.
+const (
+	queryRetryBudget = 10 * time.Second
+	queryRetryStep   = 500 * time.Millisecond
+)
 
-	err := daemon.RunWithSignalHandler(run)
+func retryUntilConsistent(ctx context.Context, fn func() error) error {
+	start := time.Now()
+
+	for attempt := 1; ; attempt++ {
+		err := fn()
+		if err == nil {
+			if attempt > 1 {
+				log.Info().Dur("delay", time.Since(start)).Msg("read became consistent (write now visible)")
+			}
+
+			return nil
+		}
+
+		if time.Since(start) >= queryRetryBudget {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(queryRetryStep):
+		}
+	}
+}
+
+func main() {
+	testsetup.SetTestEnvironment()
+
+	err := processsetup.RunWithSignalHandler(run)
 
 	if *argURL == "" {
 		metricResult, _ := prometheus.DefaultGatherer.Gather()
@@ -59,8 +96,8 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
-	cfg, warnings, err := daemon.Config()
+func run(ctx context.Context, _ context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -81,22 +118,20 @@ func run(ctx context.Context) error {
 				map[string]string{"restarted": "false"},
 				prometheus.DefaultRegisterer,
 			),
+			// Drop stale data when this (first, non-restarted) instance starts. The
+			// restarted instance below must NOT drop — it reads the persisted data.
+			DropDataOnStartup: true,
 		}
 		defer squirreldb.Stop()
 
-		err = squirreldb.DropCassandraData(ctx, false)
-		if err != nil {
-			return err
-		}
-
-		err = squirreldb.DropTemporaryStore(ctx, false)
+		err = squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false)
 		if err != nil {
 			return err
 		}
 
 		err = squirreldb.Start(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("fail to Start SquirrelDB: %w", err)
 		}
 
 		squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())
@@ -127,7 +162,16 @@ func run(ctx context.Context) error {
 			if withRestart {
 				squirreldb.Stop()
 
-				cfg.Redis.Addresses = nil
+				// Purge the Redis WAL (DropTemporaryStore deletes every key under the
+				// keyspace, which includes the WAL) so the post-restart reads can ONLY
+				// come from ClickHouse — proving the data is durably persisted there,
+				// not merely buffered in the WAL. Redis stays configured: the WAL
+				// backend requires it (the earlier read already drained the WAL, so
+				// nothing is lost by clearing it). Safe: the previous read succeeded,
+				// meaning the data is queryable = drained to ClickHouse.
+				if err := squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false); err != nil {
+					return err
+				}
 
 				squirreldb = &daemon.SquirrelDB{
 					Config: cfg,
@@ -148,11 +192,18 @@ func run(ctx context.Context) error {
 				squirrelDBURL = fmt.Sprintf("http://127.0.0.1:%d/", squirreldb.ListenPort())
 			}
 
-			if err := read(ctx, now, squirrelDBURL+"api/v1/read", *tenant); err != nil {
+			// Retry: right after the write the point may not be drained to ClickHouse
+			// yet (eventual consistency). After the restart the WAL is purged, so the
+			// read comes from ClickHouse and is consistent on the first try.
+			if err := retryUntilConsistent(ctx, func() error {
+				return read(ctx, now, squirrelDBURL+"api/v1/read", *tenant)
+			}); err != nil {
 				return err
 			}
 
-			if err := readPromQL(ctx, now, squirrelDBURL, *tenant); err != nil {
+			if err := retryUntilConsistent(ctx, func() error {
+				return readPromQL(ctx, now, squirrelDBURL, *tenant)
+			}); err != nil {
 				if errors.Is(err, errMatrixDiffError) {
 					log.Print(err)
 

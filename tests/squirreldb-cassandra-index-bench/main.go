@@ -10,7 +10,10 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/cassandra/tsdb"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,9 +53,15 @@ var (
 )
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
+
+	if errors.Is(err, testsetup.ErrSkipBackend) {
+		log.Info().Msg(err.Error())
+
+		return
+	}
 
 	metricResult, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range metricResult {
@@ -64,8 +73,42 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
-	cfg, warnings, err := daemon.Config()
+// cassandraIndexTester is implemented by the Cassandra backend to configure the
+// index test hooks before the TSDB is built.
+type cassandraIndexTester interface {
+	SetCassandraIndexTestingOption(dontStartIndex bool, nowFunc func() time.Time) error
+}
+
+func getIndex(ctx context.Context, squirreldb *core.SquirrelDB, dontStartIndex bool) (types.Index, error) {
+	b, err := squirreldb.Primary(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tester, ok := b.(cassandraIndexTester)
+	if !ok {
+		return nil, testsetup.ErrSkipBackend
+	}
+
+	if err := tester.SetCassandraIndexTestingOption(dontStartIndex, nil); err != nil {
+		return nil, err
+	}
+
+	db, err := b.TSDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cassandraTSDB, ok := db.(*tsdb.CassandraTSDB)
+	if !ok {
+		return nil, testsetup.ErrSkipBackend
+	}
+
+	return cassandraTSDB.Index(), nil
+}
+
+func run(ctx context.Context, shutdownCtx context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -80,23 +123,36 @@ func run(ctx context.Context) error {
 		*runExpiration = true
 	}
 
-	squirreldb := &daemon.SquirrelDB{
-		Config: cfg,
-		MetricRegistry: prometheus.WrapRegistererWith(
-			map[string]string{"process": "test1"},
-			prometheus.DefaultRegisterer,
-		),
-		Logger: log.With().Str("component", "daemon").Int("process", 1).Logger(),
+	// Skip early, before touching any data: this bench is Cassandra-index only, so
+	// on another backend (e.g. ClickHouse) we must not drop/recreate its tables.
+	if cfg.Backend != "cassandra" {
+		return testsetup.ErrSkipBackend
 	}
-	defer squirreldb.Stop()
 
-	if !*noDropTables {
-		log.Printf("Dropping tables")
+	squirreldb := core.New(
+		core.Deps{
+			MetricRegistry: prometheus.WrapRegistererWith(
+				map[string]string{"process": "test1"},
+				prometheus.DefaultRegisterer,
+			),
+			Logger: log.With().Str("component", "daemon").Int("process", 1).Logger(),
+		},
+		cfg,
+		core.SquirrelDBOption{
+			InternalTesting: core.InternalTestingOption{
+				DropDataOnStartup: !*noDropTables,
+			},
+		},
+	)
+	defer squirreldb.CloseAll(shutdownCtx)
 
-		err := squirreldb.DropCassandraData(ctx, false)
-		if err != nil {
-			return fmt.Errorf("failed to drop keyspace: %w", err)
-		}
+	backend, err := squirreldb.Primary(ctx)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := backend.(cassandraIndexTester); !ok {
+		return testsetup.ErrSkipBackend
 	}
 
 	if *cpuprofile != "" {
@@ -113,7 +169,7 @@ func run(ctx context.Context) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	cassandraIndex, err := squirreldb.Index(ctx, false, time.Now)
+	cassandraIndex, err := getIndex(ctx, squirreldb, false)
 	if err != nil {
 		return err
 	}
@@ -126,17 +182,20 @@ func run(ctx context.Context) error {
 
 		log.Printf("Re-run validating test on fresh index")
 
-		squirreldb2 := &daemon.SquirrelDB{
-			Config: cfg,
-			MetricRegistry: prometheus.WrapRegistererWith(
-				map[string]string{"process": "test2"},
-				prometheus.DefaultRegisterer,
-			),
-			Logger: log.With().Str("component", "daemon").Int("process", 2).Logger(),
-		}
-		defer squirreldb2.Stop()
+		squirreldb2 := core.New(
+			core.Deps{
+				MetricRegistry: prometheus.WrapRegistererWith(
+					map[string]string{"process": "test2"},
+					prometheus.DefaultRegisterer,
+				),
+				Logger: log.With().Str("component", "daemon").Int("process", 2).Logger(),
+			},
+			cfg,
+			core.SquirrelDBOption{},
+		)
+		defer squirreldb2.CloseAll(shutdownCtx)
 
-		cassandraIndex2, err := squirreldb2.Index(ctx, false, time.Now)
+		cassandraIndex2, err := getIndex(ctx, squirreldb2, false)
 		if err != nil {
 			return err
 		}
@@ -146,20 +205,23 @@ func run(ctx context.Context) error {
 
 	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 
-	err = bench(ctx, cfg, rnd)
+	err = bench(ctx, shutdownCtx, cfg, rnd)
 	if err != nil {
 		return err
 	}
 
 	if *verify {
-		squirreldb3 := &daemon.SquirrelDB{
-			Config:         cfg,
-			MetricRegistry: prometheus.NewRegistry(),
-			Logger:         log.With().Str("component", "daemon").Int("process", 3).Logger(),
-		}
-		defer squirreldb3.Stop()
+		squirreldb3 := core.New(
+			core.Deps{
+				MetricRegistry: prometheus.NewRegistry(),
+				Logger:         log.With().Str("component", "daemon").Int("process", 3).Logger(),
+			},
+			cfg,
+			core.SquirrelDBOption{},
+		)
+		defer squirreldb3.CloseAll(shutdownCtx)
 
-		idx, err := squirreldb3.Index(ctx, true, time.Now)
+		idx, err := getIndex(ctx, squirreldb3, true)
 		if err != nil {
 			return err
 		}

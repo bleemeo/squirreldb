@@ -1,0 +1,92 @@
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>1</console>
+    </logger>
+
+    <listen_host>0.0.0.0</listen_host>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <interserver_http_port>9009</interserver_http_port>
+
+    <zookeeper>
+        <node>
+            <host>clickhouse-keeper-0</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>clickhouse-keeper-1</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>clickhouse-keeper-2</host>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+
+    <remote_servers>
+        <main_cluster replace="true">
+            <secret from_env="CLICKHOUSE_CLUSTER_SECRET"></secret>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>clickhouse-server-0</host>
+                    <port>9000</port>
+                </replica>
+                <replica>
+                    <host>clickhouse-server-1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </main_cluster>
+    </remote_servers>
+
+    <display_name replace="1" from_env="CLICKHOUSE_DISPLAY_NAME">clickhouse01</display_name>
+    <macros>
+        <cluster>main_cluster</cluster>
+        <shard replace="1" from_env="CLICKHOUSE_MACROS_SHARD">shard01</shard>
+        <replica replace="1" from_env="CLICKHOUSE_MACROS_REPLICA">replica01</replica>
+    </macros>
+
+    <!--
+        The next options are here try reducing memory usage of Clickhouse.
+        On a larger production server the options should be tuned or removed, but following
+        options should be enough for medium sized Cluster (we expect them to handle few 100s GiB of data)
+    -->
+    <!-- Disable unused listener -->
+    <mysql_port remove="1"/>
+    <postgresql_port remove="1"/>
+    <grpc_port remove="1"/> <!-- it's disabled by default, but let's be sure -->
+
+    <!-- Disable some input format like CapNProto or Protobuf -->
+    <format_schema_path remove="1"/>
+    <!-- Disable some other features -->
+    <user_defined_executable_functions_config remove="1" />
+
+    <!-- Don't go below ~730, this is the minimal number of threads for Clickhouse to start -->
+    <max_thread_pool_size>1024</max_thread_pool_size> <!-- The default is 10 000 !-->
+    <background_pool_size>4</background_pool_size>
+    <background_schedule_pool_size>128</background_schedule_pool_size> <!-- The default is 512, which seems way to high for our usage -->
+    <merge_tree>
+        <!-- Because we reduced background_pool_size, we also need to reduce these two number of threads -->
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>2</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+        <number_of_free_entries_in_pool_to_execute_mutation>5</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>6</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+    </merge_tree>
+
+    <max_concurrent_queries>16</max_concurrent_queries>
+    <!-- Default is 8 GiB, change to 0 MiB, likely unused -->
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <!-- Default is 5 GiB, change to 32 MiB -->
+    <mark_cache_size>33554432</mark_cache_size>
+    <!-- Default is 5 GiB, change to 32 MiB -->
+    <index_mark_cache_size>33554432</index_mark_cache_size>
+    <!-- Default is 128 MiB, change to 8 MiB -->
+    <compiled_expression_cache_size>8388608</compiled_expression_cache_size>
+    <query_cache>
+        <!-- Default is 1 GiB, change to 16 MiB -->
+        <max_size_in_bytes>16777216</max_size_in_bytes>
+    </query_cache>
+    <!-- Default is 50% of RAM, change to 32 MiB -->
+    <merges_mutations_memory_usage_soft_limit>33554432</merges_mutations_memory_usage_soft_limit>
+</clickhouse>

@@ -27,14 +27,16 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/bleemeo/squirreldb/api/remotestorage"
-	"github.com/bleemeo/squirreldb/cassandra/mutable"
+	"github.com/bleemeo/squirreldb/api/requestscoped"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/mutable"
+	"github.com/bleemeo/squirreldb/tests/common/testcases"
 	"github.com/bleemeo/squirreldb/types"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -94,7 +96,9 @@ func getPromQLabels(t *testing.T, resp *http.Response) promQlLabels {
 func TestAPIRoute(t *testing.T) { //nolint:maintidx
 	t.Parallel()
 
-	const tenantLabelName = "__account_id"
+	const (
+		tenantLabelName = "__account_id"
+	)
 
 	t0 := time.Now().Add(-time.Minute)
 
@@ -119,7 +123,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1234",
 				labelName:       metricDiskUsed,
-				"mountpoint":    "/home",
+				"mountpoint":    testcases.DiskMount1,
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 12},
@@ -131,7 +135,7 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			Labels: labels.FromMap(map[string]string{
 				tenantLabelName: "1235",
 				labelName:       metricDiskUsed,
-				"mountpoint":    "/home",
+				"mountpoint":    testcases.DiskMount1,
 			}),
 			Points: []types.MetricPoint{
 				{Timestamp: t0.Unix() * 1000, Value: 13},
@@ -161,16 +165,16 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 		}
 	}
 
-	storeData := make(map[types.MetricID]types.MetricData)
-	for _, d := range data {
-		storeData[d.ID] = types.MetricData{
-			ID:         d.ID,
-			Points:     d.Points,
-			TimeToLive: 86400,
+	storeData := make([]types.Timeseries, len(data))
+	for i, d := range data {
+		storeData[i] = types.Timeseries{
+			Labels: d.Labels,
+			Points: d.Points,
 		}
 	}
 
-	store := &dummy.MemoryTSDB{Data: storeData}
+	store := &dummy.MemoryTSDB{}
+	store.AddData(storeData, 86400)
 
 	// The new request factory is used to make produce new different *http.Request for tests.
 	// Since we run tests cases twice, this ensure that *http.Request mutation can live between
@@ -365,13 +369,15 @@ func TestAPIRoute(t *testing.T) { //nolint:maintidx
 			t.Parallel()
 
 			api := API{
-				Index:               dummy.NewIndex(idxData),
-				Reader:              store,
-				Writer:              store,
+				Queryable:           store,
+				Appendable:          store,
 				RequireTenantHeader: tt.requireTenantHeader,
 				TenantLabelName:     tenantLabelName,
 			}
-			api.init()
+
+			if err := api.init(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 
 			// First validate that all check fail when not ready.
 			req := tt.makeRequest()
@@ -492,17 +498,19 @@ func TestWriteHandler(t *testing.T) {
 				StoreMetricIDInMemory: true,
 			}
 			reg := prometheus.NewRegistry()
-			appendable := remotestorage.New(
-				dummyWriter,
-				dummyIndex,
-				1,
-				tenantLabelName,
-				labelProcessor,
-				true,
-				reg,
-			)
+			requestScopedStore := requestscoped.NewStore(requestscoped.Options{
+				DefaultMaxEvaluatedSeries: 1024,
+				DefaultMaxEvaluatedPoints: 1024,
+				DefaultTTL:                86400,
+				TenantLabelName:           tenantLabelName,
+				RequireTenantHeader:       true,
+				Queryable:                 nil,
+				Appendable:                dummyWriter,
+				MutableLabelDetector:      labelProcessor,
+			})
+
 			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
-			writeHandler := remote.NewWriteHandler(sLogger, reg, appendable, allowedProtoMsgs, false)
+			writeHandler := remote.NewWriteHandler(sLogger, reg, requestScopedStore, allowedProtoMsgs, false)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{
@@ -532,11 +540,16 @@ func TestWriteHandler(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req = req.WithContext(types.WrapContext(t.Context(), req))
-
 			if !test.skipTenantHeader {
 				req.Header.Add(types.HeaderTenant, tenantValue)
 			}
+
+			ctx, _, err := requestScopedStore.ContextWithRequest(req.Context(), req, "write")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req = req.WithContext(ctx)
 
 			recorder := httptest.NewRecorder()
 			irw := &interceptor{OrigWriter: recorder}
@@ -549,8 +562,8 @@ func TestWriteHandler(t *testing.T) {
 				t.Fatalf("wanted status %d, got %v", test.expectStatus, resp.StatusCode)
 			}
 
-			if len(dummyWriter.Data) != test.expectedMetricsCount {
-				t.Fatalf("wanted %d metrics written, got %d", test.expectedMetricsCount, len(dummyWriter.Data))
+			if dummyWriter.CountMetrics() != test.expectedMetricsCount {
+				t.Fatalf("wanted %d metrics written, got %d", test.expectedMetricsCount, dummyWriter.CountMetrics())
 			}
 
 			if len(test.absentMatchers) > 0 {
@@ -567,12 +580,7 @@ func TestWriteHandler(t *testing.T) {
 	}
 }
 
-type metricPointsAndLabels struct {
-	Points []types.MetricPoint
-	Labels labels.Labels
-}
-
-func (metric metricPointsAndLabels) ToTimeseries() prompb.TimeSeries {
+func timeSeriesToPromPBTimeseries(metric types.Timeseries) prompb.TimeSeries {
 	samples := make([]prompb.Sample, 0, len(metric.Points))
 
 	for _, pt := range metric.Points {
@@ -588,11 +596,11 @@ func (metric metricPointsAndLabels) ToTimeseries() prompb.TimeSeries {
 	}
 }
 
-func metricsToWriteRequest(data []metricPointsAndLabels) *prompb.WriteRequest {
+func metricsToWriteRequest(data []types.Timeseries) *prompb.WriteRequest {
 	series := make([]prompb.TimeSeries, 0, len(data))
 
 	for _, metric := range data {
-		series = append(series, metric.ToTimeseries())
+		series = append(series, timeSeriesToPromPBTimeseries(metric))
 	}
 
 	return &prompb.WriteRequest{
@@ -600,21 +608,16 @@ func metricsToWriteRequest(data []metricPointsAndLabels) *prompb.WriteRequest {
 	}
 }
 
-func metricsFromStore(t *testing.T, idx *dummy.Index, store *dummy.MemoryTSDB) []metricPointsAndLabels {
-	t.Helper()
-
-	result := make([]metricPointsAndLabels, 0, len(store.Data))
-
-	for _, metric := range store.Data {
-		lbls := idx.InternalIDToLabels(metric.ID)
-
-		result = append(result, metricPointsAndLabels{
-			Points: metric.Points,
-			Labels: lbls,
-		})
+func writeRequestToBody(wr *prompb.WriteRequest) (*bytes.Reader, error) {
+	data, err := proto.Marshal(wr)
+	if err != nil {
+		return nil, err
 	}
 
-	return result
+	encoded := snappy.Encode(nil, data)
+	body := bytes.NewReader(encoded)
+
+	return body, nil
 }
 
 // TestWriteHandlerOfAPI test the "full" API (using normal init() method) and with actual datapoints.
@@ -628,11 +631,11 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		writtenPoints []metricPointsAndLabels
+		writtenPoints []types.Timeseries
 	}{
 		{
 			name: "one-points",
-			writtenPoints: []metricPointsAndLabels{
+			writtenPoints: []types.Timeseries{
 				{
 					Points: []types.MetricPoint{
 						{
@@ -648,7 +651,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 		},
 		{
 			name: "one-points-future",
-			writtenPoints: []metricPointsAndLabels{
+			writtenPoints: []types.Timeseries{
 				{
 					Points: []types.MetricPoint{
 						{
@@ -664,7 +667,7 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 		},
 		{
 			name: "three-points-past-present-and-future",
-			writtenPoints: []metricPointsAndLabels{
+			writtenPoints: []types.Timeseries{
 				{
 					Points: []types.MetricPoint{
 						{
@@ -717,49 +720,25 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 			labelProcessor := mutable.NewLabelProcessor(provider, tenantLabelName)
 
 			dummyWriter := new(dummy.MemoryTSDB)
-			dummyIndex := &dummy.Index{
-				StoreMetricIDInMemory: true,
-			}
-
-			promReqitry := prometheus.NewRegistry()
 
 			// Try to be as close as daemon.go apiTask
-			api := &API{
-				ListenAddress:               "not used",
-				ReadOnly:                    config.DefaultConfig().Internal.ReadOnly,
-				Index:                       dummyIndex,
-				Reader:                      dummyWriter,
-				Writer:                      dummyWriter,
-				PromQLMaxEvaluatedPoints:    uint64(config.DefaultConfig().PromQL.MaxEvaluatedPoints),
-				PromQLMaxEvaluatedSeries:    uint32(config.DefaultConfig().PromQL.MaxEvaluatedSeries),
-				MaxConcurrentRemoteRequests: config.DefaultConfig().RemoteStorage.MaxConcurrentRequests,
-				MaxRequestBodySizeBytes:     config.DefaultConfig().MaxRequestBodySize << 20,
-				TenantLabelName:             config.DefaultConfig().TenantLabelName,
-				MutableLabelDetector:        labelProcessor,
-				RequireTenantHeader:         config.DefaultConfig().RequireTenantHeader,
-				MetricRegistry:              promReqitry,
-				Logger:                      log.With().Logger(),
-				FuturePointsBackdateOffset:  config.DefaultConfig().MaxAllowedTimeInFuture,
+			api := makeAPI(dummyWriter, labelProcessor)
+
+			if err := api.init(t.Context()); err != nil {
+				t.Fatal(err)
 			}
-			api.init()
+
 			api.Ready()
 
-			wr := metricsToWriteRequest(test.writtenPoints)
-
-			data, err := proto.Marshal(wr)
+			body, err := writeRequestToBody(metricsToWriteRequest(test.writtenPoints))
 			if err != nil {
-				panic(err)
+				t.Fatal(err)
 			}
-
-			encoded := snappy.Encode(nil, data)
-			body := bytes.NewReader(encoded)
 
 			req, err := http.NewRequest(http.MethodPost, "http://localhost:9201/api/v1/write", body) //nolint: noctx
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			req = req.WithContext(types.WrapContext(t.Context(), req))
 
 			recorder := httptest.NewRecorder()
 			api.ServeHTTP(recorder, req)
@@ -772,9 +751,9 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 				t.Fatalf("StatusCode = %v, want %v", resp.StatusCode, http.StatusNoContent)
 			}
 
-			metricsInStore := metricsFromStore(t, dummyIndex, dummyWriter)
+			metricsInStore := dummyWriter.Data()
 
-			lessFunc := func(a, b metricPointsAndLabels) bool {
+			lessFunc := func(a, b types.Timeseries) bool {
 				return labels.Compare(a.Labels, b.Labels) < 0
 			}
 
@@ -787,25 +766,149 @@ func TestWriteHandlerOfAPI(t *testing.T) {
 	}
 }
 
+// TestAppenderInvalidRequest tests that the appender still works after a lot of invalid requests.
+// It ensures that the remoteWriteGate is correctly released with invalid inputs.
+func TestAppenderInvalidRequest(t *testing.T) {
+	t.Parallel()
+
+	const maxConcurrentWrite = 5
+
+	api := makeAPI(dummy.DiscardTSDB{}, nil)
+	api.MaxConcurrentRemoteRequests = maxConcurrentWrite
+	api.RequireTenantHeader = true
+
+	if err := api.init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	api.Ready()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	metrics1 := labels.FromStrings("__name__", "metric1")
+
+	// Send some requests with a missing tenant header.
+	for range 2 * maxConcurrentWrite {
+		body, err := writeRequestToBody(metricsToWriteRequest(
+			[]types.Timeseries{{Labels: metrics1, Points: []types.MetricPoint{{Timestamp: time.Now().UnixMilli(), Value: 42}}}},
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		recorder := httptest.NewRecorder()
+		api.ServeHTTP(recorder, req)
+
+		resp := recorder.Result()
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("response is: %s", recorder.Body.String())
+			t.Fatalf("StatusCode = %v, want %v", resp.StatusCode, http.StatusBadRequest)
+		}
+
+		gotBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(string(gotBody), requestscoped.ErrMissingTenantHeader.Error()) {
+			t.Errorf("body = %q, want contains %q", gotBody, requestscoped.ErrMissingTenantHeader.Error())
+		}
+	}
+
+	// Send some requests with an invalid TTL header.
+	for range 2 * maxConcurrentWrite {
+		body, err := writeRequestToBody(metricsToWriteRequest(
+			[]types.Timeseries{{Labels: metrics1, Points: []types.MetricPoint{{Timestamp: time.Now().UnixMilli(), Value: 42}}}},
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:9201/api/v1/write", body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req.Header.Set(types.HeaderTenant, "my_tenant")
+		req.Header.Set(types.HeaderTimeToLive, "invalid_ttl")
+
+		recorder := httptest.NewRecorder()
+		api.ServeHTTP(recorder, req)
+
+		resp := recorder.Result()
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("response is: %s", recorder.Body.String())
+			t.Fatalf("StatusCode = %v, want %v", resp.StatusCode, http.StatusUnprocessableEntity)
+		}
+
+		gotBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(string(gotBody), requestscoped.ErrParseTTLHeader.Error()) {
+			t.Errorf("body = %q, want contains %q", gotBody, requestscoped.ErrParseTTLHeader.Error())
+		}
+	}
+}
+
 func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 	t0 := time.Date(2023, 10, 2, 13, 46, 18, 0, time.UTC)
+
+	metricsConstant := testcases.GetConstant()
+	labelsMetric1 := metricsConstant.LabelsMetric1
+	labelsMetric2 := metricsConstant.LabelsMetric2
+	labelsMetric3 := metricsConstant.LabelsMetric3
+
+	defaultStoreData := []types.Timeseries{
+		{
+			Labels: labelsMetric1,
+			Points: generatePoints(1696257680000, 10000, 100, 4.2e+09),
+		},
+		{
+			Labels: labelsMetric2,
+			Points: generatePoints(1696257680000, 10000, 100, 42e+09),
+		},
+		{
+			Labels: labelsMetric3,
+			Points: generatePoints(1696257680000, 10000, 100, 4e+02),
+		},
+	}
+
+	type options struct {
+		MaxEvaluatedPoints uint64
+		MaxEvaluatedSeries uint32
+	}
 
 	tests := []struct {
 		name        string
 		promql      string
-		storeData   []metricLabelsPoints
+		reqHeader   map[string]string
+		apiOption   options
+		storeData   []types.Timeseries
 		time        time.Time
+		wantErr     bool
 		wantSamples []*model.Sample
 	}{
 		{
 			name:   "simple",
 			promql: metricCPUUsed,
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: metricCPUUsed,
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: t0.UnixMilli(), Value: 12},
 					},
 				},
@@ -822,23 +925,23 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "multiple",
 			promql: metricCPUUsed,
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName:     metricCPUUsed,
 						labelInstance: "server1:8015",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
 						{Timestamp: t0.UnixMilli(), Value: 10},
 					},
 				},
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName:     metricCPUUsed,
 						labelInstance: "server2:8015",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
 					},
 				},
@@ -860,23 +963,23 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_multiple",
 			promql: "sum(cpu_used)",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName:     metricCPUUsed,
 						labelInstance: "server1:8015",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
 						{Timestamp: t0.UnixMilli(), Value: 10},
 					},
 				},
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName:     metricCPUUsed,
 						labelInstance: "server2:8015",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
 					},
 				},
@@ -893,12 +996,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time",
 			promql: "rate(request_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "request_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
@@ -923,12 +1026,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time_few_data_on_big_range",
 			promql: "rate(request_total[2m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "request_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: (t0.Add(-70 * time.Second)).UnixMilli(), Value: 500},
 						{Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 510},
 						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 520},
@@ -959,12 +1062,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time_not_rounded",
 			promql: "rate(request_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "request_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
@@ -989,12 +1092,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time_less_stable_value",
 			promql: "rate(request_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "request_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
@@ -1019,12 +1122,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time_missing_last_point",
 			promql: "rate(request_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "request_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
@@ -1049,12 +1152,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 		{
 			name:   "aggregate_time_actual_bug",
 			promql: "rate(squirreldb_requests_points_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "squirreldb_requests_points_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: 1696257630000, Value: 2.524386e+06},
 						{Timestamp: 1696257640000, Value: 2.525197e+06},
 						{Timestamp: 1696257650000, Value: 2.525945e+06},
@@ -1080,12 +1183,12 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 			// last point had time to be ingested, the result will be the expected one.
 			name:   "aggregate_time_actual_bug_re_query",
 			promql: "rate(squirreldb_requests_points_total[1m])",
-			storeData: []metricLabelsPoints{
+			storeData: []types.Timeseries{
 				{
-					labels: labels.FromMap(map[string]string{
+					Labels: labels.FromMap(map[string]string{
 						labelName: "squirreldb_requests_points_total",
 					}),
-					points: []types.MetricPoint{
+					Points: []types.MetricPoint{
 						{Timestamp: 1696257630000, Value: 2.524386e+06},
 						{Timestamp: 1696257640000, Value: 2.525197e+06},
 						{Timestamp: 1696257650000, Value: 2.525945e+06},
@@ -1104,30 +1207,198 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 				},
 			},
 		},
+		{
+			name:      "no-header",
+			promql:    testcases.MetricName1,
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     4.2e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "5678",
+						testcases.DiskItem:     "/srv",
+					},
+					Value:     42e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			name: "no-header-with-default-1",
+			apiOption: options{
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			promql:    testcases.MetricName1,
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     4.2e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "5678",
+						testcases.DiskItem:     "/srv",
+					},
+					Value:     42e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			name: "no-header-with-default-2",
+			apiOption: options{
+				MaxEvaluatedPoints: 200,
+				MaxEvaluatedSeries: 2,
+			},
+			promql:    "disk_used + {__name__=~\"disk_.*\"}",
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantErr:   true,
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     4.2e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "5678",
+						testcases.DiskItem:     "/srv",
+					},
+					Value:     42e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			name: "filter-account",
+			reqHeader: map[string]string{
+				types.HeaderForcedMatcher: testcases.AccountLabel + "=1234",
+			},
+			promql:    testcases.MetricName1,
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     4.2e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			name: "limit-series",
+			reqHeader: map[string]string{
+				types.HeaderMaxEvaluatedSeries: "1",
+			},
+			promql:    testcases.MetricName1,
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantErr:   true,
+		},
+		{
+			name: "limit-series-and-filter-account",
+			reqHeader: map[string]string{
+				types.HeaderMaxEvaluatedSeries: "1",
+				types.HeaderForcedMatcher:      testcases.AccountLabel + "=1234",
+			},
+			promql:    testcases.MetricName1,
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantErr:   false,
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						labelName:              testcases.MetricName1,
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     4.2e+09,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
+		{
+			name: "limit-points",
+			reqHeader: map[string]string{
+				types.HeaderMaxEvaluatedPoints: "100",
+			},
+			promql:    "count_over_time(disk_used[10m])",
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantErr:   true,
+		},
+		{
+			name: "limit-points-HeaderMaxEvaluatedPoints",
+			reqHeader: map[string]string{
+				types.HeaderMaxEvaluatedPoints: "100",
+				types.HeaderForcedMatcher:      testcases.AccountLabel + "=1234",
+			},
+			promql:    "count_over_time(disk_used[10m])",
+			storeData: defaultStoreData,
+			time:      time.UnixMilli(1696257685488),
+			wantErr:   false,
+			wantSamples: []*model.Sample{
+				{
+					Metric: model.Metric{
+						testcases.AccountLabel: "1234",
+						testcases.DiskItem:     testcases.DiskMount1,
+					},
+					Value:     59,
+					Timestamp: model.TimeFromUnixNano(time.UnixMilli(1696257685488).UnixNano()),
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
-		if tt.name != "aggregate_time_actual_bug" && false {
-			continue
-		}
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			idx, store := makeIdxAndStore(tt.storeData)
-			squirrelDBAPI := &API{
-				Logger:                  logger.NewTestLogger(true),
-				Index:                   idx,
-				Reader:                  store,
-				MetricRegistry:          prometheus.NewRegistry(),
-				Writer:                  dummy.DiscardTSDB{},
-				MaxRequestBodySizeBytes: 1024,
+			store := makeTSDB(tt.storeData)
+			squirrelDBAPI := makeAPI(store, nil)
+			squirrelDBAPI.PromQLMaxEvaluatedPoints = tt.apiOption.MaxEvaluatedPoints
+			squirrelDBAPI.PromQLMaxEvaluatedSeries = tt.apiOption.MaxEvaluatedSeries
+
+			if err := squirrelDBAPI.init(t.Context()); err != nil {
+				t.Fatal(err)
 			}
-			squirrelDBAPI.init()
+
 			squirrelDBAPI.Ready()
 
 			client, err := api.NewClient(api.Config{
-				RoundTripper: roundTripperFromHTTPHandler{handler: squirrelDBAPI},
+				RoundTripper: roundTripperFromHTTPHandler{
+					handler: squirrelDBAPI,
+					headers: tt.reqHeader,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1137,6 +1408,10 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 			response, warning, err := apiClient.Query(t.Context(), tt.promql, tt.time)
 			if err != nil {
+				if tt.wantErr {
+					return
+				}
+
 				t.Fatal(err)
 			}
 
@@ -1184,39 +1459,34 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 type roundTripperFromHTTPHandler struct {
 	handler http.Handler
+	headers map[string]string
 }
 
 func (rt roundTripperFromHTTPHandler) RoundTrip(req *http.Request) (*http.Response, error) {
 	rec := httptest.NewRecorder()
+
+	for k, v := range rt.headers {
+		req.Header.Add(k, v)
+	}
+
 	rt.handler.ServeHTTP(rec, req)
 
 	return rec.Result(), nil
 }
 
-type metricLabelsPoints struct {
-	labels labels.Labels
-	points []types.MetricPoint
-}
-
-func makeIdxAndStore(data []metricLabelsPoints) (*dummy.Index, *dummy.MemoryTSDB) {
+func makeTSDB(data []types.Timeseries) *dummy.MemoryTSDB {
 	metrics := make([]types.MetricLabel, len(data))
-	store := &dummy.MemoryTSDB{Data: make(map[types.MetricID]types.MetricData)}
+	store := &dummy.MemoryTSDB{}
+	store.AddData(data, 86400)
 
 	for idx, m := range data {
 		metrics[idx] = types.MetricLabel{
-			Labels: m.labels,
+			Labels: m.Labels,
 			ID:     types.MetricID(idx),
-		}
-		store.Data[types.MetricID(idx)] = types.MetricData{
-			ID:         types.MetricID(idx),
-			Points:     m.points,
-			TimeToLive: 86400,
 		}
 	}
 
-	idx := dummy.NewIndex(metrics)
-
-	return idx, store
+	return store
 }
 
 func samplesPointerToValue(in []*model.Sample) []model.Sample {
@@ -1227,4 +1497,41 @@ func samplesPointerToValue(in []*model.Sample) []model.Sample {
 	}
 
 	return result
+}
+
+func generatePoints(maxT int64, stepT int64, count int64, value float64) []types.MetricPoint {
+	result := make([]types.MetricPoint, count)
+
+	for i := range result {
+		result[i] = types.MetricPoint{
+			Timestamp: maxT - stepT*(count-int64(i)),
+			Value:     value,
+		}
+	}
+
+	return result
+}
+
+// Try to be as close as daemon.go apiTask.
+func makeAPI(
+	backend types.TSDB,
+	labelProcessor requestscoped.MutableLabelDetector,
+) *API {
+	promReqitry := prometheus.NewRegistry()
+
+	return &API{
+		ListenAddress:               "not used",
+		Queryable:                   backend,
+		Appendable:                  backend,
+		PromQLMaxEvaluatedPoints:    uint64(config.DefaultConfig().PromQL.MaxEvaluatedPoints),
+		PromQLMaxEvaluatedSeries:    uint32(config.DefaultConfig().PromQL.MaxEvaluatedSeries),
+		MaxConcurrentRemoteRequests: config.DefaultConfig().RemoteStorage.MaxConcurrentRequests,
+		MaxRequestBodySizeBytes:     config.DefaultConfig().MaxRequestBodySize << 20,
+		TenantLabelName:             config.DefaultConfig().TenantLabelName,
+		MutableLabelDetector:        labelProcessor,
+		RequireTenantHeader:         config.DefaultConfig().RequireTenantHeader,
+		MetricRegistry:              promReqitry,
+		Logger:                      log.With().Logger(),
+		FuturePointsBackdateOffset:  config.DefaultConfig().MaxAllowedTimeInFuture,
+	}
 }

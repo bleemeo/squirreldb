@@ -25,6 +25,69 @@ import (
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/storage"
+)
+
+// TSDB is the component that store metrics (and possible states) for SquirrelDB.
+// A backend had multiple component (metrics reader - Queryable - and writer Appendable, ...) which
+// could be lazily initialized (when calling XXXComponent()) or initialized when the backend is created.
+type TSDB interface {
+	AppendableWithOptions
+	QueryableWithOptions
+
+	Close(ctx context.Context) error
+}
+
+// HTTPOptionsParser is the interface TSDB might want to implement in order to support per-HTTP request option,
+// based on HTTP header. The result from ParseHTTPOptions is passed in BackendOptions of AppenderOptions/QuerierOptions.
+type HTTPOptionsParser interface {
+	ParseHTTPOptions(h http.Header) (any, error)
+}
+
+type AppenderOptions struct {
+	Tenant       string
+	RequestDebug DebugLevel
+	WriteTTL     int64
+
+	// BackendOptions is filled by calls like ParseHTTPOptions()
+	BackendOptions any
+}
+
+// QuerierOptions contains the per-request (e.g. per HTTP request) options.
+// It's intended to be consumer by TSDB Appender or Queryable.
+type QuerierOptions struct {
+	Tenant       string
+	RequestDebug DebugLevel
+	// MaxEvaluatedSeries caps how many series a single Select may resolve before
+	// it must fail; 0 means unlimited. It mirrors the limit limitqueryable
+	// enforces cumulatively across a request, exposed to backends so they can
+	// bound the work (and query size) of a broad matcher up-front rather than
+	// only once the caller iterates the result.
+	MaxEvaluatedSeries uint32
+	// MaxEvaluatedPoints caps how many points a single Select may read; 0 means
+	// unlimited. Like MaxEvaluatedSeries it mirrors the limitqueryable limit, but a
+	// backend needs it to abort a read server-side (limitqueryable only counts
+	// points once the caller iterates, after the backend may have buffered them).
+	MaxEvaluatedPoints uint64
+	// BackendOptions is filled by calls like ParseHTTPOptions()
+	BackendOptions any
+}
+
+type AppendableWithOptions interface {
+	AppenderWithOptions(ctx context.Context, options AppenderOptions) storage.Appender
+}
+
+type QueryableWithOptions interface {
+	QuerierWithOptions(opts QuerierOptions, mint int64, maxt int64) (storage.Querier, error)
+	ChunkQuerierWithOptions(opts QuerierOptions, mint int64, maxt int64) (storage.ChunkQuerier, error)
+}
+
+type DebugLevel int
+
+const (
+	DebugLevelNone DebugLevel = iota
+	DebugLevelSimple
+	DebugLevelVerbose
 )
 
 // OldTask is a background worker that will be running until ctx is canceled.
@@ -156,16 +219,16 @@ type State interface {
 	Write(ctx context.Context, name string, value any) error
 }
 
-// RequestContextKey is used as a key in a context to an HTTP request.
-type RequestContextKey struct{}
-
-// WrapContext adds a request to the context.
-func WrapContext(ctx context.Context, r *http.Request) context.Context {
-	return context.WithValue(ctx, RequestContextKey{}, r)
-}
-
 // BackdateContextKey is used as a key in a context to a points backdate offset.
 type BackdateContextKey struct{}
+
+// HTTPRegistrar is the minimal HTTP routing interface used to register
+// backend-specific HTTP endpoints (debug, management, etc.) on the API router.
+type HTTPRegistrar interface {
+	Get(path string, handler http.HandlerFunc)
+	Post(path string, handler http.HandlerFunc)
+	Del(path string, handler http.HandlerFunc)
+}
 
 // HTTP headers available to dynamically change settings on PromQL and remote read.
 const (
@@ -195,3 +258,11 @@ const (
 )
 
 const PrometheusValidationScheme = model.UTF8Validation
+
+// BackendInfo contains some information about how the backend behaves so core.SquirrelDB can
+// adjust some features.
+type BackendInfo struct {
+	// ApplyMutableLabelInternally tells whether the Backend TSDB gives "raw" access (without mutable labels) or
+	// if the backend already applies mutable labels.
+	ApplyMutableLabelInternally bool
+}

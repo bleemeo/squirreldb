@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core"
+	"github.com/bleemeo/squirreldb/core/processsetup"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,9 +31,9 @@ var (
 func main() {
 	flag.Parse()
 
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 
 	metricResult, _ := prometheus.DefaultGatherer.Gather()
 	for _, mf := range metricResult {
@@ -43,8 +45,8 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
-	cfg, warnings, err := daemon.Config()
+func run(ctx context.Context, _ context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -56,15 +58,19 @@ func run(ctx context.Context) error {
 	clients := make([]*BenchClient, *workerProcesses)
 
 	for i := range clients {
-		squirreldb := &daemon.SquirrelDB{
-			Config: cfg,
-			MetricRegistry: prometheus.WrapRegistererWith(
-				map[string]string{"process": strconv.FormatInt(int64(i), 10)},
-				prometheus.DefaultRegisterer,
-			),
-			Logger: log.With().Str("component", "daemon").Int("process", i).Logger(),
-		}
-		defer squirreldb.Stop()
+		squirreldb := core.New(
+			core.Deps{
+				Logger: log.With().Str("component", "daemon").Int("process", i).Logger(),
+				MetricRegistry: prometheus.WrapRegistererWith(
+					map[string]string{"process": strconv.FormatInt(int64(i), 10)},
+					prometheus.DefaultRegisterer,
+				),
+			},
+			cfg,
+			core.SquirrelDBOption{},
+		)
+
+		defer squirreldb.CloseAll(ctx)
 
 		cluster, err := squirreldb.Cluster(ctx)
 		if err != nil {

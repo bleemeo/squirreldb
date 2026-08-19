@@ -17,14 +17,14 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"os"
+	"strings"
 
-	"github.com/bleemeo/squirreldb/config"
+	versionPkg "github.com/bleemeo/squirreldb/core/version"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/migration"
 
-	zlogsentry "github.com/archdx/zerolog-sentry"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -38,40 +38,10 @@ var (
 	date    string
 )
 
-// setupSentryLogger sets the default zerolog logger to a Sentry logger, or a simple
-// console logger if Sentry is disabled. The closer returned should be closed at the
-// end of the program to flush the events to Sentry.
-func setupSentryLogger(cfg config.Config) io.Closer {
-	consoleWriter := logger.NewConsoleWriter(cfg.Log.DisableColor)
-	logLevel := zerolog.Level(cfg.Log.Level) //nolint:gosec
-	release := zlogsentry.WithRelease(fmt.Sprintf("squirreldb@%s-%s", version, commit))
-
-	if cfg.Sentry.DSN == "" {
-		log.Logger = logger.NewLogger(consoleWriter, logLevel)
-
-		return nil
-	}
-
-	sentryWriter, err := logger.NewSentryWriter(cfg.Sentry.DSN, zerolog.ErrorLevel, release)
-	if err != nil {
-		log.Err(err).Msg("Failed to initialize sentry")
-
-		log.Logger = logger.NewLogger(consoleWriter, logLevel)
-
-		return nil
-	}
-
-	// Set up logger with level filter.
-	multiWriter := zerolog.MultiLevelWriter(consoleWriter, sentryWriter)
-	log.Logger = logger.NewLogger(multiWriter, logLevel)
-
-	return sentryWriter
-}
-
 func main() {
-	daemon.Version = version
-	daemon.Commit = commit
-	daemon.Date = date
+	versionPkg.Version = version
+	versionPkg.Commit = commit
+	versionPkg.Date = date
 
 	// Change the default time format of zerolog to allow millisecond precision.
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
@@ -79,32 +49,23 @@ func main() {
 	// Initialize the logger temporarily before loading the config.
 	log.Logger = logger.NewLogger(logger.NewConsoleWriter(false), zerolog.TraceLevel)
 
-	cfg, warnings, err := daemon.Config()
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to read config")
+	// Subcommand dispatch: `squirreldb daemon` and `squirreldb migrate` are
+	// handled identically — each gets the args that follow it. A bare
+	// `squirreldb` (or a first argument that is a flag) is treated as `daemon`.
+	args := os.Args[1:]
+	subcommand := "daemon"
+
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcommand, args = args[0], args[1:]
 	}
 
-	if warnings != nil {
-		log.Warn().Err(warnings).Msg("Got warnings while loading config")
+	switch subcommand {
+	case "daemon":
+		os.Exit(daemon.RunDaemon(args))
+	case "migrate":
+		os.Exit(migration.RunMigrate(args))
+	default:
+		log.Error().Msgf("Unknown subcommand %q (expected \"daemon\" or \"migrate\")", subcommand)
+		os.Exit(2)
 	}
-
-	if sentryCloser := setupSentryLogger(cfg); sentryCloser != nil {
-		defer sentryCloser.Close()
-	}
-
-	defer logger.ProcessPanic()
-
-	squirreldb := &daemon.SquirrelDB{
-		Config: cfg,
-		Logger: log.With().Str("component", "daemon").Logger(),
-	}
-
-	log.Info().Msgf("Starting SquirrelDB %s (commit %s)", version, commit)
-
-	err = daemon.RunWithSignalHandler(squirreldb.Run)
-	if err != nil {
-		log.Err(err).Msg("Failed to run SquirrelDB")
-	}
-
-	log.Debug().Msg("SquirrelDB is stopped")
 }

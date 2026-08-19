@@ -1130,6 +1130,17 @@ func (ve *verifierExecution) verifyExpiration(ctx context.Context) (hadIssue boo
 		gotValidUnexpectedIDs := gotUnexpectedIDs.Intersect(ve.allPosting)
 		gotExpectedInPast := gotValidUnexpectedIDs.Intersect(idExpectedInPast)
 		gotExpectedInFuture := gotValidUnexpectedIDs.Intersect(idExpectedInFuture)
+
+		// A metric expiring close to midnight UTC may be bucketed one day later than the day
+		// stored in id2labels: the expiration timestamp receives a jitter of up to
+		// cassandraTTLUpdateJitter, and the move between expiration buckets isn't atomic with
+		// the id2labels update (and may use a stale previous day in a cluster). An entry found
+		// exactly one day after its expected day is therefore a benign leftover which self-heals
+		// once that day is processed, so don't report it as an issue.
+		if prevDayExpiration := ve.expectedExpiration[currentDay.Add(-24*time.Hour).Unix()]; prevDayExpiration != nil {
+			gotExpectedInPast = gotExpectedInPast.Difference(prevDayExpiration)
+		}
+
 		gotUnexpctedVerifierBug := gotValidUnexpectedIDs.
 			Difference(idExpectedInPast).
 			Difference(idExpectedInFuture).

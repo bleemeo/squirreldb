@@ -20,8 +20,8 @@ import "time"
 
 const backendCassandra = "cassandra"
 
-// defaultPaths returns the default paths used to search for config files.
-func defaultPaths() []string {
+// DefaultConfigPaths returns the default paths used to search for config files.
+func DefaultConfigPaths() []string {
 	return []string{
 		"squirreldb.conf",
 	}
@@ -29,11 +29,12 @@ func defaultPaths() []string {
 
 func DefaultConfig() Config {
 	return Config{
+		Backend:           backendCassandra,
+		DefaultTimeToLive: 365 * 24 * time.Hour, // 1 year
 		Cassandra: Cassandra{
 			Addresses:              []string{"127.0.0.1:9042"},
 			Keyspace:               "squirreldb",
 			ReplicationFactor:      1,
-			DefaultTimeToLive:      365 * 24 * time.Hour, // 1 year
 			PreCreateShardDuration: 30 * time.Minute,
 			PreCreateShardFraction: 27,
 			Aggregate: Aggregate{
@@ -45,6 +46,12 @@ func DefaultConfig() Config {
 			KeyPath:                "",
 			CAPath:                 "",
 			EnableHostVerification: true,
+		},
+		ClickHouse: ClickHouse{
+			Addresses: []string{"127.0.0.1:9000"},
+			Database:  "default",
+			Username:  "",
+			Password:  "",
 		},
 		Redis: Redis{
 			Addresses:   []string{},
@@ -82,18 +89,16 @@ func DefaultConfig() Config {
 			Address: "https://telemetry.bleemeo.com/v1/telemetry/",
 		},
 		Internal: Internal{
-			Index:                   backendCassandra,
+			Dummy: Dummy{
+				Batcher: true,
+			},
+			ShowGoroutingOnShutdown: false,
 			IndexDummyCheckConflict: true,
 			IndexDummyFixedID:       0,
 			Installation: Installation{
 				Format: "Manual",
 			},
-			TSDB:                  backendCassandra,
 			TemporaryStore:        "redis",
-			Locks:                 backendCassandra,
-			States:                backendCassandra,
-			Store:                 "batcher",
-			MutableLabelsProvider: backendCassandra,
 			DisablePreAggregation: false,
 		},
 		MaxRequestBodySize:     64, // MiB

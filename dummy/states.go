@@ -18,10 +18,9 @@ package dummy
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"strconv"
 	"sync"
+
+	"github.com/bleemeo/squirreldb/types"
 )
 
 // States is a in-memory single-node "states", that is a map :)
@@ -41,25 +40,8 @@ func (s *States) Read(_ context.Context, name string, value any) (bool, error) {
 		return false, nil
 	}
 
-	switch v := value.(type) {
-	case *float64:
-		valueFloat64, _ := strconv.ParseFloat(valueString, 64)
-		*v = valueFloat64
-	case *int:
-		valueInt, _ := strconv.Atoi(valueString)
-		*v = valueInt
-	case *int64:
-		valueInt64, _ := strconv.ParseInt(valueString, 10, 64)
-		*v = valueInt64
-	case *string:
-		*v = valueString
-	default:
-		err := json.Unmarshal([]byte(valueString), value)
-		if err != nil {
-			return false, fmt.Errorf("failed to unmarshal value: %w", err)
-		}
-
-		return true, nil
+	if err := types.DecodeStateValue(valueString, value); err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -73,18 +55,9 @@ func (s *States) Write(_ context.Context, name string, value any) error {
 		s.values = make(map[string]string)
 	}
 
-	var valueString string
-
-	switch value.(type) {
-	case float64, int, int64, string:
-		valueString = fmt.Sprint(value)
-	default:
-		marshalled, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("failed to marshal value: %w", err)
-		}
-
-		valueString = string(marshalled)
+	valueString, err := types.EncodeStateValue(value)
+	if err != nil {
+		return err
 	}
 
 	s.values[name] = valueString

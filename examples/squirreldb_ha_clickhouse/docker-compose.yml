@@ -1,0 +1,249 @@
+services:
+  clickhouse-keeper-0:
+    image: clickhouse/clickhouse-keeper:26.3.10.60
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    hostname: clickhouse-keeper-0
+    environment:
+      - CLICKHOUSE_KEEPER_SERVER_ID=0
+    configs:
+      - source: clickhouse_keeper_config
+        target: /etc/clickhouse-keeper/keeper_config.xml 
+  clickhouse-keeper-1:
+    image: clickhouse/clickhouse-keeper:26.3.10.60
+    restart: unless-stopped
+    labels:
+      # Glouton is the monitoring agent made by Bleemeo.
+      # On real setup of SquirrelDB, you probably want to monitor component, but
+      # this docker compose is a quick-start used to test and evaluate SquirrelDB so disable
+      # monitoring to avoid false notification.
+      glouton.enable: "false"
+    hostname: clickhouse-keeper-1
+    environment:
+      - CLICKHOUSE_KEEPER_SERVER_ID=1
+    configs:
+      - source: clickhouse_keeper_config
+        target: /etc/clickhouse-keeper/keeper_config.xml 
+  clickhouse-keeper-2:
+    image: clickhouse/clickhouse-keeper:26.3.10.60
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    hostname: clickhouse-keeper2
+    environment:
+      - CLICKHOUSE_KEEPER_SERVER_ID=2
+    configs:
+      - source: clickhouse_keeper_config
+        target: /etc/clickhouse-keeper/keeper_config.xml 
+
+  clickhouse-server-0:
+    image: clickhouse/clickhouse-server:26.3.10.60
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    hostname: clickhouse-server-0
+    environment:
+      - CLICKHOUSE_CLUSTER_SECRET=ASuperSecretKeySharedByClickouseServer
+      - CLICKHOUSE_DB=squirreldb
+      - CLICKHOUSE_USER=squirreldb_user
+      - CLICKHOUSE_PASSWORD=secretForTest
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    configs:
+      - source: clickhouse_server_config_00
+        target: /etc/clickhouse-server/config.d/00-fix-bug.xml
+      - source: clickhouse_server_config
+        target: /etc/clickhouse-server/config.d/10-config.xml
+      - source: clickhouse_server_start_script
+        target: /srv/clickhouse-server-start.sh
+      - source: clickhouse_server_initdb_test
+        target: //docker-entrypoint-initdb.d/squirreldb_test.sql
+    command: [ "/bin/sh", "/srv/clickhouse-server-start.sh" ]
+
+  clickhouse-server-1:
+    image: clickhouse/clickhouse-server:26.3.10.60
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    hostname: clickhouse-server-1
+    environment:
+      - CLICKHOUSE_CLUSTER_SECRET=ASuperSecretKeySharedByClickouseServer
+      - CLICKHOUSE_DB=squirreldb
+      - CLICKHOUSE_USER=squirreldb_user
+      - CLICKHOUSE_PASSWORD=secretForTest
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    configs:
+      - source: clickhouse_server_config_00
+        target: /etc/clickhouse-server/config.d/00-fix-bug.xml
+      - source: clickhouse_server_config
+        target: /etc/clickhouse-server/config.d/10-config.xml
+      - source: clickhouse_server_start_script
+        target: /srv/clickhouse-server-start.sh
+      - source: clickhouse_server_initdb_test
+        target: //docker-entrypoint-initdb.d/squirreldb_test.sql
+    command: [ "/bin/sh", "/srv/clickhouse-server-start.sh" ]
+
+  redis1:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis2:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis3:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis4:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis5:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis6:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_node_start
+        target: /srv/redis-files/redis-node-start.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-node-start.sh" ]
+  redis_init:
+    image: redis:7
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    configs:
+      - source: redis_cluster_init
+        target: /srv/redis-files/redis-cluster-init.sh
+      - source: redis_config
+        target: /srv/redis-files/redis.conf
+    command: [ "/bin/sh", "/srv/redis-files/redis-cluster-init.sh" ]
+
+  squirreldb1:
+    image: bleemeo/squirreldb
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    environment:
+      - SQUIRRELDB_CLICKHOUSE_ADDRESSES=clickhouse-server-0:9000,clickhouse-server-1:9000
+      - SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=main_cluster
+      - SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
+      - SQUIRRELDB_CLICKHOUSE_DATABASE=squirreldb
+      - SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+      - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+      - SQUIRRELDB_BACKEND=clickhouse
+  squirreldb2:
+    image: bleemeo/squirreldb
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    environment:
+      - SQUIRRELDB_CLICKHOUSE_ADDRESSES=clickhouse-server-0:9000,clickhouse-server-1:9000
+      - SQUIRRELDB_CLICKHOUSE_CLUSTER_NAME=main_cluster
+      - SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb_user
+      - SQUIRRELDB_CLICKHOUSE_DATABASE=squirreldb
+      - SQUIRRELDB_CLICKHOUSE_PASSWORD=secretForTest
+      - SQUIRRELDB_REDIS_ADDRESSES=redis1:6379,redis2:6379
+      - SQUIRRELDB_BACKEND=clickhouse
+
+  squirreldb:
+    image: nginx
+    labels:
+      glouton.enable: "false"
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 127.0.0.1:9201:9201
+
+  prometheus:
+    image: prom/prometheus
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    volumes:
+      - ./sample-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  node:
+    image: prom/node-exporter
+    restart: unless-stopped
+    labels:
+      glouton.enable: "false"
+    volumes:
+      - /:/rootfs:ro,rslave
+    command: --path.rootfs=/rootfs
+  grafana:
+    image: grafana/grafana
+    labels:
+      glouton.enable: "false"
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:3000:3000
+
+
+configs:
+  redis_config:
+    content: |
+      cluster-enabled yes
+      cluster-require-full-coverage no
+      cluster-node-timeout 15000
+      cluster-config-file /data/nodes.conf
+      cluster-migration-barrier 1
+      appendonly yes
+      protected-mode no
+  redis_cluster_init:
+    file: ./redis-scripts/redis-cluster-init.sh
+  redis_node_start:
+    file: ./redis-scripts/redis-node-start.sh
+  clickhouse_keeper_config:
+    file: ./clickhouse-configs/keeper_config.xml
+  clickhouse_server_config_00:
+    file: ./clickhouse-configs/server_config_00.xml
+  clickhouse_server_config:
+    file: ./clickhouse-configs/server_config.xml
+  clickhouse_server_start_script:
+    file: ./clickhouse-server-start.sh
+  clickhouse_server_initdb_test:
+    content: |
+      CREATE DATABASE squirreldb_test;

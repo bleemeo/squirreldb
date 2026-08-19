@@ -42,6 +42,11 @@ type MetricData struct {
 	TimeToLive int64
 }
 
+type Timeseries struct {
+	Points []MetricPoint
+	Labels labels.Labels
+}
+
 type MetricRequest struct {
 	Function           string
 	IDs                []MetricID

@@ -210,6 +210,156 @@ func (c *Client) IsCluster(ctx context.Context) (bool, error) {
 	return false, c.singleClient.Ping(ctx).Err()
 }
 
+// cmdable returns the active go-redis command interface (cluster or single),
+// establishing the connection if needed. Both underlying clients implement
+// goredis.Cmdable, so single-key commands work the same on either.
+func (c *Client) cmdable(ctx context.Context) (goredis.Cmdable, error) {
+	if err := c.fixClient(ctx); err != nil {
+		return nil, err
+	}
+
+	if c.clusterClient != nil {
+		return c.clusterClient, nil
+	}
+
+	return c.singleClient, nil
+}
+
+// RPush appends values to the list at key and returns the list length afterwards.
+func (c *Client) RPush(ctx context.Context, key string, values ...any) (int64, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := cmd.RPush(ctx, key, values...).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis: %w", err)
+	}
+
+	return n, nil
+}
+
+// LLen returns the length of the list at key (0 when it does not exist).
+func (c *Client) LLen(ctx context.Context, key string) (int64, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := cmd.LLen(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis: %w", err)
+	}
+
+	return n, nil
+}
+
+// LRange returns the elements of the list at key in the [start, stop] range
+// (0-based, inclusive; negative indices count from the end).
+func (c *Client) LRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	values, err := cmd.LRange(ctx, key, start, stop).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis: %w", err)
+	}
+
+	return values, nil
+}
+
+// LTrim keeps only the elements in the [start, stop] range of the list at key.
+func (c *Client) LTrim(ctx context.Context, key string, start, stop int64) error {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.LTrim(ctx, key, start, stop).Err(); err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
+
+	return nil
+}
+
+// leaseAcquireScript sets KEYS[1]=owner with a PX ttl, but only if the key is
+// free or already owned by owner (so a holder refreshes without a competitor
+// stealing it). Returns 1 when the lease is held by owner afterwards, else 0.
+const leaseAcquireScript = `
+if redis.call('get', KEYS[1]) == ARGV[1] or redis.call('exists', KEYS[1]) == 0 then
+	redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+	return 1
+end
+return 0`
+
+// leaseReleaseScript deletes KEYS[1] only if it is still owned by owner.
+const leaseReleaseScript = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+	return redis.call('del', KEYS[1])
+end
+return 0`
+
+// leaseHeldScript refreshes KEYS[1]'s PX ttl only if it is still owned by owner.
+// Unlike leaseAcquireScript it has no `exists == 0` branch, so it never grants a
+// free lease. Returns 1 when owner still holds it, else 0.
+const leaseHeldScript = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+	redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+	return 1
+end
+return 0`
+
+// LeaseAcquire atomically acquires OR refreshes the lease at key for owner with
+// the given TTL. Returns true if owner holds the lease afterwards (i.e. it was
+// free or already owned by owner), false if another owner holds it.
+func (c *Client) LeaseAcquire(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	res, err := cmd.Eval(ctx, leaseAcquireScript, []string{key}, owner, ttl.Milliseconds()).Int()
+	if err != nil {
+		return false, fmt.Errorf("redis: %w", err)
+	}
+
+	return res == 1, nil
+}
+
+// LeaseHeld reports whether owner still holds the lease at key, refreshing its TTL
+// when it does. Unlike LeaseAcquire it never grants a free lease, so it fences an
+// action on continued ownership without a lapsed lease silently re-granting itself.
+func (c *Client) LeaseHeld(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	res, err := cmd.Eval(ctx, leaseHeldScript, []string{key}, owner, ttl.Milliseconds()).Int()
+	if err != nil {
+		return false, fmt.Errorf("redis: %w", err)
+	}
+
+	return res == 1, nil
+}
+
+// LeaseRelease releases the lease at key only if still owned by owner.
+func (c *Client) LeaseRelease(ctx context.Context, key, owner string) error {
+	cmd, err := c.cmdable(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Eval(ctx, leaseReleaseScript, []string{key}, owner).Err(); err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
+
+	return nil
+}
+
 // ShouldRetry return true when last command may be retried.
 // when using redis cluster and a master is down, go-redis took quiet some time
 // to discovery it.

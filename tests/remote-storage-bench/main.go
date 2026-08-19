@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/types"
 
@@ -71,12 +71,12 @@ func main() {
 		*seed = time.Now().UnixNano()
 	}
 
-	if err := daemon.RunWithSignalHandler(run); err != nil {
+	if err := processsetup.RunWithSignalHandler(run); err != nil {
 		log.Fatal().Err(err).Msg("Run failed")
 	}
 }
 
-func run(deadlineCtx context.Context) error { //nolint: contextcheck
+func run(deadlineCtx context.Context, _ context.Context) error { //nolint: contextcheck
 	rnd := rand.New(rand.NewSource(*seed)) //nolint:gosec
 
 	producer := NewProducer(ProducerOption{

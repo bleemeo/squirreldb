@@ -104,6 +104,12 @@ func New(ctx context.Context, reg prometheus.Registerer, options Options, logger
 	return redis, nil
 }
 
+func (r *Redis) Close() error {
+	r.client.Close()
+
+	return nil
+}
+
 func (r *Redis) initPool() {
 	r.bufferPool = sync.Pool{
 		New: func() any {

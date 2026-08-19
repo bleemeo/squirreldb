@@ -14,6 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package mutable provides the Cassandra-backed implementation of the mutable
+// label store (mutable.Store). The backend-agnostic provider, cache and types
+// live in the neutral github.com/bleemeo/squirreldb/mutable package.
 package mutable
 
 import (
@@ -23,6 +26,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/cassandra/connection"
+	"github.com/bleemeo/squirreldb/mutable"
 
 	"github.com/gocql/gocql"
 	"github.com/rs/zerolog"
@@ -38,18 +42,8 @@ type cassandra struct {
 	options Options
 }
 
-type Store interface {
-	AssociatedNames(ctx context.Context, tenant string) (map[string]string, error)
-	AssociatedValues(ctx context.Context, tenant, name string) (map[string][]string, error)
-	DeleteAssociatedName(ctx context.Context, tenant, name string) error
-	DeleteAssociatedValues(ctx context.Context, label Label) error
-	SetAssociatedName(ctx context.Context, label LabelWithName) error
-	SetAssociatedValues(ctx context.Context, label LabelWithValues) error
-	AllMutableLabels(ctx context.Context) ([]LabelWithName, error)
-}
-
 // NewCassandraStore returns a new Cassandra mutable label store.
-func NewCassandraStore(ctx context.Context, options Options) (Store, error) {
+func NewCassandraStore(ctx context.Context, options Options) (mutable.Store, error) {
 	cp := &cassandra{
 		options: options,
 	}
@@ -231,7 +225,7 @@ func (cp *cassandra) AssociatedValues(ctx context.Context, tenant, name string) 
 }
 
 // SetAssociatedValues sets the non mutable label values associated to a mutable label.
-func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithValues) error {
+func (cp *cassandra) SetAssociatedValues(ctx context.Context, label mutable.LabelWithValues) error {
 	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
@@ -253,7 +247,7 @@ func (cp *cassandra) SetAssociatedValues(ctx context.Context, label LabelWithVal
 }
 
 // DeleteAssociatedValues deletes the non mutable label values associated to a mutable label.
-func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) error {
+func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label mutable.Label) error {
 	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
@@ -275,7 +269,7 @@ func (cp *cassandra) DeleteAssociatedValues(ctx context.Context, label Label) er
 }
 
 // SetAssociatedName sets the non mutable label name associated to a mutable label name.
-func (cp *cassandra) SetAssociatedName(ctx context.Context, label LabelWithName) error {
+func (cp *cassandra) SetAssociatedName(ctx context.Context, label mutable.LabelWithName) error {
 	session, err := cp.options.Connection.Session()
 	if err != nil {
 		return err
@@ -330,16 +324,16 @@ func (cp *cassandra) DeleteAssociatedName(ctx context.Context, tenant, name stri
 
 // AllMutableLabels return the list of all known mutable labels from all tenants.
 // Currently this function is not optimized (it does a Cassandra full scan) and should be avoided if possible.
-func (cp *cassandra) AllMutableLabels(ctx context.Context) ([]LabelWithName, error) {
+func (cp *cassandra) AllMutableLabels(ctx context.Context) ([]mutable.LabelWithName, error) {
 	session, err := cp.options.Connection.SessionReadOnly()
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]LabelWithName, 0)
+	result := make([]mutable.LabelWithName, 0)
 	iter := session.Query("SELECT tenant, name, associated_name FROM mutable_label_names").WithContext(ctx).Iter()
 
-	var currentLabel LabelWithName
+	var currentLabel mutable.LabelWithName
 
 	for iter.Scan(&currentLabel.Tenant, &currentLabel.Name, &currentLabel.AssociatedName) {
 		result = append(result, currentLabel)

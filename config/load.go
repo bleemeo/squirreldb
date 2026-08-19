@@ -1,0 +1,151 @@
+// Copyright 2015-2026 Bleemeo
+//
+// bleemeo.com an infrastructure monitoring solution in the Cloud
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package config
+
+import (
+	"errors"
+	goflag "flag"
+	"fmt"
+	"runtime"
+
+	"github.com/bleemeo/squirreldb/core/version"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/pflag"
+)
+
+// ErrNormalExit is returned when process should exit normal (return code 0).
+var ErrNormalExit = errors.New("normal exit")
+
+// LoadConfigFromFlags will parse flags and load the configuration.
+// commandFlags is the sub-command specific flags (daemon, migrate, ...) and will
+// be available in the returned FlagSet. Some common flags (see CommonFlags) are
+// always added and processed; some of them stop the process normally (e.g.
+// --version, --help, ...), in which case ErrNormalExit is returned.
+// The two errors are warnings (from configuration loading) and error.
+//
+//nolint:forbidigo // This function is allowed to use fmt.Print* for CLI output.
+func LoadConfigFromFlags(
+	subcommandName string,
+	commandFlags []Flag,
+	args []string,
+) (*pflag.FlagSet, Config, error, error) {
+	allFlags := append(CommonFlags(), commandFlags...)
+	// Only the config flags shared by every entry point are exposed here; a
+	// command that needs the daemon-only ones (listen_address) adds them via its
+	// commandFlags. The full binding still comes from ConfigFlags() in Load.
+	allFlags = append(allFlags, SharedConfigFlags()...)
+	flagSet := NewFlagSet("squirreldb "+subcommandName, allFlags)
+
+	// Add "Go" flags that are used in tests.
+	flagSet.AddGoFlagSet(goflag.CommandLine)
+
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, pflag.ErrHelp) {
+			return flagSet, Config{}, nil, ErrNormalExit
+		}
+
+		return flagSet, Config{}, nil, err
+	}
+
+	// Process common flags
+	if showHelp, _ := flagSet.GetBool("help"); showHelp {
+		flagSet.PrintDefaults()
+
+		return flagSet, Config{}, nil, ErrNormalExit
+	}
+
+	if showVersion, _ := flagSet.GetBool("version"); showVersion {
+		fmt.Printf("Version %s\n", version.Version)
+
+		return flagSet, Config{}, nil, ErrNormalExit
+	}
+
+	if showBuildInfo, _ := flagSet.GetBool("build-info"); showBuildInfo {
+		fmt.Printf("Built at %s using %s from commit %s\n", version.Date, runtime.Version(), version.Commit)
+		fmt.Printf("Version %s\n", version.Version)
+
+		return flagSet, Config{}, nil, ErrNormalExit
+	}
+
+	configFiles, _ := flagSet.GetStringSlice("config")
+
+	cfg, warnings, err := LoadConfig(configFiles)
+
+	return flagSet, cfg, errors.Join(warnings...), err
+}
+
+// LoadConfig loads the configuration from the given files (plus environment and
+// command-line config overrides) and validates it. It is shared by the daemon
+// and the migrate subcommand so both load config identically.
+func LoadConfig(configFiles []string) (Config, Warnings, error) {
+	cfg, warnings, err := Load(configFiles...)
+	if err != nil {
+		return Config{}, nil, fmt.Errorf("can't load config: %w", err)
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		return cfg, nil, err
+	}
+
+	return cfg, warnings, nil
+}
+
+// validateConfig checks if the configuration is valid and consistent.
+func validateConfig(cfg Config) error {
+	var warnings prometheus.MultiError
+
+	if cfg.Cassandra.Keyspace == "" {
+		warnings.Append(fmt.Errorf("%w: 'cassandra.keyspace' must be set", ErrInvalidValue))
+	}
+
+	if cfg.Cassandra.ReplicationFactor <= 0 {
+		err := fmt.Errorf("%w: 'cassandra.replication_factor' must be strictly greater than 0", ErrInvalidValue)
+		warnings.Append(err)
+	}
+
+	if cfg.Batch.Size <= 0 {
+		warnings.Append(fmt.Errorf("%w: 'batch.size' must be strictly greater than 0", ErrInvalidValue))
+	}
+
+	if cfg.Cassandra.Aggregate.IntendedDuration <= 0 {
+		err := fmt.Errorf(
+			"%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0",
+			ErrInvalidValue,
+		)
+		warnings.Append(err)
+	}
+
+	if cfg.ExtraWriteBackend != "" {
+		knownBackends := map[string]bool{BackendCassandra: true, BackendClickHouse: true, BackendDummy: true}
+
+		if !knownBackends[cfg.ExtraWriteBackend] {
+			warnings.Append(fmt.Errorf(
+				"%w: unknown backend %q in 'extra_write_backend'", ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		}
+
+		if cfg.ExtraWriteBackend == cfg.Backend {
+			warnings.Append(fmt.Errorf(
+				"%w: 'extra_write_backend' (%q) must differ from 'backend' "+
+					"(which is already the primary, must-succeed write target)",
+				ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		}
+	}
+
+	return warnings.MaybeUnwrap()
+}

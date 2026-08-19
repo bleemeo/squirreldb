@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/core/processsetup"
 	"github.com/bleemeo/squirreldb/daemon"
+	"github.com/bleemeo/squirreldb/tests/common/testsetup"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -43,9 +45,9 @@ var (
 const labelInstance = "instance"
 
 func main() {
-	daemon.SetTestEnvironment()
+	testsetup.SetTestEnvironment()
 
-	err := daemon.RunWithSignalHandler(run)
+	err := processsetup.RunWithSignalHandler(run)
 
 	if *remoteRead == "" && *remoteWrite == "" {
 		metricResult, _ := prometheus.DefaultGatherer.Gather()
@@ -59,8 +61,8 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) error {
-	cfg, warnings, err := daemon.Config()
+func run(ctx context.Context, _ context.Context) error {
+	cfg, warnings, err := testsetup.LoadConfigForTest()
 	if err != nil {
 		return err
 	}
@@ -72,7 +74,7 @@ func run(ctx context.Context) error {
 	readURLs := strings.Split(*remoteRead, ",")
 	writeURLs := strings.Split(*remoteWrite, ",")
 
-	if readURLs[0] == "" && writeURLs[0] == "" { //nolint:nestif
+	if readURLs[0] == "" && writeURLs[0] == "" {
 		readURLs = nil
 		writeURLs = nil
 
@@ -84,16 +86,15 @@ func run(ctx context.Context) error {
 					prometheus.DefaultRegisterer,
 				),
 				Logger: log.With().Str("component", "daemon").Int("process", n).Logger(),
+				// Only the first process drops, and it starts before the others
+				// (the loop is sequential), so it resets the store and creates the
+				// keyspace/schema before the rest connect.
+				DropDataOnStartup: n == 0,
 			}
 			defer squirreldb.Stop()
 
 			if n == 0 {
-				err = squirreldb.DropCassandraData(ctx, false)
-				if err != nil {
-					return err
-				}
-
-				err = squirreldb.DropTemporaryStore(ctx, false)
+				err = squirreldb.SquirrelDBCore().TestTools().DropTemporaryStore(ctx, false)
 				if err != nil {
 					return err
 				}

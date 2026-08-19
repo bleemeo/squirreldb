@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/logger"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/promql"
@@ -83,6 +84,7 @@ func (e WrapperEngine) NewInstantQuery(
 			ts.Format(time.RFC3339),
 		),
 		logger: e.logger,
+		level:  getDebugLevel(ctx),
 	}
 
 	return query, err
@@ -125,13 +127,29 @@ type wrapperQuery struct {
 
 	logMessage string
 	logger     zerolog.Logger
+	level      types.DebugLevel
 }
 
 func (q wrapperQuery) Exec(ctx context.Context) *promql.Result {
-	perRequestData, err := getPerRequestData(ctx)
-	if err == nil && perRequestData.enableDebug {
+	if q.level >= types.DebugLevelSimple {
 		q.logger.Info().Msg(q.logMessage)
 	}
 
 	return q.Query.Exec(ctx)
+}
+
+type contextKey struct{}
+
+func SetDebugLevel(ctx context.Context, level types.DebugLevel) context.Context {
+	return context.WithValue(ctx, contextKey{}, level)
+}
+
+func getDebugLevel(ctx context.Context) types.DebugLevel {
+	v, ok := ctx.Value(contextKey{}).(types.DebugLevel)
+
+	if ok {
+		return v
+	}
+
+	return types.DebugLevelNone
 }

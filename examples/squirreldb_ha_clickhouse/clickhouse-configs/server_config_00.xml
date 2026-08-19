@@ -1,0 +1,8 @@
+<!-- This file is required to make replace="1" from_env="CLICKHOUSE_MACROS_SHARD working
+    for macros. This really feels a bug in Clickhouse.
+    To work, this file need to be before 10-config.xml (file which use replace & from_env).
+-->
+<clickhouse>
+    <macros>
+    </macros>
+</clickhouse>
