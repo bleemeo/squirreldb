@@ -15,6 +15,7 @@ linters:
     - gocognit # We use maintidx to lint function complexity.
     - goconst # Too picky, with tests it require too many creation of constants.
     - gocyclo # We use maintidx to lint function complexity.
+    - gomodguard # Superseded by gomodguard_v2.
     - interfacebloat # Warn when an interface has too many methods, not useful.
     - ireturn # Complain that interface A implementation method return an interface B... it's a requirement of interface A that is unavoidable.
     - mnd # Too picky. For example it says that 1000 (used in number of ms in one second) is a magic number.

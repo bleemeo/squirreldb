@@ -41,6 +41,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -998,6 +999,42 @@ func (c *Conn) asyncInsert(ctx context.Context, pick pickFunc, query string, wai
 	return err
 }
 
+func (c *Conn) InsertFormat(ctx context.Context, format, query string, data io.Reader) error {
+	return c.insertFormat(ctx, c.pick, format, query, data)
+}
+
+func (c *Conn) insertFormat(ctx context.Context, pick pickFunc, format, query string, data io.Reader) error {
+	h, err := pick()
+	if err != nil {
+		return err
+	}
+
+	err = h.conn.InsertFormat(ctx, format, query, data)
+	c.observe(h, err)
+
+	return err
+}
+
+func (c *Conn) QueryFormat(
+	ctx context.Context, format, query string, args ...any,
+) (io.ReadCloser, error) {
+	return c.queryFormat(ctx, c.pick, format, query, args...)
+}
+
+func (c *Conn) queryFormat(
+	ctx context.Context, pick pickFunc, format, query string, args ...any,
+) (io.ReadCloser, error) {
+	h, err := pick()
+	if err != nil {
+		return nil, err
+	}
+
+	rc, err := h.conn.QueryFormat(ctx, format, query, args...)
+	c.observe(h, err)
+
+	return rc, err
+}
+
 func (c *Conn) Ping(ctx context.Context) error {
 	return c.ping(ctx, c.pick)
 }
@@ -1141,6 +1178,16 @@ func (s *viewConn) PrepareBatch(
 
 func (s *viewConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...any) error {
 	return s.c.asyncInsert(ctx, s.pick, query, wait, args...)
+}
+
+func (s *viewConn) InsertFormat(ctx context.Context, format, query string, data io.Reader) error {
+	return s.c.insertFormat(ctx, s.pick, format, query, data)
+}
+
+func (s *viewConn) QueryFormat(
+	ctx context.Context, format, query string, args ...any,
+) (io.ReadCloser, error) {
+	return s.c.queryFormat(ctx, s.pick, format, query, args...)
 }
 
 func (s *viewConn) Ping(ctx context.Context) error {

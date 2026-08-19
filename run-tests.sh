@@ -3,7 +3,7 @@
 set -eu
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v2.15.4"
+GORELEASER_VERSION="v2.17.0"
 
 WITH_CLUSTER=0
 WITH_RACE=0
