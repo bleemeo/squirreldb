@@ -41,18 +41,18 @@ type AggregatedData struct {
 // Aggregate aggregates data.
 // The returned data keeps the same order as the input points.
 func Aggregate(data types.MetricData, resolution int64) AggregatedData {
+	aggregatedData := AggregatedData{
+		TimeToLive: data.TimeToLive,
+		ID:         data.ID,
+	}
+
 	if len(data.Points) == 0 {
-		return AggregatedData{}
+		return aggregatedData
 	}
 
 	workingPoints := make([]types.MetricPoint, 0)
 
 	var currentAggregatedTimestamp int64
-
-	aggregatedData := AggregatedData{
-		TimeToLive: data.TimeToLive,
-		ID:         data.ID,
-	}
 
 	for i, point := range data.Points {
 		aggregatedTimestamp := point.Timestamp - (point.Timestamp % resolution)
