@@ -521,6 +521,23 @@ func Test_aggregateData(t *testing.T) { //nolint:maintidx
 				TimeToLive: 3600,
 			},
 		},
+		{
+			// The ID and TTL must be kept, some callers rely on the ID of the result.
+			name: "no-points",
+			args: args{
+				data: types.MetricData{
+					ID:         MetricIDTest1,
+					Points:     nil,
+					TimeToLive: 3600,
+				},
+				resolution: 300000,
+			},
+			want: AggregatedData{
+				ID:         MetricIDTest1,
+				Points:     nil,
+				TimeToLive: 3600,
+			},
+		},
 	}
 
 	for _, tt := range tests {
