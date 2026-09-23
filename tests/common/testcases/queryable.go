@@ -41,7 +41,7 @@ func GetReadTestCase() []ReadTestCase {
 
 	now := time.Now()
 	defaultStep := 10 * time.Second
-	minutesPoints := int64((time.Minute) / defaultStep)
+	minutesPoints := int64(time.Minute / defaultStep)
 
 	defaultData := []types.Timeseries{
 		{

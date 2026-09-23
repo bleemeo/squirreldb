@@ -2759,7 +2759,7 @@ func (c *CassandraIndex) InternalUpdatePostingShards(
 
 	for i, id := range ids {
 		reqs[i] = lookupEntry{
-			idData:       idData{id: id, unsortedLabels: labelsList[i]},
+			id: id, unsortedLabels: labelsList[i],
 			wantedShards: shards[i],
 		}
 	}
@@ -2801,15 +2801,13 @@ func (c *CassandraIndex) InternalCreateMetric(
 	for i, labels := range metrics {
 		sortedLabelsString := labels.String()
 		requests[i] = lookupEntry{
-			idData: idData{
-				id:                       ids[i],
-				unsortedLabels:           labels,
-				cassandraEntryExpiration: expirations[i],
-			},
-			labelsKey:          labels.Hash(),
-			wantedShards:       shards,
-			sortedLabelsString: sortedLabelsString,
-			sortedLabels:       labels,
+			id:                       ids[i],
+			unsortedLabels:           labels,
+			cassandraEntryExpiration: expirations[i],
+			labelsKey:                labels.Hash(),
+			wantedShards:             shards,
+			sortedLabelsString:       sortedLabelsString,
+			sortedLabels:             labels,
 		}
 	}
 

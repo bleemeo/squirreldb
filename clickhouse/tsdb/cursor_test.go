@@ -193,11 +193,9 @@ func TestSelectMaterializesAndReleasesCursor(t *testing.T) {
 	}
 
 	q := &sqlQuerier{
-		labelQuerier: labelQuerier{
-			conn: &fakeConn{tagsRows: tagsRows, pointRows: pointRows},
-			mint: 0,
-			maxt: 10000,
-		},
+		conn:    &fakeConn{tagsRows: tagsRows, pointRows: pointRows},
+		mint:    0,
+		maxt:    10000,
 		metrics: newMetrics(nil),
 		onClose: func() {},
 	}
