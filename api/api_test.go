@@ -932,7 +932,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						labelInstance: "server1:8015",
 					}),
 					Points: []types.MetricPoint{
-						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
+						{Timestamp: t0.Add(-time.Minute).UnixMilli(), Value: 8},
 						{Timestamp: t0.UnixMilli(), Value: 10},
 					},
 				},
@@ -942,7 +942,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						labelInstance: "server2:8015",
 					}),
 					Points: []types.MetricPoint{
-						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
+						{Timestamp: t0.Add(-time.Minute).UnixMilli(), Value: 9},
 					},
 				},
 			},
@@ -970,7 +970,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						labelInstance: "server1:8015",
 					}),
 					Points: []types.MetricPoint{
-						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 8},
+						{Timestamp: t0.Add(-time.Minute).UnixMilli(), Value: 8},
 						{Timestamp: t0.UnixMilli(), Value: 10},
 					},
 				},
@@ -980,7 +980,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						labelInstance: "server2:8015",
 					}),
 					Points: []types.MetricPoint{
-						{Timestamp: (t0.Add(-time.Minute)).UnixMilli(), Value: 9},
+						{Timestamp: t0.Add(-time.Minute).UnixMilli(), Value: 9},
 					},
 				},
 			},
@@ -1005,11 +1005,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
-						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
-						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 200},
-						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 400},
-						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 600},
-						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						{Timestamp: t0.Add(-50 * time.Second).UnixMilli(), Value: 0},
+						{Timestamp: t0.Add(-40 * time.Second).UnixMilli(), Value: 200},
+						{Timestamp: t0.Add(-30 * time.Second).UnixMilli(), Value: 400},
+						{Timestamp: t0.Add(-20 * time.Second).UnixMilli(), Value: 600},
+						{Timestamp: t0.Add(-10 * time.Second).UnixMilli(), Value: 800},
 						{Timestamp: t0.UnixMilli(), Value: 1000},
 					},
 				},
@@ -1032,11 +1032,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						labelName: "request_total",
 					}),
 					Points: []types.MetricPoint{
-						{Timestamp: (t0.Add(-70 * time.Second)).UnixMilli(), Value: 500},
-						{Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 510},
-						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 520},
-						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 530},
-						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 540},
+						{Timestamp: t0.Add(-70 * time.Second).UnixMilli(), Value: 500},
+						{Timestamp: t0.Add(-60 * time.Second).UnixMilli(), Value: 510},
+						{Timestamp: t0.Add(-50 * time.Second).UnixMilli(), Value: 520},
+						{Timestamp: t0.Add(-40 * time.Second).UnixMilli(), Value: 530},
+						{Timestamp: t0.Add(-30 * time.Second).UnixMilli(), Value: 540},
 					},
 				},
 			},
@@ -1071,11 +1071,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
-						{Timestamp: (t0.Add(-50 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 0},
-						{Timestamp: (t0.Add(-40 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 200},
-						{Timestamp: (t0.Add(-30 * time.Second).Add(124 * time.Millisecond)).UnixMilli(), Value: 400},
-						{Timestamp: (t0.Add(-20 * time.Second).Add(122 * time.Millisecond)).UnixMilli(), Value: 600},
-						{Timestamp: (t0.Add(-10 * time.Second).Add(123 * time.Millisecond)).UnixMilli(), Value: 800},
+						{Timestamp: t0.Add(-50 * time.Second).Add(123 * time.Millisecond).UnixMilli(), Value: 0},
+						{Timestamp: t0.Add(-40 * time.Second).Add(123 * time.Millisecond).UnixMilli(), Value: 200},
+						{Timestamp: t0.Add(-30 * time.Second).Add(124 * time.Millisecond).UnixMilli(), Value: 400},
+						{Timestamp: t0.Add(-20 * time.Second).Add(122 * time.Millisecond).UnixMilli(), Value: 600},
+						{Timestamp: t0.Add(-10 * time.Second).Add(123 * time.Millisecond).UnixMilli(), Value: 800},
 						{Timestamp: t0.Add(123 * time.Millisecond).UnixMilli(), Value: 1000},
 					},
 				},
@@ -1101,11 +1101,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
-						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
-						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 207},
-						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 410},
-						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 580},
-						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						{Timestamp: t0.Add(-50 * time.Second).UnixMilli(), Value: 0},
+						{Timestamp: t0.Add(-40 * time.Second).UnixMilli(), Value: 207},
+						{Timestamp: t0.Add(-30 * time.Second).UnixMilli(), Value: 410},
+						{Timestamp: t0.Add(-20 * time.Second).UnixMilli(), Value: 580},
+						{Timestamp: t0.Add(-10 * time.Second).UnixMilli(), Value: 800},
 						{Timestamp: t0.UnixMilli(), Value: 1000},
 					},
 				},
@@ -1131,11 +1131,11 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 						// PromQL will extrapolate this point, which for a counter make sense: if at t0-50s the value is zero
 						// and assuming no reset of counter, then the counter was zero before.
 						// {Timestamp: (t0.Add(-60 * time.Second)).UnixMilli(), Value: 0},  <-- extrapolated point
-						{Timestamp: (t0.Add(-50 * time.Second)).UnixMilli(), Value: 0},
-						{Timestamp: (t0.Add(-40 * time.Second)).UnixMilli(), Value: 207},
-						{Timestamp: (t0.Add(-30 * time.Second)).UnixMilli(), Value: 410},
-						{Timestamp: (t0.Add(-20 * time.Second)).UnixMilli(), Value: 580},
-						{Timestamp: (t0.Add(-10 * time.Second)).UnixMilli(), Value: 800},
+						{Timestamp: t0.Add(-50 * time.Second).UnixMilli(), Value: 0},
+						{Timestamp: t0.Add(-40 * time.Second).UnixMilli(), Value: 207},
+						{Timestamp: t0.Add(-30 * time.Second).UnixMilli(), Value: 410},
+						{Timestamp: t0.Add(-20 * time.Second).UnixMilli(), Value: 580},
+						{Timestamp: t0.Add(-10 * time.Second).UnixMilli(), Value: 800},
 						// {Timestamp: t0.UnixMilli(), Value: 1000},  <-- missing point due to ingestion latency
 					},
 				},

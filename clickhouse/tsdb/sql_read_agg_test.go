@@ -72,9 +72,9 @@ func TestAlignedChunks(t *testing.T) {
 			to:    start.Add(3 * defaultRebuildChunk),
 			chunk: 0,
 			want: [][2]int64{
-				{start.UnixMilli(), (start.Add(defaultRebuildChunk)).UnixMilli()},
-				{start.Add(defaultRebuildChunk).UnixMilli(), (start.Add(2 * defaultRebuildChunk)).UnixMilli()},
-				{start.Add(2 * defaultRebuildChunk).UnixMilli(), (start.Add(3 * defaultRebuildChunk)).UnixMilli()},
+				{start.UnixMilli(), start.Add(defaultRebuildChunk).UnixMilli()},
+				{start.Add(defaultRebuildChunk).UnixMilli(), start.Add(2 * defaultRebuildChunk).UnixMilli()},
+				{start.Add(2 * defaultRebuildChunk).UnixMilli(), start.Add(3 * defaultRebuildChunk).UnixMilli()},
 			},
 		},
 		{
@@ -87,7 +87,7 @@ func TestAlignedChunks(t *testing.T) {
 				// floor for lower bound
 				{start.UnixMilli(), start.Add(defaultRebuildChunk).UnixMilli()},
 				// and ceil for upper bound
-				{start.Add(defaultRebuildChunk).UnixMilli(), (start.Add(defaultRebuildChunk + aggBucket)).UnixMilli()},
+				{start.Add(defaultRebuildChunk).UnixMilli(), start.Add(defaultRebuildChunk + aggBucket).UnixMilli()},
 			},
 		},
 		{
@@ -353,7 +353,7 @@ func TestAggPointsQuery(t *testing.T) {
 	oneID := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}
 
 	t.Run("tenant-scoped, small id set, groups by bucket", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "tenant-1", mint: 5, maxt: 9}
 
 		query, args := q.aggPointsQuery(oneID, "max(max)", where, whereArgs)
 
@@ -370,7 +370,7 @@ func TestAggPointsQuery(t *testing.T) {
 	})
 
 	t.Run("id set over the threshold falls back to a subquery", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "tenant-1", mint: 5, maxt: 9}
 		bigIDs := make([]uuid.UUID, pointsInlineThreshold+1)
 
 		query, args := q.aggPointsQuery(bigIDs, "max(max)", where, whereArgs)
@@ -386,7 +386,7 @@ func TestAggPointsQuery(t *testing.T) {
 	})
 
 	t.Run("unscoped query omits the tenant predicate", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "", mint: 5, maxt: 9}
 
 		query, args := q.aggPointsQuery(oneID, "max(max)", where, whereArgs)
 
@@ -416,7 +416,7 @@ func TestAggSnapQuery(t *testing.T) {
 	alignedStart := start - start%step + step
 
 	t.Run("tenant-scoped snaps to the eval grid and matches the covering bucket", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1"}}
+		q := &sqlQuerier{tenant: "tenant-1"}
 		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
 
 		query, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
@@ -453,7 +453,7 @@ func TestAggSnapQuery(t *testing.T) {
 	})
 
 	t.Run("a step-aligned Start yields two identical grids", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: ""}}
+		q := &sqlQuerier{tenant: ""}
 		hints := &storage.SelectHints{Start: alignedStart, End: end, Step: step, Range: 0}
 
 		_, args := q.aggSnapQuery(oneID, hints, where, whereArgs)
@@ -470,7 +470,7 @@ func TestAggSnapQuery(t *testing.T) {
 	})
 
 	t.Run("id set over the threshold falls back to a subquery", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1"}}
+		q := &sqlQuerier{tenant: "tenant-1"}
 		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
 		bigIDs := make([]uuid.UUID, pointsInlineThreshold+1)
 
@@ -492,7 +492,7 @@ func TestAggSnapQuery(t *testing.T) {
 	})
 
 	t.Run("unscoped query omits the tenant predicate", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: ""}}
+		q := &sqlQuerier{tenant: ""}
 		hints := &storage.SelectHints{Start: start, End: end, Step: step, Range: 0}
 
 		query, args := q.aggSnapQuery(oneID, hints, where, whereArgs)

@@ -140,7 +140,7 @@ func TestPointsQuery(t *testing.T) {
 	oneID := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}
 
 	t.Run("small id set inlines the ids, matcher evaluated once", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "tenant-1", mint: 5, maxt: 9}
 
 		query, args := q.pointsQuery(oneID, where, whereArgs)
 
@@ -156,7 +156,7 @@ func TestPointsQuery(t *testing.T) {
 	})
 
 	t.Run("id set over the threshold falls back to a subquery", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "tenant-1", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "tenant-1", mint: 5, maxt: 9}
 		bigIDs := make([]uuid.UUID, pointsInlineThreshold+1)
 
 		query, args := q.pointsQuery(bigIDs, where, whereArgs)
@@ -174,7 +174,7 @@ func TestPointsQuery(t *testing.T) {
 	})
 
 	t.Run("unscoped query omits the tenant predicate", func(t *testing.T) {
-		q := &sqlQuerier{labelQuerier: labelQuerier{tenant: "", mint: 5, maxt: 9}}
+		q := &sqlQuerier{tenant: "", mint: 5, maxt: 9}
 
 		query, args := q.pointsQuery(oneID, where, whereArgs)
 
