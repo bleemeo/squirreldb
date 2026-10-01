@@ -164,3 +164,66 @@ func TestIdentityTenantAndForcedMatchers(t *testing.T) {
 		})
 	}
 }
+
+// recordingResolver records the arguments of the last ResolveBackend.
+type recordingResolver struct {
+	tenant, requested string
+	allowed           []string
+}
+
+func (r *recordingResolver) ResolveBackend(
+	_ context.Context,
+	tenant, requested string,
+	allowed []string,
+) (string, error) {
+	r.tenant, r.requested, r.allowed = tenant, requested, allowed
+
+	return requested, nil
+}
+
+// TestIdentityBackends checks that the backends of the authenticated user are
+// given to the backend resolver and carried by the querier options, so the
+// routing queryable resolves the same backend as the early check.
+func TestIdentityBackends(t *testing.T) {
+	t.Parallel()
+
+	queryable := &recordingQueryable{}
+	resolver := &recordingResolver{}
+	store := NewStore(Options{
+		TenantLabelName: "__account_id",
+		Queryable:       queryable,
+		BackendResolver: resolver,
+		MetricRegistry:  prometheus.NewRegistry(),
+	})
+
+	identity := &auth.Identity{Name: "demo", Tenant: "acme", Backends: []string{"sandbox"}}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/query", nil)
+	req.Header.Set(types.HeaderBackend, "sandbox")
+	req = req.WithContext(auth.ContextWithIdentity(req.Context(), identity))
+
+	ctx, _, err := store.ContextWithRequest(req.Context(), req, "query")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resolver.tenant != "acme" || resolver.requested != "sandbox" || !slices.Equal(resolver.allowed, identity.Backends) {
+		t.Errorf("ResolveBackend(%q, %q, %v), want the tenant, header and backends of the user",
+			resolver.tenant, resolver.requested, resolver.allowed)
+	}
+
+	querier, err := store.Querier(0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	set := querier.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchEqual, "__name__", "up"))
+	if set.Err() != nil {
+		t.Fatal(set.Err())
+	}
+
+	if got := queryable.opts; got.Backend != "sandbox" || !slices.Equal(got.AllowedBackends, identity.Backends) {
+		t.Errorf("querier options backend = %q, allowed = %v, want the header and the backends of the user",
+			got.Backend, got.AllowedBackends)
+	}
+}

@@ -346,15 +346,15 @@ func (b *SquirrelDB) Routed(ctx context.Context) (map[string]Backend, error) {
 
 // ResolveBackend returns the name of the backend serving a request of tenant,
 // which requested the backend requested (X-SquirrelDB-Backend header, empty when
-// absent). It returns an error wrapping types.ErrBackendNotSelectable if the
-// requested backend isn't enabled. The API calls it when a request starts, to
-// reject an invalid header early; the routing queryable/appendable resolve the
-// backend the same way for each querier/appender.
-//
-// ctx is the request context: it's where a restriction of the selectable
-// backends per authenticated identity would be enforced.
-func (b *SquirrelDB) ResolveBackend(_ context.Context, tenant, requested string) (string, error) {
-	name, _, err := b.router.resolveBackend(tenant, requested)
+// absent) and may only use the allowed backends (the backends of the
+// authenticated user, empty meaning no restriction). It returns an error wrapping
+// types.ErrBackendNotSelectable if the requested backend isn't enabled, or
+// types.ErrBackendNotAllowed if the request is routed to a backend it isn't
+// allowed to use. The API calls it when a request starts, to reject the request
+// early; the routing queryable/appendable resolve the backend the same way for
+// each querier/appender, from the same values carried by their options.
+func (b *SquirrelDB) ResolveBackend(_ context.Context, tenant, requested string, allowed []string) (string, error) {
+	name, _, err := b.router.resolveBackend(tenant, requested, allowed)
 
 	return name, err
 }

@@ -99,6 +99,12 @@ func TestValidateUsers(t *testing.T) {
 			wantErr: true,
 		},
 		{name: "invalid forced matcher", mutate: func(u *User) { u.ForcedMatcher = `env="` }, wantErr: true},
+		{name: "backends", mutate: func(u *User) { u.Scopes, u.Backends = []string{"read", "write"}, []string{"sandbox"} }},
+		{
+			name:    "admin with backends",
+			mutate:  func(u *User) { u.Scopes, u.Backends = []string{"admin"}, []string{"sandbox"} },
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {

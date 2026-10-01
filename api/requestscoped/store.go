@@ -66,11 +66,14 @@ type Options struct {
 	MetricRegistry  prometheus.Registerer
 }
 
-// BackendResolver resolves the backend serving a request from its tenant and the
-// backend it requested (HeaderBackend, empty when absent). It returns an error
-// wrapping types.ErrBackendNotSelectable when the requested backend isn't enabled.
+// BackendResolver resolves the backend serving a request from its tenant, the
+// backend it requested (HeaderBackend, empty when absent) and the backends it may
+// use (the backends of the authenticated user, empty meaning no restriction). It
+// returns an error wrapping types.ErrBackendNotSelectable when the requested
+// backend isn't enabled, or types.ErrBackendNotAllowed when the request is routed
+// to a backend it isn't allowed to use.
 type BackendResolver interface {
-	ResolveBackend(ctx context.Context, tenant, requested string) (string, error)
+	ResolveBackend(ctx context.Context, tenant, requested string, allowed []string) (string, error)
 }
 
 type MutableLabelDetector interface {
@@ -178,14 +181,21 @@ func (store *Store) newCtxValue(r *http.Request, operationName string) (*context
 		result.Tenant = result.identity.Tenant
 	}
 
-	// The backend header selects the backend serving the request. The routing
-	// itself is done by the queryable/appendable from the querier/appender
-	// options; it's only validated here to reject the request early. It's
-	// resolved with the tenant of the user, so the tenant rules apply to it.
+	// The backend header selects the backend serving the request, among the
+	// backends of the user when it's restricted. The routing itself is done by
+	// the queryable/appendable from the querier/appender options, which carry the
+	// same tenant, requested and allowed backends; it's only resolved here to
+	// reject the request early. It's resolved with the tenant of the user, so the
+	// tenant rules apply to it.
 	result.Backend = r.Header.Get(types.HeaderBackend)
 
+	if result.identity != nil {
+		result.AllowedBackends = result.identity.Backends
+	}
+
 	if store.BackendResolver != nil {
-		if _, err := store.BackendResolver.ResolveBackend(r.Context(), result.Tenant, result.Backend); err != nil {
+		_, err := store.BackendResolver.ResolveBackend(r.Context(), result.Tenant, result.Backend, result.AllowedBackends)
+		if err != nil {
 			return result, err
 		}
 	}

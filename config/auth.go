@@ -18,6 +18,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/bleemeo/squirreldb/api/auth"
 )
@@ -45,6 +46,7 @@ func (a Auth) AuthUsers() []auth.User {
 			Tenant:        u.Tenant,
 			Scopes:        u.Scopes,
 			ForcedMatcher: u.ForcedMatcher,
+			Backends:      u.Backends,
 		})
 	}
 
@@ -82,6 +84,38 @@ func validateSecurity(cfg Config) []error {
 				ErrInvalidValue, u.Name,
 			))
 		}
+
+		errs = append(errs, validateUserBackends(cfg, u)...)
+	}
+
+	return errs
+}
+
+// validateUserBackends checks the backends of a user: each one must be selectable,
+// i.e. the default backend or one of 'routing.backends'.
+func validateUserBackends(cfg Config, u AuthUser) []error {
+	var errs []error
+
+	seen := make(map[string]bool, len(u.Backends))
+
+	for _, name := range u.Backends {
+		switch {
+		case !isKnownBackend(name):
+			errs = append(errs, fmt.Errorf(
+				"%w: unknown backend %q in the backends of user %q", ErrInvalidValue, name, u.Name,
+			))
+		case name != cfg.Backend && !slices.Contains(cfg.Routing.Backends, name):
+			errs = append(errs, fmt.Errorf(
+				"%w: backend %q of user %q must be the default backend or listed in 'routing.backends'",
+				ErrInvalidValue, name, u.Name,
+			))
+		case seen[name]:
+			errs = append(errs, fmt.Errorf(
+				"%w: backend %q is listed twice in the backends of user %q", ErrInvalidValue, name, u.Name,
+			))
+		}
+
+		seen[name] = true
 	}
 
 	return errs

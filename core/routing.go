@@ -41,6 +41,9 @@ const (
 	routeSourceHeader  = "header"
 	routeSourceRule    = "rule"
 	routeSourceDefault = "default"
+	// routeSourceUser is a request which would have gone to the default backend,
+	// served by the first backend its user is allowed to use instead.
+	routeSourceUser = "user"
 )
 
 // Operations of a routed request, the "operation" label of squirreldb_routing_requests_total.
@@ -73,15 +76,40 @@ func newBackendRouter(cfg config.Config) *backendRouter {
 
 // resolveBackend returns the name of the backend serving a request of tenant
 // which requested the backend requested (the HeaderBackend value, empty when
-// absent), and the source of that decision. It's the single place where the
-// backend of a request is decided, for reads and writes. It returns an error
-// wrapping types.ErrBackendNotSelectable if the requested backend isn't enabled.
-func (r *backendRouter) resolveBackend(tenant, requested string) (string, string, error) {
+// absent), and the source of that decision. allowed are the backends the request
+// may use (the backends of the authenticated user), empty meaning any selectable
+// backend. It's the single place where the backend of a request is decided, for
+// reads and writes. The backend is:
+//
+//   - the requested backend, if any;
+//   - else the backend of the first rule matching the tenant;
+//   - else the default backend, or the first allowed backend when allowed is set
+//     and doesn't contain the default backend.
+//
+// It returns an error wrapping types.ErrBackendNotSelectable if the requested
+// backend isn't enabled, and an error wrapping types.ErrBackendNotAllowed if the
+// requested backend or the backend of the matching rule isn't allowed.
+func (r *backendRouter) resolveBackend(tenant, requested string, allowed []string) (string, string, error) {
+	restricted := len(allowed) > 0
+
 	if requested != "" {
 		if !slices.Contains(r.selectable, requested) {
+			// A restricted user is only told about the backends it may use.
+			enabled := r.selectable
+			if restricted {
+				enabled = allowed
+			}
+
 			return "", "", fmt.Errorf(
 				"%w: %q (from header %s), the enabled backends are: %s",
-				types.ErrBackendNotSelectable, requested, types.HeaderBackend, strings.Join(r.selectable, ", "),
+				types.ErrBackendNotSelectable, requested, types.HeaderBackend, strings.Join(enabled, ", "),
+			)
+		}
+
+		if restricted && !slices.Contains(allowed, requested) {
+			return "", "", fmt.Errorf(
+				"%w: the user isn't allowed to use the backend %q (from header %s), its backends are: %s",
+				types.ErrBackendNotAllowed, requested, types.HeaderBackend, strings.Join(allowed, ", "),
 			)
 		}
 
@@ -90,10 +118,23 @@ func (r *backendRouter) resolveBackend(tenant, requested string) (string, string
 
 	if tenant != "" {
 		for _, rule := range r.rules {
-			if ruleMatchTenant(rule, tenant) {
-				return rule.Backend, routeSourceRule, nil
+			if !ruleMatchTenant(rule, tenant) {
+				continue
 			}
+
+			if restricted && !slices.Contains(allowed, rule.Backend) {
+				return "", "", fmt.Errorf(
+					"%w: the user isn't allowed to use the backend %q (routing rule of tenant %q), its backends are: %s",
+					types.ErrBackendNotAllowed, rule.Backend, tenant, strings.Join(allowed, ", "),
+				)
+			}
+
+			return rule.Backend, routeSourceRule, nil
 		}
+	}
+
+	if restricted && !slices.Contains(allowed, r.defaultBackend) {
+		return allowed[0], routeSourceUser, nil
 	}
 
 	return r.defaultBackend, routeSourceDefault, nil
@@ -122,13 +163,14 @@ func newRoutingMetrics(reg prometheus.Registerer) *routingMetrics {
 			Subsystem: "routing",
 			Name:      "requests_total",
 			Help: "Number of routed reads (queriers) and writes (appenders) by backend, operation " +
-				"and source of the routing decision (header, rule or default)",
+				"and source of the routing decision (header, rule, default or user)",
 		}, []string{"backend", "operation", "source"}),
 	}
 }
 
 // routingQueryable is the read path when routing is enabled: each querier is
-// served by the backend resolved from its options (tenant and requested backend).
+// served by the backend resolved from its options (tenant, requested backend and
+// allowed backends).
 type routingQueryable struct {
 	router  *backendRouter
 	metrics *routingMetrics
@@ -137,7 +179,7 @@ type routingQueryable struct {
 }
 
 func (q *routingQueryable) route(opts types.QuerierOptions) (types.QueryableWithOptions, types.QuerierOptions, error) {
-	name, source, err := q.router.resolveBackend(opts.Tenant, opts.Backend)
+	name, source, err := q.router.resolveBackend(opts.Tenant, opts.Backend, opts.AllowedBackends)
 	if err != nil {
 		return nil, opts, err
 	}
@@ -193,7 +235,7 @@ func (a *routingAppendable) AppenderWithOptions(
 	ctx context.Context,
 	opts types.AppenderOptions,
 ) storage.Appender {
-	name, source, err := a.router.resolveBackend(opts.Tenant, opts.Backend)
+	name, source, err := a.router.resolveBackend(opts.Tenant, opts.Backend, opts.AllowedBackends)
 	if err != nil {
 		return fixedappender.NewErrorAppender(err)
 	}

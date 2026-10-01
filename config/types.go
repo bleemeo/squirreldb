@@ -105,6 +105,11 @@ type AuthUser struct {
 	Scopes []string `yaml:"scopes"`
 	// ForcedMatcher restricts the series the user can read, e.g. 'env="prod"'.
 	ForcedMatcher string `yaml:"forced_matcher"`
+	// Backends, when set, are the only backends the user may use, for reads and
+	// writes: each one must be the default backend or one of 'routing.backends'.
+	// When a request of the user would go to the default backend and it isn't
+	// listed, the first one is used instead. See docs/routing.md.
+	Backends []string `yaml:"backends"`
 }
 
 type Internal struct {

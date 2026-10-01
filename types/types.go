@@ -43,6 +43,11 @@ type TSDB interface {
 // backend which isn't enabled in the routing configuration.
 var ErrBackendNotSelectable = errors.New("backend not selectable")
 
+// ErrBackendNotAllowed is returned when a request is routed (by HeaderBackend or by a
+// routing rule) to a backend which is enabled but not in the AllowedBackends of the
+// request, i.e. the authenticated user isn't allowed to use it.
+var ErrBackendNotAllowed = errors.New("backend not allowed")
+
 // HTTPOptionsParser is the interface TSDB might want to implement in order to support per-HTTP request option,
 // based on HTTP header. The result from ParseHTTPOptions is passed in BackendOptions of AppenderOptions/QuerierOptions.
 type HTTPOptionsParser interface {
@@ -56,6 +61,11 @@ type AppenderOptions struct {
 	// Backend is the backend requested by the caller (HeaderBackend), empty
 	// when none is requested. core.SquirrelDB routes the request with it.
 	Backend string
+	// AllowedBackends restricts the backends the request may be routed to (the
+	// backends of the authenticated user), empty meaning no restriction. When the
+	// request would go to the default backend and it isn't allowed, the first
+	// allowed backend is used instead. See docs/routing.md.
+	AllowedBackends []string
 
 	// BackendOptions is filled by calls like ParseHTTPOptions()
 	BackendOptions any
@@ -69,6 +79,11 @@ type QuerierOptions struct {
 	// Backend is the backend requested by the caller (HeaderBackend), empty
 	// when none is requested. core.SquirrelDB routes the request with it.
 	Backend string
+	// AllowedBackends restricts the backends the request may be routed to (the
+	// backends of the authenticated user), empty meaning no restriction. When the
+	// request would go to the default backend and it isn't allowed, the first
+	// allowed backend is used instead. See docs/routing.md.
+	AllowedBackends []string
 	// MaxEvaluatedSeries caps how many series a single Select may resolve before
 	// it must fail; 0 means unlimited. It mirrors the limit limitqueryable
 	// enforces cumulatively across a request, exposed to backends so they can

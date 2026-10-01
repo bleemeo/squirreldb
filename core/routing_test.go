@@ -107,10 +107,138 @@ func TestResolveBackend(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			name, source, err := router.resolveBackend(tc.tenant, tc.requested)
+			name, source, err := router.resolveBackend(tc.tenant, tc.requested, nil)
 			if tc.wantErr {
 				if !errors.Is(err, types.ErrBackendNotSelectable) {
 					t.Fatalf("err = %v, want %v", err, types.ErrBackendNotSelectable)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if name != tc.wantBackend || source != tc.wantSource {
+				t.Errorf("resolveBackend = (%q, %q), want (%q, %q)", name, source, tc.wantBackend, tc.wantSource)
+			}
+		})
+	}
+}
+
+// TestResolveBackendAllowed checks the resolution for a user restricted to some
+// backends (auth.users[].backends).
+func TestResolveBackendAllowed(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultConfig()
+	cfg.Backend = config.BackendClickHouse
+	cfg.Routing = config.Routing{
+		Backends: []string{config.BackendSandbox, config.BackendDummy},
+		Rules: []config.RoutingRule{
+			{Tenants: []string{"demo-*"}, Backend: config.BackendSandbox},
+			{Tenants: []string{"load-*"}, Backend: config.BackendDummy},
+		},
+	}
+
+	router := newBackendRouter(cfg)
+
+	sandboxOnly := []string{config.BackendSandbox}
+	sandboxThenDummy := []string{config.BackendSandbox, config.BackendDummy}
+	withDefault := []string{config.BackendDummy, config.BackendClickHouse}
+
+	cases := []struct {
+		name        string
+		tenant      string
+		requested   string
+		allowed     []string
+		wantBackend string
+		wantSource  string
+		wantErr     error
+	}{
+		// An unrestricted user is routed as without authentication.
+		{name: "unrestricted default", wantBackend: config.BackendClickHouse, wantSource: routeSourceDefault},
+		{
+			name:        "unrestricted header",
+			requested:   config.BackendDummy,
+			wantBackend: config.BackendDummy,
+			wantSource:  routeSourceHeader,
+		},
+		{
+			name:        "unrestricted rule",
+			tenant:      "load-1",
+			wantBackend: config.BackendDummy,
+			wantSource:  routeSourceRule,
+		},
+		{
+			name:        "header allowed",
+			requested:   config.BackendSandbox,
+			allowed:     sandboxOnly,
+			wantBackend: config.BackendSandbox,
+			wantSource:  routeSourceHeader,
+		},
+		{
+			name:      "header to the default backend not allowed",
+			requested: config.BackendClickHouse,
+			allowed:   sandboxOnly,
+			wantErr:   types.ErrBackendNotAllowed,
+		},
+		{
+			name:      "header to a routed backend not allowed",
+			tenant:    "demo-1",
+			requested: config.BackendDummy,
+			allowed:   sandboxOnly,
+			wantErr:   types.ErrBackendNotAllowed,
+		},
+		{
+			name:      "header to a backend not enabled",
+			requested: config.BackendCassandra,
+			allowed:   sandboxOnly,
+			wantErr:   types.ErrBackendNotSelectable,
+		},
+		{
+			name:        "rule allowed",
+			tenant:      "demo-1",
+			allowed:     sandboxOnly,
+			wantBackend: config.BackendSandbox,
+			wantSource:  routeSourceRule,
+		},
+		{name: "rule not allowed", tenant: "load-1", allowed: sandboxOnly, wantErr: types.ErrBackendNotAllowed},
+		{
+			name:        "default replaced by the first allowed backend",
+			allowed:     sandboxThenDummy,
+			wantBackend: config.BackendSandbox,
+			wantSource:  routeSourceUser,
+		},
+		{
+			name:        "tenant matching no rule uses the first allowed backend",
+			tenant:      "42",
+			allowed:     sandboxOnly,
+			wantBackend: config.BackendSandbox,
+			wantSource:  routeSourceUser,
+		},
+		{
+			name:        "allowed default backend is kept",
+			allowed:     withDefault,
+			wantBackend: config.BackendClickHouse,
+			wantSource:  routeSourceDefault,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			name, source, err := router.resolveBackend(tc.tenant, tc.requested, tc.allowed)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+
+				// The two errors are answered with different status codes (400 and 403).
+				if errors.Is(err, types.ErrBackendNotAllowed) && errors.Is(err, types.ErrBackendNotSelectable) {
+					t.Errorf("err = %v wraps both errors", err)
 				}
 
 				return
@@ -194,6 +322,11 @@ routing:
 			wantSeries: false,
 		},
 		{name: "invalid header", options: types.QuerierOptions{Backend: config.BackendCassandra}, wantErr: true},
+		{
+			name:       "restricted user without header nor rule",
+			options:    types.QuerierOptions{Tenant: "42", AllowedBackends: []string{config.BackendSandbox}},
+			wantSeries: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -243,6 +376,7 @@ routing:
 		{config.BackendSandbox, routeOperationRead, routeSourceHeader}: 1,
 		{config.BackendSandbox, routeOperationRead, routeSourceRule}:   1,
 		{config.BackendSandbox, routeOperationWrite, routeSourceRule}:  1,
+		{config.BackendSandbox, routeOperationRead, routeSourceUser}:   1,
 	}
 
 	for lbls, want := range wantCounters {
@@ -315,6 +449,30 @@ func TestRoutingWrites(t *testing.T) {
 	if got := strings.Join(commitOrder, ","); got != "primary,extra" {
 		t.Errorf("commits = %s, want the primary then the extra (dual-write)", got)
 	}
+
+	// A user restricted to the sandbox writes to it without header nor rule, and
+	// can't write to the default backend.
+	commitOrder = commitOrder[:0]
+
+	allowed := []string{config.BackendSandbox}
+
+	write(types.AppenderOptions{Tenant: "42", AllowedBackends: allowed})
+
+	if got := strings.Join(commitOrder, ","); got != "sandbox" {
+		t.Errorf("commits = %s, want the first allowed backend", got)
+	}
+
+	app := appendable.AppenderWithOptions(t.Context(), types.AppenderOptions{
+		Backend:         config.BackendDummy,
+		AllowedBackends: allowed,
+	})
+	if err := app.Commit(); !errors.Is(err, types.ErrBackendNotAllowed) {
+		t.Errorf("Commit to a backend not allowed: err = %v, want %v", err, types.ErrBackendNotAllowed)
+	}
+
+	if got := strings.Join(commitOrder, ","); got != "sandbox" {
+		t.Errorf("commits = %s, the write to a backend not allowed was committed", got)
+	}
 }
 
 // TestRoutingDisabled checks that without routing the read and write paths are
@@ -356,12 +514,12 @@ func TestRoutingDisabled(t *testing.T) {
 	}
 
 	// The header may only name the primary backend.
-	if name, err := squirrelDB.ResolveBackend(ctx, "1234", config.BackendDummy); err != nil ||
+	if name, err := squirrelDB.ResolveBackend(ctx, "1234", config.BackendDummy, nil); err != nil ||
 		name != config.BackendDummy {
 		t.Errorf("ResolveBackend(primary) = %q, %v", name, err)
 	}
 
-	if _, err := squirrelDB.ResolveBackend(ctx, "", config.BackendSandbox); !errors.Is(
+	if _, err := squirrelDB.ResolveBackend(ctx, "", config.BackendSandbox, nil); !errors.Is(
 		err, types.ErrBackendNotSelectable,
 	) {
 		t.Errorf("ResolveBackend(sandbox) err = %v, want %v", err, types.ErrBackendNotSelectable)

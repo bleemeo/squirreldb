@@ -255,6 +255,69 @@ func TestValidateConfigAuth(t *testing.T) {
 	runValidateConfigCases(t, base, cases)
 }
 
+func TestValidateConfigAuthUserBackends(t *testing.T) {
+	t.Parallel()
+
+	demo := func(backends ...string) AuthUser {
+		return AuthUser{
+			Name:        "demo",
+			TokenSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			Scopes:      []string{"read"},
+			Backends:    backends,
+		}
+	}
+
+	base := DefaultConfig()
+	base.Backend = BackendClickHouse
+	base.Routing = Routing{Backends: []string{BackendSandbox}}
+
+	withUser := func(u AuthUser) func(*Config) {
+		return func(c *Config) { c.Auth = Auth{Enabled: true, Users: []AuthUser{u}} }
+	}
+
+	cases := []validateConfigCase{
+		{name: "no backends", mutate: withUser(demo()), wantErr: false},
+		{name: "routed backend", mutate: withUser(demo(BackendSandbox)), wantErr: false},
+		{name: "default backend", mutate: withUser(demo(BackendClickHouse)), wantErr: false},
+		{name: "default and routed backends", mutate: withUser(demo(BackendSandbox, BackendClickHouse)), wantErr: false},
+		{
+			name: "default backend without routing",
+			mutate: func(c *Config) {
+				withUser(demo(BackendClickHouse))(c)
+				c.Routing = Routing{}
+			},
+			wantErr: false,
+		},
+		{name: "unknown backend", mutate: withUser(demo("postgres")), wantErr: true},
+		{name: "known but not selectable backend", mutate: withUser(demo(BackendCassandra)), wantErr: true},
+		{
+			name: "extra write backend is not selectable",
+			mutate: func(c *Config) {
+				withUser(demo(BackendCassandra))(c)
+				c.ExtraWriteBackend = BackendCassandra
+			},
+			wantErr: true,
+		},
+		{name: "backend listed twice", mutate: withUser(demo(BackendSandbox, BackendSandbox)), wantErr: true},
+		{
+			name: "admin scope with backends",
+			mutate: func(c *Config) {
+				u := demo(BackendSandbox)
+				u.Scopes = []string{"admin"}
+				withUser(u)(c)
+			},
+			wantErr: true,
+		},
+		{
+			name:    "not checked when auth is disabled",
+			mutate:  func(c *Config) { c.Auth.Users = []AuthUser{demo("postgres")} },
+			wantErr: false,
+		},
+	}
+
+	runValidateConfigCases(t, base, cases)
+}
+
 func TestValidateConfigRouting(t *testing.T) {
 	t.Parallel()
 

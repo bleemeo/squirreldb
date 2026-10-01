@@ -42,6 +42,10 @@ const (
 	reasonInvalidCredentials   = "invalid_credentials"
 	reasonMissingScope         = "missing_scope"
 	reasonTenantMismatch       = "tenant_mismatch"
+	// reasonBackendNotAllowed is a request routed to a backend the user may not use.
+	// It's detected by the API when it resolves the backend of the request, see
+	// CountBackendNotAllowed.
+	reasonBackendNotAllowed = "backend_not_allowed"
 )
 
 const wwwAuthenticate = `Basic realm="SquirrelDB"`
@@ -150,11 +154,21 @@ func New(opts Options) (*Authenticator, error) {
 		reasonInvalidCredentials,
 		reasonMissingScope,
 		reasonTenantMismatch,
+		reasonBackendNotAllowed,
 	} {
 		a.failures.WithLabelValues(reason)
 	}
 
 	return a, nil
+}
+
+// CountBackendNotAllowed counts a request rejected because it was routed to a backend
+// its user isn't allowed to use (see User.Backends). The request is rejected by the
+// API, which resolves the backend of the request after the authentication.
+func (a *Authenticator) CountBackendNotAllowed() {
+	if a.failures != nil {
+		a.failures.WithLabelValues(reasonBackendNotAllowed).Inc()
+	}
 }
 
 // Enabled returns whether the authentication is enabled.

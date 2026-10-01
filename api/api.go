@@ -127,7 +127,8 @@ type API struct {
 	// backends (see docs/routing.md), by backend name, under /debug/<name>/.
 	RoutedBackendDebug map[string]BackendDebugRegistrar
 	// BackendResolver (optional) validates the backend a request is routed to
-	// (X-SquirrelDB-Backend header and routing rules) when the request starts.
+	// (X-SquirrelDB-Backend header, routing rules and backends of the
+	// authenticated user) when the request starts.
 	BackendResolver requestscoped.BackendResolver
 	Logger          zerolog.Logger
 	// TLS, when enabled, serves both listeners over TLS.
@@ -353,8 +354,15 @@ func (a *API) init(ctx context.Context) error {
 			ctx, debugLevel, err := requestScopedStore.ContextWithRequest(r.Context(), r, operation)
 			if err != nil {
 				status := http.StatusUnprocessableEntity
-				if errors.Is(err, types.ErrBackendNotSelectable) {
+
+				switch {
+				case errors.Is(err, types.ErrBackendNotSelectable):
 					status = http.StatusBadRequest
+				case errors.Is(err, types.ErrBackendNotAllowed):
+					// The user is authenticated but routed to a backend it may not use.
+					status = http.StatusForbidden
+
+					a.authenticator.CountBackendNotAllowed()
 				}
 
 				a.respondError(rw, status, err)
