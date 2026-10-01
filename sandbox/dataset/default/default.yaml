@@ -1,0 +1,39 @@
+files:
+  # Each file contains one metric with its labels per line.
+  metrics:
+    - file: ./bleemeo-agent.txt
+    - file: ./bleemeo-business-metrics.txt
+    - file: ./bleemeo-snmp.txt
+    # ifOperStatus is in separated file because we want to match on ifName only for those metrics.
+    - file: ./bleemeo-snmp-ifoper.txt
+      matching_labels:
+        - ifName
+    - file: ./bleemeo-probe.txt
+      # labels that must match between metric list and dumped samples.
+      # The label __name__ must always match, this is a list of additional label
+      # which must match.
+      matching_labels:
+        - item
+        - scraper
+        - phase
+  # Then define samples. Currently samples are associated with metrics based
+  # on the metric name. This will be improved to allow some labels to match in
+  # addition to the name.
+  # If sample definition contains multiple matches, on match will be picked for
+  # a given metric, and this match will always be used (the pick is based on
+  # a hash of metric labels).
+  # Finally sample could be hand-made (like bleemeo-business-samples) or
+  # produced using tools/squirreldb-sandbox-dump.
+  samples:
+    - file: ./bleemeo-agent-samples.json
+    - file: ./bleemeo-business-samples.json
+    - file: ./bleemeo-snmp-samples.json
+    - file: ./bleemeo-probe-samples.json
+
+promql:
+  - name: probe_ssl_last_chain_expiry_timestamp_seconds{instance="sandbox.bleemeo.com:8015"}
+    step_seconds: 10
+    query: "time() + 86400*30"
+  - name: probe_domain_expiry{instance="sandbox.bleemeo.com:8015"}
+    step_seconds: 10
+    query: "time() + 86400*30"

@@ -35,6 +35,7 @@ import (
 	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
 	"github.com/bleemeo/squirreldb/config"
 	dummybackend "github.com/bleemeo/squirreldb/dummy/backend"
+	sandboxbackend "github.com/bleemeo/squirreldb/sandbox/backend"
 
 	"github.com/bleemeo/squirreldb/dummy"
 	"github.com/bleemeo/squirreldb/logger"
@@ -314,6 +315,9 @@ func (b *SquirrelDB) newBackendByName(
 	case config.BackendDummy:
 		return dummybackend.New(
 			ctx, b.deps.Logger.With().Str("backend", "dummy").Logger(), b.dummyBackendOptions(cluster))
+	case config.BackendSandbox:
+		return sandboxbackend.New(
+			ctx, b.deps.Logger.With().Str("backend", "sandbox").Logger(), b.sandboxBackendOptions(cluster))
 	default:
 		return nil, fmt.Errorf("unknown backend: %v", name)
 	}
@@ -395,6 +399,17 @@ func (b *SquirrelDB) dummyBackendOptions(cluster types.Cluster) dummybackend.Opt
 	}
 
 	return options
+}
+
+// sandboxBackendOptions builds the sandbox backend options. The sandbox backend
+// serves fake data from a dataset and discards all writes.
+func (b *SquirrelDB) sandboxBackendOptions(cluster types.Cluster) sandboxbackend.Options {
+	return sandboxbackend.Options{
+		MetricRegistry: b.deps.MetricRegistry,
+		Cluster:        cluster,
+		TenantLabel:    b.config.TenantLabelName,
+		DatasetConfig:  b.config.Sandbox.DatasetConfig,
+	}
 }
 
 // Queryable returns the primary backend's queryable with mutable-label
