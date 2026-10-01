@@ -68,10 +68,74 @@ backend or one of `routing.backends`, else the request fails with a status
 400 and an error listing the enabled backends. The value is case sensitive.
 Without a `routing` section, the header may only name the default backend.
 
+When [authentication](authentication.md) is enabled, the backends of the user
+(`auth.users[].backends`) may restrict this choice, see
+[below](#restricting-the-backends-of-a-user).
+
 Every other per-request header (tenant, TTL, limits, forced matcher, debug)
 applies unchanged to the selected backend. In particular the tenant still
 restricts the series to the tenant, and the sandbox backend uses it to add the
 tenant label to its series.
+
+## Restricting the backends of a user
+
+With [authentication](authentication.md#backends), a user may be restricted to some
+backends with `backends`, each one being the default backend or one of
+`routing.backends`:
+
+```yaml
+backend: clickhouse
+routing:
+  backends: [sandbox]
+  rules:
+    - tenants: ["load-*"]
+      backend: clickhouse
+
+auth:
+  enabled: true
+  users:
+    - name: demo
+      token_sha256: "<sha256 printed by squirreldb auth gen-token>"
+      scopes: [read]
+      backends: [sandbox]
+    - name: dashglass
+      password_hash: "<hash printed by squirreldb auth hash-password>"
+      scopes: [read]
+```
+
+The backend of a request of a restricted user is resolved like any other request,
+then checked against its backends:
+
+| Resolved by                         | Backend in `backends`  | Backend not in `backends`                     |
+| ----------------------------------- | ---------------------- | --------------------------------------------- |
+| `X-SquirrelDB-Backend` header       | that backend           | `403 Forbidden`                               |
+| header naming a disabled backend    | `400 Bad Request`      | `400 Bad Request`                             |
+| first routing rule matching tenant  | the rule's backend     | `403 Forbidden`                               |
+| default (no header, no rule)        | the default backend    | the **first** backend of `backends` (`user`)  |
+
+An unrestricted user (no `backends`), or any request when authentication is disabled,
+is routed exactly as described above. With the configuration above:
+
+| User        | Request                                   | Backend                          |
+| ----------- | ----------------------------------------- | -------------------------------- |
+| `demo`      | no header                                 | sandbox (first of its backends)  |
+| `demo`      | `X-SquirrelDB-Backend: sandbox`           | sandbox                          |
+| `demo`      | `X-SquirrelDB-Backend: clickhouse`        | 403                              |
+| `demo`      | `X-SquirrelDB-Tenant: load-1` (rule)      | 403                              |
+| `dashglass` | no header                                 | clickhouse (default)             |
+| `dashglass` | `X-SquirrelDB-Backend: sandbox`           | sandbox                          |
+
+The 403 is counted by `squirreldb_api_auth_failures_total{reason="backend_not_allowed"}`,
+and the error message names the backend the user isn't allowed to use. For a restricted
+user, the error of a header naming a disabled backend only lists the user's backends.
+
+The restriction applies to reads and writes alike: a restricted user with the `write`
+scope only writes to its backends.
+
+```sh
+# The demo token reads the sandbox data without any routing header.
+curl -H "Authorization: Bearer $DEMO_TOKEN" 'http://localhost:9201/api/v1/query?query=agent_status'
+```
 
 ## Writes
 
@@ -108,8 +172,9 @@ backend receives the options it parsed.
 `squirreldb_routing_requests_total{backend, operation, source}` counts the
 routed reads (`operation="read"`, one per querier, so roughly one per query) and
 writes (`operation="write"`, one per remote write request), by backend and by
-source of the decision: `header`, `rule` or `default`. It's only exported when
-routing is configured.
+source of the decision: `header`, `rule`, `default`, or `user` for a request
+of a restricted user served by its first backend instead of the default one. It's
+only exported when routing is configured.
 
 The routed backends export their own metrics (e.g.
 `squirreldb_sandbox_requests_points`). The metrics of components shared with the
@@ -150,7 +215,9 @@ curl -H 'X-SquirrelDB-Backend: sandbox' -H 'X-SquirrelDB-Tenant: 1234' \
 
 ## Security
 
-The `X-SquirrelDB-Backend` header lets any client of SquirrelDB pick any enabled
-backend, for reads and writes. Only enable backends that are safe to expose to
-every client. A future authentication feature will allow restricting the
-backends an identity may select.
+Without authentication, the `X-SquirrelDB-Backend` header lets any client of
+SquirrelDB pick any enabled backend, for reads and writes. Only enable backends
+that are safe to expose to every client, or enable
+[authentication](authentication.md) and restrict the backends of the users which
+must not use every backend (see
+[above](#restricting-the-backends-of-a-user)).
