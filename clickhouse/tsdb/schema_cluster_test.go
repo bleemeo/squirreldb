@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS tsdb_tags ON CLUSTER test_cluster
 )
 ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_tags', '{replica}')
 PRIMARY KEY (tenant, metric_name)
-ORDER BY (tenant, metric_name, id)
+ORDER BY (tenant, metric_name, id, tags)
 TTL max_expiration`
 
 const datapointInputDDLCluster = `
