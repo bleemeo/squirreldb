@@ -59,7 +59,18 @@ type Options struct {
 	Appendable                types.AppendableWithOptions
 	MutableLabelDetector      MutableLabelDetector
 	OptionsParser             types.HTTPOptionsParser
-	MetricRegistry            prometheus.Registerer
+	// BackendResolver (optional) checks, when the request starts, that the
+	// backend the request is routed to is valid, so an invalid backend header is
+	// rejected before any read or write.
+	BackendResolver BackendResolver
+	MetricRegistry  prometheus.Registerer
+}
+
+// BackendResolver resolves the backend serving a request from its tenant and the
+// backend it requested (HeaderBackend, empty when absent). It returns an error
+// wrapping types.ErrBackendNotSelectable when the requested backend isn't enabled.
+type BackendResolver interface {
+	ResolveBackend(ctx context.Context, tenant, requested string) (string, error)
 }
 
 type MutableLabelDetector interface {
@@ -165,6 +176,18 @@ func (store *Store) newCtxValue(r *http.Request, operationName string) (*context
 	result.identity = auth.IdentityFromContext(r.Context())
 	if result.identity != nil && result.identity.Tenant != "" {
 		result.Tenant = result.identity.Tenant
+	}
+
+	// The backend header selects the backend serving the request. The routing
+	// itself is done by the queryable/appendable from the querier/appender
+	// options; it's only validated here to reject the request early. It's
+	// resolved with the tenant of the user, so the tenant rules apply to it.
+	result.Backend = r.Header.Get(types.HeaderBackend)
+
+	if store.BackendResolver != nil {
+		if _, err := store.BackendResolver.ResolveBackend(r.Context(), result.Tenant, result.Backend); err != nil {
+			return result, err
+		}
 	}
 
 	result.EnableDebug = r.Header.Get(types.HeaderQueryDebug) != "" || store.DebugAll()

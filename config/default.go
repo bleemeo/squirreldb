@@ -53,6 +53,13 @@ func DefaultConfig() Config {
 			Username:  "",
 			Password:  "",
 		},
+		Sandbox: Sandbox{
+			DatasetConfig: "",
+		},
+		Routing: Routing{
+			Backends: []string{},
+			Rules:    []RoutingRule{},
+		},
 		Redis: Redis{
 			Addresses:   []string{},
 			Username:    "",
