@@ -32,6 +32,16 @@ SQUIRRELDB_BACKEND=sandbox ./squirreldb
 SQUIRRELDB_BACKEND=sandbox SQUIRRELDB_SANDBOX_DATASET_CONFIG=/path/to/dataset.yaml ./squirreldb
 ```
 
+The sandbox backend can also be served next to another backend by the same
+SquirrelDB, selected per request with the `X-SquirrelDB-Backend: sandbox` header
+or by a tenant rule (e.g. for demo accounts), see [routing.md](routing.md):
+
+```yaml
+backend: clickhouse
+routing:
+  backends: [sandbox]
+```
+
 The dataset is loaded when SquirrelDB starts; an invalid dataset makes the start
 fail. Series that have no matching samples are dropped with a warning in the log.
 

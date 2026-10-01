@@ -87,6 +87,22 @@ SQUIRRELDB_BACKEND=sandbox ./squirreldb
 
 See [docs/sandbox.md](docs/sandbox.md).
 
+## Backend routing
+
+A single SquirrelDB can serve several backends, the backend of a request being selected by the
+`X-SquirrelDB-Backend` header or by a rule on the tenant (e.g. demo accounts served by the sandbox backend):
+
+```yaml
+backend: clickhouse
+routing:
+  backends: [sandbox]
+  rules:
+    - tenants: ["demo-*"]
+      backend: sandbox
+```
+
+See [docs/routing.md](docs/routing.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
