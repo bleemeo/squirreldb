@@ -30,6 +30,9 @@ import (
 // ErrNormalExit is returned when process should exit normal (return code 0).
 var ErrNormalExit = errors.New("normal exit")
 
+// ErrUnexpectedArgument is returned when the command line contains a positional argument.
+var ErrUnexpectedArgument = errors.New("unexpected argument")
+
 // LoadConfigFromFlags will parse flags and load the configuration.
 // commandFlags is the sub-command specific flags (daemon, migrate, ...) and will
 // be available in the returned FlagSet. Some common flags (see CommonFlags) are
@@ -81,18 +84,27 @@ func LoadConfigFromFlags(
 		return flagSet, Config{}, nil, ErrNormalExit
 	}
 
+	// The subcommand name must come first (see main.go); any other positional
+	// argument, e.g. a subcommand placed after a flag, would otherwise be
+	// silently ignored and the default subcommand would run instead.
+	if flagSet.NArg() > 0 {
+		return flagSet, Config{}, nil, fmt.Errorf(
+			"%w %q (a subcommand must be the first argument)", ErrUnexpectedArgument, flagSet.Arg(0),
+		)
+	}
+
 	configFiles, _ := flagSet.GetStringSlice("config")
 
-	cfg, warnings, err := LoadConfig(configFiles)
+	cfg, warnings, err := LoadConfig(flagSet, configFiles)
 
 	return flagSet, cfg, errors.Join(warnings...), err
 }
 
 // LoadConfig loads the configuration from the given files (plus environment and
-// command-line config overrides) and validates it. It is shared by the daemon
-// and the migrate subcommand so both load config identically.
-func LoadConfig(configFiles []string) (Config, Warnings, error) {
-	cfg, warnings, err := Load(configFiles...)
+// the config flags set in the already parsed flagSet) and validates it. It is
+// shared by the daemon and the migrate subcommand so both load config identically.
+func LoadConfig(flagSet *pflag.FlagSet, configFiles []string) (Config, Warnings, error) {
+	cfg, warnings, err := Load(flagSet, configFiles...)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}
