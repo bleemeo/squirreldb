@@ -40,6 +40,7 @@ type Config struct {
 	Cassandra           Cassandra     `yaml:"cassandra"`
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
 	Sandbox             Sandbox       `yaml:"sandbox"`
+	Routing             Routing       `yaml:"routing"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
 	TenantLabelName     string        `yaml:"tenant_label_name"`
@@ -183,6 +184,39 @@ type Sandbox struct {
 	// paths in that file are resolved relative to its directory. Empty uses the
 	// default dataset embedded in SquirrelDB.
 	DatasetConfig string `yaml:"dataset_config"`
+}
+
+// Routing holds the per-request backend routing configuration: it lets a
+// single SquirrelDB serve several backends, the backend of a request being
+// selected by the X-SquirrelDB-Backend header or by a tenant rule. Empty means
+// every request goes to Backend (the default route). See docs/routing.md.
+type Routing struct {
+	// Backends are the additional backends to start and make selectable, by the
+	// header or by a rule. Backend (the default route) is always selectable and
+	// must not be listed here, nor ExtraWriteBackend.
+	Backends []string `yaml:"backends"`
+	// Rules route a request without the X-SquirrelDB-Backend header by its
+	// tenant. They are evaluated in order and the first matching rule wins; a
+	// request matching no rule goes to Backend.
+	Rules []RoutingRule `yaml:"rules"`
+}
+
+// RoutingRule routes the requests of some tenants to a backend.
+type RoutingRule struct {
+	// Tenants are glob patterns matched against the tenant of the request, with
+	// the path.Match syntax ("*" matches any sequence of characters but "/", "?"
+	// a single character, "[...]" a character class). A request without tenant
+	// never matches a rule.
+	Tenants []string `yaml:"tenants"`
+	// Backend is the backend of the matching requests: Backend or one of
+	// Routing.Backends.
+	Backend string `yaml:"backend"`
+}
+
+// Enabled tells whether routing is configured, i.e. some requests may be served
+// by another backend than the default one.
+func (r Routing) Enabled() bool {
+	return len(r.Backends) > 0 || len(r.Rules) > 0
 }
 
 // Dummy holds the configuration of the dummy backend.

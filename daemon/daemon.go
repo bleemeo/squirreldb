@@ -248,18 +248,32 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 		s.api.MetricRegistry = prometheus.DefaultRegisterer
 	}
 
+	// The backend of a request (X-SquirrelDB-Backend header and routing rules) is
+	// validated when the request starts, so an invalid header is a 400.
+	s.api.BackendResolver = s.getSquirrelDB()
+
 	if backend, err := s.backend(ctx); err == nil {
 		s.api.BackendName = s.Config.Backend
 		s.api.BackendDebug = backend
 
-		// The header option parser and the (legacy) debug endpoints are backend
-		// capabilities, reached on the unwrapped backend — not by asserting a TSDB.
-		if parser, ok := backend.(types.HTTPOptionsParser); ok {
-			s.api.OptionsParser = parser
-		}
-
+		// The (legacy) debug endpoints are a backend capability, reached on the
+		// unwrapped backend — not by asserting a TSDB.
 		if debug, ok := backend.(api.TSDBDebugEndpoint); ok {
 			s.api.DebugEndpoint = debug
+		}
+	}
+
+	// The header option parser is a backend capability too; with routing, core
+	// parses the headers for every selectable backend.
+	if parser, err := s.getSquirrelDB().HTTPOptionsParser(ctx); err == nil && parser != nil {
+		s.api.OptionsParser = parser
+	}
+
+	if routed, err := s.getSquirrelDB().Routed(ctx); err == nil && len(routed) > 0 {
+		s.api.RoutedBackendDebug = make(map[string]api.BackendDebugRegistrar, len(routed))
+
+		for name, backend := range routed {
+			s.api.RoutedBackendDebug[name] = backend
 		}
 	}
 

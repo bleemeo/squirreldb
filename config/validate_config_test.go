@@ -94,3 +94,109 @@ func TestValidateConfigExtraWriteBackends(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateConfigRouting(t *testing.T) {
+	t.Parallel()
+
+	base := DefaultConfig()
+	base.Backend = BackendClickHouse
+
+	cases := []struct {
+		name    string
+		routing Routing
+		extra   string
+		wantErr bool
+	}{
+		{
+			name:    "empty routing is fine",
+			routing: Routing{},
+			wantErr: false,
+		},
+		{
+			name: "routed backend and rules",
+			routing: Routing{
+				Backends: []string{BackendSandbox},
+				Rules: []RoutingRule{
+					{Tenants: []string{"demo-*", "1234"}, Backend: BackendSandbox},
+					{Tenants: []string{"5678"}, Backend: BackendClickHouse},
+				},
+			},
+			extra:   BackendCassandra,
+			wantErr: false,
+		},
+		{
+			name:    "rule to the default backend without routed backend",
+			routing: Routing{Rules: []RoutingRule{{Tenants: []string{"*"}, Backend: BackendClickHouse}}},
+			wantErr: false,
+		},
+		{
+			name:    "unknown routed backend",
+			routing: Routing{Backends: []string{"postgres"}},
+			wantErr: true,
+		},
+		{
+			name:    "default backend listed in routed backends",
+			routing: Routing{Backends: []string{BackendClickHouse}},
+			wantErr: true,
+		},
+		{
+			name:    "extra write backend listed in routed backends",
+			routing: Routing{Backends: []string{BackendCassandra}},
+			extra:   BackendCassandra,
+			wantErr: true,
+		},
+		{
+			name:    "routed backend listed twice",
+			routing: Routing{Backends: []string{BackendSandbox, BackendSandbox}},
+			wantErr: true,
+		},
+		{
+			name:    "rule backend not selectable",
+			routing: Routing{Rules: []RoutingRule{{Tenants: []string{"1234"}, Backend: BackendSandbox}}},
+			wantErr: true,
+		},
+		{
+			name: "unknown rule backend",
+			routing: Routing{
+				Backends: []string{BackendSandbox},
+				Rules:    []RoutingRule{{Tenants: []string{"1234"}, Backend: "postgres"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "rule without tenant",
+			routing: Routing{
+				Backends: []string{BackendSandbox},
+				Rules:    []RoutingRule{{Backend: BackendSandbox}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "rule with an invalid pattern",
+			routing: Routing{
+				Backends: []string{BackendSandbox},
+				Rules:    []RoutingRule{{Tenants: []string{"demo-["}, Backend: BackendSandbox}},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := base
+			cfg.Routing = tc.routing
+			cfg.ExtraWriteBackend = tc.extra
+
+			err := validateConfig(cfg)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

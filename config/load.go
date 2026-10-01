@@ -20,6 +20,7 @@ import (
 	"errors"
 	goflag "flag"
 	"fmt"
+	"path"
 	"runtime"
 
 	"github.com/bleemeo/squirreldb/core/version"
@@ -130,15 +131,13 @@ func validateConfig(cfg Config) error {
 	}
 
 	if cfg.ExtraWriteBackend != "" {
-		knownBackends := map[string]bool{BackendCassandra: true, BackendClickHouse: true, BackendDummy: true}
-
 		switch {
 		case cfg.ExtraWriteBackend == BackendSandbox:
 			warnings.Append(fmt.Errorf(
 				"%w: backend %q can't be used as 'extra_write_backend': it discards every write",
 				ErrInvalidValue, cfg.ExtraWriteBackend,
 			))
-		case !knownBackends[cfg.ExtraWriteBackend]:
+		case !isKnownBackend(cfg.ExtraWriteBackend):
 			warnings.Append(fmt.Errorf(
 				"%w: unknown backend %q in 'extra_write_backend'", ErrInvalidValue, cfg.ExtraWriteBackend,
 			))
@@ -153,5 +152,78 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
+	for _, err := range validateRouting(cfg) {
+		warnings.Append(err)
+	}
+
 	return warnings.MaybeUnwrap()
+}
+
+// isKnownBackend tells whether name is the name of a backend SquirrelDB can build.
+func isKnownBackend(name string) bool {
+	switch name {
+	case BackendCassandra, BackendClickHouse, BackendDummy, BackendSandbox:
+		return true
+	default:
+		return false
+	}
+}
+
+// validateRouting checks the "routing" section. The default backend is always
+// selectable, so listing it in 'routing.backends' is rejected as a mistake. The
+// extra write backend is rejected too: a backend instance is either the
+// dual-write target of the default route or a routed backend, never both.
+func validateRouting(cfg Config) []error {
+	var errs []error
+
+	selectable := map[string]bool{cfg.Backend: true}
+
+	for _, name := range cfg.Routing.Backends {
+		switch {
+		case !isKnownBackend(name):
+			errs = append(errs, fmt.Errorf("%w: unknown backend %q in 'routing.backends'", ErrInvalidValue, name))
+		case name == cfg.Backend:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.backends' must not contain the default backend %q (it is always selectable)",
+				ErrInvalidValue, name,
+			))
+		case name == cfg.ExtraWriteBackend:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.backends' must not contain the 'extra_write_backend' %q",
+				ErrInvalidValue, name,
+			))
+		case selectable[name]:
+			errs = append(errs, fmt.Errorf("%w: backend %q is listed twice in 'routing.backends'", ErrInvalidValue, name))
+		}
+
+		selectable[name] = true
+	}
+
+	for i, rule := range cfg.Routing.Rules {
+		if len(rule.Tenants) == 0 {
+			errs = append(errs, fmt.Errorf("%w: 'routing.rules[%d].tenants' must not be empty", ErrInvalidValue, i))
+		}
+
+		for _, pattern := range rule.Tenants {
+			if _, err := path.Match(pattern, ""); err != nil {
+				errs = append(errs, fmt.Errorf(
+					"%w: invalid pattern %q in 'routing.rules[%d].tenants': %w", ErrInvalidValue, pattern, i, err,
+				))
+			}
+		}
+
+		switch {
+		case !isKnownBackend(rule.Backend):
+			errs = append(errs, fmt.Errorf(
+				"%w: unknown backend %q in 'routing.rules[%d].backend'", ErrInvalidValue, rule.Backend, i,
+			))
+		case !selectable[rule.Backend]:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.rules[%d].backend' %q must be the default backend or listed in 'routing.backends'",
+				ErrInvalidValue, i, rule.Backend,
+			))
+		}
+	}
+
+	return errs
 }

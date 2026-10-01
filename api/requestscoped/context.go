@@ -38,6 +38,7 @@ type contextValue struct {
 	operationName      string
 	store              *Store
 	Tenant             string
+	Backend            string
 	EnableDebug        bool
 	EnableVerboseDebug bool
 	TimeToLive         int64
@@ -120,6 +121,7 @@ func (ctxValue *contextValue) debugLevel() types.DebugLevel {
 func (ctxValue *contextValue) getAppenderOptions() types.AppenderOptions {
 	return types.AppenderOptions{
 		Tenant:         ctxValue.Tenant,
+		Backend:        ctxValue.Backend,
 		RequestDebug:   ctxValue.debugLevel(),
 		WriteTTL:       ctxValue.TimeToLive,
 		BackendOptions: ctxValue.BackendOptions,
@@ -129,6 +131,7 @@ func (ctxValue *contextValue) getAppenderOptions() types.AppenderOptions {
 func (ctxValue *contextValue) getQuerierOptions() types.QuerierOptions {
 	return types.QuerierOptions{
 		Tenant:         ctxValue.Tenant,
+		Backend:        ctxValue.Backend,
 		RequestDebug:   ctxValue.debugLevel(),
 		BackendOptions: ctxValue.BackendOptions,
 	}

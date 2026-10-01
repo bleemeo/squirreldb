@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec,gci
@@ -115,7 +116,13 @@ type API struct {
 	// so two backends never collide on the same relative path.
 	BackendDebug BackendDebugRegistrar
 	BackendName  string
-	Logger       zerolog.Logger
+	// RoutedBackendDebug (optional) registers the debug endpoints of the routed
+	// backends (see docs/routing.md), by backend name, under /debug/<name>/.
+	RoutedBackendDebug map[string]BackendDebugRegistrar
+	// BackendResolver (optional) validates the backend a request is routed to
+	// (X-SquirrelDB-Backend header and routing rules) when the request starts.
+	BackendResolver requestscoped.BackendResolver
+	Logger          zerolog.Logger
 
 	ready                 atomic.Int32
 	router                http.Handler
@@ -262,6 +269,7 @@ func (a *API) init(ctx context.Context) error {
 		Appendable:                a.Appendable,
 		OptionsParser:             a.OptionsParser,
 		MutableLabelDetector:      a.MutableLabelDetector,
+		BackendResolver:           a.BackendResolver,
 		MetricRegistry:            a.MetricRegistry,
 	}
 
@@ -293,25 +301,11 @@ func (a *API) init(ctx context.Context) error {
 	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
 
 	if a.BackendDebug != nil && a.BackendName != "" {
-		prefix := "/debug/" + a.BackendName
+		a.registerBackendDebug(router, a.BackendName, a.BackendDebug)
+	}
 
-		a.BackendDebug.RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc) {
-			full := prefix + path
-
-			switch method {
-			case http.MethodGet:
-				router.Get(full, handler)
-			case http.MethodPost:
-				router.Post(full, handler)
-			default:
-				a.Logger.Warn().Msgf("ignoring backend debug endpoint %s: unsupported method %q", full, method)
-
-				return
-			}
-
-			a.backendDebugEndpoints = append(a.backendDebugEndpoints,
-				backendDebugEndpoint{method: method, path: full, description: description})
-		})
+	for _, name := range slices.Sorted(maps.Keys(a.RoutedBackendDebug)) {
+		a.registerBackendDebug(router, name, a.RoutedBackendDebug[name])
 	}
 
 	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
@@ -344,7 +338,12 @@ func (a *API) init(ctx context.Context) error {
 
 			ctx, debugLevel, err := requestScopedStore.ContextWithRequest(r.Context(), r, operation)
 			if err != nil {
-				a.respondError(rw, http.StatusUnprocessableEntity, err)
+				status := http.StatusUnprocessableEntity
+				if errors.Is(err, types.ErrBackendNotSelectable) {
+					status = http.StatusBadRequest
+				}
+
+				a.respondError(rw, status, err)
 
 				return
 			}
@@ -400,6 +399,30 @@ func (a *API) init(ctx context.Context) error {
 	a.router = apiRouter
 
 	return nil
+}
+
+// registerBackendDebug registers the debug endpoints of a backend under
+// /debug/<name>/.
+func (a *API) registerBackendDebug(router *route.Router, name string, backend BackendDebugRegistrar) {
+	prefix := "/debug/" + name
+
+	backend.RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc) {
+		full := prefix + path
+
+		switch method {
+		case http.MethodGet:
+			router.Get(full, handler)
+		case http.MethodPost:
+			router.Post(full, handler)
+		default:
+			a.Logger.Warn().Msgf("ignoring backend debug endpoint %s: unsupported method %q", full, method)
+
+			return
+		}
+
+		a.backendDebugEndpoints = append(a.backendDebugEndpoints,
+			backendDebugEndpoint{method: method, path: full, description: description})
+	})
 }
 
 // Run start the HTTP api server.
