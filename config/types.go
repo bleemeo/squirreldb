@@ -25,6 +25,10 @@ const (
 )
 
 // Config is the main structured configuration.
+//
+// Secrets (passwords, hashes, tokens, DSNs) must be tagged `sensitive:"true"`: the
+// admin status page (/debug/status) shows the effective configuration with these
+// fields redacted.
 type Config struct {
 	Backend string `yaml:"backend"`
 	// ExtraWriteBackend is an optional additional, best-effort write target
@@ -93,9 +97,9 @@ type AuthUser struct {
 	// Name is the basic auth username.
 	Name string `yaml:"name"`
 	// PasswordHash is the bcrypt hash of the basic auth password.
-	PasswordHash string `yaml:"password_hash"`
+	PasswordHash string `sensitive:"true" yaml:"password_hash"`
 	// TokenSHA256 is the hex encoded sha256 of a bearer token.
-	TokenSHA256 string `yaml:"token_sha256"`
+	TokenSHA256 string `sensitive:"true" yaml:"token_sha256"`
 	// Tenant, when set, binds the user to this tenant.
 	Tenant string `yaml:"tenant"`
 	// Scopes are the permissions of the user: read, write and/or admin.
@@ -125,7 +129,7 @@ type Installation struct {
 }
 
 type Sentry struct {
-	DSN string `yaml:"dsn"`
+	DSN string `sensitive:"true" yaml:"dsn"`
 }
 
 type Log struct {
@@ -149,7 +153,7 @@ type RemoteStorage struct {
 type Redis struct {
 	Addresses   []string `yaml:"addresses"`
 	Username    string   `yaml:"username"`
-	Password    string   `yaml:"password"`
+	Password    string   `sensitive:"true"    yaml:"password"`
 	SSL         bool     `yaml:"ssl"`
 	SSLInsecure bool     `yaml:"ssl_insecure"`
 	CertPath    string   `yaml:"cert_path"`
@@ -166,7 +170,7 @@ type Cassandra struct {
 	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`
 	Username               string        `yaml:"username"`
-	Password               string        `yaml:"password"`
+	Password               string        `sensitive:"true"                 yaml:"password"`
 	CertPath               string        `yaml:"cert_path"`
 	KeyPath                string        `yaml:"key_path"`
 	CAPath                 string        `yaml:"ca_path"`
@@ -185,7 +189,7 @@ type ClickHouse struct {
 	Addresses []string `yaml:"addresses"`
 	Database  string   `yaml:"database"`
 	Username  string   `yaml:"username"`
-	Password  string   `yaml:"password"`
+	Password  string   `sensitive:"true" yaml:"password"`
 	// ClusterName, when set, makes SquirrelDB create its tables with
 	// "ON CLUSTER <name>" and ReplicatedMergeTree engines (ClickHouse cluster
 	// mode). Empty means a single ClickHouse node (plain MergeTree). It must

@@ -200,6 +200,22 @@ func (b *Backend) CloseAll(ctx context.Context) {
 func (b *Backend) RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc)) {
 }
 
+// Status are the details of the dummy backend on the admin status page.
+type Status struct {
+	// Batcher tells whether writes go through the batcher before being discarded.
+	Batcher bool `json:"batcher"`
+}
+
+// Status reports the dummy backend as healthy, it has no dependency
+// (types.StatusProvider).
+func (b *Backend) Status(context.Context) types.ComponentStatus {
+	return types.ComponentStatus{
+		Status:  types.StatusOK,
+		Reason:  "dummy backend: writes are discarded and reads are empty",
+		Details: Status{Batcher: b.options.Batcher},
+	}
+}
+
 // telemetryStore is a no-op telemetry.Store: it hands out fixed IDs and a no-op
 // release. The dummy backend keeps no state, so there is nothing to coordinate.
 type telemetryStore struct{}
@@ -215,6 +231,7 @@ func (telemetryStore) AcquireNodeID(context.Context) (func() string, func(), err
 // compile-time check that the dummy backend keeps satisfying the interfaces it
 // must (without importing the daemon package, which would be a cycle).
 var (
-	_ types.TSDB      = (*batchingTSDB)(nil)
-	_ telemetry.Store = telemetryStore{}
+	_ types.TSDB           = (*batchingTSDB)(nil)
+	_ telemetry.Store      = telemetryStore{}
+	_ types.StatusProvider = (*Backend)(nil)
 )

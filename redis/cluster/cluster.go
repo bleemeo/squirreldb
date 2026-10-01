@@ -33,6 +33,7 @@ import (
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/redis/client"
+	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/golang/snappy"
 	"github.com/google/uuid"
@@ -263,6 +264,36 @@ func (c *Cluster) Size() int {
 	}
 
 	return aliveCount
+}
+
+// redisStatus are the details of the Redis cluster on the admin status page.
+type redisStatus struct {
+	// RedisCluster tells whether Redis is a Redis Cluster (true) or a single instance.
+	RedisCluster bool `json:"redis_cluster"`
+	// Size is the number of SquirrelDB seen alive, including this one.
+	Size int `json:"size"`
+}
+
+// Status pings Redis to report whether it is reachable (types.StatusProvider).
+func (c *Cluster) Status(ctx context.Context) types.ComponentStatus {
+	if c.client == nil {
+		return types.ComponentStatus{Status: types.StatusUnknown, Reason: "cluster not started"}
+	}
+
+	details := redisStatus{Size: c.Size()}
+
+	isCluster, err := c.client.IsCluster(ctx)
+	if err != nil {
+		return types.ComponentStatus{
+			Status:  types.StatusDown,
+			Reason:  "Redis unreachable: " + err.Error(),
+			Details: details,
+		}
+	}
+
+	details.RedisCluster = isCluster
+
+	return types.ComponentStatus{Status: types.StatusOK, Details: details}
 }
 
 func (c *Cluster) sendDiscoveryMessage(ctx context.Context, hostname string, isFirstMsg bool) {

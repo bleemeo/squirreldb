@@ -208,6 +208,15 @@ func (c *Connection) Keyspace() string {
 	return c.cluster.Keyspace
 }
 
+// LastConnectionEstablished returns when the current session was opened, zero if
+// none was opened yet.
+func (c *Connection) LastConnectionEstablished() time.Time {
+	c.l.Lock()
+	defer c.l.Unlock()
+
+	return c.lastConnectionEstablished
+}
+
 // Close closes all Session still open. All Session acquired by Session() should be closed before this call.
 func (c *Connection) Close() {
 	c.l.Lock()

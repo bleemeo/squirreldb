@@ -591,6 +591,45 @@ func (b *SquirrelDB) CloseAll(ctx context.Context) {
 	}
 }
 
+// BackendStates returns the state of the primary and (if configured) extra
+// backends, for the admin status page. It never starts a backend nor blocks on
+// one: it only reads what is already known.
+func (b *SquirrelDB) BackendStates() []types.BackendState {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	states := []types.BackendState{backendState(b.config.Backend, types.BackendRolePrimary, b.primary)}
+
+	if b.config.ExtraWriteBackend != "" {
+		extra := backendState(b.config.ExtraWriteBackend, types.BackendRoleExtra, b.extra)
+		extra.UnavailableSince = b.extraUnavailableSince
+		states = append(states, extra)
+	}
+
+	return states
+}
+
+func backendState(name string, role string, backend Backend) types.BackendState {
+	state := types.BackendState{Name: name, Role: role}
+
+	if backend != nil {
+		state.Started = true
+		state.Backend = backend
+		state.Info = backend.BackendInfo()
+	}
+
+	return state
+}
+
+// StartedCluster returns the cluster, or nil if it was not built yet. Unlike
+// Cluster, it never starts it.
+func (b *SquirrelDB) StartedCluster() types.Cluster {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.cluster
+}
+
 // TestTools return tools that could be used during tests.
 func (b *SquirrelDB) TestTools() *SquirrelDBTestTools {
 	return &SquirrelDBTestTools{b: b}
