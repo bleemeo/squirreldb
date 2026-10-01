@@ -77,6 +77,16 @@ All configuration options can be overriden by environment variables. The environ
 
 For example, cassandra.addresses becomes `SQUIRRELDB_CASSANDRA_ADDRESSES`.
 
+## Sandbox
+
+SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:
+
+```sh
+SQUIRRELDB_BACKEND=sandbox ./squirreldb
+```
+
+See [docs/sandbox.md](docs/sandbox.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
