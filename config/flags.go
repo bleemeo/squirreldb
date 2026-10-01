@@ -87,6 +87,11 @@ func DaemonConfigFlags() []Flag {
 			Value: defaultCfg.ListenAddress,
 			Usage: "Set the Prometheus API listen address",
 		},
+		{
+			Name:  "admin_listen_address",
+			Value: defaultCfg.AdminListenAddress,
+			Usage: "Serve the admin endpoints (/debug/, /mutable/) on this address instead of listen_address",
+		},
 	}
 }
 
