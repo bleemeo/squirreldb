@@ -94,6 +94,21 @@ Endpoints that change state (e.g. `/debug/flush`, `/debug/preaggregate`) should 
 called with `POST`. They still accept `GET` for backward compatibility, but this is
 deprecated and logs a warning.
 
+### Security
+
+By default SquirrelDB serves plain HTTP without authentication and trusts the
+`X-SquirrelDB-Tenant` header: only expose it to trusted clients, or keep it on localhost.
+To expose it, enable TLS (`tls.cert_file`, `tls.key_file`, optional mTLS) and
+authentication (`auth.enabled` and `auth.users`): users authenticated by basic auth
+(bcrypt) or bearer token (sha256), with `read`, `write` and `admin` scopes, optionally
+bound to a tenant and restricted by a forced matcher. A good setup serves the admin
+endpoints on `admin_listen_address: localhost:9202` and exposes `listen_address` with
+TLS and authentication. `squirreldb auth hash-password` and `squirreldb auth gen-token`
+generate the credentials.
+
+SquirrelDB warns at startup when a listener is reachable from the network without
+authentication. See [docs/authentication.md](docs/authentication.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
