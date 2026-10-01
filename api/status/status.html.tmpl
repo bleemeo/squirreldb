@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+{{- if .Refresh}}
+<meta http-equiv="refresh" content="{{.Refresh}}">
+{{- end}}
+<title>{{statusText .Report.Status}} - SquirrelDB {{.Report.Node.Hostname}}</title>
+<style>{{.CSS}}</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>SquirrelDB status</h1>
+  <span class="muted">{{.Report.Node.Hostname}} &middot; version {{or .Report.Build.Version "-"}} &middot; generated {{formatTime .Report.GeneratedAt}}</span>
+  <span class="muted">Auto-refresh:
+    {{- range .RefreshLinks}}
+    {{if .Active}}<strong>{{.Label}}</strong>{{else}}<a href="{{.Href}}">{{.Label}}</a>{{end}}
+    {{- end}}
+  </span>
+  <a href="{{.JSONHref}}">JSON</a>
+</header>
+
+<div class="summary {{badge .Report.Status}}">
+  <strong>{{statusText .Report.Status}}</strong>
+  {{- if .Report.Reasons}}
+  <ul>
+    {{- range .Report.Reasons}}
+    <li>{{.}}</li>
+    {{- end}}
+  </ul>
+  {{- end}}
+</div>
+
+<div class="grid">
+{{- with .Report.Node}}
+<section>
+  {{template "head" (sectionHead "Node" .Section)}}
+  <table class="kv">
+    <tr><th>Hostname</th><td>{{.Hostname}}</td></tr>
+    <tr><th>Ready</th><td>{{.Ready}}</td></tr>
+    <tr><th>Listen address</th><td><code>{{.ListenAddress}}</code></td></tr>
+    <tr><th>Admin listen address</th><td>{{if .AdminListenAddress}}<code>{{.AdminListenAddress}}</code>{{else}}<span class="muted">same as listen address</span>{{end}}</td></tr>
+    <tr><th>Telemetry cluster ID</th><td>{{or .TelemetryClusterID "-"}}</td></tr>
+    <tr><th>Telemetry node ID</th><td>{{or .TelemetryNodeID "-"}}</td></tr>
+  </table>
+</section>
+{{- end}}
+
+{{- with .Report.Build}}
+<section>
+  {{template "head" (sectionHead "Build" .Section)}}
+  <table class="kv">
+    <tr><th>Version</th><td>{{or .Version "-"}}</td></tr>
+    <tr><th>Commit</th><td>{{or .Commit "-"}}</td></tr>
+    <tr><th>Build date</th><td>{{or .Date "-"}}</td></tr>
+    <tr><th>Go version</th><td>{{.GoVersion}}</td></tr>
+    <tr><th>Started</th><td>{{formatTime .StartTime}}</td></tr>
+    <tr><th>Uptime</th><td>{{.Uptime}}</td></tr>
+  </table>
+</section>
+{{- end}}
+
+{{- with .Report.Backends}}
+<section class="wide">
+  {{template "head" (sectionHead "Backends" .Section)}}
+  <div class="scroll">
+  <table>
+    <tr><th>Role</th><th>Backend</th><th>Status</th><th>Started</th><th>Reason</th></tr>
+    {{- with .Primary}}
+    <tr><td>primary</td><td>{{.Name}}</td><td><span class="badge {{badge .Status}}">{{.Status}}</span></td><td>{{.Started}}</td><td>{{.Reason}}</td></tr>
+    {{- end}}
+    {{- with .Extra}}
+    {{- if .Configured}}
+    <tr><td>extra (dual-write)</td><td>{{.Name}}</td><td><span class="badge {{badge .Status}}">{{.Status}}</span></td><td>{{.Started}}</td><td>{{.Reason}}{{if .UnavailableSince}} <span class="muted">(unavailable since {{formatTime .UnavailableSince}})</span>{{end}}</td></tr>
+    {{- else}}
+    <tr><td>extra (dual-write)</td><td colspan="4" class="muted">not configured</td></tr>
+    {{- end}}
+    {{- end}}
+  </table>
+  </div>
+</section>
+{{- end}}
+
+{{- range .Components}}
+<section class="wide">
+  {{template "head" (sectionHead .Title .Section)}}
+  {{- if .Details}}
+  <div class="scroll">{{template "value" .Details}}</div>
+  {{- end}}
+</section>
+{{- end}}
+
+{{- with .Report.Security}}
+<section class="wide">
+  {{template "head" (sectionHead "Security" .Section)}}
+  {{- range .Notes}}
+  <p class="reason muted">Note: {{.}}</p>
+  {{- end}}
+  <div class="grid">
+  <div>
+  <h3>Authentication</h3>
+  <table class="kv">
+    <tr><th>Enabled</th><td>{{.AuthEnabled}}</td></tr>
+    <tr><th>/metrics requires auth</th><td>{{.MetricsRequireAuth}}</td></tr>
+  </table>
+  {{- if .AuthFailures}}
+  <h3>Rejected requests since start</h3>
+  <table class="kv">
+    {{- range $reason, $count := .AuthFailures}}
+    <tr><th>{{$reason}}</th><td>{{$count}}</td></tr>
+    {{- end}}
+  </table>
+  {{- end}}
+  </div>
+  <div>
+  <h3>TLS</h3>
+  <table class="kv">
+    <tr><th>Enabled</th><td>{{.TLS.Enabled}}</td></tr>
+    {{- if .TLS.Enabled}}
+    <tr><th>Client auth</th><td>{{or .TLS.ClientAuthType "NoClientCert"}}</td></tr>
+    <tr><th>Client CA</th><td>{{.TLS.ClientCA}}</td></tr>
+    <tr><th>Min version</th><td>{{or .TLS.MinVersion "TLS12"}}</td></tr>
+    {{- with .TLS.Certificate}}
+    <tr><th>Certificate subject</th><td>{{.Subject}}</td></tr>
+    {{- if .DNSNames}}<tr><th>DNS names</th><td>{{join .DNSNames}}</td></tr>{{end}}
+    <tr><th>Not after</th><td>{{formatTime .NotAfter}} <span class="muted">({{printf "%.1f" .ExpiresInDays}} days)</span></td></tr>
+    {{- end}}
+    {{- if .TLS.CertificateError}}
+    <tr><th>Certificate error</th><td class="error">{{.TLS.CertificateError}}</td></tr>
+    {{- end}}
+    {{- end}}
+  </table>
+  </div>
+  </div>
+  {{- if .Users}}
+  <h3>Users</h3>
+  <div class="scroll">
+  <table>
+    <tr><th>Name</th><th>Scopes</th><th>Tenant</th><th>Methods</th><th>Forced matcher</th></tr>
+    {{- range .Users}}
+    <tr><td>{{.Name}}</td><td>{{join .Scopes}}</td><td>{{or .Tenant "-"}}</td><td>{{join .Methods}}</td><td>{{if .HasForcedMatcher}}yes{{else}}no{{end}}</td></tr>
+    {{- end}}
+  </table>
+  </div>
+  {{- end}}
+</section>
+{{- end}}
+
+<section class="wide">
+  <div class="section-head"><h2>Endpoints</h2></div>
+  <div class="grid">
+  <div>
+  <h3>Read-only</h3>
+  <ul class="endpoints">
+    {{- range .Links}}
+    <li><a href="{{.Path}}">{{.Path}}</a> <span class="muted">{{.Description}}</span></li>
+    {{- end}}
+  </ul>
+  </div>
+  <div>
+  <h3>Documentation only (call them with curl)</h3>
+  <ul class="endpoints">
+    {{- range .Docs}}
+    <li><code>{{.Method}} {{.Path}}</code> <span class="muted">{{.Description}}</span></li>
+    {{- end}}
+  </ul>
+  </div>
+  </div>
+</section>
+
+{{- with .Report.Config}}
+<section class="wide">
+  {{template "head" (sectionHead "Configuration" .Section)}}
+  <details>
+    <summary>Effective configuration (secrets redacted)</summary>
+    <pre>{{$.Config}}</pre>
+  </details>
+</section>
+{{- end}}
+</div>
+
+<footer class="muted">Read-only page: it never changes the state of SquirrelDB. See docs/admin-status.md.</footer>
+</main>
+</body>
+</html>
+
+{{- define "head"}}
+<div class="section-head"><h2>{{.Title}}</h2> <span class="badge {{badge .Section.Status}}">{{.Section.Status}}</span></div>
+{{- if .Section.Error}}<p class="error">{{.Section.Error}}</p>{{end}}
+{{- if .Section.Reason}}<p class="reason">{{.Section.Reason}}</p>{{end}}
+{{- end}}
+
+{{- define "value"}}
+{{- if .Table}}
+<table>
+  <tr>{{range .Table.Columns}}<th>{{.}}</th>{{end}}</tr>
+  {{- range .Table.Rows}}
+  <tr>{{range .}}<td>{{template "value" .}}</td>{{end}}</tr>
+  {{- end}}
+</table>
+{{- else if .Fields}}
+<table class="kv">
+  {{- range .Fields}}
+  <tr><th>{{.Key}}</th><td>{{template "value" .Value}}</td></tr>
+  {{- end}}
+</table>
+{{- else if .Badge}}<span class="badge {{.Badge}}">{{.Text}}</span>
+{{- else}}{{.Text}}
+{{- end}}
+{{- end}}

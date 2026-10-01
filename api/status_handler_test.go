@@ -84,6 +84,8 @@ func makeStatusTestAPI(t *testing.T, adminListenAddress string, authOptions auth
 	api.Logger = zerolog.Nop()
 	api.Auth = authOptions
 	api.Status = statusTestSources(t)
+	api.BackendName = "fake"
+	api.BackendDebug = fakeBackendDebug{}
 
 	if err := api.init(t.Context()); err != nil {
 		t.Fatal(err)
@@ -202,4 +204,94 @@ func TestStatusEndpointAuth(t *testing.T) {
 			{routeCheck: statusRoute, user: "admin", wantStatus: http.StatusOK},
 		})
 	})
+}
+
+const browserAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+// TestDebugContentNegotiation checks that /debug/ serves the status page to
+// browsers and the text help otherwise.
+func TestDebugContentNegotiation(t *testing.T) {
+	t.Parallel()
+
+	api := makeStatusTestAPI(t, "", auth.Options{})
+
+	cases := []struct {
+		name     string
+		path     string
+		accept   string
+		wantHTML bool
+	}{
+		{name: "curl", path: "/debug/", accept: "*/*", wantHTML: false},
+		{name: "no accept", path: "/debug/", accept: "", wantHTML: false},
+		{name: "text", path: "/debug/", accept: "text/plain", wantHTML: false},
+		{name: "browser", path: "/debug/", accept: browserAccept, wantHTML: true},
+		{name: "status json", path: "/debug/status", accept: browserAccept, wantHTML: false},
+		{name: "status html", path: "/debug/status?format=html", accept: "*/*", wantHTML: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
+			if tc.accept != "" {
+				req.Header.Set("Accept", tc.accept)
+			}
+
+			w := httptest.NewRecorder()
+			api.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+
+			body := w.Body.String()
+			isHTML := strings.HasPrefix(w.Header().Get("Content-Type"), "text/html")
+
+			if isHTML != tc.wantHTML {
+				t.Fatalf("Content-Type = %q, want HTML = %v", w.Header().Get("Content-Type"), tc.wantHTML)
+			}
+
+			switch {
+			case tc.wantHTML:
+				checkStatusPage(t, w.Header(), body)
+			case tc.path == "/debug/":
+				if !strings.HasPrefix(body, "The following index info enpoints exists") {
+					t.Errorf("body = %.80q..., want the text help", body)
+				}
+			}
+		})
+	}
+}
+
+func checkStatusPage(t *testing.T, header http.Header, body string) {
+	t.Helper()
+
+	checkStatusSecurityHeaders(t, header)
+	checkNoSecret(t, body)
+
+	if csp := header.Get("Content-Security-Policy"); !strings.Contains(csp, "style-src 'sha256-") {
+		t.Errorf("Content-Security-Policy = %q, want the stylesheet hash", csp)
+	}
+
+	if !strings.HasPrefix(body, "<!DOCTYPE html>") || !strings.Contains(body, "SquirrelDB status") {
+		t.Errorf("body = %.80q..., want the status page", body)
+	}
+
+	// No script, no external resource, no form, and the endpoints that change
+	// state are not links.
+	for _, forbidden := range []string{
+		"<script", " src=", "<link", "<form", "<iframe",
+		`href="/debug/flush"`, `href="/debug/toggle_debug_query"`, `href="/debug/fake/op"`, `href="/mutable/`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("the page contains %q", forbidden)
+		}
+	}
+
+	for _, want := range []string{`href="/debug/status"`, `href="/debug/fake/info"`, "POST /debug/fake/op"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the page does not contain %q", want)
+		}
+	}
 }

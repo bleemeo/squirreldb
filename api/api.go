@@ -135,6 +135,7 @@ type API struct {
 
 	ready                 atomic.Int32
 	status                *status.Collector
+	statusPage            *status.Page
 	authenticator         *auth.Authenticator
 	tlsConfig             *tls.Config
 	router                http.Handler
@@ -295,6 +296,11 @@ func (a *API) init(ctx context.Context) error {
 		Auth:               a.Auth,
 		AuthFailures:       a.authenticator.Failures,
 	})
+
+	a.statusPage, err = status.NewPage()
+	if err != nil {
+		return err
+	}
 
 	maxConcurrent := a.MaxConcurrentRemoteRequests
 	if maxConcurrent <= 0 {
@@ -767,7 +773,15 @@ func (a *API) readyHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
-func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
+// debugHelpHandler serves the status page to browsers (Accept prefers text/html),
+// and the plain text help of the debug endpoints otherwise (e.g. curl).
+func (a *API) debugHelpHandler(w http.ResponseWriter, r *http.Request) {
+	if status.PrefersHTML(r.Header.Get("Accept")) {
+		a.statusPageHandler(w, r, nil)
+
+		return
+	}
+
 	fmt.Fprint(w, `The following index info enpoints exists
 
 Endpoints that change state are marked with POST: call them with POST
@@ -777,6 +791,7 @@ When admin_listen_address is set, these endpoints are served on that address onl
 
 /debug/status
 	Read-only status of this node (build, backends, cluster, security, redacted config) as JSON.
+	Open /debug/ in a browser (or /debug/status?format=html) for the same status as a page.
 	See docs/admin-status.md.
 
 /debug/index_info
