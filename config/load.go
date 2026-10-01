@@ -138,6 +138,10 @@ func validateConfig(cfg Config) error {
 		))
 	}
 
+	for _, err := range validateSecurity(cfg) {
+		warnings.Append(err)
+	}
+
 	if cfg.ExtraWriteBackend != "" {
 		knownBackends := map[string]bool{BackendCassandra: true, BackendClickHouse: true, BackendDummy: true}
 

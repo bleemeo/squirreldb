@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/bleemeo/squirreldb/api/auth"
 	"github.com/bleemeo/squirreldb/appendable/fixedappender"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/types"
@@ -158,6 +159,13 @@ func (store *Store) newCtxValue(r *http.Request, operationName string) (*context
 
 	// The tenant header makes queries match only metrics from this tenant.
 	result.Tenant = r.Header.Get(types.HeaderTenant)
+
+	// A user bound to a tenant always uses its tenant. The auth middleware already
+	// rejected the requests with a different tenant header.
+	result.identity = auth.IdentityFromContext(r.Context())
+	if result.identity != nil && result.identity.Tenant != "" {
+		result.Tenant = result.identity.Tenant
+	}
 
 	result.EnableDebug = r.Header.Get(types.HeaderQueryDebug) != "" || store.DebugAll()
 	result.EnableVerboseDebug = r.Header.Get(types.HeaderQueryVerboseDebug) != ""

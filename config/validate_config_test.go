@@ -18,6 +18,10 @@ package config
 
 import (
 	"testing"
+
+	"github.com/bleemeo/squirreldb/api/auth/authtest"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestValidateConfigExtraWriteBackends(t *testing.T) {
@@ -118,4 +122,120 @@ func runValidateConfigCases(t *testing.T, base Config, cases []validateConfigCas
 			}
 		})
 	}
+}
+
+func TestValidateConfigTLS(t *testing.T) {
+	t.Parallel()
+
+	certs := authtest.WriteCertificates(t, t.TempDir())
+	base := DefaultConfig()
+
+	cases := []validateConfigCase{
+		{
+			name:    "TLS disabled by default",
+			mutate:  func(*Config) {},
+			wantErr: false,
+		},
+		{
+			name: "valid certificate",
+			mutate: func(c *Config) {
+				c.TLS = TLS{CertFile: certs.ServerCertFile, KeyFile: certs.ServerKeyFile, MinVersion: "TLS13"}
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid mTLS",
+			mutate: func(c *Config) {
+				c.TLS = TLS{
+					CertFile:       certs.ServerCertFile,
+					KeyFile:        certs.ServerKeyFile,
+					ClientCAFile:   certs.CAFile,
+					ClientAuthType: "RequireAndVerifyClientCert",
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name:    "missing certificate file",
+			mutate:  func(c *Config) { c.TLS = TLS{CertFile: "/does/not/exist.pem", KeyFile: certs.ServerKeyFile} },
+			wantErr: true,
+		},
+		{
+			name:    "key without certificate",
+			mutate:  func(c *Config) { c.TLS = TLS{KeyFile: certs.ServerKeyFile} },
+			wantErr: true,
+		},
+		{
+			name:    "key not matching the certificate",
+			mutate:  func(c *Config) { c.TLS = TLS{CertFile: certs.ServerCertFile, KeyFile: certs.OtherKeyFile} },
+			wantErr: true,
+		},
+		{
+			name: "invalid min_version",
+			mutate: func(c *Config) {
+				c.TLS = TLS{CertFile: certs.ServerCertFile, KeyFile: certs.ServerKeyFile, MinVersion: "1.2"}
+			},
+			wantErr: true,
+		},
+	}
+
+	runValidateConfigCases(t, base, cases)
+}
+
+func TestValidateConfigAuth(t *testing.T) {
+	t.Parallel()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader := AuthUser{Name: "reader", PasswordHash: string(hash), Scopes: []string{"read"}}
+	writer := AuthUser{
+		Name:        "glouton-acme",
+		TokenSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Tenant:      "acme",
+		Scopes:      []string{"write"},
+	}
+	invalid := AuthUser{Name: "invalid", PasswordHash: "clear text", Scopes: []string{"read"}}
+
+	base := DefaultConfig()
+
+	cases := []validateConfigCase{
+		{
+			name:    "auth disabled by default",
+			mutate:  func(*Config) {},
+			wantErr: false,
+		},
+		{
+			name:    "users are not checked when auth is disabled",
+			mutate:  func(c *Config) { c.Auth.Users = []AuthUser{invalid} },
+			wantErr: false,
+		},
+		{
+			name:    "valid users",
+			mutate:  func(c *Config) { c.Auth = Auth{Enabled: true, Users: []AuthUser{reader, writer}} },
+			wantErr: false,
+		},
+		{
+			name:    "enabled without user",
+			mutate:  func(c *Config) { c.Auth = Auth{Enabled: true} },
+			wantErr: true,
+		},
+		{
+			name:    "invalid user",
+			mutate:  func(c *Config) { c.Auth = Auth{Enabled: true, Users: []AuthUser{reader, invalid}} },
+			wantErr: true,
+		},
+		{
+			name: "tenant without tenant label",
+			mutate: func(c *Config) {
+				c.Auth = Auth{Enabled: true, Users: []AuthUser{writer}}
+				c.TenantLabelName = ""
+			},
+			wantErr: true,
+		},
+	}
+
+	runValidateConfigCases(t, base, cases)
 }

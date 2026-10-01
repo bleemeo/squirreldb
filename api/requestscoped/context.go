@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/api/auth"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
@@ -42,6 +43,8 @@ type contextValue struct {
 	EnableVerboseDebug bool
 	TimeToLive         int64
 	BackendOptions     any
+	// identity is the authenticated user, nil when the authentication is disabled.
+	identity *auth.Identity
 
 	l               sync.Mutex
 	queryableOption *queryableOption
@@ -159,6 +162,12 @@ func (ctxValue *contextValue) makeQueryable() (types.QueryableWithOptions, error
 
 	if ctxValue.queryableOption.ForcedMatcher != nil {
 		limitOption.ForcedMatchers = append(limitOption.ForcedMatchers, ctxValue.queryableOption.ForcedMatcher)
+	}
+
+	// The forced matchers of the user are added to the one of the header, the
+	// header can't replace them.
+	if ctxValue.identity != nil {
+		limitOption.ForcedMatchers = append(limitOption.ForcedMatchers, ctxValue.identity.ForcedMatchers...)
 	}
 
 	if ctxValue.store.TenantLabelName != "" && ctxValue.Tenant != "" {
