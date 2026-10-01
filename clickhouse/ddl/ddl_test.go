@@ -189,3 +189,71 @@ func TestLogEngineMismatch(t *testing.T) {
 		})
 	}
 }
+
+// TestSortingKey checks a DDL sorting key normalizes to the form system.tables
+// reports it in (sorting_key, e.g. "tenant, metric_name, id"): the migration
+// compares them to choose between attaching and copying a table's partitions.
+func TestSortingKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		ddl  string
+		want string
+	}{
+		{
+			name: "tuple",
+			ddl: "CREATE TABLE t (a UInt8)\nENGINE = MergeTree\nPRIMARY KEY (a)\n" +
+				"ORDER BY (tenant, metric_name, id, tags)\nTTL x",
+			want: "tenant,metric_name,id,tags",
+		},
+		{
+			name: "single column, indented",
+			ddl:  "\n\t\tCREATE TABLE t (k String)\n\t\tENGINE = ReplacingMergeTree(version)\n\t\tORDER BY k",
+			want: "k",
+		},
+		{
+			name: "single column in parentheses",
+			ddl:  "CREATE TABLE t (name String)\nENGINE = ReplacingMergeTree(version)\nORDER BY (name)",
+			want: "name",
+		},
+		{
+			name: "no ORDER BY",
+			ddl:  "CREATE TABLE t (a UInt8)\nENGINE = Null",
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := SortingKey(tc.ddl); got != tc.want {
+				t.Errorf("SortingKey = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeSortingKey(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		// As system.tables reports them. ORDER BY (name) is "name" on ClickHouse
+		// 26.3 but "(name)" on 26.8 and 26.9.
+		"tenant, metric_name, id": "tenant,metric_name,id",
+		"name":                    "name",
+		"(name)":                  "name",
+		"":                        "",
+		// An expression keeps its parentheses: it compares unequal to its DDL
+		// form at worst, which callers treat as the safe case.
+		"(toDate(t), id)": "(toDate(t),id)",
+		"toDate(t), id":   "toDate(t),id",
+	}
+
+	for in, want := range cases {
+		if got := NormalizeSortingKey(in); got != want {
+			t.Errorf("NormalizeSortingKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

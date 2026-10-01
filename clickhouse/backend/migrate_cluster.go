@@ -18,6 +18,16 @@
 // <table>_pre_cluster, create the replicated one under the original name, and attach
 // the source's partitions to it (hardlinks, so no data is copied).
 //
+// A source whose sorting key differs from the replicated table's cannot be attached
+// (ClickHouse: "Tables have different ordering"). That is a tsdb_tags created before
+// its ORDER BY gained tags (see clickhouse/tsdb tsdbTagsDDL): its partitions are
+// copied with INSERT ... SELECT instead, then detached like an attached one. It is
+// the series index, one row per series, so the copy is small next to tsdb_data. A
+// copy is idempotent, so the per-partition resumability is kept: re-copying a
+// partition whose detach did not happen only adds duplicate rows of the same key,
+// which the AggregatingMergeTree merges into one (min/max of equal values), and
+// which reads already tolerate (they dedup by id, as for a re-registered series).
+//
 // The usual recipe (create <table>_replicated, attach, rename onto <table>) is
 // unusable here: it renames a REPLICATED table, whose Keeper path embeds the name
 // (see clickhouse/ddl). Renaming the single-node table has no such problem.
@@ -67,6 +77,11 @@ type tableStep struct {
 	// they hold. Empty once every partition has been attached and detached.
 	Partitions []string `json:"partitions,omitempty"`
 	Bytes      uint64   `json:"bytes,omitempty"`
+	// Copy is set when Source's sorting key differs from the replicated table's, so
+	// its partitions are copied (INSERT ... SELECT) instead of attached; Rows is the
+	// row count of Source's active parts (see planCopies).
+	Copy bool   `json:"copy,omitempty"`
+	Rows uint64 `json:"rows,omitempty"`
 }
 
 // dataTable is where the step's partitions currently live: still under the final
@@ -152,6 +167,47 @@ func planMigration(objects []ddl.Object, engines map[string]string) ([]tableStep
 	// A source with no partition left is a rollback net waiting for ?cleanup=1;
 	// scanPartitions moves it out of the steps once it confirms it is empty.
 	return steps, nil
+}
+
+// planCopies sets Copy on the steps whose source cannot be attached to the
+// replicated table because their sorting keys differ. keys are the normalized
+// system.tables sorting keys of the host (ddl.TableSortingKeys). The replicated
+// table's key is read from ClickHouse once it exists, and parsed from its DDL
+// before (so a dry run shows the copy too).
+//
+// A key that cannot be determined leaves the step an attach: should the keys
+// really differ, ClickHouse refuses the ATTACH, which changes nothing and is
+// re-callable — never a silent loss.
+func planCopies(objects []ddl.Object, steps []tableStep, keys map[string]string) {
+	byName := make(map[string]ddl.Object, len(objects))
+	for _, o := range objects {
+		byName[o.Name] = o
+	}
+
+	for i, step := range steps {
+		if step.Source == "" {
+			continue
+		}
+
+		sourceKey := keys[step.dataTable()]
+		if sourceKey == "" {
+			continue
+		}
+
+		var targetKey string
+
+		if !step.Rename && !step.Create {
+			targetKey = keys[step.Table]
+		} else {
+			targetKey = ddl.SortingKey(byName[step.Table].DDL)
+		}
+
+		if targetKey == "" {
+			continue
+		}
+
+		steps[i].Copy = sourceKey != targetKey
+	}
 }
 
 // findMigrationHost returns the host holding the single-node tables, and the
@@ -275,9 +331,10 @@ func (b *Backend) preflight(ctx context.Context, conn driver.Conn) error {
 	return nil
 }
 
-// scanPartitions fills each step's partitions (and the disk they pin) from the
-// table currently holding its data, and moves the steps whose source is empty —
-// everything attached and detached already — to the pending cleanup.
+// scanPartitions fills each step's partitions (and the disk and rows they hold)
+// from the table currently holding its data, and moves the steps whose source is
+// empty — everything attached (or copied) and detached already — to the pending
+// cleanup.
 func scanPartitions(
 	ctx context.Context, conn driver.Conn, plan *migrationPlan,
 ) error {
@@ -285,14 +342,14 @@ func scanPartitions(
 
 	for _, step := range plan.Steps {
 		if step.Source != "" {
-			partitions, bytes, err := activePartitions(ctx, conn, step.dataTable())
+			parts, err := activePartitions(ctx, conn, step.dataTable())
 			if err != nil {
 				return err
 			}
 
-			step.Partitions, step.Bytes = partitions, bytes
+			step.Partitions, step.Bytes, step.Rows = parts.ids, parts.bytes, parts.rows
 
-			if len(partitions) == 0 && !step.Rename && !step.Create {
+			if len(parts.ids) == 0 && !step.Rename && !step.Create {
 				// Nothing left to attach and the table exists: only the emptied source
 				// remains, waiting for ?cleanup=1.
 				plan.CleanupPending = append(plan.CleanupPending, step.Source)
@@ -309,40 +366,46 @@ func scanPartitions(
 	return nil
 }
 
-// activePartitions returns the table's active partition ids, oldest first, and the
-// disk they occupy. An absent table has no part, hence no partition.
-func activePartitions(ctx context.Context, conn driver.Conn, table string) ([]string, uint64, error) {
+// partitionSet is a table's active partitions: their ids, oldest first, and the
+// disk and rows of their parts.
+type partitionSet struct {
+	ids   []string
+	bytes uint64
+	rows  uint64
+}
+
+// activePartitions returns the table's active partitions. An absent table has no
+// part, hence no partition.
+func activePartitions(ctx context.Context, conn driver.Conn, table string) (partitionSet, error) {
+	var set partitionSet
+
 	rows, err := conn.Query(ctx, `
-		SELECT partition_id, sum(bytes_on_disk)
+		SELECT partition_id, sum(bytes_on_disk), sum(rows)
 		FROM system.parts
 		WHERE database = currentDatabase() AND table = ? AND active
 		GROUP BY partition_id
 		ORDER BY partition_id`, table)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list partitions of %s: %w", table, err)
+		return set, fmt.Errorf("list partitions of %s: %w", table, err)
 	}
 	defer rows.Close()
 
-	var (
-		partitions []string
-		total      uint64
-	)
-
 	for rows.Next() {
 		var (
-			partition string
-			bytes     uint64
+			partition    string
+			bytes, count uint64
 		)
 
-		if err := rows.Scan(&partition, &bytes); err != nil {
-			return nil, 0, fmt.Errorf("scan partitions of %s: %w", table, err)
+		if err := rows.Scan(&partition, &bytes, &count); err != nil {
+			return set, fmt.Errorf("scan partitions of %s: %w", table, err)
 		}
 
-		partitions = append(partitions, partition)
-		total += bytes
+		set.ids = append(set.ids, partition)
+		set.bytes += bytes
+		set.rows += count
 	}
 
-	return partitions, total, rows.Err()
+	return set, rows.Err()
 }
 
 // migrateClusterHandler plans (and, unless ?dry_run, performs) the single-node →
@@ -407,6 +470,15 @@ func (b *Backend) migrateClusterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	keys, err := ddl.TableSortingKeys(r.Context(), hostConn, migrationTableNames(objects))
+	if err != nil {
+		http.Error(w, "read the sorting keys: "+err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	planCopies(objects, plan.Steps, keys)
+
 	if err := scanPartitions(r.Context(), hostConn, &plan); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -466,7 +538,13 @@ func writePlan(w http.ResponseWriter, plan migrationPlan, clusterName string) {
 			actions = append(actions, "create replicated")
 		}
 
-		if len(step.Partitions) > 0 {
+		switch {
+		case len(step.Partitions) == 0:
+		case step.Copy:
+			actions = append(actions, fmt.Sprintf(
+				"copy %d row(s) (%s), sorting key differs from the replicated table, from %d partition(s): %s",
+				step.Rows, humanBytes(step.Bytes), len(step.Partitions), strings.Join(step.Partitions, ", ")))
+		default:
 			actions = append(actions, fmt.Sprintf("attach %d partition(s) (%s): %s",
 				len(step.Partitions), humanBytes(step.Bytes), strings.Join(step.Partitions, ", ")))
 		}

@@ -341,6 +341,65 @@ func TableEngines(ctx context.Context, conn driver.Conn, names []string) (map[st
 	return engines, rows.Err()
 }
 
+// orderByRe captures a DDL template's ORDER BY expression, up to the end of its
+// line. Anchored at a line start like mergeTreeEngineRe. Only meant for a table
+// (Object.Replicated): the SELECT of a materialized view could hold another one.
+var orderByRe = regexp.MustCompile(`(?m)^\s*ORDER BY\s+(.+)$`)
+
+// SortingKey returns the sorting key a CREATE TABLE statement declares,
+// normalized by NormalizeSortingKey so it compares with the system.tables one
+// (TableSortingKeys). Empty when the statement has no ORDER BY at a line start (a
+// Null table).
+func SortingKey(createDDL string) string {
+	m := orderByRe.FindStringSubmatch(createDDL)
+	if m == nil {
+		return ""
+	}
+
+	return NormalizeSortingKey(m[1])
+}
+
+// NormalizeSortingKey makes a DDL sorting key and a system.tables one comparable:
+// whitespace is dropped and a column tuple loses its parentheses (ClickHouse
+// reports ORDER BY (a, b) as "a, b"), so both give "a,b". It only has to be exact
+// for the plain column lists the schemas use: a key it fails to normalize
+// compares unequal, which callers must treat as the safe case.
+func NormalizeSortingKey(key string) string {
+	key = strings.Join(strings.Fields(key), "")
+
+	if strings.HasPrefix(key, "(") && strings.HasSuffix(key, ")") && strings.Count(key, "(") == 1 {
+		key = key[1 : len(key)-1]
+	}
+
+	return key
+}
+
+// TableSortingKeys returns the sorting key (system.tables sorting_key, normalized
+// by NormalizeSortingKey) of each of names that exists in the current database. A
+// table without one (Null, MaterializedView) maps to "".
+func TableSortingKeys(ctx context.Context, conn driver.Conn, names []string) (map[string]string, error) {
+	rows, err := conn.Query(ctx,
+		"SELECT name, sorting_key FROM system.tables WHERE database = currentDatabase() AND name IN (?)", names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make(map[string]string, len(names))
+
+	for rows.Next() {
+		var name, key string
+
+		if err := rows.Scan(&name, &key); err != nil {
+			return nil, err
+		}
+
+		keys[name] = NormalizeSortingKey(key)
+	}
+
+	return keys, rows.Err()
+}
+
 // OnCluster returns the " ON CLUSTER <name>" clause (empty for a single node),
 // for statements built without a template (e.g. DROP).
 func OnCluster(clusterName string) string {

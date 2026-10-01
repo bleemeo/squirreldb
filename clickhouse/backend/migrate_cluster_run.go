@@ -46,6 +46,7 @@ const (
 
 var (
 	errSourceNotEmpty     = errors.New("source table still holds active partitions, refusing to drop it")
+	errNoColumns          = errors.New("no column to copy")
 	errUnclassifiedObject = errors.New(
 		"schema object is neither replicable nor a known droppable one, so the migration cannot know " +
 			"whether dropping it loses data (see splitSchema)")
@@ -198,9 +199,12 @@ func (b *Backend) createSchema(ctx context.Context, conn driver.Conn, objects []
 	return err
 }
 
-// attachAll moves every planned partition to its replicated table, with merges
-// stopped on the sources so their parts cannot change underneath.
+// attachAll moves every planned partition to its replicated table — attached, or
+// copied for a step with Copy — with merges stopped on the sources so their parts
+// cannot change underneath.
 func (b *Backend) attachAll(ctx context.Context, w io.Writer, conn driver.Conn, steps []tableStep) error {
+	var err error
+
 	stopped := make([]string, 0, len(steps))
 
 	defer func() {
@@ -222,6 +226,15 @@ func (b *Backend) attachAll(ctx context.Context, w io.Writer, conn driver.Conn, 
 
 		stopped = append(stopped, step.Source)
 
+		var columns []string
+
+		if step.Copy {
+			columns, err = insertableColumns(ctx, conn, step.Source)
+			if err != nil {
+				return err
+			}
+		}
+
 		for i, partition := range step.Partitions {
 			// The only safe place to stop: everything before is attached AND detached.
 			if err := ctx.Err(); err != nil {
@@ -230,13 +243,21 @@ func (b *Backend) attachAll(ctx context.Context, w io.Writer, conn driver.Conn, 
 			}
 
 			t0 := time.Now()
+			verb := "attached"
 
-			if err := b.attachPartition(ctx, conn, step, partition); err != nil {
+			if step.Copy {
+				verb = "copied"
+				err = b.copyPartition(ctx, conn, step, columns, partition)
+			} else {
+				err = b.attachPartition(ctx, conn, step, partition)
+			}
+
+			if err != nil {
 				return err
 			}
 
-			progressf(w, "%s: attached partition %s (%d/%d) in %s\n",
-				step.Table, partition, i+1, len(step.Partitions),
+			progressf(w, "%s: %s partition %s (%d/%d) in %s\n",
+				step.Table, verb, partition, i+1, len(step.Partitions),
 				time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
@@ -272,6 +293,75 @@ func (b *Backend) attachPartition(
 	return nil
 }
 
+// copyPartition copies one partition of the source into the replicated table, for
+// a source whose sorting key differs (see migrate_cluster.go), then detaches it from
+// the source to record that it is done, like attachPartition.
+//
+// Unlike an ATTACH, the copy is safe to repeat: a copy interrupted (or whose detach
+// failed) is copied again on the next call, and the duplicate rows merge. The
+// DETACH still must never follow a failed or cancelled INSERT, which may have
+// copied only part of the partition.
+func (b *Backend) copyPartition(
+	ctx context.Context, conn driver.Conn, step tableStep, columns []string, partition string,
+) error {
+	list := strings.Join(columns, ", ")
+
+	insert := "INSERT INTO " + step.Table + " (" + list + ") SELECT " + list +
+		" FROM " + step.Source + " WHERE _partition_id = ?"
+	if err := conn.Exec(ctx, insert, partition); err != nil {
+		return fmt.Errorf("copy partition %s of %s: %w", partition, step.Source, err)
+	}
+
+	detachCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detachTimeout)
+	defer cancel()
+
+	detach := "ALTER TABLE " + step.Source + " DETACH PARTITION ID ?"
+	if err := conn.Exec(detachCtx, detach, partition); err != nil {
+		return fmt.Errorf("detach the copied partition %s of %s (re-run to finish, it copies it again): %w",
+			partition, step.Source, err)
+	}
+
+	return nil
+}
+
+// insertableColumns lists the table's columns an INSERT can write (not
+// MATERIALIZED, ALIAS or EPHEMERAL), quoted, in table order: the copy names them
+// rather than relying on SELECT * matching the target's column order.
+func insertableColumns(ctx context.Context, conn driver.Conn, table string) ([]string, error) {
+	rows, err := conn.Query(ctx, `
+		SELECT name
+		FROM system.columns
+		WHERE database = currentDatabase() AND table = ?
+			AND default_kind NOT IN ('MATERIALIZED', 'ALIAS', 'EPHEMERAL')
+		ORDER BY position`, table)
+	if err != nil {
+		return nil, fmt.Errorf("list columns of %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	var columns []string
+
+	for rows.Next() {
+		var name string
+
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan columns of %s: %w", table, err)
+		}
+
+		columns = append(columns, "`"+strings.ReplaceAll(name, "`", "\\`")+"`")
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list columns of %s: %w", table, err)
+	}
+
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("%w: %s", errNoColumns, table)
+	}
+
+	return columns, nil
+}
+
 func (b *Backend) stopMerges(ctx context.Context, conn driver.Conn, table string) error {
 	if err := conn.Exec(ctx, "SYSTEM STOP MERGES "+table); err != nil {
 		return fmt.Errorf("stop merges on %s: %w", table, err)
@@ -295,13 +385,13 @@ func (b *Backend) startMerges(ctx context.Context, conn driver.Conn, table strin
 // re-checking each is empty: an active partition means data nothing attached.
 func cleanupSources(ctx context.Context, w io.Writer, conn driver.Conn, sources []string) error {
 	for _, source := range sources {
-		partitions, _, err := activePartitions(ctx, conn, source)
+		parts, err := activePartitions(ctx, conn, source)
 		if err != nil {
 			return err
 		}
 
-		if len(partitions) > 0 {
-			return fmt.Errorf("%w: %s has %d", errSourceNotEmpty, source, len(partitions))
+		if len(parts.ids) > 0 {
+			return fmt.Errorf("%w: %s has %d", errSourceNotEmpty, source, len(parts.ids))
 		}
 
 		// No ON CLUSTER: the source only ever existed on this host.
