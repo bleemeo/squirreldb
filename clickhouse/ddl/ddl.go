@@ -57,6 +57,11 @@ import (
 // degraded/recovering node, not a fresh bootstrap.
 const codeReplicaAlreadyExists = 253
 
+// codeMetadataMismatch is the ClickHouse error code (METADATA_MISMATCH) returned
+// when a replicated table is created with a definition that differs from the one
+// its existing replicas registered in Keeper (e.g. another sorting key).
+const codeMetadataMismatch = 342
+
 // replicatedPrefix is the prefix ClickHouse gives the replicated variant of every
 // MergeTree-family engine.
 const replicatedPrefix = "Replicated"
@@ -82,6 +87,25 @@ func (e *ReplicaExistsError) Error() string {
 	return fmt.Sprintf(
 		"table %s already exists on another replica in Keeper but not on this node "+
 			"(lost/rebuilt replica — SYSTEM DROP REPLICA needed)", e.Table)
+}
+
+// MetadataMismatchError is returned by CreateTables and EnsureTables when a
+// replicated table cannot be created because Keeper already holds it with another
+// definition (METADATA_MISMATCH): its existing replicas were created from an older
+// schema. Err is the ClickHouse error. The caller turns it into an actionable hint.
+type MetadataMismatchError struct {
+	Table string
+	Err   error
+}
+
+func (e *MetadataMismatchError) Error() string {
+	return fmt.Sprintf(
+		"create %s: its definition differs from the one its existing replicas registered in Keeper: %v",
+		e.Table, e.Err)
+}
+
+func (e *MetadataMismatchError) Unwrap() error {
+	return e.Err
 }
 
 // createObjectRe captures the created object's name in a CREATE TABLE / CREATE
@@ -198,6 +222,7 @@ func EngineMatchesMode(engine string, clustered bool) bool {
 //     error means the object's data already lives in Keeper but not on the node
 //     that ran the CREATE (a degraded/recovering node, not a bootstrap): it is
 //     logged and tolerated so startup proceeds.
+//   - A METADATA_MISMATCH is returned as *MetadataMismatchError.
 //   - Any other creation error is returned (a real bootstrap failure the operator
 //     must see, e.g. a timed-out ON CLUSTER DDL on a fresh cluster).
 //
@@ -283,7 +308,7 @@ func logEngineMismatch(logger zerolog.Logger, objects []Object, engines map[stri
 // the table on the rebuilt one. It STOPS at the first REPLICA_ALREADY_EXISTS
 // (returning *ReplicaExistsError), so the caller can tell the operator to run
 // SYSTEM DROP REPLICA rather than letting a dependent object fail with a confusing
-// UNKNOWN_TABLE.
+// UNKNOWN_TABLE. A METADATA_MISMATCH is returned as *MetadataMismatchError.
 func CreateTables(ctx context.Context, conn driver.Conn, logger zerolog.Logger, objects []Object) error {
 	return createObjects(ctx, conn, logger, objects, false)
 }
@@ -293,7 +318,13 @@ func createObjects(
 ) error {
 	for _, o := range objects {
 		if err := conn.Exec(ctx, o.DDL); err != nil {
-			if ex, ok := errors.AsType[*proto.Exception](err); ok && ex.Code == codeReplicaAlreadyExists {
+			ex, isException := errors.AsType[*proto.Exception](err)
+
+			if isException && ex.Code == codeMetadataMismatch {
+				return &MetadataMismatchError{Table: o.Name, Err: err}
+			}
+
+			if isException && ex.Code == codeReplicaAlreadyExists {
 				if !tolerateReplicaExists {
 					return &ReplicaExistsError{Table: o.Name}
 				}

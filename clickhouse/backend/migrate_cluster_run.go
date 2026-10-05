@@ -196,7 +196,7 @@ func (b *Backend) createSchema(ctx context.Context, conn driver.Conn, objects []
 		return fmt.Errorf("%w\n\n%s", err, b.dropReplicaRunbook())
 	}
 
-	return err
+	return withSchemaHint(err)
 }
 
 // attachAll moves every planned partition to its replicated table — attached, or
