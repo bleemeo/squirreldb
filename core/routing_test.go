@@ -29,6 +29,7 @@ import (
 	apipromql "github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/dummy"
+	"github.com/bleemeo/squirreldb/mutable"
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -400,6 +401,44 @@ func TestRoutedBackendStartFailure(t *testing.T) {
 
 	if _, err := squirrelDB.Appendable(t.Context()); err == nil {
 		t.Error("Appendable succeeded with a routed backend failing to start")
+	}
+}
+
+// TestRoutingWithLabeledPrimaryMetrics checks that a routed backend starts when
+// the primary registered the mutable label metrics with a "backend" label, as the
+// Cassandra and ClickHouse backends do: the metrics of a routed backend must have
+// the same label names to share the registry.
+func TestRoutingWithLabeledPrimaryMetrics(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultConfig()
+	cfg.Backend = config.BackendDummy
+	cfg.Internal.Dummy.Batcher = false
+	cfg.Routing.Backends = []string{config.BackendSandbox}
+
+	reg := prometheus.NewRegistry()
+
+	// Register the mutable label metrics as a Cassandra primary would; the
+	// Cassandra backend itself requires a database.
+	mutable.NewProviderAndProcessor(
+		t.Context(),
+		prometheus.WrapRegistererWith(map[string]string{"backend": config.BackendCassandra}, reg),
+		&dummy.LocalCluster{},
+		dummy.NewMutableLabelStore(dummy.MutableLabels{}),
+		cfg.TenantLabelName,
+		zerolog.Nop(),
+	)
+
+	squirrelDB := New(Deps{Logger: zerolog.Nop(), MetricRegistry: reg}, cfg, SquirrelDBOption{})
+
+	defer squirrelDB.CloseAll(context.Background())
+
+	if _, err := squirrelDB.Queryable(t.Context()); err != nil {
+		t.Fatalf("Queryable: %v", err)
+	}
+
+	if _, err := squirrelDB.Appendable(t.Context()); err != nil {
+		t.Fatalf("Appendable: %v", err)
 	}
 }
 
