@@ -76,6 +76,8 @@ type TLS struct {
 }
 
 // Auth configures the authentication of the HTTP API. See docs/authentication.md.
+// Unknown keys in this section (and in TLS) are errors, not warnings: see
+// securitySections.
 type Auth struct {
 	// Enabled enables the authentication (disabled by default).
 	Enabled bool `yaml:"enabled"`

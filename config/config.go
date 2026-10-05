@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"dario.cat/mergo"
@@ -104,7 +105,59 @@ func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Con
 		return config, unwrapErrors(warnings), err
 	}
 
+	// The decoder doesn't report the unused keys in Metadata when ErrorUnused
+	// fails, so a second decode, into a throwaway struct, collects them.
+	var (
+		discarded Config
+		metadata  mapstructure.Metadata
+	)
+
+	metadataConf := unmarshalConf
+	decoderConf := *unmarshalConf.DecoderConfig
+	decoderConf.ErrorUnused = false
+	decoderConf.Metadata = &metadata
+	metadataConf.DecoderConfig = &decoderConf
+
+	if err := k.UnmarshalWithConf("", &discarded, metadataConf); err == nil {
+		if err := checkSecurityUnusedKeys(metadata.Unused); err != nil {
+			return config, unwrapErrors(warnings), err
+		}
+	}
+
 	return config, unwrapErrors(warnings), nil
+}
+
+// securitySections are the config sections where an unknown key is an error
+// instead of a warning: a typo there (e.g. "tenat" for a user's "tenant", or
+// "enable" for "enabled") silently weakens the access restrictions.
+var securitySections = []string{"auth", "tls"} //nolint:gochecknoglobals
+
+// checkSecurityUnusedKeys returns an error listing the unknown keys found in the
+// security sections. unused holds the full key paths reported by the decoder,
+// e.g. "auth.users[0].tenat".
+func checkSecurityUnusedKeys(unused []string) error {
+	var invalid []string
+
+	for _, key := range unused {
+		for _, section := range securitySections {
+			if key == section || strings.HasPrefix(key, section+".") || strings.HasPrefix(key, section+"[") {
+				invalid = append(invalid, key)
+
+				break
+			}
+		}
+	}
+
+	if len(invalid) == 0 {
+		return nil
+	}
+
+	slices.Sort(invalid)
+
+	return fmt.Errorf(
+		"%w: unknown keys in a security section (%s): %s",
+		ErrInvalidValue, strings.Join(securitySections, ", "), strings.Join(invalid, ", "),
+	)
 }
 
 // load the configuration from files and directories.
@@ -113,7 +166,7 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 
 	// Load config from environment variables.
 	// The warnings are filled only after k.Load is called.
-	envToKey, envWarnings := envToKeyFunc()
+	envToKey, envWarnings, unknownSecurityEnv := envToKeyFunc()
 
 	// Environment variable overwrite basic types (string, int), arrays, and maps.
 	envMergeFunc := mergeFunc(mergo.WithOverride)
@@ -123,6 +176,17 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 
 	if len(*envWarnings) > 0 {
 		warnings = append(warnings, *envWarnings...)
+	}
+
+	// Unknown environment variables are ignored, except in the security sections
+	// where a typo would silently weaken the access restrictions.
+	if len(*unknownSecurityEnv) > 0 {
+		slices.Sort(*unknownSecurityEnv)
+
+		errors.Append(fmt.Errorf(
+			"%w: unknown environment variables for a security section (%s): %s",
+			ErrInvalidValue, strings.Join(securitySections, ", "), strings.Join(*unknownSecurityEnv, ", "),
+		))
 	}
 
 	// Migrate deprecated keys before the defaults are merged. At this point fileEnvKoanf
@@ -197,7 +261,9 @@ func migrateDeprecatedKeys(k *koanf.Koanf) prometheus.MultiError {
 // envToKeyFunc returns a function that converts an environment variable to a configuration key
 // and a pointer to Warnings, the warnings are filled only after koanf.Load has been called.
 // Panics if two config keys correspond to the same environment variable.
-func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
+// The returned slice is filled, when the environment is loaded, with the
+// variables of a security section that match no config key.
+func envToKeyFunc() (func(string) string, *prometheus.MultiError, *[]string) {
 	// Get all config keys from an empty config.
 	k := koanf.New(delimiter)
 	_ = k.Load(structs.Provider(Config{}, "yaml"), nil)
@@ -227,11 +293,29 @@ func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
 	}
 
 	warnings := make(prometheus.MultiError, 0)
+	unknownSecurity := make([]string, 0)
 	envFunc := func(s string) string {
-		return envToKey[s]
+		key, ok := envToKey[s]
+		if !ok && isSecurityEnvKey(s) {
+			unknownSecurity = append(unknownSecurity, s)
+		}
+
+		return key
 	}
 
-	return envFunc, &warnings
+	return envFunc, &warnings, &unknownSecurity
+}
+
+// isSecurityEnvKey reports whether an environment variable belongs to one of the
+// securitySections, e.g. SQUIRRELDB_AUTH_ENABLED.
+func isSecurityEnvKey(envKey string) bool {
+	for _, section := range securitySections {
+		if strings.HasPrefix(envKey, toEnvKey(section)+"_") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // mergeFunc return a merge function to use with koanf.
