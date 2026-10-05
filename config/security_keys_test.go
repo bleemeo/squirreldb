@@ -63,6 +63,40 @@ auth:
 			wantInError: []string{"auth.users[1].tenat"},
 		},
 		{
+			name: "typo with an invalid value outside the security sections",
+			content: `
+auth:
+  users:
+    - name: grafana-acme
+      scopes: [read]
+      tenat: acme
+log:
+  level: abc
+`,
+			wantInError: []string{"auth.users[0].tenat"},
+		},
+		{
+			name: "invalid value in a security section",
+			content: `
+auth:
+  enable: true
+  users:
+    - name: reader
+      scopes: {read: true}
+`,
+			wantInError: []string{"auth.users[0].scopes"},
+		},
+		{
+			name: "invalid value outside the security sections stays a warning",
+			content: `
+auth:
+  enabled: true
+log:
+  level: abc
+`,
+			wantWarning: "log.level",
+		},
+		{
 			name: "typo in an auth key",
 			content: `
 auth:

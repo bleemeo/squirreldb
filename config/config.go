@@ -105,26 +105,61 @@ func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Con
 		return config, unwrapErrors(warnings), err
 	}
 
-	// The decoder doesn't report the unused keys in Metadata when ErrorUnused
-	// fails, so a second decode, into a throwaway struct, collects them.
+	if err := checkSecuritySections(k, unmarshalConf); err != nil {
+		return config, unwrapErrors(warnings), err
+	}
+
+	return config, unwrapErrors(warnings), nil
+}
+
+// checkSecuritySections decodes the security sections alone, into a throwaway
+// struct, and returns an error if they contain an unknown key or an invalid value.
+//
+// The decoder doesn't report the unused keys in Metadata when ErrorUnused fails,
+// hence this second decode with ErrorUnused disabled. It is limited to the security
+// sections because the decoder also skips Metadata for every struct holding a
+// decode error: an invalid value elsewhere (e.g. "log.level: abc") must not hide
+// a typo in "auth". An invalid value inside a security section is fatal too, as
+// the decoder then can't list its unknown keys, and a value that can't be decoded
+// is left to its zero value, which can disable a restriction as well.
+func checkSecuritySections(k *koanf.Koanf, unmarshalConf koanf.UnmarshalConf) error {
+	raw := k.Raw()
+	sections := make(map[string]any, len(securitySections))
+
+	for _, section := range securitySections {
+		if value, ok := raw[section]; ok {
+			sections[section] = value
+		}
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
 	var (
 		discarded Config
 		metadata  mapstructure.Metadata
 	)
 
-	metadataConf := unmarshalConf
 	decoderConf := *unmarshalConf.DecoderConfig
+	decoderConf.TagName = unmarshalConf.Tag
 	decoderConf.ErrorUnused = false
 	decoderConf.Metadata = &metadata
-	metadataConf.DecoderConfig = &decoderConf
+	decoderConf.Result = &discarded
 
-	if err := k.UnmarshalWithConf("", &discarded, metadataConf); err == nil {
-		if err := checkSecurityUnusedKeys(metadata.Unused); err != nil {
-			return config, unwrapErrors(warnings), err
-		}
+	decoder, err := mapstructure.NewDecoder(&decoderConf)
+	if err != nil {
+		return err
 	}
 
-	return config, unwrapErrors(warnings), nil
+	if err := decoder.Decode(sections); err != nil {
+		return fmt.Errorf(
+			"%w: invalid value in a security section (%s): %w",
+			ErrInvalidValue, strings.Join(securitySections, ", "), err,
+		)
+	}
+
+	return checkSecurityUnusedKeys(metadata.Unused)
 }
 
 // securitySections are the config sections where an unknown key is an error
