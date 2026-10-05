@@ -49,10 +49,54 @@ their schema. SquirrelDB now creates it with
 - a `tsdb_tags` created before that change keeps its old sorting key. It is **not**
   rewritten, and keeps working on 26.8 and later — the check only applies when a
   table is created;
-- a `tsdb_tags` created since (a new install, `POST /debug/clickhouse/create_tables`
-  on a new server) uses the new key. Both keys hold the same rows and series ids;
+- a `tsdb_tags` created since (a new install, a new cluster) uses the new key. Both
+  keys hold the same rows and series ids;
+- on a cluster, the key is part of the table's replication metadata in Keeper, so a
+  server added or rebuilt on a cluster whose `tsdb_tags` has the old key **cannot get
+  the table automatically**: see
+  [the next section](#adding-a-server-to-a-cluster-created-before-the-tsdb_tags-key-change);
 - the [single-node → cluster migration](#single-node--single-node-cluster) copies the
   rows of an old-key `tsdb_tags` instead of attaching its partitions (see step 4).
+
+Converting the `tsdb_tags` of an existing cluster to the new key is not automated.
+
+### Adding a server to a cluster created before the tsdb_tags key change
+
+Check the key of the cluster's `tsdb_tags` on a healthy server:
+
+```sql
+SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = 'tsdb_tags';
+```
+
+With `tenant, metric_name, id, tags`, nothing special: follow the usual steps. With
+`tenant, metric_name, id`, `POST /debug/clickhouse/create_tables` (and SquirrelDB's
+startup) fails on the new or rebuilt server with `METADATA_MISMATCH` (Code 342):
+Keeper holds the old key and refuses the new one. Create `tsdb_tags` by hand on that
+server first, with the old key and the same replicated engine, **without**
+`ON CLUSTER`:
+
+```sql
+CREATE TABLE IF NOT EXISTS tsdb_tags
+(
+    id UUID DEFAULT reinterpretAsUUID(sipHash128(metric_name, tenant, tags)),
+    metric_name LowCardinality(String),
+    tenant LowCardinality(String) CODEC(ZSTD(1)),
+    tags Map(LowCardinality(String), String),
+    min_time SimpleAggregateFunction(min, Nullable(DateTime64(3))),
+    max_time SimpleAggregateFunction(max, Nullable(DateTime64(3))),
+    max_expiration SimpleAggregateFunction(max, DateTime64(3))
+)
+ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_tags', '{replica}')
+PRIMARY KEY (tenant, metric_name)
+ORDER BY (tenant, metric_name, id)
+TTL max_expiration
+SETTINGS allow_dimensions_outside_sorting_key = 1  -- ClickHouse 26.8 and later only
+```
+
+Drop the `SETTINGS` line on ClickHouse 26.3, which does not know the setting (and does
+not need it). The table joins the existing replicas and receives their data. Then call
+`POST /debug/clickhouse/create_tables` for the remaining tables: it leaves the existing
+`tsdb_tags` alone.
 
 ## Growing
 
@@ -219,7 +263,9 @@ replicated.
    ```sh
    curl -XPOST http://squirreldb:9201/debug/clickhouse/create_tables
    ```
-   ClickHouse then replicates the existing data to it on its own.
+   ClickHouse then replicates the existing data to it on its own. If the cluster's
+   `tsdb_tags` predates its key change, create that table by hand first, see
+   [Adding a server to a cluster created before the tsdb_tags key change](#adding-a-server-to-a-cluster-created-before-the-tsdb_tags-key-change).
 4. **Add its address** to `clickhouse.addresses` in every SquirrelDB and restart them.
    The order of steps 3 and 4 does not matter: SquirrelDB excludes a host that is
    missing tables or whose replica is still catching up, and includes it once ready.

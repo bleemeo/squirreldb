@@ -109,6 +109,13 @@ SETTINGS allow_suspicious_low_cardinality_types = 1`
 // rewritten. The single-node to cluster migration copies their rows instead of
 // attaching their partitions, which ClickHouse refuses across sorting keys (see
 // clickhouse/backend/migrate_cluster.go).
+//
+// On a cluster, the sorting key is part of the replicated table's Keeper metadata:
+// a server added or rebuilt on a cluster whose tsdb_tags has the legacy key cannot
+// be given this DDL (METADATA_MISMATCH, which the backend turns into a hint). Its
+// tsdb_tags must be created by hand with the legacy key (plus the setting above on
+// 26.8 and later), see docs/clickhouse-cluster.md. Converting a legacy-key cluster
+// to this key is not automated.
 const tsdbTagsDDL = `
 CREATE TABLE IF NOT EXISTS tsdb_tags
 (

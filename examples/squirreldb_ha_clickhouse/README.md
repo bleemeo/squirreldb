@@ -129,6 +129,10 @@ here `clickhouse-server-1`):
    ```
    curl -XPOST http://squirreldb:9201/debug/clickhouse/create_tables
    ```
+   If it fails on `tsdb_tags` with `METADATA_MISMATCH`, the cluster's `tsdb_tags`
+   was created by an older SquirrelDB with the legacy sorting key: create it by hand
+   on the rebuilt node first, see "Adding a server to a cluster created before the
+   tsdb_tags key change" in [docs/clickhouse-cluster.md](../../docs/clickhouse-cluster.md).
    Without SquirrelDB, do it by hand: copy each table's definition from a healthy
    node and run it on the rebuilt one (the name-based path and `{replica}` macro
    make it re-attach):
