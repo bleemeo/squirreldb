@@ -265,11 +265,25 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 
 	// The header option parser is a backend capability too; with routing, core
 	// parses the headers for every selectable backend.
-	if parser, err := s.getSquirrelDB().HTTPOptionsParser(ctx); err == nil && parser != nil {
+	parser, err := s.getSquirrelDB().HTTPOptionsParser(ctx)
+	if err != nil {
+		readiness <- fmt.Errorf("HTTP options parser start fail: %w", err)
+
+		return
+	}
+
+	if parser != nil {
 		s.api.OptionsParser = parser
 	}
 
-	if routed, err := s.getSquirrelDB().Routed(ctx); err == nil && len(routed) > 0 {
+	routed, err := s.getSquirrelDB().Routed(ctx)
+	if err != nil {
+		readiness <- fmt.Errorf("routed backends start fail: %w", err)
+
+		return
+	}
+
+	if len(routed) > 0 {
 		s.api.RoutedBackendDebug = make(map[string]api.BackendDebugRegistrar, len(routed))
 
 		for name, backend := range routed {
