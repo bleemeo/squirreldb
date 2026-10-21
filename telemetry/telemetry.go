@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bleemeo/squirreldb/facts"
@@ -84,6 +85,8 @@ type StoreTiming struct {
 type Telemetry struct {
 	opts Options
 
+	// mu guards clusterID and idFn, read by IDs.
+	mu sync.Mutex
 	// Common ID between all SquirrelDB in the cluster.
 	clusterID string
 	// Getter for the ID of this SquirrelDB instance (the Store may change it, so
@@ -206,27 +209,57 @@ func (t *Telemetry) postInformation(ctx context.Context) {
 	_ = resp.Body.Close()
 }
 
+// IDs returns the cluster ID and the ID of this node, each empty until the
+// telemetry acquired it (a few minutes after the start).
+func (t *Telemetry) IDs() (clusterID string, nodeID string) {
+	t.mu.Lock()
+	idFn := t.idFn
+	clusterID = t.clusterID
+	t.mu.Unlock()
+
+	if idFn != nil {
+		nodeID = idFn()
+	}
+
+	return clusterID, nodeID
+}
+
 // getTelemetryID returns this node's telemetry ID, acquiring one from the Store
 // (and caching it, with its release function) on first use.
 func (t *Telemetry) getTelemetryID(ctx context.Context) (string, error) {
-	if t.idFn == nil {
-		idFn, release, err := t.opts.Store.AcquireNodeID(ctx)
+	t.mu.Lock()
+	idFn := t.idFn
+	t.mu.Unlock()
+
+	if idFn == nil {
+		var (
+			release func()
+			err     error
+		)
+
+		idFn, release, err = t.opts.Store.AcquireNodeID(ctx)
 		if err != nil {
 			return "", err
 		}
 
+		t.mu.Lock()
 		t.idFn = idFn
 		t.releaseID = release
+		t.mu.Unlock()
 	}
 
 	// Read afresh: the Store may have re-acquired a different ID since (see
 	// AcquireNodeID), so this must not be cached.
-	return t.idFn(), nil
+	return idFn(), nil
 }
 
 func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {
-	if t.clusterID != "" {
-		return t.clusterID, nil
+	t.mu.Lock()
+	cached := t.clusterID
+	t.mu.Unlock()
+
+	if cached != "" {
+		return cached, nil
 	}
 
 	clusterID, err := t.opts.Store.ClusterID(ctx)
@@ -234,7 +267,9 @@ func (t *Telemetry) getClusterID(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	t.mu.Lock()
 	t.clusterID = clusterID
+	t.mu.Unlock()
 
 	return clusterID, nil
 }

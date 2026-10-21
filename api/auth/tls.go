@@ -19,6 +19,7 @@ package auth
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -103,6 +104,29 @@ func NewTLSConfig(opts TLSOptions) (*tls.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ServerCertificate reads and parses the first (leaf) certificate of CertFile. Like
+// the TLS handshake, it reads the file on each call, so it reflects a renewed
+// certificate.
+func (o TLSOptions) ServerCertificate() (*x509.Certificate, error) {
+	data, err := os.ReadFile(o.CertFile)
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		var block *pem.Block
+
+		block, data = pem.Decode(data)
+		if block == nil {
+			return nil, fmt.Errorf("%w: no certificate in cert_file %s", ErrInvalidTLS, o.CertFile)
+		}
+
+		if block.Type == "CERTIFICATE" {
+			return x509.ParseCertificate(block.Bytes)
+		}
+	}
 }
 
 func toWebTLSConfig(opts TLSOptions) (*web.TLSConfig, error) {
