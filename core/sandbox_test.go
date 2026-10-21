@@ -45,7 +45,7 @@ func TestSandboxBackendFromConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, warnings, err := config.LoadConfig([]string{configPath})
+	cfg, warnings, err := config.LoadConfig(nil, []string{configPath})
 	if err != nil {
 		t.Fatal(err)
 	}
