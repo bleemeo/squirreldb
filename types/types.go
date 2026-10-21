@@ -18,6 +18,7 @@ package types
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -38,6 +39,15 @@ type TSDB interface {
 	Close(ctx context.Context) error
 }
 
+// ErrBackendNotSelectable is returned when a request selects (with HeaderBackend) a
+// backend which isn't enabled in the routing configuration.
+var ErrBackendNotSelectable = errors.New("backend not selectable")
+
+// ErrBackendNotAllowed is returned when a request is routed (by HeaderBackend or by a
+// routing rule) to a backend which is enabled but not in the AllowedBackends of the
+// request, i.e. the authenticated user isn't allowed to use it.
+var ErrBackendNotAllowed = errors.New("backend not allowed")
+
 // HTTPOptionsParser is the interface TSDB might want to implement in order to support per-HTTP request option,
 // based on HTTP header. The result from ParseHTTPOptions is passed in BackendOptions of AppenderOptions/QuerierOptions.
 type HTTPOptionsParser interface {
@@ -48,6 +58,14 @@ type AppenderOptions struct {
 	Tenant       string
 	RequestDebug DebugLevel
 	WriteTTL     int64
+	// Backend is the backend requested by the caller (HeaderBackend), empty
+	// when none is requested. core.SquirrelDB routes the request with it.
+	Backend string
+	// AllowedBackends restricts the backends the request may be routed to (the
+	// backends of the authenticated user), empty meaning no restriction. When the
+	// request would go to the default backend and it isn't allowed, the first
+	// allowed backend is used instead. See docs/routing.md.
+	AllowedBackends []string
 
 	// BackendOptions is filled by calls like ParseHTTPOptions()
 	BackendOptions any
@@ -58,6 +76,14 @@ type AppenderOptions struct {
 type QuerierOptions struct {
 	Tenant       string
 	RequestDebug DebugLevel
+	// Backend is the backend requested by the caller (HeaderBackend), empty
+	// when none is requested. core.SquirrelDB routes the request with it.
+	Backend string
+	// AllowedBackends restricts the backends the request may be routed to (the
+	// backends of the authenticated user), empty meaning no restriction. When the
+	// request would go to the default backend and it isn't allowed, the first
+	// allowed backend is used instead. See docs/routing.md.
+	AllowedBackends []string
 	// MaxEvaluatedSeries caps how many series a single Select may resolve before
 	// it must fail; 0 means unlimited. It mirrors the limit limitqueryable
 	// enforces cumulatively across a request, exposed to backends so they can
@@ -252,6 +278,9 @@ const (
 	HeaderTenant = "X-SquirrelDB-Tenant"
 	// HeaderTimeToLive Set the metric Time To Live when writing.
 	HeaderTimeToLive = "X-SquirrelDB-TTL"
+	// HeaderBackend Select the backend (by name, e.g. "sandbox") serving the request, reads and
+	// writes. The backend must be enabled in the routing configuration. See docs/routing.md.
+	HeaderBackend = "X-SquirrelDB-Backend"
 	// HeaderQueryDebug Enable debugging information printed in SquirrelDB server log about a query.
 	HeaderQueryDebug        = "X-SquirrelDB-Query-Debug"
 	HeaderQueryVerboseDebug = "X-SquirrelDB-Query-Verbose-Debug"
@@ -264,5 +293,5 @@ const PrometheusValidationScheme = model.UTF8Validation
 type BackendInfo struct {
 	// ApplyMutableLabelInternally tells whether the Backend TSDB gives "raw" access (without mutable labels) or
 	// if the backend already applies mutable labels.
-	ApplyMutableLabelInternally bool
+	ApplyMutableLabelInternally bool `json:"apply_mutable_label_internally"`
 }

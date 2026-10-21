@@ -20,6 +20,7 @@ import (
 	"errors"
 	goflag "flag"
 	"fmt"
+	"path"
 	"runtime"
 
 	"github.com/bleemeo/squirreldb/core/version"
@@ -29,6 +30,9 @@ import (
 
 // ErrNormalExit is returned when process should exit normal (return code 0).
 var ErrNormalExit = errors.New("normal exit")
+
+// ErrUnexpectedArgument is returned when the command line contains a positional argument.
+var ErrUnexpectedArgument = errors.New("unexpected argument")
 
 // LoadConfigFromFlags will parse flags and load the configuration.
 // commandFlags is the sub-command specific flags (daemon, migrate, ...) and will
@@ -45,8 +49,9 @@ func LoadConfigFromFlags(
 ) (*pflag.FlagSet, Config, error, error) {
 	allFlags := append(CommonFlags(), commandFlags...)
 	// Only the config flags shared by every entry point are exposed here; a
-	// command that needs the daemon-only ones (listen_address) adds them via its
-	// commandFlags. The full binding still comes from ConfigFlags() in Load.
+	// command that needs the daemon-only ones (listen_address, admin_listen_address)
+	// adds them via its commandFlags. The full binding still comes from
+	// ConfigFlags() in Load.
 	allFlags = append(allFlags, SharedConfigFlags()...)
 	flagSet := NewFlagSet("squirreldb "+subcommandName, allFlags)
 
@@ -81,18 +86,27 @@ func LoadConfigFromFlags(
 		return flagSet, Config{}, nil, ErrNormalExit
 	}
 
+	// The subcommand name must come first (see main.go); any other positional
+	// argument, e.g. a subcommand placed after a flag, would otherwise be
+	// silently ignored and the default subcommand would run instead.
+	if flagSet.NArg() > 0 {
+		return flagSet, Config{}, nil, fmt.Errorf(
+			"%w %q (a subcommand must be the first argument)", ErrUnexpectedArgument, flagSet.Arg(0),
+		)
+	}
+
 	configFiles, _ := flagSet.GetStringSlice("config")
 
-	cfg, warnings, err := LoadConfig(configFiles)
+	cfg, warnings, err := LoadConfig(flagSet, configFiles)
 
 	return flagSet, cfg, errors.Join(warnings...), err
 }
 
 // LoadConfig loads the configuration from the given files (plus environment and
-// command-line config overrides) and validates it. It is shared by the daemon
-// and the migrate subcommand so both load config identically.
-func LoadConfig(configFiles []string) (Config, Warnings, error) {
-	cfg, warnings, err := Load(configFiles...)
+// the config flags set in the already parsed flagSet) and validates it. It is
+// shared by the daemon and the migrate subcommand so both load config identically.
+func LoadConfig(flagSet *pflag.FlagSet, configFiles []string) (Config, Warnings, error) {
+	cfg, warnings, err := Load(flagSet, configFiles...)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("can't load config: %w", err)
 	}
@@ -129,10 +143,26 @@ func validateConfig(cfg Config) error {
 		warnings.Append(err)
 	}
 
-	if cfg.ExtraWriteBackend != "" {
-		knownBackends := map[string]bool{BackendCassandra: true, BackendClickHouse: true, BackendDummy: true}
+	if cfg.AdminListenAddress != "" && cfg.AdminListenAddress == cfg.ListenAddress {
+		warnings.Append(fmt.Errorf(
+			"%w: 'admin_listen_address' (%q) must differ from 'listen_address' "+
+				"(leave it empty to serve the admin endpoints on 'listen_address')",
+			ErrInvalidValue, cfg.AdminListenAddress,
+		))
+	}
 
-		if !knownBackends[cfg.ExtraWriteBackend] {
+	for _, err := range validateSecurity(cfg) {
+		warnings.Append(err)
+	}
+
+	if cfg.ExtraWriteBackend != "" {
+		switch {
+		case cfg.ExtraWriteBackend == BackendSandbox:
+			warnings.Append(fmt.Errorf(
+				"%w: backend %q can't be used as 'extra_write_backend': it discards every write",
+				ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		case !isKnownBackend(cfg.ExtraWriteBackend):
 			warnings.Append(fmt.Errorf(
 				"%w: unknown backend %q in 'extra_write_backend'", ErrInvalidValue, cfg.ExtraWriteBackend,
 			))
@@ -147,5 +177,78 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
+	for _, err := range validateRouting(cfg) {
+		warnings.Append(err)
+	}
+
 	return warnings.MaybeUnwrap()
+}
+
+// isKnownBackend tells whether name is the name of a backend SquirrelDB can build.
+func isKnownBackend(name string) bool {
+	switch name {
+	case BackendCassandra, BackendClickHouse, BackendDummy, BackendSandbox:
+		return true
+	default:
+		return false
+	}
+}
+
+// validateRouting checks the "routing" section. The default backend is always
+// selectable, so listing it in 'routing.backends' is rejected as a mistake. The
+// extra write backend is rejected too: a backend instance is either the
+// dual-write target of the default route or a routed backend, never both.
+func validateRouting(cfg Config) []error {
+	var errs []error
+
+	selectable := map[string]bool{cfg.Backend: true}
+
+	for _, name := range cfg.Routing.Backends {
+		switch {
+		case !isKnownBackend(name):
+			errs = append(errs, fmt.Errorf("%w: unknown backend %q in 'routing.backends'", ErrInvalidValue, name))
+		case name == cfg.Backend:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.backends' must not contain the default backend %q (it is always selectable)",
+				ErrInvalidValue, name,
+			))
+		case name == cfg.ExtraWriteBackend:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.backends' must not contain the 'extra_write_backend' %q",
+				ErrInvalidValue, name,
+			))
+		case selectable[name]:
+			errs = append(errs, fmt.Errorf("%w: backend %q is listed twice in 'routing.backends'", ErrInvalidValue, name))
+		}
+
+		selectable[name] = true
+	}
+
+	for i, rule := range cfg.Routing.Rules {
+		if len(rule.Tenants) == 0 {
+			errs = append(errs, fmt.Errorf("%w: 'routing.rules[%d].tenants' must not be empty", ErrInvalidValue, i))
+		}
+
+		for _, pattern := range rule.Tenants {
+			if _, err := path.Match(pattern, ""); err != nil {
+				errs = append(errs, fmt.Errorf(
+					"%w: invalid pattern %q in 'routing.rules[%d].tenants': %w", ErrInvalidValue, pattern, i, err,
+				))
+			}
+		}
+
+		switch {
+		case !isKnownBackend(rule.Backend):
+			errs = append(errs, fmt.Errorf(
+				"%w: unknown backend %q in 'routing.rules[%d].backend'", ErrInvalidValue, rule.Backend, i,
+			))
+		case !selectable[rule.Backend]:
+			errs = append(errs, fmt.Errorf(
+				"%w: 'routing.rules[%d].backend' %q must be the default backend or listed in 'routing.backends'",
+				ErrInvalidValue, i, rule.Backend,
+			))
+		}
+	}
+
+	return errs
 }

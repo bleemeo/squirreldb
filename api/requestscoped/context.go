@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bleemeo/squirreldb/api/auth"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/queryable/limitqueryable"
 	"github.com/bleemeo/squirreldb/types"
@@ -34,14 +35,20 @@ import (
 type contextKey struct{}
 
 type contextValue struct {
-	httpRequest        *http.Request
-	operationName      string
-	store              *Store
-	Tenant             string
+	httpRequest   *http.Request
+	operationName string
+	store         *Store
+	Tenant        string
+	Backend       string
+	// AllowedBackends are the backends of the authenticated user, empty when
+	// it isn't restricted (or the authentication is disabled).
+	AllowedBackends    []string
 	EnableDebug        bool
 	EnableVerboseDebug bool
 	TimeToLive         int64
 	BackendOptions     any
+	// identity is the authenticated user, nil when the authentication is disabled.
+	identity *auth.Identity
 
 	l               sync.Mutex
 	queryableOption *queryableOption
@@ -119,18 +126,22 @@ func (ctxValue *contextValue) debugLevel() types.DebugLevel {
 
 func (ctxValue *contextValue) getAppenderOptions() types.AppenderOptions {
 	return types.AppenderOptions{
-		Tenant:         ctxValue.Tenant,
-		RequestDebug:   ctxValue.debugLevel(),
-		WriteTTL:       ctxValue.TimeToLive,
-		BackendOptions: ctxValue.BackendOptions,
+		Tenant:          ctxValue.Tenant,
+		Backend:         ctxValue.Backend,
+		AllowedBackends: ctxValue.AllowedBackends,
+		RequestDebug:    ctxValue.debugLevel(),
+		WriteTTL:        ctxValue.TimeToLive,
+		BackendOptions:  ctxValue.BackendOptions,
 	}
 }
 
 func (ctxValue *contextValue) getQuerierOptions() types.QuerierOptions {
 	return types.QuerierOptions{
-		Tenant:         ctxValue.Tenant,
-		RequestDebug:   ctxValue.debugLevel(),
-		BackendOptions: ctxValue.BackendOptions,
+		Tenant:          ctxValue.Tenant,
+		Backend:         ctxValue.Backend,
+		AllowedBackends: ctxValue.AllowedBackends,
+		RequestDebug:    ctxValue.debugLevel(),
+		BackendOptions:  ctxValue.BackendOptions,
 	}
 }
 
@@ -159,6 +170,12 @@ func (ctxValue *contextValue) makeQueryable() (types.QueryableWithOptions, error
 
 	if ctxValue.queryableOption.ForcedMatcher != nil {
 		limitOption.ForcedMatchers = append(limitOption.ForcedMatchers, ctxValue.queryableOption.ForcedMatcher)
+	}
+
+	// The forced matchers of the user are added to the one of the header, the
+	// header can't replace them.
+	if ctxValue.identity != nil {
+		limitOption.ForcedMatchers = append(limitOption.ForcedMatchers, ctxValue.identity.ForcedMatchers...)
 	}
 
 	if ctxValue.store.TenantLabelName != "" && ctxValue.Tenant != "" {

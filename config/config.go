@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"dario.cat/mergo"
@@ -34,6 +35,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
 
@@ -60,10 +62,13 @@ var deprecatedKeys = map[string]string{ //nolint:gochecknoglobals
 
 type Warnings []error
 
-// Load loads the configuration from files and directories to a struct.
+// Load loads the configuration from files and directories to a struct, then
+// applies the config flags (see ConfigFlags) explicitly set in flagSet.
+// flagSet must already be parsed; its other flags (command flags) are ignored
+// here. It may be nil when there are no command-line flags.
 // Returns the config, warnings and an error.
-func Load(paths ...string) (Config, Warnings, error) {
-	cfg, warnings, err := loadToStruct(true, os.Args, paths...)
+func Load(flagSet *pflag.FlagSet, paths ...string) (Config, Warnings, error) {
+	cfg, warnings, err := loadToStruct(true, flagSet, paths...)
 	if err != nil {
 		return cfg, warnings, err
 	}
@@ -75,8 +80,8 @@ func Load(paths ...string) (Config, Warnings, error) {
 	return cfg, warnings, nil
 }
 
-func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Config, Warnings, error) {
-	k, warnings, err := load(withDefaultAndFlags, args, paths...)
+func loadToStruct(withDefaultAndFlags bool, flagSet *pflag.FlagSet, paths ...string) (Config, Warnings, error) {
+	k, warnings, err := load(withDefaultAndFlags, flagSet, paths...)
 
 	var config Config
 
@@ -104,16 +109,107 @@ func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Con
 		return config, unwrapErrors(warnings), err
 	}
 
+	if err := checkSecuritySections(k, unmarshalConf); err != nil {
+		return config, unwrapErrors(warnings), err
+	}
+
 	return config, unwrapErrors(warnings), nil
 }
 
+// checkSecuritySections decodes the security sections alone, into a throwaway
+// struct, and returns an error if they contain an unknown key or an invalid value.
+//
+// The decoder doesn't report the unused keys in Metadata when ErrorUnused fails,
+// hence this second decode with ErrorUnused disabled. It is limited to the security
+// sections because the decoder also skips Metadata for every struct holding a
+// decode error: an invalid value elsewhere (e.g. "log.level: abc") must not hide
+// a typo in "auth". An invalid value inside a security section is fatal too, as
+// the decoder then can't list its unknown keys, and a value that can't be decoded
+// is left to its zero value, which can disable a restriction as well.
+func checkSecuritySections(k *koanf.Koanf, unmarshalConf koanf.UnmarshalConf) error {
+	raw := k.Raw()
+	sections := make(map[string]any, len(securitySections))
+
+	for _, section := range securitySections {
+		if value, ok := raw[section]; ok {
+			sections[section] = value
+		}
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	var (
+		discarded Config
+		metadata  mapstructure.Metadata
+	)
+
+	decoderConf := *unmarshalConf.DecoderConfig
+	decoderConf.TagName = unmarshalConf.Tag
+	decoderConf.ErrorUnused = false
+	decoderConf.Metadata = &metadata
+	decoderConf.Result = &discarded
+
+	decoder, err := mapstructure.NewDecoder(&decoderConf)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(sections); err != nil {
+		return fmt.Errorf(
+			"%w: invalid value in a security section (%s): %w",
+			ErrInvalidValue, strings.Join(securitySections, ", "), err,
+		)
+	}
+
+	return checkSecurityUnusedKeys(metadata.Unused)
+}
+
+// securitySections are the config sections where an unknown key is an error
+// instead of a warning: a typo there (e.g. "tenat" for a user's "tenant", or
+// "enable" for "enabled") silently weakens the access restrictions.
+var securitySections = []string{"auth", "tls"} //nolint:gochecknoglobals
+
+// checkSecurityUnusedKeys returns an error listing the unknown keys found in the
+// security sections. unused holds the full key paths reported by the decoder,
+// e.g. "auth.users[0].tenat".
+func checkSecurityUnusedKeys(unused []string) error {
+	var invalid []string
+
+	for _, key := range unused {
+		for _, section := range securitySections {
+			if key == section || strings.HasPrefix(key, section+".") || strings.HasPrefix(key, section+"[") {
+				invalid = append(invalid, key)
+
+				break
+			}
+		}
+	}
+
+	if len(invalid) == 0 {
+		return nil
+	}
+
+	slices.Sort(invalid)
+
+	return fmt.Errorf(
+		"%w: unknown keys in a security section (%s): %s",
+		ErrInvalidValue, strings.Join(securitySections, ", "), strings.Join(invalid, ", "),
+	)
+}
+
 // load the configuration from files and directories.
-func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
+func load(
+	withDefaultAndFlags bool,
+	flagSet *pflag.FlagSet,
+	paths ...string,
+) (*koanf.Koanf, prometheus.MultiError, error) {
 	fileEnvKoanf, warnings, errors := loadPaths(paths)
 
 	// Load config from environment variables.
 	// The warnings are filled only after k.Load is called.
-	envToKey, envWarnings := envToKeyFunc()
+	envToKey, envWarnings, unknownSecurityEnv := envToKeyFunc()
 
 	// Environment variable overwrite basic types (string, int), arrays, and maps.
 	envMergeFunc := mergeFunc(mergo.WithOverride)
@@ -123,6 +219,17 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 
 	if len(*envWarnings) > 0 {
 		warnings = append(warnings, *envWarnings...)
+	}
+
+	// Unknown environment variables are ignored, except in the security sections
+	// where a typo would silently weaken the access restrictions.
+	if len(*unknownSecurityEnv) > 0 {
+		slices.Sort(*unknownSecurityEnv)
+
+		errors.Append(fmt.Errorf(
+			"%w: unknown environment variables for a security section (%s): %s",
+			ErrInvalidValue, strings.Join(securitySections, ", "), strings.Join(*unknownSecurityEnv, ", "),
+		))
 	}
 
 	// Migrate deprecated keys before the defaults are merged. At this point fileEnvKoanf
@@ -143,16 +250,29 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 	warning = k.Load(confmap.Provider(fileEnvKoanf.All(), delimiter), nil, mergeFunc(mergo.WithOverride))
 	warnings.Append(warning)
 
-	if withDefaultAndFlags {
-		// Parse the config flags without the command flags because the command flags would
-		// create warnings about invalid keys when the config is converted to a struct.
-		flagSet := NewFlagSet("config", ConfigFlags())
+	if withDefaultAndFlags && flagSet != nil {
+		// Read the flag set already parsed by the caller instead of parsing the
+		// arguments a second time with only the config flags: such a parser doesn't
+		// know the command flags (--config, subcommand options, ...), stops at the
+		// first of them and silently drops every config flag placed after it.
+		// Only the config flags are kept, because the command flags would create
+		// warnings about invalid keys when the config is converted to a struct.
+		configFlagNames := make(map[string]bool)
 
-		// The error can be safely ignored as the flags were already parsed in the daemon.
-		_ = flagSet.Parse(args)
+		for _, f := range ConfigFlags() {
+			configFlagNames[f.Name] = true
+		}
+
+		provider := posflag.ProviderWithFlag(flagSet, delimiter, k, func(f *pflag.Flag) (string, any) {
+			if !configFlagNames[f.Name] {
+				return "", nil
+			}
+
+			return f.Name, posflag.FlagVal(flagSet, f)
+		})
 
 		// Overwrite the config with the command line args set explicitly.
-		warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil)
+		warning = k.Load(provider, nil)
 		warnings.Append(warning)
 	}
 
@@ -197,7 +317,9 @@ func migrateDeprecatedKeys(k *koanf.Koanf) prometheus.MultiError {
 // envToKeyFunc returns a function that converts an environment variable to a configuration key
 // and a pointer to Warnings, the warnings are filled only after koanf.Load has been called.
 // Panics if two config keys correspond to the same environment variable.
-func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
+// The returned slice is filled, when the environment is loaded, with the
+// variables of a security section that match no config key.
+func envToKeyFunc() (func(string) string, *prometheus.MultiError, *[]string) {
 	// Get all config keys from an empty config.
 	k := koanf.New(delimiter)
 	_ = k.Load(structs.Provider(Config{}, "yaml"), nil)
@@ -227,11 +349,29 @@ func envToKeyFunc() (func(string) string, *prometheus.MultiError) {
 	}
 
 	warnings := make(prometheus.MultiError, 0)
+	unknownSecurity := make([]string, 0)
 	envFunc := func(s string) string {
-		return envToKey[s]
+		key, ok := envToKey[s]
+		if !ok && isSecurityEnvKey(s) {
+			unknownSecurity = append(unknownSecurity, s)
+		}
+
+		return key
 	}
 
-	return envFunc, &warnings
+	return envFunc, &warnings, &unknownSecurity
+}
+
+// isSecurityEnvKey reports whether an environment variable belongs to one of the
+// securitySections, e.g. SQUIRRELDB_AUTH_ENABLED.
+func isSecurityEnvKey(envKey string) bool {
+	for _, section := range securitySections {
+		if strings.HasPrefix(envKey, toEnvKey(section)+"_") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // mergeFunc return a merge function to use with koanf.

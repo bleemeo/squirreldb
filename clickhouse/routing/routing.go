@@ -135,6 +135,12 @@ type host struct {
 	// but not ready. Empty when ready. Surfaced in pick's error and the debug
 	// endpoint so an operator sees WHY a host is excluded (e.g. bad credentials).
 	cause string
+	// probedAt is when the last probe completed, zero before the first one.
+	probedAt time.Time
+	// lag is the replica delay measured by the last probe that reached the lag
+	// check, and lagKnown whether one did.
+	lag      time.Duration
+	lagKnown bool
 }
 
 func (h *host) state() (reachable, ready bool) {
@@ -187,6 +193,16 @@ func (h *host) set(reachable, ready bool, causeMessage string, logger zerolog.Lo
 
 	h.reachable, h.ready = reachable, ready
 	h.cause = causeMessage
+	h.probedAt = time.Now()
+}
+
+// setLag records the replica delay measured by a probe.
+func (h *host) setLag(lag time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.lag = lag
+	h.lagKnown = true
 }
 
 // Conn is a driver.Conn routing to healthy hosts. It is safe for concurrent use.
@@ -514,6 +530,11 @@ type HostStatus struct {
 	// Cause is the reason the host is not fully healthy (ping error, missing tables,
 	// lagging); empty when ready.
 	Cause string `json:"cause,omitempty"`
+	// LastProbe is when the health monitor last probed the host.
+	LastProbe time.Time `json:"last_probe"`
+	// ReplicaLagSeconds is the delay of the most-delayed replica of the host, as
+	// measured by the last probe that reached the lag check. Nil when unknown.
+	ReplicaLagSeconds *float64 `json:"replica_lag_seconds,omitempty"`
 }
 
 // Hosts returns the current health of every configured host (for introspection,
@@ -522,16 +543,67 @@ func (c *Conn) Hosts() []HostStatus {
 	statuses := make([]HostStatus, 0, len(c.hosts))
 
 	for _, h := range c.hosts {
-		reachable, ready := h.state()
-		statuses = append(statuses, HostStatus{
-			Address:   h.addr,
-			Reachable: reachable,
-			Ready:     ready,
-			Cause:     h.lastCause(),
-		})
+		statuses = append(statuses, h.status())
 	}
 
 	return statuses
+}
+
+func (h *host) status() HostStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	status := HostStatus{
+		Address:   h.addr,
+		Reachable: h.reachable,
+		Ready:     h.ready,
+		Cause:     h.cause,
+		LastProbe: h.probedAt,
+	}
+
+	if h.lagKnown {
+		lag := h.lag.Seconds()
+		status.ReplicaLagSeconds = &lag
+	}
+
+	return status
+}
+
+// QueryLimitStatus is the state of the query-concurrency limiter.
+type QueryLimitStatus struct {
+	// Enabled is false when no limit is applied (the server is unlimited).
+	Enabled bool `json:"enabled"`
+	// Budget is the total (read+write) number of in-flight queries allowed, and
+	// ReadBudget the part of it reads can use.
+	Budget     int `json:"budget"`
+	ReadBudget int `json:"read_budget"`
+	// InFlight is the number of queries holding a slot, split in reads and writes.
+	// They are a snapshot of the semaphores, slightly approximate under load.
+	InFlight       int `json:"in_flight"`
+	InFlightReads  int `json:"in_flight_reads"`
+	InFlightWrites int `json:"in_flight_writes"`
+}
+
+// QueryLimit returns the current state of the query-concurrency limiter (for
+// introspection, e.g. the status page).
+func (c *Conn) QueryLimit() QueryLimitStatus {
+	if c.sem == nil {
+		return QueryLimitStatus{}
+	}
+
+	inFlight := len(c.sem)
+	reads := len(c.readSem)
+
+	return QueryLimitStatus{
+		Enabled:    true,
+		Budget:     cap(c.sem),
+		ReadBudget: cap(c.readSem),
+		InFlight:   inFlight,
+		// A read holds a readSem slot before its sem slot, so reads may briefly
+		// exceed the sem count: never report negative writes.
+		InFlightReads:  min(reads, inFlight),
+		InFlightWrites: max(0, inFlight-reads),
+	}
 }
 
 // pick returns a host to route a call to: a ready one if any, otherwise a
@@ -785,8 +857,8 @@ func classifyTables(
 }
 
 // lagging reports whether the host's most-delayed replica is behind by more than
-// the configured threshold. On a single node (no replicated tables) the delay is
-// zero.
+// the configured threshold, and records the delay on the host. On a single node
+// (no replicated tables) the delay is zero.
 func (c *Conn) lagging(ctx context.Context, h *host) (bool, error) {
 	var delaySeconds uint64
 
@@ -797,7 +869,10 @@ func (c *Conn) lagging(ctx context.Context, h *host) (bool, error) {
 		return false, err
 	}
 
-	return time.Duration(delaySeconds)*time.Second > c.opts.LagThreshold, nil
+	delay := time.Duration(delaySeconds) * time.Second
+	h.setLag(delay)
+
+	return delay > c.opts.LagThreshold, nil
 }
 
 // --- driver.Conn implementation (route each call to a picked host) ---

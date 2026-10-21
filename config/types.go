@@ -22,9 +22,14 @@ const (
 	BackendCassandra  = "cassandra"
 	BackendClickHouse = "clickhouse"
 	BackendDummy      = "dummy"
+	BackendSandbox    = "sandbox"
 )
 
 // Config is the main structured configuration.
+//
+// Secrets (passwords, hashes, tokens, DSNs) must be tagged `sensitive:"true"`: the
+// admin status page (/debug/status) shows the effective configuration with these
+// fields redacted.
 type Config struct {
 	Backend string `yaml:"backend"`
 	// ExtraWriteBackend is an optional additional, best-effort write target
@@ -38,8 +43,13 @@ type Config struct {
 	ExtraWriteBackend   string        `yaml:"extra_write_backend"`
 	Cassandra           Cassandra     `yaml:"cassandra"`
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
+	Sandbox             Sandbox       `yaml:"sandbox"`
+	Routing             Routing       `yaml:"routing"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
+	AdminListenAddress  string        `yaml:"admin_listen_address"`
+	TLS                 TLS           `yaml:"tls"`
+	Auth                Auth          `yaml:"auth"`
 	TenantLabelName     string        `yaml:"tenant_label_name"`
 	RequireTenantHeader bool          `yaml:"require_tenant_header"`
 	RemoteStorage       RemoteStorage `yaml:"remote_storage"`
@@ -55,6 +65,57 @@ type Config struct {
 	// MaxAllowedTimeInFuture defines how much duration in the future is allowed for points' timestamps.
 	// Point more that this amount in the future might be rejected.
 	MaxAllowedTimeInFuture time.Duration `yaml:"max_allowed_time_in_future"`
+}
+
+// TLS configures the TLS of the HTTP API, on listen_address and admin_listen_address.
+// The fields have the same meaning as in the tls_server_config of the Prometheus web
+// configuration file. TLS is enabled when cert_file is set.
+type TLS struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// ClientCAFile is the CA used to verify the client certificates (mTLS).
+	ClientCAFile string `yaml:"client_ca_file"`
+	// ClientAuthType is one of NoClientCert (the default), RequestClientCert,
+	// RequireAnyClientCert, VerifyClientCertIfGiven or RequireAndVerifyClientCert.
+	ClientAuthType string `yaml:"client_auth_type"`
+	// MinVersion is one of TLS10, TLS11, TLS12 (the default) or TLS13.
+	MinVersion string `yaml:"min_version"`
+}
+
+// Auth configures the authentication of the HTTP API. See docs/authentication.md.
+// Unknown keys in this section (and in TLS) are errors, not warnings: see
+// securitySections.
+type Auth struct {
+	// Enabled enables the authentication (disabled by default).
+	Enabled bool `yaml:"enabled"`
+	// MetricsRequireAuth makes /metrics require an authenticated user. /ready never
+	// requires authentication.
+	MetricsRequireAuth bool `yaml:"metrics_require_auth"`
+	// Users can only be set in configuration files: unlike the other settings, they
+	// can't be set by environment variables or flags. Users defined in multiple files
+	// are concatenated.
+	Users []AuthUser `yaml:"users"`
+}
+
+// AuthUser is a user of the HTTP API.
+type AuthUser struct {
+	// Name is the basic auth username.
+	Name string `yaml:"name"`
+	// PasswordHash is the bcrypt hash of the basic auth password.
+	PasswordHash string `sensitive:"true" yaml:"password_hash"`
+	// TokenSHA256 is the hex encoded sha256 of a bearer token.
+	TokenSHA256 string `sensitive:"true" yaml:"token_sha256"`
+	// Tenant, when set, binds the user to this tenant.
+	Tenant string `yaml:"tenant"`
+	// Scopes are the permissions of the user: read, write and/or admin.
+	Scopes []string `yaml:"scopes"`
+	// ForcedMatcher restricts the series the user can read, e.g. 'env="prod"'.
+	ForcedMatcher string `yaml:"forced_matcher"`
+	// Backends, when set, are the only backends the user may use, for reads and
+	// writes: each one must be the default backend or one of 'routing.backends'.
+	// When a request of the user would go to the default backend and it isn't
+	// listed, the first one is used instead. See docs/routing.md.
+	Backends []string `yaml:"backends"`
 }
 
 type Internal struct {
@@ -78,7 +139,7 @@ type Installation struct {
 }
 
 type Sentry struct {
-	DSN string `yaml:"dsn"`
+	DSN string `sensitive:"true" yaml:"dsn"`
 }
 
 type Log struct {
@@ -102,7 +163,7 @@ type RemoteStorage struct {
 type Redis struct {
 	Addresses   []string `yaml:"addresses"`
 	Username    string   `yaml:"username"`
-	Password    string   `yaml:"password"`
+	Password    string   `sensitive:"true"    yaml:"password"`
 	SSL         bool     `yaml:"ssl"`
 	SSLInsecure bool     `yaml:"ssl_insecure"`
 	CertPath    string   `yaml:"cert_path"`
@@ -119,7 +180,7 @@ type Cassandra struct {
 	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`
 	Username               string        `yaml:"username"`
-	Password               string        `yaml:"password"`
+	Password               string        `sensitive:"true"                 yaml:"password"`
 	CertPath               string        `yaml:"cert_path"`
 	KeyPath                string        `yaml:"key_path"`
 	CAPath                 string        `yaml:"ca_path"`
@@ -138,7 +199,7 @@ type ClickHouse struct {
 	Addresses []string `yaml:"addresses"`
 	Database  string   `yaml:"database"`
 	Username  string   `yaml:"username"`
-	Password  string   `yaml:"password"`
+	Password  string   `sensitive:"true" yaml:"password"`
 	// ClusterName, when set, makes SquirrelDB create its tables with
 	// "ON CLUSTER <name>" and ReplicatedMergeTree engines (ClickHouse cluster
 	// mode). Empty means a single ClickHouse node (plain MergeTree). It must
@@ -170,6 +231,50 @@ type ClickHouse struct {
 	// carries its labels (~150-200 B), so this also bounds Redis memory. 0 uses the
 	// built-in default (200k points ≈ 35 MiB → block at ~2M points ≈ 350 MiB).
 	WALSoftThreshold int `yaml:"wal_soft_threshold"`
+}
+
+// Sandbox holds the configuration of the sandbox backend.
+// It is used when the "backend" option is set to "sandbox". The sandbox backend
+// serves deterministic fake data generated from a dataset and discards every
+// write; it has no external dependency. See docs/sandbox.md.
+type Sandbox struct {
+	// DatasetConfig is the path of the dataset definition file (yaml). Relative
+	// paths in that file are resolved relative to its directory. Empty uses the
+	// default dataset embedded in SquirrelDB.
+	DatasetConfig string `yaml:"dataset_config"`
+}
+
+// Routing holds the per-request backend routing configuration: it lets a
+// single SquirrelDB serve several backends, the backend of a request being
+// selected by the X-SquirrelDB-Backend header or by a tenant rule. Empty means
+// every request goes to Backend (the default route). See docs/routing.md.
+type Routing struct {
+	// Backends are the additional backends to start and make selectable, by the
+	// header or by a rule. Backend (the default route) is always selectable and
+	// must not be listed here, nor ExtraWriteBackend.
+	Backends []string `yaml:"backends"`
+	// Rules route a request without the X-SquirrelDB-Backend header by its
+	// tenant. They are evaluated in order and the first matching rule wins; a
+	// request matching no rule goes to Backend.
+	Rules []RoutingRule `yaml:"rules"`
+}
+
+// RoutingRule routes the requests of some tenants to a backend.
+type RoutingRule struct {
+	// Tenants are glob patterns matched against the tenant of the request, with
+	// the path.Match syntax ("*" matches any sequence of characters but "/", "?"
+	// a single character, "[...]" a character class). A request without tenant
+	// never matches a rule.
+	Tenants []string `yaml:"tenants"`
+	// Backend is the backend of the matching requests: Backend or one of
+	// Routing.Backends.
+	Backend string `yaml:"backend"`
+}
+
+// Enabled tells whether routing is configured, i.e. some requests may be served
+// by another backend than the default one.
+func (r Routing) Enabled() bool {
+	return len(r.Backends) > 0 || len(r.Rules) > 0
 }
 
 // Dummy holds the configuration of the dummy backend.

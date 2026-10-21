@@ -75,7 +75,7 @@ func SetTestEnvironment() {
 }
 
 func LoadConfigForTest() (config.Config, error, error) {
-	_, cfg, warnings, err := config.LoadConfigFromFlags("squirreldb-test", nil, os.Args)
+	_, cfg, warnings, err := config.LoadConfigFromFlags("squirreldb-test", nil, os.Args[1:])
 	if errors.Is(err, config.ErrNormalExit) {
 		os.Exit(0)
 	}

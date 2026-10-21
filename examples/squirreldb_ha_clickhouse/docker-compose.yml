@@ -1,6 +1,8 @@
 services:
+  # ClickHouse 26.8 LTS (see docs/clickhouse-cluster.md for the tested versions).
+  # The Keeper image has no 26.8.15 release; 26.8.14.3 is the latest 26.8 one.
   clickhouse-keeper-0:
-    image: clickhouse/clickhouse-keeper:26.3.10.60
+    image: clickhouse/clickhouse-keeper:26.8.14.3
     restart: unless-stopped
     labels:
       glouton.enable: "false"
@@ -11,7 +13,7 @@ services:
       - source: clickhouse_keeper_config
         target: /etc/clickhouse-keeper/keeper_config.xml 
   clickhouse-keeper-1:
-    image: clickhouse/clickhouse-keeper:26.3.10.60
+    image: clickhouse/clickhouse-keeper:26.8.14.3
     restart: unless-stopped
     labels:
       # Glouton is the monitoring agent made by Bleemeo.
@@ -26,7 +28,7 @@ services:
       - source: clickhouse_keeper_config
         target: /etc/clickhouse-keeper/keeper_config.xml 
   clickhouse-keeper-2:
-    image: clickhouse/clickhouse-keeper:26.3.10.60
+    image: clickhouse/clickhouse-keeper:26.8.14.3
     restart: unless-stopped
     labels:
       glouton.enable: "false"
@@ -38,7 +40,7 @@ services:
         target: /etc/clickhouse-keeper/keeper_config.xml 
 
   clickhouse-server-0:
-    image: clickhouse/clickhouse-server:26.3.10.60
+    image: clickhouse/clickhouse-server:26.8.15.10
     restart: unless-stopped
     labels:
       glouton.enable: "false"
@@ -61,7 +63,7 @@ services:
     command: [ "/bin/sh", "/srv/clickhouse-server-start.sh" ]
 
   clickhouse-server-1:
-    image: clickhouse/clickhouse-server:26.3.10.60
+    image: clickhouse/clickhouse-server:26.8.15.10
     restart: unless-stopped
     labels:
       glouton.enable: "false"

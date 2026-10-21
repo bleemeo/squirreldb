@@ -53,10 +53,9 @@ func (c *CassandraIndex) MigrationShards(ctx context.Context) ([]int32, error) {
 // MigrationShardExpiration returns when the shard's index postings are scheduled
 // to be dropped. That date is set to outlive the raw data, so a past expiration
 // means the data has already expired. The zero time means the shard has no
-// expiration entry: either pre-feature, or orphaned (its expiration metric was
-// lost before deleteShard could drop the shard, so its postings — and its
-// existing-shards entry — were never purged). Either way the raw data is gone, so
-// the migration skips the shard.
+// expiration entry: either it is not created yet (it is only set on the first
+// metric expiration refresh, about a day after the metrics are created), or it
+// was lost (pre-feature or orphaned shard).
 func (c *CassandraIndex) MigrationShardExpiration(ctx context.Context, shard int32) (time.Time, error) {
 	expiration, _, err := c.getShardExpirationFromStore(ctx, shard)
 	if errors.Is(err, errMetricDoesNotExist) {

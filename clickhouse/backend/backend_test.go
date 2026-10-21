@@ -18,9 +18,12 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/bleemeo/squirreldb/clickhouse/ddl"
 	"github.com/bleemeo/squirreldb/config"
 
 	"github.com/rs/zerolog"
@@ -45,5 +48,37 @@ func TestDropTablesRefusesNonTestDatabase(t *testing.T) {
 	// The error should name the refused database (it must not have tried to connect).
 	if !strings.Contains(err.Error(), "production") {
 		t.Errorf("error should name the refused database, got: %v", err)
+	}
+}
+
+// TestWithSchemaHint checks a METADATA_MISMATCH on tsdb_tags (a server joining a
+// cluster whose tsdb_tags has the legacy sorting key) gets the hint pointing to
+// the manual procedure, and that other errors are returned unchanged.
+func TestWithSchemaHint(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("Code: 342. METADATA_MISMATCH")
+
+	tagsErr := fmt.Errorf("wrapped: %w", &ddl.MetadataMismatchError{Table: "tsdb_tags", Err: cause})
+
+	got := withSchemaHint(tagsErr)
+	if !errors.Is(got, cause) {
+		t.Errorf("the original error is not wrapped: %v", got)
+	}
+
+	for _, want := range []string{"legacy", "(tenant, metric_name, id)", legacyTagsKeyDoc} {
+		if !strings.Contains(got.Error(), want) {
+			t.Errorf("hint should contain %q, got: %v", want, got)
+		}
+	}
+
+	for _, err := range []error{
+		nil,
+		cause,
+		&ddl.MetadataMismatchError{Table: "tsdb_data", Err: cause},
+	} {
+		if got := withSchemaHint(err); got != err { //nolint:errorlint // must be the same error
+			t.Errorf("withSchemaHint(%v) = %v, want it unchanged", err, got)
+		}
 	}
 }

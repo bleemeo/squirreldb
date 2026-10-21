@@ -98,6 +98,9 @@ func newBatchingTSDB(
 	return t, nil
 }
 
+// dummyRedisKeyPrefix is added to the Redis keyspace of the dummy temporary store.
+const dummyRedisKeyPrefix = "dummy-"
+
 // newTemporaryStore returns a Redis-backed store when Redis is configured, or an
 // in-memory store otherwise — the same logic (and same fail-loudly contract on a
 // Redis error) as the Cassandra and ClickHouse backends.
@@ -118,7 +121,10 @@ func newTemporaryStore(
 			),
 			redisTemporarystore.Options{
 				RedisOptions: redisCfg,
-				Keyspace:     redisCfg.Keyspace,
+				// The Cassandra batcher uses the same key names: a distinct
+				// prefix keeps the dummy backend from sharing the points
+				// buffered for Cassandra when both run together.
+				Keyspace: redisCfg.Keyspace + dummyRedisKeyPrefix,
 			},
 			storeLogger,
 		)

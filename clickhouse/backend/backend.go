@@ -199,6 +199,27 @@ func (b *Backend) dropReplicaRunbook() string {
 	return sb.String()
 }
 
+// legacyTagsKeyDoc points to the manual procedure for a cluster whose tsdb_tags
+// predates its sorting-key change.
+const legacyTagsKeyDoc = "docs/clickhouse-cluster.md, section " +
+	"\"Adding a server to a cluster created before the tsdb_tags key change\""
+
+// withSchemaHint adds an actionable hint to a schema creation error a SquirrelDB
+// upgrade can cause. A METADATA_MISMATCH on tsdb_tags is a new or rebuilt replica
+// of a cluster whose tsdb_tags was created with the legacy sorting key
+// (tenant, metric_name, id): Keeper refuses the new key, so the table must be
+// created by hand on that server (see tsdbTagsDDL in clickhouse/tsdb).
+func withSchemaHint(err error) error {
+	mismatch, ok := errors.AsType[*ddl.MetadataMismatchError](err)
+	if !ok || mismatch.Table != "tsdb_tags" {
+		return err
+	}
+
+	return fmt.Errorf("%w\n\nThis cluster's tsdb_tags was created by an older SquirrelDB, with the legacy "+
+		"sorting key (tenant, metric_name, id), and a new or rebuilt server cannot join it with the current one. "+
+		"Create tsdb_tags by hand on that server with the legacy key, then retry: see %s", err, legacyTagsKeyDoc)
+}
+
 func (b *Backend) BackendInfo() types.BackendInfo {
 	return types.BackendInfo{
 		ApplyMutableLabelInternally: false,
@@ -268,7 +289,7 @@ func (b *Backend) Start(ctx context.Context) error {
 		_ = conn.Close()
 		b.routing = nil
 
-		return fmt.Errorf("clickhouse: create schema: %w", err)
+		return fmt.Errorf("clickhouse: create schema: %w", withSchemaHint(err))
 	}
 
 	return nil
@@ -721,5 +742,5 @@ func (b *Backend) EnsureSchema(ctx context.Context) error {
 		return fmt.Errorf("%w\n\n%s", err, b.dropReplicaRunbook())
 	}
 
-	return err
+	return withSchemaHint(err)
 }

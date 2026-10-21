@@ -107,7 +107,7 @@ func parseOptions(args []string) (options, error) {
 	// Import options
 	flags.StringVarP(&opts.inputFile, "input-file", "i", "", "Input file")
 	flags.StringVar(&writeURL, "write-url", "http://localhost:9201/api/v1/write", "SquirrelDB write URL")
-	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (if left blank, it will use the host of the write-url / to disable it, set to 'skip')")                 //nolint:lll
+	flags.StringVar(&preAggregURL, "pre-aggreg-url", "", "SquirrelDB pre-aggregation URL (default: on the write-url host, set it if SquirrelDB uses admin_listen_address / 'skip' disables it)") //nolint:lll
 	flags.BoolVar(&opts.importKeepNaNs, "import-keep-nan", false, "Whether NaNs should be imported (be aware that parquet export/import doesn't allow to distinguish stale NaNs & normal NaNs)") //nolint:lll
 	flags.BoolVar(&opts.importConvertToStaleNaNs, "import-convert-to-stale-nan", false, "Whether NaNs should be converted to stale NaNs")                                                        //nolint:lll
 

@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/bleemeo/squirreldb/api"
+	"github.com/bleemeo/squirreldb/api/auth"
+	"github.com/bleemeo/squirreldb/api/status"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/core"
 	"github.com/bleemeo/squirreldb/core/version"
@@ -61,7 +63,9 @@ type SquirrelDB struct {
 	squirrelDBOnce sync.Once
 	squirreldb     *core.SquirrelDB
 
-	api    api.API
+	api api.API
+	// tlm is the telemetry, nil when it is disabled.
+	tlm    *telemetry.Telemetry
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
@@ -231,6 +235,13 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	}
 
 	s.api.ListenAddress = s.Config.ListenAddress
+	s.api.AdminListenAddress = s.Config.AdminListenAddress
+	s.api.TLS = s.Config.TLS.TLSOptions()
+	s.api.Auth = auth.Options{
+		Enabled:            s.Config.Auth.Enabled,
+		MetricsRequireAuth: s.Config.Auth.MetricsRequireAuth,
+		Users:              s.Config.Auth.AuthUsers(),
+	}
 	s.api.Queryable = queryable
 	s.api.Appendable = appendable
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.PromQL.MaxEvaluatedPoints) //nolint:gosec
@@ -243,23 +254,58 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 	s.api.DefaultTTL = s.Config.DefaultTimeToLive
+	s.api.Status = status.Sources{
+		Backends:  s.getSquirrelDB().BackendStates,
+		Cluster:   s.getSquirrelDB().StartedCluster,
+		Telemetry: s.telemetryIDs,
+		// The status page redacts the secrets of the configuration.
+		Config: s.Config,
+	}
 
 	if s.api.MetricRegistry == nil {
 		s.api.MetricRegistry = prometheus.DefaultRegisterer
 	}
 
+	// The backend of a request (X-SquirrelDB-Backend header and routing rules) is
+	// validated when the request starts, so an invalid header is a 400.
+	s.api.BackendResolver = s.getSquirrelDB()
+
 	if backend, err := s.backend(ctx); err == nil {
 		s.api.BackendName = s.Config.Backend
 		s.api.BackendDebug = backend
 
-		// The header option parser and the (legacy) debug endpoints are backend
-		// capabilities, reached on the unwrapped backend — not by asserting a TSDB.
-		if parser, ok := backend.(types.HTTPOptionsParser); ok {
-			s.api.OptionsParser = parser
-		}
-
+		// The (legacy) debug endpoints are a backend capability, reached on the
+		// unwrapped backend — not by asserting a TSDB.
 		if debug, ok := backend.(api.TSDBDebugEndpoint); ok {
 			s.api.DebugEndpoint = debug
+		}
+	}
+
+	// The header option parser is a backend capability too; with routing, core
+	// parses the headers for every selectable backend.
+	parser, err := s.getSquirrelDB().HTTPOptionsParser(ctx)
+	if err != nil {
+		readiness <- fmt.Errorf("HTTP options parser start fail: %w", err)
+
+		return
+	}
+
+	if parser != nil {
+		s.api.OptionsParser = parser
+	}
+
+	routed, err := s.getSquirrelDB().Routed(ctx)
+	if err != nil {
+		readiness <- fmt.Errorf("routed backends start fail: %w", err)
+
+		return
+	}
+
+	if len(routed) > 0 {
+		s.api.RoutedBackendDebug = make(map[string]api.BackendDebugRegistrar, len(routed))
+
+		for name, backend := range routed {
+			s.api.RoutedBackendDebug[name] = backend
 		}
 	}
 
@@ -387,7 +433,19 @@ func (s *SquirrelDB) telemetry(ctx context.Context) error {
 	)
 	tlm.Start(ctx)
 
+	s.tlm = tlm
+
 	return nil
+}
+
+// telemetryIDs returns the telemetry cluster and node IDs, empty when the
+// telemetry is disabled or did not acquire them yet.
+func (s *SquirrelDB) telemetryIDs() (string, string) {
+	if s.tlm == nil {
+		return "", ""
+	}
+
+	return s.tlm.IDs()
 }
 
 // mutableLabelProcessor returns the mutable label processor from the backend. It

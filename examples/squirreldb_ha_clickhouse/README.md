@@ -107,6 +107,10 @@ change. It also never recreates tables on restart (only at first bootstrap) and
 uses name-based Keeper paths, so re-creating a table re-attaches to the existing
 data instead of forking. Bringing the node back is the manual operation below:
 
+(The `curl` commands below use SquirrelDB's main port `9201`. If you set
+`admin_listen_address`, the `/debug/` endpoints are only served on that address:
+use it instead.)
+
 Steps (the recreated node is `clickhouse-server-0`, whose replica macro is
 `replica01` — see `clickhouse-server-start.sh`; run the SQL on a **healthy** node,
 here `clickhouse-server-1`):
@@ -129,6 +133,10 @@ here `clickhouse-server-1`):
    ```
    curl -XPOST http://squirreldb:9201/debug/clickhouse/create_tables
    ```
+   If it fails on `tsdb_tags` with `METADATA_MISMATCH`, the cluster's `tsdb_tags`
+   was created by an older SquirrelDB with the legacy sorting key: create it by hand
+   on the rebuilt node first, see "Adding a server to a cluster created before the
+   tsdb_tags key change" in [docs/clickhouse-cluster.md](../../docs/clickhouse-cluster.md).
    Without SquirrelDB, do it by hand: copy each table's definition from a healthy
    node and run it on the rebuilt one (the name-based path and `{replica}` macro
    make it re-attach):

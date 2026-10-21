@@ -24,6 +24,7 @@ import (
 	cassandrabackend "github.com/bleemeo/squirreldb/cassandra/backend"
 	clickhousebackend "github.com/bleemeo/squirreldb/clickhouse/backend"
 	dummybackend "github.com/bleemeo/squirreldb/dummy/backend"
+	sandboxbackend "github.com/bleemeo/squirreldb/sandbox/backend"
 )
 
 // Compile-time checks that each backend exposes, on the (never-wrapped) Backend
@@ -38,4 +39,5 @@ var (
 	_ Backend                 = (*cassandrabackend.Backend)(nil)
 	_ Backend                 = (*clickhousebackend.Backend)(nil)
 	_ Backend                 = (*dummybackend.Backend)(nil)
+	_ Backend                 = (*sandboxbackend.Backend)(nil)
 )

@@ -77,6 +77,70 @@ All configuration options can be overriden by environment variables. The environ
 
 For example, cassandra.addresses becomes `SQUIRRELDB_CASSANDRA_ADDRESSES`.
 
+### Admin endpoints
+
+SquirrelDB serves the Prometheus API (remote read/write, PromQL) on `listen_address`
+(`localhost:9201` by default). By default the same address also serves the admin
+endpoints: everything under `/debug/` (index inspection, flush, pre-aggregation, pprof,
+backend operations such as `/debug/clickhouse/...`) and the `/mutable/` label API.
+`curl http://localhost:9201/debug/` lists the debug endpoints.
+
+To expose the Prometheus API without these endpoints, set `admin_listen_address`
+(or `--admin_listen_address`, or `SQUIRRELDB_ADMIN_LISTEN_ADDRESS`) to another address,
+e.g. `localhost:9202`. The admin endpoints are then served only on that address and
+return 404 on `listen_address`. `/metrics` and `/ready` are served on both.
+
+Endpoints that change state (e.g. `/debug/flush`, `/debug/preaggregate`) should be
+called with `POST`. They still accept `GET` for backward compatibility, but this is
+deprecated and logs a warning.
+
+Open `/debug/` in a browser for a read-only status page telling whether the node is
+healthy and, if not, why: backends, ClickHouse hosts and WAL, cluster, TLS and users,
+and the effective configuration with its secrets redacted. The same report is available
+as JSON on `/debug/status`. See [docs/admin-status.md](docs/admin-status.md).
+
+### Security
+
+By default SquirrelDB serves plain HTTP without authentication and trusts the
+`X-SquirrelDB-Tenant` header: only expose it to trusted clients, or keep it on localhost.
+To expose it, enable TLS (`tls.cert_file`, `tls.key_file`, optional mTLS) and
+authentication (`auth.enabled` and `auth.users`): users authenticated by basic auth
+(bcrypt) or bearer token (sha256), with `read`, `write` and `admin` scopes, optionally
+bound to a tenant and restricted by a forced matcher. A good setup serves the admin
+endpoints on `admin_listen_address: localhost:9202` and exposes `listen_address` with
+TLS and authentication. `squirreldb auth hash-password` and `squirreldb auth gen-token`
+generate the credentials.
+
+SquirrelDB warns at startup when a listener is reachable from the network without
+authentication. See [docs/authentication.md](docs/authentication.md).
+
+## Backend routing
+
+A single SquirrelDB can serve several backends, the backend of a request being selected by the
+`X-SquirrelDB-Backend` header or by a rule on the tenant (e.g. demo accounts served by the sandbox backend):
+
+```yaml
+backend: clickhouse
+routing:
+  backends: [sandbox]
+  rules:
+    - tenants: ["demo-*"]
+      backend: sandbox
+```
+
+See [docs/routing.md](docs/routing.md).
+
+
+## Sandbox
+
+SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:
+
+```sh
+SQUIRRELDB_BACKEND=sandbox ./squirreldb
+```
+
+See [docs/sandbox.md](docs/sandbox.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
