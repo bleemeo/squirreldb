@@ -65,6 +65,7 @@ func DefaultConfig() Config {
 			Keyspace:    "",
 		},
 		ListenAddress:       "localhost:9201",
+		AdminListenAddress:  "",
 		TenantLabelName:     "__account_id",
 		RequireTenantHeader: false,
 		RemoteStorage: RemoteStorage{

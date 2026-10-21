@@ -231,6 +231,7 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	}
 
 	s.api.ListenAddress = s.Config.ListenAddress
+	s.api.AdminListenAddress = s.Config.AdminListenAddress
 	s.api.Queryable = queryable
 	s.api.Appendable = appendable
 	s.api.PromQLMaxEvaluatedPoints = uint64(s.Config.PromQL.MaxEvaluatedPoints) //nolint:gosec

@@ -40,6 +40,7 @@ type Config struct {
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
+	AdminListenAddress  string        `yaml:"admin_listen_address"`
 	TenantLabelName     string        `yaml:"tenant_label_name"`
 	RequireTenantHeader bool          `yaml:"require_tenant_header"`
 	RemoteStorage       RemoteStorage `yaml:"remote_storage"`

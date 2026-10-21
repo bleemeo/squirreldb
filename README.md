@@ -77,6 +77,23 @@ All configuration options can be overriden by environment variables. The environ
 
 For example, cassandra.addresses becomes `SQUIRRELDB_CASSANDRA_ADDRESSES`.
 
+### Admin endpoints
+
+SquirrelDB serves the Prometheus API (remote read/write, PromQL) on `listen_address`
+(`localhost:9201` by default). By default the same address also serves the admin
+endpoints: everything under `/debug/` (index inspection, flush, pre-aggregation, pprof,
+backend operations such as `/debug/clickhouse/...`) and the `/mutable/` label API.
+`curl http://localhost:9201/debug/` lists the debug endpoints.
+
+To expose the Prometheus API without these endpoints, set `admin_listen_address`
+(or `--admin_listen_address`, or `SQUIRRELDB_ADMIN_LISTEN_ADDRESS`) to another address,
+e.g. `localhost:9202`. The admin endpoints are then served only on that address and
+return 404 on `listen_address`. `/metrics` and `/ready` are served on both.
+
+Endpoints that change state (e.g. `/debug/flush`, `/debug/preaggregate`) should be
+called with `POST`. They still accept `GET` for backward compatibility, but this is
+deprecated and logs a warning.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

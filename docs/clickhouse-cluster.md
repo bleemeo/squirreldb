@@ -34,6 +34,10 @@ first move is a data migration, and it is much easier to reason about with exact
 one ClickHouse server. The second move needs no migration of your own: the tables are
 already replicated, so ClickHouse itself copies the data to the new server.
 
+> **Admin endpoints.** The `curl` commands below call SquirrelDB's `/debug/` endpoints
+> on its main port (`9201`). If `admin_listen_address` is set, these endpoints are only
+> served on that address: use it instead (they return 404 on the main port).
+
 # Single node → single-node cluster
 
 ## 1. Configure ClickHouse

@@ -30,6 +30,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -89,8 +90,12 @@ type TSDBDebugEndpoint interface {
 // API it the SquirrelDB HTTP API server.
 type API struct {
 	ListenAddress string
-	Queryable     types.QueryableWithOptions
-	Appendable    types.AppendableWithOptions
+	// AdminListenAddress, when set, moves the admin endpoints (/debug/ and
+	// /mutable/) to a dedicated listener on this address: they are no longer
+	// served on ListenAddress. When empty, everything is served on ListenAddress.
+	AdminListenAddress string
+	Queryable          types.QueryableWithOptions
+	Appendable         types.AppendableWithOptions
 	// OptionsParser (optional) parses per-request backend options from HTTP headers;
 	// DebugEndpoint (optional) exposes the legacy index/flush/pre-aggregate debug
 	// operations. Both are backend capabilities, set only when the backend provides
@@ -120,8 +125,12 @@ type API struct {
 	ready                 atomic.Int32
 	router                http.Handler
 	listenPort            int
+	adminListenPort       int
 	metrics               *metrics
 	backendDebugEndpoints []backendDebugEndpoint
+	// adminRouter serves the admin endpoints on AdminListenAddress. It is nil
+	// when AdminListenAddress is empty, the admin endpoints then being on router.
+	adminRouter http.Handler
 
 	FuturePointsBackdateOffset time.Duration
 }
@@ -269,55 +278,17 @@ func (a *API) init(ctx context.Context) error {
 
 	router := route.New()
 
-	router.Get("/metrics", promhttp.Handler().ServeHTTP)
-	router.Get("/ready", a.readyHandler)
-	router.Get("/debug/", a.debugHelpHandler)
-	router.Get("/debug/index_info", a.indexInfoHandler)
-	router.Get("/debug/flush", a.flushHandler)
-	router.Get("/debug/index_verify", a.indexVerifyHandler)
-	router.Get("/debug/index_dump", a.indexDumpHandler)
-	router.Get("/debug/index_dump_by_labels", a.indexDumpByLabelsHandler)
-	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
-	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
-	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
-	router.Get("/debug/index_block", a.indexBlockHandler)
-	router.Get("/debug/index_unblock", a.indexUnblockHandler)
-	router.Get("/debug/toggle_debug_query", func(w http.ResponseWriter, r *http.Request) {
-		debugRequest := requestScopedStore.ToggleDebug()
+	// The admin endpoints share the main router unless they have their own listener.
+	adminRouter := router
+	if a.AdminListenAddress != "" {
+		adminRouter = route.New()
+		a.adminRouter = adminRouter
 
-		fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
-	})
-	router.Get("/debug/preaggregate", a.aggregateHandler)
-	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
-	router.Post("/debug/mutable_import", a.mutableImportHandler)
-	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
-
-	if a.BackendDebug != nil && a.BackendName != "" {
-		prefix := "/debug/" + a.BackendName
-
-		a.BackendDebug.RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc) {
-			full := prefix + path
-
-			switch method {
-			case http.MethodGet:
-				router.Get(full, handler)
-			case http.MethodPost:
-				router.Post(full, handler)
-			default:
-				a.Logger.Warn().Msgf("ignoring backend debug endpoint %s: unsupported method %q", full, method)
-
-				return
-			}
-
-			a.backendDebugEndpoints = append(a.backendDebugEndpoints,
-				backendDebugEndpoint{method: method, path: full, description: description})
-		})
+		a.registerCommonRoutes(adminRouter)
 	}
 
-	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
-	router.Del("/mutable/names", a.mutableLabelNamesDeleteHandler)
-	router.Post("/mutable/values", a.mutableLabelValuesWriteHandler)
-	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
+	a.registerCommonRoutes(router)
+	a.registerAdminRoutes(adminRouter, requestScopedStore)
 
 	api := NewPrometheus(
 		requestScopedStore,
@@ -402,7 +373,95 @@ func (a *API) init(ctx context.Context) error {
 	return nil
 }
 
+// registerCommonRoutes registers the routes served on every listener.
+func (a *API) registerCommonRoutes(router *route.Router) {
+	router.Get("/metrics", promhttp.Handler().ServeHTTP)
+	router.Get("/ready", a.readyHandler)
+}
+
+// registerAdminRoutes registers the admin endpoints: the troubleshooting and
+// maintenance endpoints under /debug/ (including the backend-specific ones) and
+// the mutable labels write API. They are served on AdminListenAddress when set.
+func (a *API) registerAdminRoutes(router *route.Router, requestScopedStore *requestscoped.Store) {
+	router.Get("/debug/", a.debugHelpHandler)
+	router.Get("/debug/index_info", a.indexInfoHandler)
+	a.registerMutatingRoute(router, "/debug/flush", a.flushHandler, nil)
+	// index_verify only changes the index when asked to fix it.
+	a.registerMutatingRoute(router, "/debug/index_verify", a.indexVerifyHandler, func(r *http.Request) bool {
+		return r.URL.Query().Get("fix") != ""
+	})
+	router.Get("/debug/index_dump", a.indexDumpHandler)
+	router.Get("/debug/index_dump_by_labels", a.indexDumpByLabelsHandler)
+	router.Get("/debug/index_dump_by_expiration", a.indexDumpByExpirationDateHandler)
+	router.Get("/debug/index_dump_by_shard", a.indexDumpByShardHandler)
+	router.Get("/debug/index_dump_by_posting", a.indexDumpByPostingHandler)
+	a.registerMutatingRoute(router, "/debug/index_block", a.indexBlockHandler, nil)
+	a.registerMutatingRoute(router, "/debug/index_unblock", a.indexUnblockHandler, nil)
+	a.registerMutatingRoute(router, "/debug/toggle_debug_query", func(w http.ResponseWriter, _ *http.Request) {
+		debugRequest := requestScopedStore.ToggleDebug()
+
+		fmt.Fprintf(w, "defaultDebugRequest is now %v\n", debugRequest)
+	}, nil)
+	a.registerMutatingRoute(router, "/debug/preaggregate", a.aggregateHandler, nil)
+	router.Get("/debug/mutable_dump", a.mutableDumpHandler)
+	router.Post("/debug/mutable_import", a.mutableImportHandler)
+	router.Get("/debug/pprof/*item", http.DefaultServeMux.ServeHTTP)
+
+	if a.BackendDebug != nil && a.BackendName != "" {
+		prefix := "/debug/" + a.BackendName
+
+		a.BackendDebug.RegisterHTTPEndpoints(func(method, path, description string, handler http.HandlerFunc) {
+			full := prefix + path
+
+			switch method {
+			case http.MethodGet:
+				router.Get(full, handler)
+			case http.MethodPost:
+				router.Post(full, handler)
+			default:
+				a.Logger.Warn().Msgf("ignoring backend debug endpoint %s: unsupported method %q", full, method)
+
+				return
+			}
+
+			a.backendDebugEndpoints = append(a.backendDebugEndpoints,
+				backendDebugEndpoint{method: method, path: full, description: description})
+		})
+	}
+
+	router.Post("/mutable/names", a.mutableLabelNamesWriteHandler)
+	router.Del("/mutable/names", a.mutableLabelNamesDeleteHandler)
+	router.Post("/mutable/values", a.mutableLabelValuesWriteHandler)
+	router.Del("/mutable/values", a.mutableLabelValuesDeleteHandler)
+}
+
+// registerMutatingRoute registers an endpoint that changes state on POST. It is
+// also registered on GET for backward compatibility, a GET request that changes
+// state logging a deprecation warning (once per endpoint). isMutating tells
+// whether a request changes state; nil means every request does.
+func (a *API) registerMutatingRoute(
+	router *route.Router,
+	path string,
+	handler http.HandlerFunc,
+	isMutating func(r *http.Request) bool,
+) {
+	var warnOnce sync.Once
+
+	router.Post(path, handler)
+	router.Get(path, func(w http.ResponseWriter, r *http.Request) {
+		if isMutating == nil || isMutating(r) {
+			warnOnce.Do(func() {
+				a.Logger.Warn().Msgf("GET %s is deprecated because it changes state, use POST instead", path)
+			})
+		}
+
+		handler(w, r)
+	})
+}
+
 // Run start the HTTP api server.
+// When AdminListenAddress is set, it also starts the admin server. Readiness is
+// only signalled once both addresses are bound, and both servers are stopped together.
 func (a *API) Run(ctx context.Context, readiness chan error) {
 	err := a.init(ctx)
 	if err != nil {
@@ -411,53 +470,113 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		return
 	}
 
-	server := &http.Server{
-		Addr:              a.ListenAddress,
-		Handler:           a,
-		ReadHeaderTimeout: 10 * time.Second,
+	servers := []*apiServer{{name: "API", address: a.ListenAddress, handler: a, port: &a.listenPort}}
+
+	if a.adminRouter != nil {
+		servers = append(servers, &apiServer{
+			name:    "admin",
+			address: a.AdminListenAddress,
+			handler: http.HandlerFunc(a.serveAdminHTTP),
+			port:    &a.adminListenPort,
+		})
 	}
 
-	serverStopped := make(chan error)
+	for i, srv := range servers {
+		if err := srv.listen(ctx); err != nil {
+			for _, started := range servers[:i] {
+				_ = started.listener.Close()
+			}
 
-	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", a.ListenAddress)
-	if err != nil {
-		readiness <- err
+			readiness <- err
 
-		return
+			return
+		}
 	}
 
-	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
-		a.listenPort = tcpAddr.Port
+	serverStopped := make(chan error, len(servers))
+
+	for _, srv := range servers {
+		go func() {
+			defer logger.ProcessPanic()
+
+			serverStopped <- srv.server.Serve(srv.listener)
+		}()
 	}
-
-	go func() {
-		defer logger.ProcessPanic()
-
-		serverStopped <- server.Serve(ln)
-	}()
 
 	a.Logger.Info().Msgf("Server listening on %s", a.ListenAddress)
 
+	if a.adminRouter != nil {
+		a.Logger.Info().Msgf("Admin endpoints (/debug/, /mutable/) served on %s only", a.AdminListenAddress)
+	} else {
+		a.Logger.Info().Msgf(
+			"Admin endpoints (/debug/, /mutable/) served on %s, set admin_listen_address to serve them separately",
+			a.ListenAddress,
+		)
+	}
+
 	readiness <- nil
+
+	// Stop all servers when one of them stops, as if the context was cancelled.
+	var stopErrs []error
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
-		defer cancel()
-
-		if err := server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
-			a.Logger.Err(err).Msg("Failed stop the HTTP server")
-		}
-
-		err = <-serverStopped
-	case err = <-serverStopped:
+	case err := <-serverStopped:
+		stopErrs = append(stopErrs, err)
 	}
 
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		a.Logger.Err(err).Msg("HTTP server failed")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpServerShutdownTimeout)
+	defer cancel()
+
+	for _, srv := range servers {
+		if err := srv.server.Shutdown(shutdownCtx); err != nil { //nolint: contextcheck
+			a.Logger.Err(err).Msgf("Failed stop the %s HTTP server", srv.name)
+		}
+	}
+
+	for len(stopErrs) < len(servers) {
+		stopErrs = append(stopErrs, <-serverStopped)
+	}
+
+	for _, err := range stopErrs {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			a.Logger.Err(err).Msg("HTTP server failed")
+		}
 	}
 
 	a.Logger.Debug().Msg("Server stopped")
+}
+
+// apiServer is one of the HTTP servers started by Run.
+type apiServer struct {
+	name    string
+	address string
+	handler http.Handler
+	// port is set to the port actually listened on.
+	port *int
+
+	listener net.Listener
+	server   *http.Server
+}
+
+func (s *apiServer) listen(ctx context.Context) error {
+	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", s.address)
+	if err != nil {
+		return fmt.Errorf("%s server: %w", s.name, err)
+	}
+
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		*s.port = tcpAddr.Port
+	}
+
+	s.listener = ln
+	s.server = &http.Server{
+		Addr:              s.address,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	return nil
 }
 
 // ListenPort return the port listenning on. Should not be used before Run()
@@ -467,14 +586,29 @@ func (a *API) ListenPort() int {
 	return a.listenPort
 }
 
+// AdminListenPort return the port the admin server is listening on, or 0 when
+// AdminListenAddress is empty. Should not be used before Run() signalled its readiness.
+func (a *API) AdminListenPort() int {
+	return a.adminListenPort
+}
+
 // Ready mark the system as ready to access requests.
 func (a *API) Ready() {
 	a.ready.Store(1)
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	a.serveWhenReady(a.router, w, req)
+}
+
+// serveAdminHTTP serves the admin endpoints of the admin listener.
+func (a *API) serveAdminHTTP(w http.ResponseWriter, req *http.Request) {
+	a.serveWhenReady(a.adminRouter, w, req)
+}
+
+func (a *API) serveWhenReady(handler http.Handler, w http.ResponseWriter, req *http.Request) {
 	if a.ready.Load() > 0 {
-		a.router.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 
 		return
 	}
@@ -505,17 +639,29 @@ func (a *API) readyHandler(w http.ResponseWriter, _ *http.Request) {
 func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, `The following index info enpoints exists
 
+Endpoints that change state are marked with POST: call them with POST
+(e.g. curl -XPOST http://localhost:9201/debug/flush). Most of them still accept GET for backward
+compatibility, but this is deprecated.
+When admin_listen_address is set, these endpoints are served on that address only.
+
 /debug/index_info
 	provide global information about index
 
 /debug/index_info?metricID=XXX
 	provide information on given metric ID
 
-/debug/toggle_debug_query
+/debug/index_verify
+	Verify the index consistency. Use "lock" to hold the index lock during the verification and
+	"strict" for stricter checks. "now" (format 2006-01-02) overrides the date used by the checks.
+
+POST /debug/index_verify?fix=1
+	Same as above but also fix the inconsistencies found.
+
+POST /debug/toggle_debug_query
 	Enable or disable some tracing of query submitted to SquirrelDB. This could be very verbose.
 	By using the header X-SquirrelDB-Query-Debug you could enable tracing for a single query.
 
-/debug/preaggregate?from=2006-01-02&to=2006-01-02
+POST /debug/preaggregate?from=2006-01-02&to=2006-01-02
 	(Re)-run the preaggragation on specified day(s). If you inserted data with timestamp older than
 	ingestion window (8 hours), the pre-aggregation might already have processed that day.
 	This endpoints allow to force re-running the pre-aggregations on that day.
@@ -523,7 +669,7 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 /debug/pprof/
 	Golang pprof endpoints
 
-/debug/flush
+POST /debug/flush
 	Write metric from the memory store to Cassandra.
 	SquirrelDB first write incoming points to a memory store with fast random access (Redis or local memory),
 	and after some time write them to Cassandra. This is done to improve compression and reduce number of writes
@@ -534,18 +680,18 @@ func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
 /debug/mutable_dump
 	Produce a CSV with all known mutable labels.
 
-/debug/mutable_import
+POST /debug/mutable_import
 	Remove all known mutable labels and add all labels provided by input CSV.
 	Example of curl to export/import:
 	$ curl http://localhost:9201/debug/mutable_dump > file.csv
 	$ curl http://localhost:9201/debug/mutable_import --data-binary @file.csv
 
-/debug/index_block
+POST /debug/index_block
 	Block write on Cassandra for 5 minutes. Use /debug/index_unblock to
 	release the block before the 5 minutes delay. Re-use /debug/index_block
 	to extend to block duration.
 
-/debug/index_unblock
+POST /debug/index_unblock
 	Undo the block from /debug/index_block
 
 The is some index dump enpoints, that produce CSV export of the index information.

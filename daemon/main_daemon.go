@@ -32,7 +32,8 @@ import (
 // daemonCommandFlags are the command-line flags of the daemon entry point (the
 // default `squirreldb` / `squirreldb daemon`). Beyond the shared config flags
 // that every entry point exposes, the daemon also exposes the daemon-only config
-// flags (listen_address): it runs the server they configure, unlike `migrate`.
+// flags (listen_address, admin_listen_address): it runs the servers they
+// configure, unlike `migrate`.
 func daemonCommandFlags() []config.Flag {
 	return config.DaemonConfigFlags()
 }

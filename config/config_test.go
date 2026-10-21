@@ -56,9 +56,10 @@ func TestStructuredConfig(t *testing.T) {
 			CAPath:      "/ca.pem",
 			Keyspace:    "squirreldb",
 		},
-		DefaultTimeToLive: 4 * time.Hour,
-		ListenAddress:     "127.0.0.1:9090",
-		TenantLabelName:   "account",
+		DefaultTimeToLive:  4 * time.Hour,
+		ListenAddress:      "127.0.0.1:9090",
+		AdminListenAddress: "127.0.0.1:9091",
+		TenantLabelName:    "account",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 1,
 		},

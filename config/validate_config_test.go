@@ -25,11 +25,7 @@ func TestValidateConfigExtraWriteBackends(t *testing.T) {
 
 	base := DefaultConfig()
 
-	cases := []struct {
-		name    string
-		mutate  func(*Config)
-		wantErr bool
-	}{
+	cases := []validateConfigCase{
 		{
 			name:    "no extra_write_backend is fine",
 			mutate:  func(*Config) {},
@@ -60,6 +56,50 @@ func TestValidateConfigExtraWriteBackends(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
+	runValidateConfigCases(t, base, cases)
+}
+
+func TestValidateConfigAdminListenAddress(t *testing.T) {
+	t.Parallel()
+
+	base := DefaultConfig()
+
+	cases := []validateConfigCase{
+		{
+			name:    "no admin_listen_address is fine",
+			mutate:  func(*Config) {},
+			wantErr: false,
+		},
+		{
+			name: "admin_listen_address different from listen_address",
+			mutate: func(c *Config) {
+				c.ListenAddress = "localhost:9201"
+				c.AdminListenAddress = "localhost:9202"
+			},
+			wantErr: false,
+		},
+		{
+			name: "admin_listen_address equal to listen_address is rejected",
+			mutate: func(c *Config) {
+				c.ListenAddress = "localhost:9201"
+				c.AdminListenAddress = "localhost:9201"
+			},
+			wantErr: true,
+		},
+	}
+
+	runValidateConfigCases(t, base, cases)
+}
+
+type validateConfigCase struct {
+	name    string
+	mutate  func(*Config)
+	wantErr bool
+}
+
+func runValidateConfigCases(t *testing.T, base Config, cases []validateConfigCase) {
+	t.Helper()
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
