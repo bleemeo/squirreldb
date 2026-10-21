@@ -35,6 +35,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,10 +62,13 @@ var deprecatedKeys = map[string]string{ //nolint:gochecknoglobals
 
 type Warnings []error
 
-// Load loads the configuration from files and directories to a struct.
+// Load loads the configuration from files and directories to a struct, then
+// applies the config flags (see ConfigFlags) explicitly set in flagSet.
+// flagSet must already be parsed; its other flags (command flags) are ignored
+// here. It may be nil when there are no command-line flags.
 // Returns the config, warnings and an error.
-func Load(paths ...string) (Config, Warnings, error) {
-	cfg, warnings, err := loadToStruct(true, os.Args, paths...)
+func Load(flagSet *pflag.FlagSet, paths ...string) (Config, Warnings, error) {
+	cfg, warnings, err := loadToStruct(true, flagSet, paths...)
 	if err != nil {
 		return cfg, warnings, err
 	}
@@ -76,8 +80,8 @@ func Load(paths ...string) (Config, Warnings, error) {
 	return cfg, warnings, nil
 }
 
-func loadToStruct(withDefaultAndFlags bool, args []string, paths ...string) (Config, Warnings, error) {
-	k, warnings, err := load(withDefaultAndFlags, args, paths...)
+func loadToStruct(withDefaultAndFlags bool, flagSet *pflag.FlagSet, paths ...string) (Config, Warnings, error) {
+	k, warnings, err := load(withDefaultAndFlags, flagSet, paths...)
 
 	var config Config
 
@@ -196,7 +200,11 @@ func checkSecurityUnusedKeys(unused []string) error {
 }
 
 // load the configuration from files and directories.
-func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koanf, prometheus.MultiError, error) {
+func load(
+	withDefaultAndFlags bool,
+	flagSet *pflag.FlagSet,
+	paths ...string,
+) (*koanf.Koanf, prometheus.MultiError, error) {
 	fileEnvKoanf, warnings, errors := loadPaths(paths)
 
 	// Load config from environment variables.
@@ -242,16 +250,29 @@ func load(withDefaultAndFlags bool, args []string, paths ...string) (*koanf.Koan
 	warning = k.Load(confmap.Provider(fileEnvKoanf.All(), delimiter), nil, mergeFunc(mergo.WithOverride))
 	warnings.Append(warning)
 
-	if withDefaultAndFlags {
-		// Parse the config flags without the command flags because the command flags would
-		// create warnings about invalid keys when the config is converted to a struct.
-		flagSet := NewFlagSet("config", ConfigFlags())
+	if withDefaultAndFlags && flagSet != nil {
+		// Read the flag set already parsed by the caller instead of parsing the
+		// arguments a second time with only the config flags: such a parser doesn't
+		// know the command flags (--config, subcommand options, ...), stops at the
+		// first of them and silently drops every config flag placed after it.
+		// Only the config flags are kept, because the command flags would create
+		// warnings about invalid keys when the config is converted to a struct.
+		configFlagNames := make(map[string]bool)
 
-		// The error can be safely ignored as the flags were already parsed in the daemon.
-		_ = flagSet.Parse(args)
+		for _, f := range ConfigFlags() {
+			configFlagNames[f.Name] = true
+		}
+
+		provider := posflag.ProviderWithFlag(flagSet, delimiter, k, func(f *pflag.Flag) (string, any) {
+			if !configFlagNames[f.Name] {
+				return "", nil
+			}
+
+			return f.Name, posflag.FlagVal(flagSet, f)
+		})
 
 		// Overwrite the config with the command line args set explicitly.
-		warning = k.Load(posflag.Provider(flagSet, delimiter, k), nil)
+		warning = k.Load(provider, nil)
 		warnings.Append(warning)
 	}
 

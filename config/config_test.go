@@ -175,11 +175,15 @@ func TestFlags(t *testing.T) {
 
 	// Value set from config, env and flag, only the flag should be kept.
 	expectedConfig.Redis.Addresses = []string{"192.168.0.4:6379"}
-	args := []string{"--redis.addresses", "192.168.0.4:6379"}
+	flagSet := NewFlagSet("test", ConfigFlags())
+
+	if err := flagSet.Parse([]string{"--redis.addresses", "192.168.0.4:6379"}); err != nil {
+		t.Fatalf("Failed to parse flags: %s", err)
+	}
 
 	t.Setenv("SQUIRRELDB_REDIS_ADDRESSES", "192.168.0.3:9042")
 
-	config, warnings, err := loadToStruct(true, args, "testdata/flags.conf")
+	config, warnings, err := loadToStruct(true, flagSet, "testdata/flags.conf")
 	if warnings != nil {
 		t.Fatalf("Warning while loading config: %s", warnings)
 	}
@@ -408,7 +412,7 @@ func TestLoad(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			config, warnings, err := Load(test.Files...)
+			config, warnings, err := Load(nil, test.Files...)
 			if (test.WantError == nil) != (err == nil) {
 				t.Fatalf(
 					"Unexpected error for files %s: got %q, want %q",
