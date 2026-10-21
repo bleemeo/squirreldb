@@ -10,9 +10,9 @@ same SquirrelDB.
 
 ```yaml
 # The default route: the backend serving every request not routed elsewhere.
-backend: clickhouse
-# Dual-write applies to the default route only (see below).
-extra_write_backend: cassandra
+backend: cassandra
+# Dual-write applies to the writes to the default backend only (see below).
+extra_write_backend: clickhouse
 
 routing:
   # Additional backends to start and make selectable. The default backend
@@ -141,11 +141,13 @@ curl -H "Authorization: Bearer $DEMO_TOKEN" 'http://localhost:9201/api/v1/query?
 
 A write is sent only to the backend selected for the request:
 
-- On the default route, the write goes to the default backend and, when
-  `extra_write_backend` is set, is dual-written to the extra backend, as
-  without routing.
-- On a routed backend, the write goes to that backend only: it's never
-  dual-written. A write routed to the sandbox backend is accepted and discarded.
+- When the default backend is selected, whether by the `X-SquirrelDB-Backend`
+  header, by a rule or by default, the write goes to the default backend and,
+  when `extra_write_backend` is set, is dual-written to the extra backend, as
+  without routing. The extra backend can't be selected on its own.
+- When a routed backend is selected, the write goes to that backend only: it's
+  never dual-written. A write routed to the sandbox backend is accepted and
+  discarded.
 
 `internal.read_only` makes every backend read-only.
 

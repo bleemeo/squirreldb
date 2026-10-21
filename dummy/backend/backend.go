@@ -158,7 +158,10 @@ func (b *Backend) getMutableStack(ctx context.Context) (*mutable.Provider, *muta
 
 	provider, processor := mutable.NewProviderAndProcessor(
 		ctx,
-		b.options.MetricRegistry,
+		// The mutable package registers backend-agnostic metric names; tag them with
+		// the backend, as the Cassandra and ClickHouse backends do, so that this
+		// backend can share a registry with another one (e.g. as a routed backend).
+		prometheus.WrapRegistererWith(map[string]string{"backend": "dummy"}, b.options.MetricRegistry),
 		b.options.Cluster,
 		b.mutableStore,
 		b.options.TenantLabel,

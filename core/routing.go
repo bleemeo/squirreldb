@@ -292,11 +292,13 @@ func (p routedOptionsParser) ParseHTTPOptions(h http.Header) (any, error) {
 }
 
 // routedRegisterer is the metric registerer of the routed backends. They share
-// the registry of the primary backend, and some of their components (e.g. the
-// mutable label cache) register the same metrics as the primary's: such a
-// duplicate registration is ignored instead of failing (a backend registers its
-// metrics with promauto, which panics on error), so the duplicate metrics of a
-// routed backend are not exported while its own metrics are.
+// the registry of the primary backend, and some of their components may register
+// the same metrics as the primary's (the backends tag their shared component
+// metrics with a "backend" label, so this happens only between backends of the
+// same type): such a duplicate registration is ignored instead of failing (a
+// backend registers its metrics with promauto, which panics on error), so the
+// duplicate metrics of a routed backend are not exported while its own metrics
+// are. A registration conflicting with a different descriptor still fails.
 type routedRegisterer struct {
 	reg prometheus.Registerer
 
