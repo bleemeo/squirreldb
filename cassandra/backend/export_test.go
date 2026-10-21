@@ -102,3 +102,54 @@ func TestIdsAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestIsDeadShard(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name       string
+		shardEnd   time.Time
+		expiration time.Time
+		want       bool
+	}{
+		{
+			name:     "current shard without expiration yet",
+			shardEnd: now.Add(6 * 24 * time.Hour),
+			want:     false,
+		},
+		{
+			name:     "previous shard just ended without expiration",
+			shardEnd: now.Add(-time.Minute),
+			want:     false,
+		},
+		{
+			name:     "shard without expiration ended long ago",
+			shardEnd: now.Add(-deadShardMinAge - time.Minute),
+			want:     true,
+		},
+		{
+			name:       "future expiration",
+			shardEnd:   now.Add(-30 * 24 * time.Hour),
+			expiration: now.Add(time.Hour),
+			want:       false,
+		},
+		{
+			name:       "past expiration",
+			shardEnd:   now.Add(-30 * 24 * time.Hour),
+			expiration: now.Add(-time.Hour),
+			want:       true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isDeadShard(tc.shardEnd, tc.expiration, now); got != tc.want {
+				t.Errorf("isDeadShard() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
