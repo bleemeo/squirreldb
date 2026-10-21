@@ -121,6 +121,11 @@ environment variables, e.g. `SQUIRRELDB_AUTH_ENABLED=true` or `SQUIRRELDB_TLS_CE
 When configuration is split in multiple files (e.g. a directory of `.conf` files), the
 users of all files are concatenated; user names must be unique.
 
+Unknown keys under `auth` and `tls`, and unknown `SQUIRRELDB_AUTH_*` and `SQUIRRELDB_TLS_*`
+environment variables, stop SquirrelDB at startup instead of only logging a warning
+like elsewhere in the configuration: a typo such as `tenat` instead of `tenant` would
+otherwise leave a user without its restriction.
+
 ## Scopes
 
 | Scope   | Routes                                                                                                                                                                                                                                                                                                                                        |

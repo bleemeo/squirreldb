@@ -29,6 +29,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -47,6 +48,16 @@ const (
 	// CountBackendNotAllowed.
 	reasonBackendNotAllowed = "backend_not_allowed"
 )
+
+// failureReasons are all the reasons of the authentication failures.
+var failureReasons = []string{ //nolint:gochecknoglobals
+	reasonMissingCredentials,
+	reasonMalformedCredentials,
+	reasonInvalidCredentials,
+	reasonMissingScope,
+	reasonTenantMismatch,
+	reasonBackendNotAllowed,
+}
 
 const wwwAuthenticate = `Basic realm="SquirrelDB"`
 
@@ -148,14 +159,7 @@ func New(opts Options) (*Authenticator, error) {
 		Help:      "Total number of requests rejected by the authentication, by reason",
 	}, []string{"reason"})
 
-	for _, reason := range []string{
-		reasonMissingCredentials,
-		reasonMalformedCredentials,
-		reasonInvalidCredentials,
-		reasonMissingScope,
-		reasonTenantMismatch,
-		reasonBackendNotAllowed,
-	} {
+	for _, reason := range failureReasons {
 		a.failures.WithLabelValues(reason)
 	}
 
@@ -174,6 +178,27 @@ func (a *Authenticator) CountBackendNotAllowed() {
 // Enabled returns whether the authentication is enabled.
 func (a *Authenticator) Enabled() bool {
 	return a.enabled
+}
+
+// Failures returns the number of requests rejected since the start, by reason
+// (the values of the squirreldb_api_auth_failures_total metric). It is nil when
+// the authentication is disabled.
+func (a *Authenticator) Failures() map[string]float64 {
+	if a.failures == nil {
+		return nil
+	}
+
+	result := make(map[string]float64, len(failureReasons))
+
+	for _, reason := range failureReasons {
+		var m dto.Metric
+
+		if err := a.failures.WithLabelValues(reason).Write(&m); err == nil {
+			result[reason] = m.GetCounter().GetValue()
+		}
+	}
+
+	return result
 }
 
 // Middleware returns a handler that authenticates the requests, checks they have the

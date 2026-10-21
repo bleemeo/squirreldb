@@ -293,5 +293,5 @@ const PrometheusValidationScheme = model.UTF8Validation
 type BackendInfo struct {
 	// ApplyMutableLabelInternally tells whether the Backend TSDB gives "raw" access (without mutable labels) or
 	// if the backend already applies mutable labels.
-	ApplyMutableLabelInternally bool
+	ApplyMutableLabelInternally bool `json:"apply_mutable_label_internally"`
 }

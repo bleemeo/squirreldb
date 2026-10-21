@@ -39,6 +39,7 @@ import (
 	"github.com/bleemeo/squirreldb/api/auth"
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/api/requestscoped"
+	"github.com/bleemeo/squirreldb/api/status"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
 	"github.com/bleemeo/squirreldb/logger"
 	"github.com/bleemeo/squirreldb/mutable"
@@ -136,8 +137,13 @@ type API struct {
 	// Auth configures the authentication of both listeners. Its MetricRegistry and
 	// Logger are ignored, the ones of the API are used.
 	Auth auth.Options
+	// Status provides the sources of the admin status page (/debug/status) that
+	// are outside the API. Every field is optional.
+	Status status.Sources
 
 	ready                 atomic.Int32
+	status                *status.Collector
+	statusPage            *status.Page
 	authenticator         *auth.Authenticator
 	tlsConfig             *tls.Config
 	router                http.Handler
@@ -284,6 +290,22 @@ func (a *API) init(ctx context.Context) error {
 	a.authenticator = authenticator
 
 	a.tlsConfig, err = auth.NewTLSConfig(a.TLS)
+	if err != nil {
+		return err
+	}
+
+	a.status = status.New(status.Options{
+		Sources:            a.Status,
+		StartTime:          time.Now(),
+		ListenAddress:      a.ListenAddress,
+		AdminListenAddress: a.AdminListenAddress,
+		Ready:              func() bool { return a.ready.Load() > 0 },
+		TLS:                a.TLS,
+		Auth:               a.Auth,
+		AuthFailures:       a.authenticator.Failures,
+	})
+
+	a.statusPage, err = status.NewPage()
 	if err != nil {
 		return err
 	}
@@ -447,6 +469,7 @@ func (a *API) registerCommonRoutes(router *route.Router) {
 // the mutable labels write API. They are served on AdminListenAddress when set.
 func (a *API) registerAdminRoutes(router *route.Router, requestScopedStore *requestscoped.Store) {
 	router.Get("/debug/", a.debugHelpHandler)
+	router.Get("/debug/status", a.statusHandler)
 	router.Get("/debug/index_info", a.indexInfoHandler)
 	a.registerMutatingRoute(router, "/debug/flush", a.flushHandler, nil)
 	// index_verify only changes the index when asked to fix it.
@@ -781,13 +804,26 @@ func (a *API) readyHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "Ready")
 }
 
-func (a *API) debugHelpHandler(w http.ResponseWriter, _ *http.Request) {
+// debugHelpHandler serves the status page to browsers (Accept prefers text/html),
+// and the plain text help of the debug endpoints otherwise (e.g. curl).
+func (a *API) debugHelpHandler(w http.ResponseWriter, r *http.Request) {
+	if status.PrefersHTML(r.Header.Get("Accept")) {
+		a.statusPageHandler(w, r, nil)
+
+		return
+	}
+
 	fmt.Fprint(w, `The following index info enpoints exists
 
 Endpoints that change state are marked with POST: call them with POST
 (e.g. curl -XPOST http://localhost:9201/debug/flush). Most of them still accept GET for backward
 compatibility, but this is deprecated.
 When admin_listen_address is set, these endpoints are served on that address only.
+
+/debug/status
+	Read-only status of this node (build, backends, cluster, security, redacted config) as JSON.
+	Open /debug/ in a browser (or /debug/status?format=html) for the same status as a page.
+	See docs/admin-status.md.
 
 /debug/index_info
 	provide global information about index

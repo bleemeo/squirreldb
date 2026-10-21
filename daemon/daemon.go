@@ -27,6 +27,7 @@ import (
 
 	"github.com/bleemeo/squirreldb/api"
 	"github.com/bleemeo/squirreldb/api/auth"
+	"github.com/bleemeo/squirreldb/api/status"
 	"github.com/bleemeo/squirreldb/config"
 	"github.com/bleemeo/squirreldb/core"
 	"github.com/bleemeo/squirreldb/core/version"
@@ -62,7 +63,9 @@ type SquirrelDB struct {
 	squirrelDBOnce sync.Once
 	squirreldb     *core.SquirrelDB
 
-	api    api.API
+	api api.API
+	// tlm is the telemetry, nil when it is disabled.
+	tlm    *telemetry.Telemetry
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
@@ -251,6 +254,13 @@ func (s *SquirrelDB) apiTask(ctx context.Context, readiness chan error) {
 	s.api.MetricRegistry = s.MetricRegistry
 	s.api.Logger = s.Logger.With().Str("component", "api").Logger()
 	s.api.DefaultTTL = s.Config.DefaultTimeToLive
+	s.api.Status = status.Sources{
+		Backends:  s.getSquirrelDB().BackendStates,
+		Cluster:   s.getSquirrelDB().StartedCluster,
+		Telemetry: s.telemetryIDs,
+		// The status page redacts the secrets of the configuration.
+		Config: s.Config,
+	}
 
 	if s.api.MetricRegistry == nil {
 		s.api.MetricRegistry = prometheus.DefaultRegisterer
@@ -409,7 +419,19 @@ func (s *SquirrelDB) telemetry(ctx context.Context) error {
 	)
 	tlm.Start(ctx)
 
+	s.tlm = tlm
+
 	return nil
+}
+
+// telemetryIDs returns the telemetry cluster and node IDs, empty when the
+// telemetry is disabled or did not acquire them yet.
+func (s *SquirrelDB) telemetryIDs() (string, string) {
+	if s.tlm == nil {
+		return "", ""
+	}
+
+	return s.tlm.IDs()
 }
 
 // mutableLabelProcessor returns the mutable label processor from the backend. It

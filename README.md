@@ -94,6 +94,11 @@ Endpoints that change state (e.g. `/debug/flush`, `/debug/preaggregate`) should 
 called with `POST`. They still accept `GET` for backward compatibility, but this is
 deprecated and logs a warning.
 
+Open `/debug/` in a browser for a read-only status page telling whether the node is
+healthy and, if not, why: backends, ClickHouse hosts and WAL, cluster, TLS and users,
+and the effective configuration with its secrets redacted. The same report is available
+as JSON on `/debug/status`. See [docs/admin-status.md](docs/admin-status.md).
+
 ### Security
 
 By default SquirrelDB serves plain HTTP without authentication and trusts the
@@ -108,16 +113,6 @@ generate the credentials.
 
 SquirrelDB warns at startup when a listener is reachable from the network without
 authentication. See [docs/authentication.md](docs/authentication.md).
-
-## Sandbox
-
-SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:
-
-```sh
-SQUIRRELDB_BACKEND=sandbox ./squirreldb
-```
-
-See [docs/sandbox.md](docs/sandbox.md).
 
 ## Backend routing
 
@@ -134,6 +129,17 @@ routing:
 ```
 
 See [docs/routing.md](docs/routing.md).
+
+
+## Sandbox
+
+SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:
+
+```sh
+SQUIRRELDB_BACKEND=sandbox ./squirreldb
+```
+
+See [docs/sandbox.md](docs/sandbox.md).
 
 ## Contributing
 
