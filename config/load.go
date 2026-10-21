@@ -145,7 +145,13 @@ func validateConfig(cfg Config) error {
 	if cfg.ExtraWriteBackend != "" {
 		knownBackends := map[string]bool{BackendCassandra: true, BackendClickHouse: true, BackendDummy: true}
 
-		if !knownBackends[cfg.ExtraWriteBackend] {
+		switch {
+		case cfg.ExtraWriteBackend == BackendSandbox:
+			warnings.Append(fmt.Errorf(
+				"%w: backend %q can't be used as 'extra_write_backend': it discards every write",
+				ErrInvalidValue, cfg.ExtraWriteBackend,
+			))
+		case !knownBackends[cfg.ExtraWriteBackend]:
 			warnings.Append(fmt.Errorf(
 				"%w: unknown backend %q in 'extra_write_backend'", ErrInvalidValue, cfg.ExtraWriteBackend,
 			))

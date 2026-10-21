@@ -53,6 +53,9 @@ func DefaultConfig() Config {
 			Username:  "",
 			Password:  "",
 		},
+		Sandbox: Sandbox{
+			DatasetConfig: "",
+		},
 		Redis: Redis{
 			Addresses:   []string{},
 			Username:    "",

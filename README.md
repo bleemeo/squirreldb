@@ -114,6 +114,16 @@ generate the credentials.
 SquirrelDB warns at startup when a listener is reachable from the network without
 authentication. See [docs/authentication.md](docs/authentication.md).
 
+## Sandbox
+
+SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:
+
+```sh
+SQUIRRELDB_BACKEND=sandbox ./squirreldb
+```
+
+See [docs/sandbox.md](docs/sandbox.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

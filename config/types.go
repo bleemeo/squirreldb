@@ -22,6 +22,7 @@ const (
 	BackendCassandra  = "cassandra"
 	BackendClickHouse = "clickhouse"
 	BackendDummy      = "dummy"
+	BackendSandbox    = "sandbox"
 )
 
 // Config is the main structured configuration.
@@ -42,6 +43,7 @@ type Config struct {
 	ExtraWriteBackend   string        `yaml:"extra_write_backend"`
 	Cassandra           Cassandra     `yaml:"cassandra"`
 	ClickHouse          ClickHouse    `yaml:"clickhouse"`
+	Sandbox             Sandbox       `yaml:"sandbox"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
 	AdminListenAddress  string        `yaml:"admin_listen_address"`
@@ -223,6 +225,17 @@ type ClickHouse struct {
 	// carries its labels (~150-200 B), so this also bounds Redis memory. 0 uses the
 	// built-in default (200k points ≈ 35 MiB → block at ~2M points ≈ 350 MiB).
 	WALSoftThreshold int `yaml:"wal_soft_threshold"`
+}
+
+// Sandbox holds the configuration of the sandbox backend.
+// It is used when the "backend" option is set to "sandbox". The sandbox backend
+// serves deterministic fake data generated from a dataset and discards every
+// write; it has no external dependency. See docs/sandbox.md.
+type Sandbox struct {
+	// DatasetConfig is the path of the dataset definition file (yaml). Relative
+	// paths in that file are resolved relative to its directory. Empty uses the
+	// default dataset embedded in SquirrelDB.
+	DatasetConfig string `yaml:"dataset_config"`
 }
 
 // Dummy holds the configuration of the dummy backend.

@@ -1,0 +1,82 @@
+# This is a comment
+# List of metrics from a Bleemeo agent in Bleemeo mode
+agent_sent_message{instance="server.bleemeo.work:8015"}
+agent_status{instance="server.bleemeo.work:8015"}
+container_cpu_used{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_io_read_bytes{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_io_write_bytes{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_mem_used_perc{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_net_bits_recv{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_net_bits_sent{item="bleemeo-consumer", instance="server.bleemeo.work:8015"}
+container_cpu_used{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_io_read_bytes{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_io_write_bytes{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_mem_used_perc{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_net_bits_recv{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_net_bits_sent{item="bleemeo_cassandra_1", instance="server.bleemeo.work:8015"}
+container_cpu_used{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_io_read_bytes{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_io_write_bytes{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_mem_used_perc{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_net_bits_recv{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_net_bits_sent{item="bleemeo_kafka_1", instance="server.bleemeo.work:8015"}
+container_cpu_used{item="haproxy", instance="server.bleemeo.work:8015"}
+container_io_read_bytes{item="haproxy", instance="server.bleemeo.work:8015"}
+container_io_write_bytes{item="haproxy", instance="server.bleemeo.work:8015"}
+container_mem_used_perc{item="haproxy", instance="server.bleemeo.work:8015"}
+container_net_bits_recv{item="haproxy", instance="server.bleemeo.work:8015"}
+container_net_bits_sent{item="haproxy", instance="server.bleemeo.work:8015"}
+container_cpu_used{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+container_io_read_bytes{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+container_io_write_bytes{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+container_mem_used_perc{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+container_net_bits_recv{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+container_net_bits_sent{item="bleemeo_influxdb_1", instance="server.bleemeo.work:8015"}
+cpu_idle{instance="server.bleemeo.work:8015"}
+cpu_interrupt{instance="server.bleemeo.work:8015"}
+cpu_nice{instance="server.bleemeo.work:8015"}
+cpu_softirq{instance="server.bleemeo.work:8015"}
+cpu_steal{instance="server.bleemeo.work:8015"}
+cpu_system{instance="server.bleemeo.work:8015"}
+cpu_used{instance="server.bleemeo.work:8015"}
+cpu_used_status{instance="server.bleemeo.work:8015"}
+cpu_user{instance="server.bleemeo.work:8015"}
+cpu_wait{instance="server.bleemeo.work:8015"}
+cpu_guest{instance="server.bleemeo.work:8015"}
+cpu_guest_nice{instance="server.bleemeo.work:8015"}
+disk_used_perc{item="/", instance="server.bleemeo.work:8015"}
+disk_used_perc_status{item="/", instance="server.bleemeo.work:8015"}
+disk_used_perc{item="/boot", instance="server.bleemeo.work:8015"}
+disk_used_perc_status{item="/boot", instance="server.bleemeo.work:8015"}
+disk_used_perc{item="/home", instance="server.bleemeo.work:8015"}
+disk_used_perc_status{item="/home", instance="server.bleemeo.work:8015"}
+io_read_bytes{item="nvme0n1", instance="server.bleemeo.work:8015"}
+io_reads{item="nvme0n1", instance="server.bleemeo.work:8015"}
+io_utilization{item="nvme0n1", instance="server.bleemeo.work:8015"}
+io_write_bytes{item="nvme0n1", instance="server.bleemeo.work:8015"}
+io_writes{item="nvme0n1", instance="server.bleemeo.work:8015"}
+io_read_bytes{item="sda", instance="server.bleemeo.work:8015"}
+io_reads{item="sda", instance="server.bleemeo.work:8015"}
+io_utilization{item="sda", instance="server.bleemeo.work:8015"}
+io_write_bytes{item="sda", instance="server.bleemeo.work:8015"}
+io_writes{item="sda", instance="server.bleemeo.work:8015"}
+mem_buffered{instance="server.bleemeo.work:8015"}
+mem_cached{instance="server.bleemeo.work:8015"}
+mem_free{instance="server.bleemeo.work:8015"}
+mem_used{instance="server.bleemeo.work:8015"}
+mem_used_perc{instance="server.bleemeo.work:8015"}
+mem_used_perc_status{instance="server.bleemeo.work:8015"}
+net_bits_recv{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_bits_sent{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_err_in{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_err_out{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_packets_recv{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_packets_sent{item="enx106530060c99", instance="server.bleemeo.work:8015"}
+net_bits_recv{item="wlp2s0", instance="server.bleemeo.work:8015"}
+net_bits_sent{item="wlp2s0", instance="server.bleemeo.work:8015"}
+net_err_in{item="wlp2s0", instance="server.bleemeo.work:8015"}
+net_err_out{item="wlp2s0", instance="server.bleemeo.work:8015"}
+net_packets_recv{item="wlp2s0", instance="server.bleemeo.work:8015"}
+net_packets_sent{item="wlp2s0", instance="server.bleemeo.work:8015"}
+swap_used_perc{instance="server.bleemeo.work:8015"}
+system_load1{instance="server.bleemeo.work:8015"}

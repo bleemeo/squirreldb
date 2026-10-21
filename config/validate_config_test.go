@@ -52,6 +52,21 @@ func TestValidateConfigExtraWriteBackends(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "sandbox backend is fine",
+			mutate: func(c *Config) {
+				c.Backend = BackendSandbox
+			},
+			wantErr: false,
+		},
+		{
+			name: "sandbox can't be an extra backend",
+			mutate: func(c *Config) {
+				c.Backend = "cassandra"
+				c.ExtraWriteBackend = BackendSandbox
+			},
+			wantErr: true,
+		},
+		{
 			name: "unknown extra backend name",
 			mutate: func(c *Config) {
 				c.Backend = "cassandra"
