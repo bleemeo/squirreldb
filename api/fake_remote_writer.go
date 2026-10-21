@@ -95,10 +95,6 @@ type writeHandler struct {
 
 	samplesWithInvalidLabelsTotal  prometheus.Counter
 	samplesAppendedWithoutMetadata prometheus.Counter
-
-	ingestSTZeroSample      bool
-	enableTypeAndUnitLabels bool
-	appendMetadata          bool
 }
 
 //go:linkname write github.com/prometheus/prometheus/storage/remote.(*writeHandler).write
@@ -134,7 +130,14 @@ func (s *backdatingWriteStore) Store(
 		// PRW 1.0 flow has different proto message and no partial write handling.
 		var req prompb.WriteRequest
 		if err := proto.Unmarshal(body, &req); err != nil {
-			logger.ErrorContext(r.Context(), "Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
+			logger.ErrorContext(
+				r.Context(),
+				"Error decoding v1 remote write request",
+				"protobuf_message",
+				msgType,
+				"err",
+				err.Error(),
+			)
 			wr.SetStatusCode(http.StatusBadRequest)
 
 			return wr, err
@@ -165,7 +168,14 @@ func (s *backdatingWriteStore) Store(
 	// Remote Write 2.x proto message handling.
 	var req writev2.Request
 	if err := proto.Unmarshal(body, &req); err != nil {
-		logger.ErrorContext(r.Context(), "Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
+		logger.ErrorContext(
+			r.Context(),
+			"Error decoding v2 remote write request",
+			"protobuf_message",
+			msgType,
+			"err",
+			err.Error(),
+		)
 		wr.SetStatusCode(http.StatusBadRequest)
 
 		return wr, err
