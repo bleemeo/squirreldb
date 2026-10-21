@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/bleemeo/squirreldb/api/auth"
 	versionPkg "github.com/bleemeo/squirreldb/core/version"
 	"github.com/bleemeo/squirreldb/daemon"
 	"github.com/bleemeo/squirreldb/logger"
@@ -49,9 +50,9 @@ func main() {
 	// Initialize the logger temporarily before loading the config.
 	log.Logger = logger.NewLogger(logger.NewConsoleWriter(false), zerolog.TraceLevel)
 
-	// Subcommand dispatch: `squirreldb daemon` and `squirreldb migrate` are
-	// handled identically — each gets the args that follow it. A bare
-	// `squirreldb` (or a first argument that is a flag) is treated as `daemon`.
+	// Subcommand dispatch: `squirreldb daemon`, `squirreldb migrate` and
+	// `squirreldb auth` are handled identically — each gets the args that follow
+	// it. A bare `squirreldb` (or a first argument that is a flag) is treated as `daemon`.
 	args := os.Args[1:]
 	subcommand := "daemon"
 
@@ -64,8 +65,10 @@ func main() {
 		os.Exit(daemon.RunDaemon(args))
 	case "migrate":
 		os.Exit(migration.RunMigrate(args))
+	case "auth":
+		os.Exit(auth.RunCommand(args))
 	default:
-		log.Error().Msgf("Unknown subcommand %q (expected \"daemon\" or \"migrate\")", subcommand)
+		log.Error().Msgf("Unknown subcommand %q (expected \"daemon\", \"migrate\" or \"auth\")", subcommand)
 		os.Exit(2)
 	}
 }

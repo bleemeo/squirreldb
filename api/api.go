@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bleemeo/squirreldb/api/auth"
 	"github.com/bleemeo/squirreldb/api/promql"
 	"github.com/bleemeo/squirreldb/api/requestscoped"
 	"github.com/bleemeo/squirreldb/appendable/requestappender"
@@ -121,8 +123,15 @@ type API struct {
 	BackendDebug BackendDebugRegistrar
 	BackendName  string
 	Logger       zerolog.Logger
+	// TLS, when enabled, serves both listeners over TLS.
+	TLS auth.TLSOptions
+	// Auth configures the authentication of both listeners. Its MetricRegistry and
+	// Logger are ignored, the ones of the API are used.
+	Auth auth.Options
 
 	ready                 atomic.Int32
+	authenticator         *auth.Authenticator
+	tlsConfig             *tls.Config
 	router                http.Handler
 	listenPort            int
 	adminListenPort       int
@@ -131,6 +140,10 @@ type API struct {
 	// adminRouter serves the admin endpoints on AdminListenAddress. It is nil
 	// when AdminListenAddress is empty, the admin endpoints then being on router.
 	adminRouter http.Handler
+	// handler and adminHandler serve the main and admin listeners: they add the
+	// authentication and the readiness check to router and adminRouter.
+	handler      http.Handler
+	adminHandler http.Handler
 
 	FuturePointsBackdateOffset time.Duration
 }
@@ -251,6 +264,22 @@ func NewPrometheus(
 func (a *API) init(ctx context.Context) error {
 	a.metrics = newMetrics(a.MetricRegistry)
 
+	authOptions := a.Auth
+	authOptions.MetricRegistry = a.MetricRegistry
+	authOptions.Logger = a.Logger.With().Str("component", "auth").Logger()
+
+	authenticator, err := auth.New(authOptions)
+	if err != nil {
+		return fmt.Errorf("authentication: %w", err)
+	}
+
+	a.authenticator = authenticator
+
+	a.tlsConfig, err = auth.NewTLSConfig(a.TLS)
+	if err != nil {
+		return err
+	}
+
 	maxConcurrent := a.MaxConcurrentRemoteRequests
 	if maxConcurrent <= 0 {
 		maxConcurrent = runtime.GOMAXPROCS(0) * 2
@@ -369,6 +398,19 @@ func (a *API) init(ctx context.Context) error {
 	api.Register(apiRouter)
 
 	a.router = apiRouter
+
+	// The authentication wraps each listener: on the main listener the scope depends
+	// on the route, on the admin listener every route except /ready and /metrics
+	// requires the admin scope.
+	a.handler = a.authenticator.Middleware(auth.ClassifyRoute, http.HandlerFunc(
+		func(w http.ResponseWriter, req *http.Request) { a.serveWhenReady(a.router, w, req) },
+	))
+
+	if a.adminRouter != nil {
+		a.adminHandler = a.authenticator.Middleware(auth.ClassifyAdminRoute, http.HandlerFunc(
+			func(w http.ResponseWriter, req *http.Request) { a.serveWhenReady(a.adminRouter, w, req) },
+		))
+	}
 
 	return nil
 }
@@ -499,11 +541,32 @@ func (a *API) Run(ctx context.Context, readiness chan error) {
 		go func() {
 			defer logger.ProcessPanic()
 
+			if a.tlsConfig != nil {
+				// Each server gets its own copy because ServeTLS may update it.
+				srv.server.TLSConfig = a.tlsConfig.Clone()
+				// The certificate is provided by TLSConfig.
+				serverStopped <- srv.server.ServeTLS(srv.listener, "", "")
+
+				return
+			}
+
 			serverStopped <- srv.server.Serve(srv.listener)
 		}()
 	}
 
-	a.Logger.Info().Msgf("Server listening on %s", a.ListenAddress)
+	scheme := "HTTP"
+	if a.tlsConfig != nil {
+		scheme = "HTTPS"
+	}
+
+	a.Logger.Info().Msgf(
+		"Server listening on %s (%s, authentication %s)",
+		a.ListenAddress, scheme, enabledText(a.authenticator.Enabled()),
+	)
+
+	for _, srv := range servers {
+		a.warnInsecureListener(srv)
+	}
 
 	if a.adminRouter != nil {
 		a.Logger.Info().Msgf("Admin endpoints (/debug/, /mutable/) served on %s only", a.AdminListenAddress)
@@ -579,6 +642,57 @@ func (s *apiServer) listen(ctx context.Context) error {
 	return nil
 }
 
+// warnInsecureListener warns when a server is reachable from the network without
+// authentication, or with authentication but without TLS.
+func (a *API) warnInsecureListener(srv *apiServer) {
+	if isLoopback(srv.listener.Addr()) {
+		return
+	}
+
+	switch {
+	case !a.authenticator.Enabled():
+		a.Logger.Warn().Msgf(
+			"Authentication is disabled and the %s server listens on %s, which is reachable from the network: "+
+				"anyone who can connect can read and write the metrics of every tenant%s. "+
+				"Enable auth or listen on localhost, see docs/authentication.md",
+			srv.name, srv.listener.Addr(), adminWarning(srv, a.adminRouter == nil),
+		)
+	case a.tlsConfig == nil:
+		a.Logger.Warn().Msgf(
+			"Authentication is enabled without TLS and the %s server listens on %s, which is reachable from "+
+				"the network: passwords and tokens are sent in clear text. Configure tls, see docs/authentication.md",
+			srv.name, srv.listener.Addr(),
+		)
+	}
+}
+
+func adminWarning(srv *apiServer, adminOnMainListener bool) string {
+	if srv.name == "admin" || adminOnMainListener {
+		return " and use the admin endpoints (/debug/, /mutable/)"
+	}
+
+	return ""
+}
+
+func enabledText(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+
+	return "disabled"
+}
+
+// isLoopback returns whether the address only accepts local connections.
+// An unspecified address (e.g. ":9201" or "0.0.0.0:9201") listens on every interface.
+func isLoopback(addr net.Addr) bool {
+	tcpAddr, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return false
+	}
+
+	return tcpAddr.IP.IsLoopback()
+}
+
 // ListenPort return the port listenning on. Should not be used before Run()
 // signalled its readiness.
 // This is useful for tests that use port "0" to known the actual listenning port.
@@ -598,12 +712,12 @@ func (a *API) Ready() {
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	a.serveWhenReady(a.router, w, req)
+	a.handler.ServeHTTP(w, req)
 }
 
 // serveAdminHTTP serves the admin endpoints of the admin listener.
 func (a *API) serveAdminHTTP(w http.ResponseWriter, req *http.Request) {
-	a.serveWhenReady(a.adminRouter, w, req)
+	a.adminHandler.ServeHTTP(w, req)
 }
 
 func (a *API) serveWhenReady(handler http.Handler, w http.ResponseWriter, req *http.Request) {
