@@ -78,6 +78,10 @@ func (it *SampleIterator) AtT() int64 {
 	return it.points[it.offset].Timestamp
 }
 
+func (it *SampleIterator) AtST() int64 {
+	return 0
+}
+
 // AtHistogram is not implemented (float samples only).
 func (it *SampleIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
 	return 0, nil

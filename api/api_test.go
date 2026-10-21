@@ -510,7 +510,7 @@ func TestWriteHandler(t *testing.T) {
 			})
 
 			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
-			writeHandler := remote.NewWriteHandler(sLogger, reg, requestScopedStore, allowedProtoMsgs, false)
+			writeHandler := remote.NewWriteHandler(sLogger, reg, requestScopedStore, allowedProtoMsgs, false, false, false)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{
@@ -1406,7 +1406,7 @@ func TestPromQLInstantQuery(t *testing.T) { //nolint:maintidx
 
 			apiClient := v1.NewAPI(client)
 
-			response, warning, err := apiClient.Query(t.Context(), tt.promql, tt.time)
+			response, warning, _, err := apiClient.Query(t.Context(), tt.promql, tt.time)
 			if err != nil {
 				if tt.wantErr {
 					return

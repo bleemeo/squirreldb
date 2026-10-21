@@ -56,7 +56,7 @@ func testLogger(t *testing.T) zerolog.Logger {
 func testMetric(t *testing.T, name string, stepSeconds int, query string) Metric {
 	t.Helper()
 
-	lbls, err := parser.ParseMetric(name)
+	lbls, err := parser.NewParser(parser.Options{}).ParseMetric(name)
 	if err != nil {
 		t.Fatalf("Failed to parse metric %q: %s", name, err)
 	}

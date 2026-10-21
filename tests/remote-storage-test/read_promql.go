@@ -402,7 +402,7 @@ func readPromQLWorker(
 			break
 		}
 
-		result, warnings, err := promQLAPI.QueryRange(ctx, req.query, req.rangeParam)
+		result, warnings, _, err := promQLAPI.QueryRange(ctx, req.query, req.rangeParam)
 		if err != nil {
 			return count, err
 		}

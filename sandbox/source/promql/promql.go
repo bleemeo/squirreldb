@@ -55,8 +55,10 @@ type Metric struct {
 func Load(promqlConfig dataset.Promql) ([]Metric, error) {
 	metrics := make([]Metric, len(promqlConfig))
 
+	parserInstance := parser.NewParser(parser.Options{})
+
 	for i, metric := range promqlConfig {
-		lbls, err := parser.ParseMetric(metric.Name)
+		lbls, err := parserInstance.ParseMetric(metric.Name)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", metric.Name, err)
 		}
@@ -65,7 +67,7 @@ func Load(promqlConfig dataset.Promql) ([]Metric, error) {
 			return nil, fmt.Errorf("metric %s: %w", metric.Name, ErrInvalidStepSeconds)
 		}
 
-		if _, err := parser.ParseExpr(metric.Query); err != nil {
+		if _, err := parserInstance.ParseExpr(metric.Query); err != nil {
 			return nil, fmt.Errorf("metric %s: invalid query: %w", metric.Name, err)
 		}
 

@@ -121,7 +121,7 @@ func TestQuerierWithoutTenant(t *testing.T) {
 
 	q := NewQuerier(testSeries(), 5000, 30000, QuerierOptions{})
 
-	got := selectAll(t, q, true, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"))
+	got := selectAll(t, q, true, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used")) //nolint:staticcheck,lll
 	want := []selectedSeries{
 		{
 			Labels: `{__name__="cpu_used", instance="server1"}`,
@@ -166,7 +166,7 @@ func TestQuerierWithTenant(t *testing.T) {
 		t,
 		q,
 		true,
-		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"),
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"), //nolint:staticcheck
 		labels.MustNewMatcher(labels.MatchEqual, "instance", "server2"),
 		tenantMatcher,
 	)
@@ -205,7 +205,7 @@ func TestQuerierWithTenant(t *testing.T) {
 		t.Errorf("LabelValues(tenant) mismatch (-want +got):\n%s", diff)
 	}
 
-	values, _, err = q.LabelValues(t.Context(), labels.MetricName, nil, tenantMatcher)
+	values, _, err = q.LabelValues(t.Context(), labels.MetricName, nil, tenantMatcher) //nolint:staticcheck
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestQuerierTenantSort(t *testing.T) {
 		TenantLabel: labels.Label{Name: "tenant", Value: "1"},
 	})
 
-	got := selectAll(t, q, true, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "up"))
+	got := selectAll(t, q, true, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "up")) //nolint:staticcheck
 	if len(got) != 2 {
 		t.Fatalf("got %d series, want 2", len(got))
 	}
@@ -287,7 +287,7 @@ func TestQuerierStats(t *testing.T) {
 	for range 2 {
 		q := NewQuerier(testSeries(), 5000, 30000, opts)
 
-		selectAll(t, q, false, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"))
+		selectAll(t, q, false, labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used")) //nolint:staticcheck,lll
 
 		if err := q.Close(); err != nil {
 			t.Fatal(err)

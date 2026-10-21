@@ -36,7 +36,7 @@ func TestMatcherCondition(t *testing.T) {
 	}{
 		{
 			name:     "equal on __name__",
-			matcher:  labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"),
+			matcher:  labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"), //nolint:staticcheck
 			wantCond: "metric_name = ?",
 			wantArgs: []any{"cpu_used"},
 		},
@@ -60,7 +60,7 @@ func TestMatcherCondition(t *testing.T) {
 		},
 		{
 			name:     "not-regexp on __name__ is anchored",
-			matcher:  labels.MustNewMatcher(labels.MatchNotRegexp, labels.MetricName, "node_.*"),
+			matcher:  labels.MustNewMatcher(labels.MatchNotRegexp, labels.MetricName, "node_.*"), //nolint:staticcheck
 			wantCond: "NOT match(metric_name, ?)",
 			wantArgs: []any{"^(?:node_.*)$"},
 		},
@@ -93,7 +93,7 @@ func TestBuildWhere(t *testing.T) {
 
 	t.Run("matchers are ANDed with ordered args", func(t *testing.T) {
 		where, args := lq.buildWhere([]*labels.Matcher{
-			labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"),
+			labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"), //nolint:staticcheck
 			labels.MustNewMatcher(labels.MatchRegexp, "item", "/.*"),
 		})
 
@@ -113,7 +113,7 @@ func TestWhereWithTime(t *testing.T) {
 	lq := &labelQuerier{tenantLabel: "__bleemeo_account__", mint: 5, maxt: 9}
 
 	where, args := lq.whereWithTime([]*labels.Matcher{
-		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"),
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "cpu_used"), //nolint:staticcheck
 	})
 
 	// The matcher condition is kept, plus the [mint, maxt] activity filter on the

@@ -52,7 +52,7 @@ func (lq *labelQuerier) LabelValues(
 	)
 
 	switch name {
-	case labels.MetricName:
+	case labels.MetricName: //nolint:staticcheck
 		query = "SELECT DISTINCT metric_name AS v FROM tsdb_tags WHERE " + where + " ORDER BY v"
 		queryArgs = args
 	case lq.tenantLabel:
@@ -118,7 +118,7 @@ func (lq *labelQuerier) LabelNames(
 	}
 
 	names := make([]string, 0, len(keys)+2)
-	names = append(names, labels.MetricName)
+	names = append(names, labels.MetricName) //nolint:staticcheck
 
 	if hasTenant != 0 {
 		names = append(names, lq.tenantLabel)
@@ -193,7 +193,7 @@ func (lq *labelQuerier) matcherCondition(m *labels.Matcher) (string, []any) {
 	)
 
 	switch m.Name {
-	case labels.MetricName:
+	case labels.MetricName: //nolint:staticcheck
 		expr = "metric_name"
 	case lq.tenantLabel:
 		expr = "tenant"

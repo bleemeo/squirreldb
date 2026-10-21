@@ -114,7 +114,9 @@ func (p *point) UnmarshalJSON(buf []byte) error {
 func processArgs() (
 	matchersString string, relabels labels.Labels, dropLabels []string, start time.Time, end time.Time, err error,
 ) {
-	matchers, err := parser.ParseMetricSelector("{" + *matcherText + "}")
+	parserInstance := parser.NewParser(parser.Options{})
+
+	matchers, err := parserInstance.ParseMetricSelector("{" + *matcherText + "}")
 	if err != nil {
 		return "", labels.EmptyLabels(), nil, start, end, fmt.Errorf("can't parse matcher: %w", err)
 	}
@@ -141,7 +143,7 @@ func processArgs() (
 	}
 
 	if *reLabelsText != "" {
-		tmp, err := parser.ParseMetricSelector("{" + *reLabelsText + "}")
+		tmp, err := parserInstance.ParseMetricSelector("{" + *reLabelsText + "}")
 		if err != nil {
 			return "", labels.EmptyLabels(), nil, start, end, fmt.Errorf("can't parse matcher: %w", err)
 		}

@@ -93,11 +93,11 @@ func (app errAppender) AppendHistogram(
 	return 0, app.err
 }
 
-func (app errAppender) AppendHistogramCTZeroSample(
+func (app errAppender) AppendHistogramSTZeroSample(
 	ref storage.SeriesRef,
 	l labels.Labels,
 	t int64,
-	ct int64,
+	st int64,
 	h *histogram.Histogram,
 	fh *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
@@ -112,11 +112,11 @@ func (app errAppender) UpdateMetadata(
 	return 0, app.err
 }
 
-func (app errAppender) AppendCTZeroSample(
+func (app errAppender) AppendSTZeroSample(
 	ref storage.SeriesRef,
 	l labels.Labels,
 	t int64,
-	ct int64,
+	st int64,
 ) (storage.SeriesRef, error) {
 	return 0, app.err
 }

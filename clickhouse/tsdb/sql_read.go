@@ -638,7 +638,7 @@ func asTooManyPoints(err error) (error, bool) {
 // buildLabels reconstructs a series' label set from its tsdb_tags columns.
 func (lq *labelQuerier) buildLabels(metricName, tenant string, tags map[string]string) labels.Labels {
 	b := labels.NewScratchBuilder(len(tags) + 2)
-	b.Add(labels.MetricName, metricName)
+	b.Add(labels.MetricName, metricName) //nolint:staticcheck
 
 	if tenant != "" {
 		b.Add(lq.tenantLabel, tenant)

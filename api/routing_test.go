@@ -109,7 +109,7 @@ func TestBackendRouting(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			response, _, err := v1.NewAPI(client).QueryRange(
+			response, _, _, err := v1.NewAPI(client).QueryRange(
 				t.Context(),
 				"agent_status",
 				v1.Range{Start: start, End: end, Step: time.Minute},

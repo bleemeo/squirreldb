@@ -32,9 +32,9 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/golang/snappy"
+	remoteapi "github.com/prometheus/client_golang/exp/api/remote"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/route"
-	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
@@ -73,9 +73,9 @@ func TestFakeRemoteWriter(t *testing.T) {
 	zlog := zerolog.New(zerolog.NewTestWriter(t))
 	store := &dummy.MemoryTSDB{}
 
-	msgVersions := map[string]config.RemoteWriteProtoMsg{
-		"V1": config.RemoteWriteProtoMsgV1,
-		"V2": config.RemoteWriteProtoMsgV2,
+	msgVersions := map[string]remoteapi.WriteMessageType{
+		"V1": remoteapi.WriteV1MessageType,
+		"V2": remoteapi.WriteV2MessageType,
 	}
 
 	for _, tc := range testCases {
@@ -88,10 +88,9 @@ func TestFakeRemoteWriter(t *testing.T) {
 				t.Parallel()
 
 				appendable := new(dummyAppendable)
-				api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog)
+				api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog, tc.backdateOffset)
 				router := route.New()
 
-				patchRemoteWriteHandler(api, tc.backdateOffset)
 				api.Register(router)
 
 				pointTS := time.Now().Round(time.Second).Add(tc.pointFutureness)
@@ -141,10 +140,9 @@ func TestWriterHandlerLogger(t *testing.T) {
 	store := &dummy.MemoryTSDB{}
 
 	appendable := new(dummyAppendable)
-	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog)
+	api := NewPrometheus(store, appendable, 1, prometheus.NewRegistry(), zlog, time.Hour)
 	router := route.New()
 
-	patchRemoteWriteHandler(api, time.Hour)
 	api.Register(router)
 
 	req, err := http.NewRequest( //nolint: noctx
@@ -156,7 +154,7 @@ func TestWriterHandlerLogger(t *testing.T) {
 		t.Fatal("Failed to make request:", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-protobuf;proto="+string(config.RemoteWriteProtoMsgV1))
+	req.Header.Set("Content-Type", "application/x-protobuf;proto="+string(remoteapi.WriteV1MessageType))
 
 	recorder := httptest.NewRecorder()
 
@@ -170,9 +168,9 @@ func TestWriterHandlerLogger(t *testing.T) {
 		t.Errorf("Status code = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 
-	// This is a copy of a log message from fake_remote_writer.go, to ensure access to
-	// fwh.originalWriteHandler.logger works.
-	expectedContent := "Error decompressing remote write request"
+	// This is a copy of a log message from remoteapi.SnappyDecodeMiddleware, to ensure
+	// our logger is used by the remote write handler.
+	expectedContent := "Error snappy decoding remote write request"
 	if !strings.Contains(logBuffer.String(), expectedContent) {
 		t.Errorf("Log buffer don't contains expected string: %s", expectedContent)
 	}
@@ -211,12 +209,12 @@ func getV2Series(pointTS time.Time) writev2.TimeSeries {
 	}
 }
 
-func makeWriteReqBody(t *testing.T, msgVersion config.RemoteWriteProtoMsg, pointTS time.Time) io.Reader {
+func makeWriteReqBody(t *testing.T, msgVersion remoteapi.WriteMessageType, pointTS time.Time) io.Reader {
 	t.Helper()
 
 	var req interface{ Marshal() ([]byte, error) }
 
-	if msgVersion == config.RemoteWriteProtoMsgV1 {
+	if msgVersion == remoteapi.WriteV1MessageType {
 		req = &prompb.WriteRequest{
 			Timeseries: []prompb.TimeSeries{getV1Series(pointTS)},
 		}
@@ -305,7 +303,7 @@ func (der *dummyAppender) AppendHistogram(
 	panic("implement me")
 }
 
-func (der *dummyAppender) AppendHistogramCTZeroSample(
+func (der *dummyAppender) AppendHistogramSTZeroSample(
 	_ storage.SeriesRef,
 	_ labels.Labels,
 	_, _ int64,
@@ -324,7 +322,7 @@ func (der *dummyAppender) UpdateMetadata(
 	return ref, nil
 }
 
-func (der *dummyAppender) AppendCTZeroSample(
+func (der *dummyAppender) AppendSTZeroSample(
 	storage.SeriesRef,
 	labels.Labels,
 	int64,

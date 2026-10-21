@@ -45,14 +45,14 @@ type seriesColumns struct {
 // labels.Labels being canonically sorted by name (a Prometheus invariant).
 func seriesToInput(lbls labels.Labels, tenantLabel string, ttlSeconds int64, globalDays uint16) seriesColumns {
 	cols := seriesColumns{
-		metricName: lbls.Get(labels.MetricName),
+		metricName: lbls.Get(labels.MetricName), //nolint:staticcheck
 		tags:       &sortedTags{},
 		rowTTLDays: rowTTLDays(ttlSeconds, globalDays),
 	}
 
 	lbls.Range(func(l labels.Label) {
 		switch l.Name {
-		case labels.MetricName:
+		case labels.MetricName: //nolint:staticcheck
 		case tenantLabel:
 			cols.tenant = l.Value
 		default:

@@ -106,7 +106,7 @@ func TestReadEmbeddedDataset(t *testing.T) {
 		t.Fatalf("TSDB: %v", err)
 	}
 
-	nameMatcher := labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "agent_status")
+	nameMatcher := labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "agent_status") //nolint:staticcheck
 	tenantMatcher := labels.MustNewMatcher(labels.MatchEqual, tenantLabel, "1234")
 
 	// Without tenant, series are returned as they are in the dataset.
@@ -144,7 +144,7 @@ func TestReadEmbeddedDataset(t *testing.T) {
 	}
 
 	// The PromQL series of the dataset are served too.
-	expiry := query(t, tsdb, "", labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "probe_domain_expiry"))
+	expiry := query(t, tsdb, "", labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "probe_domain_expiry")) //nolint:staticcheck,lll
 	if len(expiry) != 1 {
 		t.Errorf("got %d probe_domain_expiry series, want 1", len(expiry))
 	}
@@ -206,7 +206,7 @@ func TestPromQLSeriesValue(t *testing.T) {
 		t.Context(),
 		false,
 		nil,
-		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "probe_domain_expiry"),
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "probe_domain_expiry"), //nolint:staticcheck
 	)
 	if !set.Next() {
 		t.Fatal("probe_domain_expiry not found")
@@ -236,7 +236,7 @@ func TestDiscardWrites(t *testing.T) {
 
 	app := tsdb.AppenderWithOptions(t.Context(), types.AppenderOptions{WriteTTL: 86400})
 
-	lbls := labels.FromStrings(labels.MetricName, "written_metric", tenantLabel, "1234")
+	lbls := labels.FromStrings(labels.MetricName, "written_metric", tenantLabel, "1234") //nolint:staticcheck
 	if _, err := app.Append(0, lbls, time.Now().UnixMilli(), 42); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestDiscardWrites(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	got := query(t, tsdb, "1234", labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "written_metric"))
+	got := query(t, tsdb, "1234", labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "written_metric")) //nolint:staticcheck,lll
 	if len(got) != 0 {
 		t.Errorf("got %d written series, want 0: writes must be discarded", len(got))
 	}

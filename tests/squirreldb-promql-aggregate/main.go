@@ -987,7 +987,7 @@ func runAggMatrix(ctx context.Context, backend string, t0 time.Time, squirrelDBU
 // timestamp(ms)->value map. w decides instant (api.Query) vs range (api.QueryRange).
 func runQuery(ctx context.Context, api v1.API, query string, w evalWindow) (map[int64]float64, error) {
 	if w.instant() {
-		values, _, err := api.Query(ctx, query, w.end)
+		values, _, _, err := api.Query(ctx, query, w.end)
 		if err != nil {
 			return nil, err
 		}
@@ -995,7 +995,7 @@ func runQuery(ctx context.Context, api v1.API, query string, w evalWindow) (map[
 		return seriesToMap(values)
 	}
 
-	values, _, err := api.QueryRange(ctx, query, v1.Range{Start: w.start, End: w.end, Step: w.step})
+	values, _, _, err := api.QueryRange(ctx, query, v1.Range{Start: w.start, End: w.end, Step: w.step})
 	if err != nil {
 		return nil, err
 	}

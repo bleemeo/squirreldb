@@ -150,7 +150,7 @@ func (r *recordingAppender) AppendHistogram(
 	return 0, nil
 }
 
-func (r *recordingAppender) AppendHistogramCTZeroSample(
+func (r *recordingAppender) AppendHistogramSTZeroSample(
 	_ storage.SeriesRef,
 	_ labels.Labels,
 	_ int64,
@@ -169,7 +169,7 @@ func (r *recordingAppender) UpdateMetadata(
 	return 0, nil
 }
 
-func (r *recordingAppender) AppendCTZeroSample(
+func (r *recordingAppender) AppendSTZeroSample(
 	_ storage.SeriesRef,
 	_ labels.Labels,
 	_ int64,
