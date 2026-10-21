@@ -67,7 +67,20 @@ func DefaultConfig() Config {
 			CAPath:      "",
 			Keyspace:    "",
 		},
+		TLS: TLS{
+			CertFile:       "",
+			KeyFile:        "",
+			ClientCAFile:   "",
+			ClientAuthType: "",
+			MinVersion:     "",
+		},
+		Auth: Auth{
+			Enabled:            false,
+			MetricsRequireAuth: false,
+			Users:              []AuthUser{},
+		},
 		ListenAddress:       "localhost:9201",
+		AdminListenAddress:  "",
 		TenantLabelName:     "__account_id",
 		RequireTenantHeader: false,
 		RemoteStorage: RemoteStorage{

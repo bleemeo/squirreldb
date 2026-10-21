@@ -121,7 +121,7 @@ func preaggregate(ctx context.Context, squirrelDBURL string, from time.Time, to 
 		to.Format("2006-01-02"),
 	)
 
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, aggregateURL, nil)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, aggregateURL, nil)
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {

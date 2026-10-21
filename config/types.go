@@ -26,6 +26,10 @@ const (
 )
 
 // Config is the main structured configuration.
+//
+// Secrets (passwords, hashes, tokens, DSNs) must be tagged `sensitive:"true"`: the
+// admin status page (/debug/status) shows the effective configuration with these
+// fields redacted.
 type Config struct {
 	Backend string `yaml:"backend"`
 	// ExtraWriteBackend is an optional additional, best-effort write target
@@ -42,6 +46,9 @@ type Config struct {
 	Sandbox             Sandbox       `yaml:"sandbox"`
 	Redis               Redis         `yaml:"redis"`
 	ListenAddress       string        `yaml:"listen_address"`
+	AdminListenAddress  string        `yaml:"admin_listen_address"`
+	TLS                 TLS           `yaml:"tls"`
+	Auth                Auth          `yaml:"auth"`
 	TenantLabelName     string        `yaml:"tenant_label_name"`
 	RequireTenantHeader bool          `yaml:"require_tenant_header"`
 	RemoteStorage       RemoteStorage `yaml:"remote_storage"`
@@ -57,6 +64,52 @@ type Config struct {
 	// MaxAllowedTimeInFuture defines how much duration in the future is allowed for points' timestamps.
 	// Point more that this amount in the future might be rejected.
 	MaxAllowedTimeInFuture time.Duration `yaml:"max_allowed_time_in_future"`
+}
+
+// TLS configures the TLS of the HTTP API, on listen_address and admin_listen_address.
+// The fields have the same meaning as in the tls_server_config of the Prometheus web
+// configuration file. TLS is enabled when cert_file is set.
+type TLS struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// ClientCAFile is the CA used to verify the client certificates (mTLS).
+	ClientCAFile string `yaml:"client_ca_file"`
+	// ClientAuthType is one of NoClientCert (the default), RequestClientCert,
+	// RequireAnyClientCert, VerifyClientCertIfGiven or RequireAndVerifyClientCert.
+	ClientAuthType string `yaml:"client_auth_type"`
+	// MinVersion is one of TLS10, TLS11, TLS12 (the default) or TLS13.
+	MinVersion string `yaml:"min_version"`
+}
+
+// Auth configures the authentication of the HTTP API. See docs/authentication.md.
+// Unknown keys in this section (and in TLS) are errors, not warnings: see
+// securitySections.
+type Auth struct {
+	// Enabled enables the authentication (disabled by default).
+	Enabled bool `yaml:"enabled"`
+	// MetricsRequireAuth makes /metrics require an authenticated user. /ready never
+	// requires authentication.
+	MetricsRequireAuth bool `yaml:"metrics_require_auth"`
+	// Users can only be set in configuration files: unlike the other settings, they
+	// can't be set by environment variables or flags. Users defined in multiple files
+	// are concatenated.
+	Users []AuthUser `yaml:"users"`
+}
+
+// AuthUser is a user of the HTTP API.
+type AuthUser struct {
+	// Name is the basic auth username.
+	Name string `yaml:"name"`
+	// PasswordHash is the bcrypt hash of the basic auth password.
+	PasswordHash string `sensitive:"true" yaml:"password_hash"`
+	// TokenSHA256 is the hex encoded sha256 of a bearer token.
+	TokenSHA256 string `sensitive:"true" yaml:"token_sha256"`
+	// Tenant, when set, binds the user to this tenant.
+	Tenant string `yaml:"tenant"`
+	// Scopes are the permissions of the user: read, write and/or admin.
+	Scopes []string `yaml:"scopes"`
+	// ForcedMatcher restricts the series the user can read, e.g. 'env="prod"'.
+	ForcedMatcher string `yaml:"forced_matcher"`
 }
 
 type Internal struct {
@@ -80,7 +133,7 @@ type Installation struct {
 }
 
 type Sentry struct {
-	DSN string `yaml:"dsn"`
+	DSN string `sensitive:"true" yaml:"dsn"`
 }
 
 type Log struct {
@@ -104,7 +157,7 @@ type RemoteStorage struct {
 type Redis struct {
 	Addresses   []string `yaml:"addresses"`
 	Username    string   `yaml:"username"`
-	Password    string   `yaml:"password"`
+	Password    string   `sensitive:"true"    yaml:"password"`
 	SSL         bool     `yaml:"ssl"`
 	SSLInsecure bool     `yaml:"ssl_insecure"`
 	CertPath    string   `yaml:"cert_path"`
@@ -121,7 +174,7 @@ type Cassandra struct {
 	PreCreateShardFraction int           `yaml:"pre_create_shard_fraction"`
 	Aggregate              Aggregate     `yaml:"aggregate"`
 	Username               string        `yaml:"username"`
-	Password               string        `yaml:"password"`
+	Password               string        `sensitive:"true"                 yaml:"password"`
 	CertPath               string        `yaml:"cert_path"`
 	KeyPath                string        `yaml:"key_path"`
 	CAPath                 string        `yaml:"ca_path"`
@@ -140,7 +193,7 @@ type ClickHouse struct {
 	Addresses []string `yaml:"addresses"`
 	Database  string   `yaml:"database"`
 	Username  string   `yaml:"username"`
-	Password  string   `yaml:"password"`
+	Password  string   `sensitive:"true" yaml:"password"`
 	// ClusterName, when set, makes SquirrelDB create its tables with
 	// "ON CLUSTER <name>" and ReplicatedMergeTree engines (ClickHouse cluster
 	// mode). Empty means a single ClickHouse node (plain MergeTree). It must

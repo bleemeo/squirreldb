@@ -107,6 +107,10 @@ change. It also never recreates tables on restart (only at first bootstrap) and
 uses name-based Keeper paths, so re-creating a table re-attaches to the existing
 data instead of forking. Bringing the node back is the manual operation below:
 
+(The `curl` commands below use SquirrelDB's main port `9201`. If you set
+`admin_listen_address`, the `/debug/` endpoints are only served on that address:
+use it instead.)
+
 Steps (the recreated node is `clickhouse-server-0`, whose replica macro is
 `replica01` — see `clickhouse-server-start.sh`; run the SQL on a **healthy** node,
 here `clickhouse-server-1`):

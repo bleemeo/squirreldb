@@ -18,6 +18,8 @@ package tsdb
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -47,6 +49,45 @@ type walDrainer struct {
 
 	metrics *metrics
 	logger  zerolog.Logger
+
+	// The state observed by the loop, read by the status page (see state).
+	leader atomic.Bool
+	// lastDrained is when a drain cycle last emptied the WAL (unix nanoseconds, 0 if never).
+	lastDrained atomic.Int64
+	errMu       sync.Mutex
+	lastErr     string
+	lastErrAt   time.Time
+}
+
+// drainerState is a snapshot of the drainer state.
+type drainerState struct {
+	leader      bool
+	lastDrained time.Time
+	lastErr     string
+	lastErrAt   time.Time
+}
+
+func (d *walDrainer) state() drainerState {
+	st := drainerState{leader: d.leader.Load()}
+
+	if ns := d.lastDrained.Load(); ns != 0 {
+		st.lastDrained = time.Unix(0, ns)
+	}
+
+	d.errMu.Lock()
+	st.lastErr, st.lastErrAt = d.lastErr, d.lastErrAt
+	d.errMu.Unlock()
+
+	return st
+}
+
+// noteError records the last drain error, for the status page.
+func (d *walDrainer) noteError(msg string, err error) {
+	d.errMu.Lock()
+	defer d.errMu.Unlock()
+
+	d.lastErr = msg + ": " + err.Error()
+	d.lastErrAt = time.Now()
 }
 
 // run is the drainer loop. It returns when ctx is done, releasing the lease if held
@@ -93,6 +134,7 @@ func (d *walDrainer) run(ctx context.Context) {
 		}
 
 		leader = held
+		d.leader.Store(held)
 
 		// Publish the WAL length (buffered points) every tick (every node observes the
 		// same shared list), so the gauge reflects drains, not just this node's appends.
@@ -139,16 +181,20 @@ func (d *walDrainer) drainCycle(ctx context.Context) {
 		entries, err := d.wal.Peek(ctx, d.maxPoints)
 		if err != nil {
 			d.logger.Warn().Err(err).Msg("peek WAL")
+			d.noteError("peek WAL", err)
 
 			return
 		}
 
 		if len(entries) == 0 {
+			d.lastDrained.Store(time.Now().UnixNano())
+
 			return // WAL drained
 		}
 
 		if err := d.write(ctx, entries); err != nil {
 			d.logger.Warn().Err(err).Msg("write WAL batch to ClickHouse")
+			d.noteError("write WAL batch to ClickHouse", err)
 
 			return // leave the entries in the WAL, retry next cycle
 		}
@@ -168,6 +214,7 @@ func (d *walDrainer) drainCycle(ctx context.Context) {
 
 		if err := d.wal.Trim(ctx, len(entries)); err != nil {
 			d.logger.Warn().Err(err).Msg("trim WAL")
+			d.noteError("trim WAL", err)
 
 			return
 		}

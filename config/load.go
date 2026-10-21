@@ -45,8 +45,9 @@ func LoadConfigFromFlags(
 ) (*pflag.FlagSet, Config, error, error) {
 	allFlags := append(CommonFlags(), commandFlags...)
 	// Only the config flags shared by every entry point are exposed here; a
-	// command that needs the daemon-only ones (listen_address) adds them via its
-	// commandFlags. The full binding still comes from ConfigFlags() in Load.
+	// command that needs the daemon-only ones (listen_address, admin_listen_address)
+	// adds them via its commandFlags. The full binding still comes from
+	// ConfigFlags() in Load.
 	allFlags = append(allFlags, SharedConfigFlags()...)
 	flagSet := NewFlagSet("squirreldb "+subcommandName, allFlags)
 
@@ -126,6 +127,18 @@ func validateConfig(cfg Config) error {
 			"%w: 'cassandra.aggregate.intended_duration' must be strictly greater than 0",
 			ErrInvalidValue,
 		)
+		warnings.Append(err)
+	}
+
+	if cfg.AdminListenAddress != "" && cfg.AdminListenAddress == cfg.ListenAddress {
+		warnings.Append(fmt.Errorf(
+			"%w: 'admin_listen_address' (%q) must differ from 'listen_address' "+
+				"(leave it empty to serve the admin endpoints on 'listen_address')",
+			ErrInvalidValue, cfg.AdminListenAddress,
+		))
+	}
+
+	for _, err := range validateSecurity(cfg) {
 		warnings.Append(err)
 	}
 

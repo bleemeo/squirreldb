@@ -56,9 +56,35 @@ func TestStructuredConfig(t *testing.T) {
 			CAPath:      "/ca.pem",
 			Keyspace:    "squirreldb",
 		},
-		DefaultTimeToLive: 4 * time.Hour,
-		ListenAddress:     "127.0.0.1:9090",
-		TenantLabelName:   "account",
+		DefaultTimeToLive:  4 * time.Hour,
+		ListenAddress:      "127.0.0.1:9090",
+		AdminListenAddress: "127.0.0.1:9091",
+		TLS: TLS{
+			CertFile:       "/cert.pem",
+			KeyFile:        "/key.pem",
+			ClientCAFile:   "/ca.pem",
+			ClientAuthType: "RequireAndVerifyClientCert",
+			MinVersion:     "TLS13",
+		},
+		Auth: Auth{
+			Enabled:            true,
+			MetricsRequireAuth: true,
+			Users: []AuthUser{
+				{
+					Name:        "glouton-acme",
+					TokenSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+					Tenant:      "acme",
+					Scopes:      []string{"write"},
+				},
+				{
+					Name:          "dashglass",
+					PasswordHash:  "$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+					Scopes:        []string{"read"},
+					ForcedMatcher: `env="prod"`,
+				},
+			},
+		},
+		TenantLabelName: "account",
 		RemoteStorage: RemoteStorage{
 			MaxConcurrentRequests: 1,
 		},
