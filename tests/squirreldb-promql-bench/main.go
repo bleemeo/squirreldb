@@ -47,7 +47,7 @@ func query(ctx context.Context, api v1.API, query string, ts time.Time) (model.V
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, warnings, err := api.Query(ctx, query, ts)
+	result, warnings, _, err := api.Query(ctx, query, ts)
 	if len(warnings) > 0 {
 		log.Printf("Warnings: %v\n", warnings)
 	}
@@ -60,7 +60,7 @@ func queryRange(ctx context.Context, api v1.API, query string, queryRange v1.Ran
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, warnings, err := api.QueryRange(ctx, query, queryRange)
+	result, warnings, _, err := api.QueryRange(ctx, query, queryRange)
 	if len(warnings) > 0 {
 		log.Printf("Warnings: %v\n", warnings)
 	}
