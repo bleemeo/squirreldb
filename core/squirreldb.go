@@ -15,18 +15,20 @@
 // limitations under the License.
 
 // Package core is the storage glue of SquirrelDB: from the configured backends
-// it composes the data-plane accessors (read, write, dual-write) that the API,
-// the migration tool and the tests consume. Backends are never wrapped — only
-// the narrow read/write interfaces are decorated (mutable labels on read,
-// dual-write on write) — so every backend-specific capability stays reachable on
-// the Backend itself.
+// it composes the data-plane accessors (read, write, dual-write, per-request
+// routing) that the API, the migration tool and the tests consume. Backends are
+// never wrapped — only the narrow read/write interfaces are decorated (mutable
+// labels on read, dual-write on write, routing on both) — so every
+// backend-specific capability stays reachable on the Backend itself.
 package core
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -59,7 +61,8 @@ var (
 
 // Backend is the uniform storage interface both Cassandra and ClickHouse satisfy.
 // A single backend (selected by the "backend" config option) provides every
-// store; mixing backends is not supported. Backend-specific capabilities beyond
+// store; mixing backends is not supported, but a request can be routed to
+// another, complete, backend (see docs/routing.md). Backend-specific capabilities beyond
 // this interface (raw export/import, HTTP option parsing, the debug endpoints,
 // the Cassandra index, ...) are reached by type-asserting the concrete Backend,
 // which is never wrapped.
@@ -127,18 +130,29 @@ type Deps struct {
 	MetricRegistry prometheus.Registerer
 }
 
-// SquirrelDB owns the started primary and optional extra backends and hands out the
-// composed data-plane accessors. It caches the (started-once) backend instances
-// but never the result of Backend.TSDB() — the backends memoize their own TSDB.
+// SquirrelDB owns the started primary, optional extra and routed backends and
+// hands out the composed data-plane accessors. It caches the (started-once)
+// backend instances but never the result of Backend.TSDB() — the backends
+// memoize their own TSDB.
+//
+// The primary backend ("backend" option) is the default route; the routed
+// backends ("routing.backends" option, see docs/routing.md) are selectable per
+// request. The extra backend only receives the dual-write of the default route.
+// Telemetry, cluster, mutable label API and debug endpoints stay bound to the
+// primary.
 type SquirrelDB struct {
 	config config.Config
 	option SquirrelDBOption
 	deps   Deps
+	router *backendRouter
+	// routingMetrics is nil when routing is disabled.
+	routingMetrics *routingMetrics
 
 	mu                sync.Mutex
 	cluster           types.Cluster
 	primary           Backend
 	extra             Backend
+	routed            map[string]Backend
 	wg                sync.WaitGroup
 	cancelExtraAttach context.CancelFunc
 
@@ -152,11 +166,18 @@ func New(deps Deps, config config.Config, option SquirrelDBOption) *SquirrelDB {
 		deps.MetricRegistry = prometheus.DefaultRegisterer
 	}
 
-	return &SquirrelDB{
+	b := &SquirrelDB{
 		deps:   deps,
 		config: config,
 		option: option,
+		router: newBackendRouter(config),
 	}
+
+	if config.Routing.Enabled() {
+		b.routingMetrics = newRoutingMetrics(deps.MetricRegistry)
+	}
+
+	return b
 }
 
 // Cluster return an types.Cluster. The returned cluster should be closed after use.
@@ -219,6 +240,7 @@ func (b *SquirrelDB) Primary(ctx context.Context) (Backend, error) {
 		b.config.Internal.ReadOnly || b.option.PrimaryBackendReadOnly,
 		false,
 		cluster,
+		b.deps.MetricRegistry,
 	)
 	if err != nil {
 		return nil, err
@@ -254,6 +276,7 @@ func (b *SquirrelDB) Extra(ctx context.Context) (Backend, error) {
 			b.config.Internal.ReadOnly,
 			b.option.MigrateTargetImportOnly,
 			cluster,
+			b.deps.MetricRegistry,
 		)
 		if err != nil {
 			return nil, err
@@ -275,15 +298,78 @@ func (b *SquirrelDB) Extra(ctx context.Context) (Backend, error) {
 	return extra, nil
 }
 
-// startBackend builds and starts one backend by name.
+// Routed returns the (started, cached) routed backends ("routing.backends"
+// option), by name. They are all started on the first call, which fails if any
+// of them fails to start. It returns an empty map when no routed backend is
+// configured.
+func (b *SquirrelDB) Routed(ctx context.Context) (map[string]Backend, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(b.config.Routing.Backends) == 0 {
+		return map[string]Backend{}, nil
+	}
+
+	cluster, err := b.clusterLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.routed == nil {
+		b.routed = make(map[string]Backend, len(b.config.Routing.Backends))
+	}
+
+	for _, name := range b.config.Routing.Backends {
+		if _, ok := b.routed[name]; ok {
+			continue
+		}
+
+		// The routed backends share the registry of the primary: the duplicate
+		// metrics of their shared components are ignored.
+		backend, err := b.startBackend(
+			ctx,
+			name,
+			b.config.Internal.ReadOnly,
+			false,
+			cluster,
+			&routedRegisterer{reg: b.deps.MetricRegistry},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("start routed backend %q: %w", name, err)
+		}
+
+		b.routed[name] = backend
+	}
+
+	return maps.Clone(b.routed), nil
+}
+
+// ResolveBackend returns the name of the backend serving a request of tenant,
+// which requested the backend requested (X-SquirrelDB-Backend header, empty when
+// absent) and may only use the allowed backends (the backends of the
+// authenticated user, empty meaning no restriction). It returns an error wrapping
+// types.ErrBackendNotSelectable if the requested backend isn't enabled, or
+// types.ErrBackendNotAllowed if the request is routed to a backend it isn't
+// allowed to use. The API calls it when a request starts, to reject the request
+// early; the routing queryable/appendable resolve the backend the same way for
+// each querier/appender, from the same values carried by their options.
+func (b *SquirrelDB) ResolveBackend(_ context.Context, tenant, requested string, allowed []string) (string, error) {
+	name, _, err := b.router.resolveBackend(tenant, requested, allowed)
+
+	return name, err
+}
+
+// startBackend builds and starts one backend by name. reg is the registry of its
+// metrics.
 func (b *SquirrelDB) startBackend(
 	ctx context.Context,
 	name string,
 	readOnly bool,
 	importOnly bool,
 	cluster types.Cluster,
+	reg prometheus.Registerer,
 ) (Backend, error) {
-	result, err := b.newBackendByName(ctx, name, cluster, readOnly, importOnly)
+	result, err := b.newBackendByName(ctx, name, cluster, reg, readOnly, importOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -301,23 +387,25 @@ func (b *SquirrelDB) newBackendByName(
 	ctx context.Context,
 	name string,
 	cluster types.Cluster,
+	reg prometheus.Registerer,
 	readOnly bool,
 	importOnly bool,
 ) (Backend, error) {
 	switch name {
 	case config.BackendCassandra:
 		return cassandrabackend.New(
-			ctx, b.deps.Logger.With().Str("backend", "cassandra").Logger(), b.cassandraBackendOptions(cluster, readOnly))
+			ctx, b.deps.Logger.With().Str("backend", "cassandra").Logger(),
+			b.cassandraBackendOptions(cluster, reg, readOnly))
 	case config.BackendClickHouse:
 		return clickhousebackend.New(
 			ctx, b.deps.Logger.With().Str("backend", "clickhouse").Logger(),
-			b.clickHouseBackendOptions(cluster, readOnly, importOnly))
+			b.clickHouseBackendOptions(cluster, reg, readOnly, importOnly))
 	case config.BackendDummy:
 		return dummybackend.New(
-			ctx, b.deps.Logger.With().Str("backend", "dummy").Logger(), b.dummyBackendOptions(cluster))
+			ctx, b.deps.Logger.With().Str("backend", "dummy").Logger(), b.dummyBackendOptions(cluster, reg))
 	case config.BackendSandbox:
 		return sandboxbackend.New(
-			ctx, b.deps.Logger.With().Str("backend", "sandbox").Logger(), b.sandboxBackendOptions(cluster))
+			ctx, b.deps.Logger.With().Str("backend", "sandbox").Logger(), b.sandboxBackendOptions(cluster, reg))
 	default:
 		return nil, fmt.Errorf("unknown backend: %v", name)
 	}
@@ -326,7 +414,11 @@ func (b *SquirrelDB) newBackendByName(
 // cassandraBackendOptions builds the Cassandra backend options from the config
 // and the daemon-provided cluster. Index test hooks (DontStartIndex/
 // InternalNowFunction) are set later via Backend.SetCassandraIndexTestingOption.
-func (b *SquirrelDB) cassandraBackendOptions(cluster types.Cluster, readOnly bool) cassandrabackend.Options {
+func (b *SquirrelDB) cassandraBackendOptions(
+	cluster types.Cluster,
+	reg prometheus.Registerer,
+	readOnly bool,
+) cassandrabackend.Options {
 	getAggregateIntendedDuration := func() time.Duration {
 		// The largest the cluster, the slower we can run pre-aggregation.
 		return b.config.Cassandra.Aggregate.IntendedDuration * time.Duration(cluster.Size())
@@ -335,7 +427,7 @@ func (b *SquirrelDB) cassandraBackendOptions(cluster types.Cluster, readOnly boo
 	options := cassandrabackend.Options{
 		CassandraConfig:           b.config.Cassandra,
 		ReadOnly:                  readOnly,
-		MetricRegistry:            b.deps.MetricRegistry,
+		MetricRegistry:            reg,
 		Cluster:                   cluster,
 		TenantLabel:               b.config.TenantLabelName,
 		DefaultTimeToLive:         b.config.DefaultTimeToLive,
@@ -359,12 +451,13 @@ func (b *SquirrelDB) cassandraBackendOptions(cluster types.Cluster, readOnly boo
 // the TSDB for bulk import only (no WAL drainer) — see MigrateTargetImportOnly.
 func (b *SquirrelDB) clickHouseBackendOptions(
 	cluster types.Cluster,
+	reg prometheus.Registerer,
 	readOnly bool,
 	importOnly bool,
 ) clickhousebackend.Options {
 	options := clickhousebackend.Options{
 		Config:            b.config.ClickHouse,
-		MetricRegistry:    b.deps.MetricRegistry,
+		MetricRegistry:    reg,
 		ReadOnly:          readOnly,
 		Cluster:           cluster,
 		TenantLabel:       b.config.TenantLabelName,
@@ -385,9 +478,9 @@ func (b *SquirrelDB) clickHouseBackendOptions(
 // dummyBackendOptions builds the dummy backend options. The dummy backend
 // discards all writes; the batcher (and its temporary store) are only wired when
 // dummy.batcher is set.
-func (b *SquirrelDB) dummyBackendOptions(cluster types.Cluster) dummybackend.Options {
+func (b *SquirrelDB) dummyBackendOptions(cluster types.Cluster, reg prometheus.Registerer) dummybackend.Options {
 	options := dummybackend.Options{
-		MetricRegistry: b.deps.MetricRegistry,
+		MetricRegistry: reg,
 		Cluster:        cluster,
 		TenantLabel:    b.config.TenantLabelName,
 		Batch:          b.config.Batch,
@@ -403,33 +496,65 @@ func (b *SquirrelDB) dummyBackendOptions(cluster types.Cluster) dummybackend.Opt
 
 // sandboxBackendOptions builds the sandbox backend options. The sandbox backend
 // serves fake data from a dataset and discards all writes.
-func (b *SquirrelDB) sandboxBackendOptions(cluster types.Cluster) sandboxbackend.Options {
+func (b *SquirrelDB) sandboxBackendOptions(cluster types.Cluster, reg prometheus.Registerer) sandboxbackend.Options {
 	return sandboxbackend.Options{
-		MetricRegistry: b.deps.MetricRegistry,
+		MetricRegistry: reg,
 		Cluster:        cluster,
 		TenantLabel:    b.config.TenantLabelName,
 		DatasetConfig:  b.config.Sandbox.DatasetConfig,
 	}
 }
 
-// Queryable returns the primary backend's queryable with mutable-label
-// translation applied (the normal API read path).
+// Queryable returns the read path: the primary backend's queryable with
+// mutable-label translation applied (the normal API read path). When routing is
+// enabled, it's a routing queryable serving each querier from the backend
+// resolved from its options, each backend with its own mutable-label translation.
 func (b *SquirrelDB) Queryable(ctx context.Context) (types.QueryableWithOptions, error) {
 	primary, err := b.Primary(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	inner, err := primary.TSDB(ctx)
+	primaryQueryable, err := b.backendQueryable(ctx, primary)
 	if err != nil {
 		return nil, err
 	}
 
-	if primary.BackendInfo().ApplyMutableLabelInternally {
+	if !b.config.Routing.Enabled() {
+		return primaryQueryable, nil
+	}
+
+	routed, err := b.Routed(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	targets := map[string]types.QueryableWithOptions{b.config.Backend: primaryQueryable}
+
+	for name, backend := range routed {
+		targets[name], err = b.backendQueryable(ctx, backend)
+		if err != nil {
+			return nil, fmt.Errorf("routed backend %q: %w", name, err)
+		}
+	}
+
+	return &routingQueryable{router: b.router, metrics: b.routingMetrics, targets: targets}, nil
+}
+
+// backendQueryable returns the backend's queryable with mutable-label
+// translation applied, using the backend's own mutable label processor, unless
+// the backend applies the mutable labels itself.
+func (b *SquirrelDB) backendQueryable(ctx context.Context, backend Backend) (types.QueryableWithOptions, error) {
+	inner, err := backend.TSDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if backend.BackendInfo().ApplyMutableLabelInternally {
 		return inner, nil
 	}
 
-	processor, err := primary.MutableProcessor(ctx)
+	processor, err := backend.MutableProcessor(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -437,16 +562,47 @@ func (b *SquirrelDB) Queryable(ctx context.Context) (types.QueryableWithOptions,
 	return mutable.NewQueryable(inner, processor, b.deps.Logger.With().Str("component", "mutable").Logger()), nil
 }
 
-// Appendable returns the write path. With an extra backend configured it is a
-// dual-write combiner (primary must-succeed + extra best-effort); otherwise it is
-// the primary backend's appendable directly. The combiner reads the live extra on
-// each request, so an extra attached later (AttachExtraWhenReady) starts receiving
-// writes without rebuilding the appendable.
+// Appendable returns the write path. When routing is enabled, it's a routing
+// appendable writing each request only to the backend resolved from its options:
+// the default route uses the primary write path (see primaryAppendable), a routed
+// backend is written alone (no dual-write).
 func (b *SquirrelDB) Appendable(ctx context.Context) (types.AppendableWithOptions, error) {
 	if b.config.Internal.ReadOnly {
 		return fixedappender.NewErrorAppendableWithOptions(ErrIsReadOnly), nil
 	}
 
+	primaryAppendable, err := b.primaryAppendable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if !b.config.Routing.Enabled() {
+		return primaryAppendable, nil
+	}
+
+	routed, err := b.Routed(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	targets := map[string]types.AppendableWithOptions{b.config.Backend: primaryAppendable}
+
+	for name, backend := range routed {
+		targets[name], err = backend.TSDB(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("routed backend %q: %w", name, err)
+		}
+	}
+
+	return &routingAppendable{router: b.router, metrics: b.routingMetrics, targets: targets}, nil
+}
+
+// primaryAppendable returns the primary write path. With an extra backend
+// configured it is a dual-write combiner (primary must-succeed + extra
+// best-effort); otherwise it is the primary backend's appendable directly. The
+// combiner reads the live extra on each request, so an extra attached later
+// (AttachExtraWhenReady) starts receiving writes without rebuilding the appendable.
+func (b *SquirrelDB) primaryAppendable(ctx context.Context) (types.AppendableWithOptions, error) {
 	primary, err := b.Primary(ctx)
 	if err != nil {
 		return nil, err
@@ -472,6 +628,52 @@ func (b *SquirrelDB) Appendable(ctx context.Context) (types.AppendableWithOption
 		extras:  b.extraTSDBs,
 		logger:  b.deps.Logger,
 	}, nil
+}
+
+// HTTPOptionsParser returns the parser of the per-request backend options
+// (BackendOptions of the querier/appender options), or nil when no backend has
+// one. Without routing, it's the primary backend's parser. With routing, the
+// headers are parsed by the parser of every selectable backend and the routing
+// queryable/appendable hands to the backend serving a request the options it
+// parsed.
+func (b *SquirrelDB) HTTPOptionsParser(ctx context.Context) (types.HTTPOptionsParser, error) {
+	primary, err := b.Primary(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	primaryParser, primaryOk := primary.(types.HTTPOptionsParser)
+
+	if !b.config.Routing.Enabled() {
+		if !primaryOk {
+			return nil, nil //nolint:nilnil // no parser is not an error.
+		}
+
+		return primaryParser, nil
+	}
+
+	routed, err := b.Routed(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	parsers := make(map[string]types.HTTPOptionsParser, len(routed)+1)
+
+	if primaryOk {
+		parsers[b.config.Backend] = primaryParser
+	}
+
+	for name, backend := range routed {
+		if parser, ok := backend.(types.HTTPOptionsParser); ok {
+			parsers[name] = parser
+		}
+	}
+
+	if len(parsers) == 0 {
+		return nil, nil //nolint:nilnil // no parser is not an error.
+	}
+
+	return routedOptionsParser{parsers: parsers}, nil
 }
 
 // extraTSDBs returns the current extra TSDB(s) for dual-write, or nil when the
@@ -570,7 +772,7 @@ func (b *SquirrelDB) attachExtraWhenReady(ctx context.Context) {
 	}
 }
 
-// CloseAll closes the primary and (if started) the extra backend.
+// CloseAll closes the primary, the routed and (if started) the extra backend.
 func (b *SquirrelDB) CloseAll(ctx context.Context) {
 	b.mu.Lock()
 
@@ -587,12 +789,17 @@ func (b *SquirrelDB) CloseAll(ctx context.Context) {
 
 	primary := b.primary
 	extra := b.extra
+	routed := b.routed
 	cluster := b.cluster
 
 	b.mu.Unlock()
 
 	if primary != nil {
 		primary.CloseAll(ctx)
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(routed)) {
+		routed[name].CloseAll(ctx)
 	}
 
 	if extra != nil {

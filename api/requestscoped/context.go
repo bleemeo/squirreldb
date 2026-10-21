@@ -35,10 +35,14 @@ import (
 type contextKey struct{}
 
 type contextValue struct {
-	httpRequest        *http.Request
-	operationName      string
-	store              *Store
-	Tenant             string
+	httpRequest   *http.Request
+	operationName string
+	store         *Store
+	Tenant        string
+	Backend       string
+	// AllowedBackends are the backends of the authenticated user, empty when
+	// it isn't restricted (or the authentication is disabled).
+	AllowedBackends    []string
 	EnableDebug        bool
 	EnableVerboseDebug bool
 	TimeToLive         int64
@@ -122,18 +126,22 @@ func (ctxValue *contextValue) debugLevel() types.DebugLevel {
 
 func (ctxValue *contextValue) getAppenderOptions() types.AppenderOptions {
 	return types.AppenderOptions{
-		Tenant:         ctxValue.Tenant,
-		RequestDebug:   ctxValue.debugLevel(),
-		WriteTTL:       ctxValue.TimeToLive,
-		BackendOptions: ctxValue.BackendOptions,
+		Tenant:          ctxValue.Tenant,
+		Backend:         ctxValue.Backend,
+		AllowedBackends: ctxValue.AllowedBackends,
+		RequestDebug:    ctxValue.debugLevel(),
+		WriteTTL:        ctxValue.TimeToLive,
+		BackendOptions:  ctxValue.BackendOptions,
 	}
 }
 
 func (ctxValue *contextValue) getQuerierOptions() types.QuerierOptions {
 	return types.QuerierOptions{
-		Tenant:         ctxValue.Tenant,
-		RequestDebug:   ctxValue.debugLevel(),
-		BackendOptions: ctxValue.BackendOptions,
+		Tenant:          ctxValue.Tenant,
+		Backend:         ctxValue.Backend,
+		AllowedBackends: ctxValue.AllowedBackends,
+		RequestDebug:    ctxValue.debugLevel(),
+		BackendOptions:  ctxValue.BackendOptions,
 	}
 }
 

@@ -114,6 +114,23 @@ generate the credentials.
 SquirrelDB warns at startup when a listener is reachable from the network without
 authentication. See [docs/authentication.md](docs/authentication.md).
 
+## Backend routing
+
+A single SquirrelDB can serve several backends, the backend of a request being selected by the
+`X-SquirrelDB-Backend` header or by a rule on the tenant (e.g. demo accounts served by the sandbox backend):
+
+```yaml
+backend: clickhouse
+routing:
+  backends: [sandbox]
+  rules:
+    - tenants: ["demo-*"]
+      backend: sandbox
+```
+
+See [docs/routing.md](docs/routing.md).
+
+
 ## Sandbox
 
 SquirrelDB can serve deterministic fake data, with no database, for demos and for testing tools that read from it:

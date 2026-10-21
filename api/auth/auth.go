@@ -73,6 +73,10 @@ type User struct {
 	// ForcedMatcher restricts the series the user can read, combined (AND) with the
 	// forced matcher header. See ParseForcedMatcher for the format.
 	ForcedMatcher string
+	// Backends, when set, are the only backends the user may use (see
+	// docs/routing.md); the first one replaces the default backend when the
+	// default backend isn't listed. Empty means every enabled backend.
+	Backends []string
 }
 
 // Identity is an authenticated user, stored in the request context.
@@ -82,6 +86,8 @@ type Identity struct {
 	Scopes []Scope
 	// ForcedMatchers are added (AND) to the matchers of every read request of this user.
 	ForcedMatchers []*labels.Matcher
+	// Backends are the only backends the user may use, empty meaning no restriction.
+	Backends []string
 }
 
 // HasScope returns whether the identity was granted the scope.
@@ -190,10 +196,11 @@ func validateUser(user User, seen map[string]bool, index int) error {
 		switch scope {
 		case string(ScopeRead), string(ScopeWrite):
 		case string(ScopeAdmin):
-			// The admin endpoints are not tenant scoped (e.g. index dumps list every tenant),
-			// granting them to a restricted user would bypass its restriction.
-			if user.Tenant != "" || user.ForcedMatcher != "" {
-				fail("the admin scope can't be granted to a user with a tenant or a forced_matcher")
+			// The admin endpoints are not tenant scoped (e.g. index dumps list every tenant)
+			// nor routed (e.g. the debug endpoints of every backend), granting them to a
+			// restricted user would bypass its restriction.
+			if user.Tenant != "" || user.ForcedMatcher != "" || len(user.Backends) > 0 {
+				fail("the admin scope can't be granted to a user with a tenant, a forced_matcher or backends")
 			}
 		default:
 			fail("unknown scope %q (expected read, write or admin)", scope)
@@ -236,5 +243,6 @@ func newIdentity(user User) (*Identity, error) {
 		Tenant:         user.Tenant,
 		Scopes:         scopes,
 		ForcedMatchers: matchers,
+		Backends:       slices.Clone(user.Backends),
 	}, nil
 }

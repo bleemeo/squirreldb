@@ -277,8 +277,8 @@ func TestCredentials(t *testing.T) {
 		})
 	}
 
-	if n, err := testutil.GatherAndCount(reg, "squirreldb_api_auth_failures_total"); err != nil || n != 5 {
-		t.Errorf("got %d auth failures series (err=%v), want 5", n, err)
+	if n, err := testutil.GatherAndCount(reg, "squirreldb_api_auth_failures_total"); err != nil || n != 6 {
+		t.Errorf("got %d auth failures series (err=%v), want 6", n, err)
 	}
 }
 

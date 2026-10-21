@@ -81,6 +81,7 @@ func TestStructuredConfig(t *testing.T) {
 					PasswordHash:  "$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
 					Scopes:        []string{"read"},
 					ForcedMatcher: `env="prod"`,
+					Backends:      []string{"clickhouse"},
 				},
 			},
 		},
