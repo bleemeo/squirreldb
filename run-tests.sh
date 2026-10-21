@@ -5,6 +5,14 @@ set -eu
 # Should be the same as build.sh
 GORELEASER_VERSION="v2.18.0"
 
+# ClickHouse server image of the single-node "clickhouse" mode (the cluster mode
+# uses the one of examples/squirreldb_ha_clickhouse). Pinned to a tested release
+# rather than latest, so a new ClickHouse release does not silently change what
+# the tests run against; override it to test another one, e.g.
+# CLICKHOUSE_IMAGE=clickhouse/clickhouse-server:26.3.10.60 ./run-tests.sh clickhouse
+# The tested versions are listed in docs/clickhouse-cluster.md.
+CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.8.15.10}"
+
 WITH_CLUSTER=0
 WITH_RACE=0
 WITH_COVER=0
@@ -65,6 +73,7 @@ Usage: $0 [cluster|race|long|nostop|scylladb|clickhouse]
  cassandra: Use Cassandra as store [default]
   scylladb: Use ScyllaDB instead of Cassandra
 clickhouse: Use the ClickHouse as store.
+            The server image is \$CLICKHOUSE_IMAGE (default ${CLICKHOUSE_IMAGE}).
 
 If multiple store are specified, they are all started (could be useful in shell session),
 but last one is used as backend. Multiple store is only supported in non-cluster environment.
@@ -154,8 +163,10 @@ fi
 if [ "${WITH_CLUSTER}" = "0" ] && [ "${START_STORE_CLICKHOUSE}" = "1" ]; then
     # The database is created by the ClickHouse image (CLICKHOUSE_DB); SquirrelDB only creates the tables inside it.
     echo
-    echo "== Starting ClickHouse & Redis"
-    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_USER=squirreldb_user -e CLICKHOUSE_PASSWORD=secretForTest clickhouse/clickhouse-server || true
+    echo "== Starting ClickHouse (${CLICKHOUSE_IMAGE}) & Redis"
+    docker run --name squirreldb-test-clickhouse -d -e CLICKHOUSE_DB=squirreldb_test -e CLICKHOUSE_USER=squirreldb_user -e CLICKHOUSE_PASSWORD=secretForTest "${CLICKHOUSE_IMAGE}" || true
+    # A container left by an earlier run (nostop) is reused whatever its image: say which one.
+    echo "ClickHouse container image: $(docker inspect squirreldb-test-clickhouse -f '{{ .Config.Image }}')"
 
     docker_network=""
     export SQUIRRELDB_CLICKHOUSE_ADDRESSES=$(docker inspect squirreldb-test-clickhouse -f '{{ .NetworkSettings.Networks.bridge.IPAddress }}'):9000

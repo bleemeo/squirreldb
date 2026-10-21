@@ -92,6 +92,30 @@ SETTINGS allow_suspicious_low_cardinality_types = 1`
 // a margin covering the re-register gap so the index never expires before its
 // data. min_time/max_time bound the series activity (used to filter label
 // queries); max_time carries the same gap margin.
+//
+// tags is the last ORDER BY column: ClickHouse 26.8 refuses to create an
+// AggregatingMergeTree whose columns are neither in the sorting key nor aggregates.
+// Its opt-out, the table setting allow_dimensions_outside_sorting_key, is unknown
+// to 26.3 (a CREATE using it fails there), so the key carries tags instead. The
+// id is a hash of (metric_name, tenant, tags), so tags is functionally dependent
+// on it: appending tags after id groups the same rows on
+// merge and keeps the series order. The PRIMARY KEY stays (tenant, metric_name),
+// so the sparse index is unchanged and tags is not stored in it. On an id
+// collision, the two series now stay two rows instead of one keeping the other's
+// tags at random.
+//
+// Tables created before this change keep ORDER BY (tenant, metric_name, id): they
+// keep working on every version (the check only applies to a CREATE) and are not
+// rewritten. The single-node to cluster migration copies their rows instead of
+// attaching their partitions, which ClickHouse refuses across sorting keys (see
+// clickhouse/backend/migrate_cluster.go).
+//
+// On a cluster, the sorting key is part of the replicated table's Keeper metadata:
+// a server added or rebuilt on a cluster whose tsdb_tags has the legacy key cannot
+// be given this DDL (METADATA_MISMATCH, which the backend turns into a hint). Its
+// tsdb_tags must be created by hand with the legacy key (plus the setting above on
+// 26.8 and later), see docs/clickhouse-cluster.md. Converting a legacy-key cluster
+// to this key is not automated.
 const tsdbTagsDDL = `
 CREATE TABLE IF NOT EXISTS tsdb_tags
 (
@@ -105,7 +129,7 @@ CREATE TABLE IF NOT EXISTS tsdb_tags
 )
 ENGINE = AggregatingMergeTree
 PRIMARY KEY (tenant, metric_name)
-ORDER BY (tenant, metric_name, id)
+ORDER BY (tenant, metric_name, id, tags)
 TTL max_expiration`
 
 // SQL write path: points are inserted into the Null-engine datapoint_input

@@ -27,6 +27,77 @@ While Keeper is unreachable they go read-only and SquirrelDB cannot write (a pla
 `MergeTree` would keep accepting writes), and a Keeper sharing the server's disk dies
 with it.
 
+## Supported ClickHouse versions
+
+SquirrelDB is tested against these ClickHouse releases (`CLICKHOUSE_IMAGE` selects
+the one `run-tests.sh clickhouse` uses):
+
+| ClickHouse | Tested release | Notes                                                   |
+| ---------- | -------------- | ------------------------------------------------------- |
+| 26.3 LTS   | 26.3.10.60     |                                                         |
+| 26.8 LTS   | 26.8.15.10     | default of `run-tests.sh` and of the HA example         |
+| 26.9       | 26.9.7.9       |                                                         |
+
+Upgrading ClickHouse from 26.3 to 26.8 or later needs no schema migration, but
+ClickHouse 26.8 refuses to *create* an `AggregatingMergeTree` with a column that is
+neither in its sorting key nor an aggregate, which the `tsdb_tags` table of older
+SquirrelDB releases has (`tags`): on 26.8 and later, those releases cannot create
+their schema. SquirrelDB now creates it with
+`ORDER BY (tenant, metric_name, id, tags)` instead of
+`ORDER BY (tenant, metric_name, id)`, on every ClickHouse version:
+
+- a `tsdb_tags` created before that change keeps its old sorting key. It is **not**
+  rewritten, and keeps working on 26.8 and later — the check only applies when a
+  table is created;
+- a `tsdb_tags` created since (a new install, a new cluster) uses the new key. Both
+  keys hold the same rows and series ids;
+- on a cluster, the key is part of the table's replication metadata in Keeper, so a
+  server added or rebuilt on a cluster whose `tsdb_tags` has the old key **cannot get
+  the table automatically**: see
+  [the next section](#adding-a-server-to-a-cluster-created-before-the-tsdb_tags-key-change);
+- the [single-node → cluster migration](#single-node--single-node-cluster) copies the
+  rows of an old-key `tsdb_tags` instead of attaching its partitions (see step 4).
+
+Converting the `tsdb_tags` of an existing cluster to the new key is not automated.
+
+### Adding a server to a cluster created before the tsdb_tags key change
+
+Check the key of the cluster's `tsdb_tags` on a healthy server:
+
+```sql
+SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = 'tsdb_tags';
+```
+
+With `tenant, metric_name, id, tags`, nothing special: follow the usual steps. With
+`tenant, metric_name, id`, `POST /debug/clickhouse/create_tables` (and SquirrelDB's
+startup) fails on the new or rebuilt server with `METADATA_MISMATCH` (Code 342):
+Keeper holds the old key and refuses the new one. Create `tsdb_tags` by hand on that
+server first, with the old key and the same replicated engine, **without**
+`ON CLUSTER`:
+
+```sql
+CREATE TABLE IF NOT EXISTS tsdb_tags
+(
+    id UUID DEFAULT reinterpretAsUUID(sipHash128(metric_name, tenant, tags)),
+    metric_name LowCardinality(String),
+    tenant LowCardinality(String) CODEC(ZSTD(1)),
+    tags Map(LowCardinality(String), String),
+    min_time SimpleAggregateFunction(min, Nullable(DateTime64(3))),
+    max_time SimpleAggregateFunction(max, Nullable(DateTime64(3))),
+    max_expiration SimpleAggregateFunction(max, DateTime64(3))
+)
+ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/{database}/tsdb_tags', '{replica}')
+PRIMARY KEY (tenant, metric_name)
+ORDER BY (tenant, metric_name, id)
+TTL max_expiration
+SETTINGS allow_dimensions_outside_sorting_key = 1  -- ClickHouse 26.8 and later only
+```
+
+Drop the `SETTINGS` line on ClickHouse 26.3, which does not know the setting (and does
+not need it). The table joins the existing replicas and receives their data. Then call
+`POST /debug/clickhouse/create_tables` for the remaining tables: it leaves the existing
+`tsdb_tags` alone.
+
 ## Growing
 
 Go **single node → single-node cluster → multi-node cluster**, in that order. The
@@ -98,6 +169,16 @@ curl -XPOST -N http://squirreldb:9201/debug/clickhouse/migrate_to_cluster
 Per table, it renames the single-node table to `<table>_pre_cluster`, creates the
 replicated table under the original name, and attaches the source's partitions to it.
 Attaching uses filesystem hardlinks, so **no data is copied** whatever the volume.
+
+The one exception is a source whose sorting key differs from the table SquirrelDB
+creates — in practice a `tsdb_tags` created before its `ORDER BY` gained `tags` (see
+[Supported ClickHouse versions](#supported-clickhouse-versions)). ClickHouse refuses
+to attach a partition across sorting keys, so its rows are copied
+(`INSERT ... SELECT`) partition by partition, then the source partition is detached
+as usual. The plan shows it as `copy N row(s)`. `tsdb_tags` is the series index (a
+row per series), small next to `tsdb_data`, and a copy interrupted before its detach
+is simply copied again on the next call: the duplicate rows hold the same values and
+merge into one.
 
 What to expect while it runs:
 
@@ -186,7 +267,9 @@ replicated.
    ```sh
    curl -XPOST http://squirreldb:9201/debug/clickhouse/create_tables
    ```
-   ClickHouse then replicates the existing data to it on its own.
+   ClickHouse then replicates the existing data to it on its own. If the cluster's
+   `tsdb_tags` predates its key change, create that table by hand first, see
+   [Adding a server to a cluster created before the tsdb_tags key change](#adding-a-server-to-a-cluster-created-before-the-tsdb_tags-key-change).
 4. **Add its address** to `clickhouse.addresses` in every SquirrelDB and restart them.
    The order of steps 3 and 4 does not matter: SquirrelDB excludes a host that is
    missing tables or whose replica is still catching up, and includes it once ready.

@@ -18,8 +18,10 @@ package backend
 
 import (
 	"errors"
+	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bleemeo/squirreldb/clickhouse/ddl"
@@ -290,6 +292,184 @@ func TestPlanSources(t *testing.T) {
 	for i, source := range got {
 		if source != want[i] {
 			t.Errorf("source %d = %q, want %q", i, source, want[i])
+		}
+	}
+}
+
+// TestPlanCopiesOldTagsKey checks a tsdb_tags created before its ORDER BY gained
+// tags is copied rather than attached (ClickHouse refuses to attach across sorting
+// keys), in every resumable state, while the tables whose key is unchanged keep the
+// hardlink attach. The keys are the system.tables form (ddl.TableSortingKeys).
+func TestPlanCopiesOldTagsKey(t *testing.T) {
+	t.Parallel()
+
+	objects := allSchemaObjects(Options{ClusterName: "main_cluster"})
+
+	const (
+		oldTagsKey = "tenant,metric_name,id"
+		newTagsKey = "tenant,metric_name,id,tags"
+		dataKey    = "tenant,id,timestamp"
+	)
+
+	cases := []struct {
+		name    string
+		engines map[string]string
+		keys    map[string]string
+		want    map[string]bool // table -> Copy, for the steps checked
+	}{
+		{
+			name: "not migrated yet, old tsdb_tags",
+			engines: map[string]string{
+				"tsdb_data": "MergeTree", "tsdb_tags": "AggregatingMergeTree",
+			},
+			keys: map[string]string{"tsdb_data": dataKey, "tsdb_tags": oldTagsKey},
+			want: map[string]bool{"tsdb_data": false, "tsdb_tags": true},
+		},
+		{
+			name: "not migrated yet, tsdb_tags created with the new key",
+			engines: map[string]string{
+				"tsdb_data": "MergeTree", "tsdb_tags": "AggregatingMergeTree",
+			},
+			keys: map[string]string{"tsdb_data": dataKey, "tsdb_tags": newTagsKey},
+			want: map[string]bool{"tsdb_data": false, "tsdb_tags": false},
+		},
+		{
+			name: "renamed, replicated table not created yet",
+			engines: map[string]string{
+				"tsdb_data_pre_cluster": "MergeTree", "tsdb_tags_pre_cluster": "AggregatingMergeTree",
+			},
+			keys: map[string]string{"tsdb_data_pre_cluster": dataKey, "tsdb_tags_pre_cluster": oldTagsKey},
+			want: map[string]bool{"tsdb_data": false, "tsdb_tags": true},
+		},
+		{
+			name: "created, partitions left: the existing table's key decides",
+			engines: map[string]string{
+				"tsdb_data": "ReplicatedMergeTree", "tsdb_data_pre_cluster": "MergeTree",
+				"tsdb_tags": "ReplicatedAggregatingMergeTree", "tsdb_tags_pre_cluster": "AggregatingMergeTree",
+			},
+			keys: map[string]string{
+				"tsdb_data": dataKey, "tsdb_data_pre_cluster": dataKey,
+				"tsdb_tags": newTagsKey, "tsdb_tags_pre_cluster": oldTagsKey,
+			},
+			want: map[string]bool{"tsdb_data": false, "tsdb_tags": true},
+		},
+		{
+			name: "unknown source key stays an attach",
+			engines: map[string]string{
+				"tsdb_tags": "AggregatingMergeTree",
+			},
+			keys: map[string]string{},
+			want: map[string]bool{"tsdb_tags": false},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			steps, err := planMigration(objects, tc.engines)
+			if err != nil {
+				t.Fatalf("planMigration: %v", err)
+			}
+
+			planCopies(objects, steps, tc.keys)
+
+			got := make(map[string]bool, len(steps))
+			for _, step := range steps {
+				got[step.Table] = step.Copy
+			}
+
+			for table, want := range tc.want {
+				copied, ok := got[table]
+				if !ok {
+					t.Errorf("no step for %s in %+v", table, steps)
+
+					continue
+				}
+
+				if copied != want {
+					t.Errorf("%s Copy = %t, want %t", table, copied, want)
+				}
+			}
+
+			for table, copied := range got {
+				if _, checked := tc.want[table]; !checked && copied {
+					t.Errorf("%s Copy = true, want an attach (or nothing to move)", table)
+				}
+			}
+		})
+	}
+}
+
+// TestSchemaSortingKeys checks the sorting key parsed from each replicable table's
+// DDL matches the one ClickHouse reports for it (system.tables sorting_key, as
+// checked on 26.3, 26.8 and 26.9): a parse mismatch would make planCopies copy a
+// table that could be attached — tsdb_data, whatever its volume.
+func TestSchemaSortingKeys(t *testing.T) {
+	t.Parallel()
+
+	reported := map[string]string{
+		"tsdb_data":            "tenant, id, timestamp",
+		"tsdb_tags":            "tenant, metric_name, id, tags",
+		"tsdb_data_agg_15m":    "tenant, id, bucket",
+		"mutable_label_names":  "tenant, name",
+		"mutable_label_values": "tenant, name, value",
+		"telemetry_cluster_id": "k",
+		"telemetry_node_ids":   "telemetry_id",
+		"state":                "(name)",
+	}
+
+	for _, clusterName := range []string{"", "main_cluster"} {
+		for _, o := range allSchemaObjects(Options{ClusterName: clusterName}) {
+			if !o.Replicated {
+				continue
+			}
+
+			key, ok := reported[o.Name]
+			if !ok {
+				t.Errorf("%s: add the sorting key ClickHouse reports for it to this test", o.Name)
+
+				continue
+			}
+
+			if got, want := ddl.SortingKey(o.DDL), ddl.NormalizeSortingKey(key); got != want {
+				t.Errorf("%s (cluster %q): DDL sorting key %q, want %q", o.Name, clusterName, got, want)
+			}
+		}
+	}
+}
+
+// TestWritePlanCopy checks the plan tells a copy from an attach, with the row count
+// the copy will move.
+func TestWritePlanCopy(t *testing.T) {
+	t.Parallel()
+
+	plan := migrationPlan{
+		Host: "ch-0:9000",
+		Steps: []tableStep{
+			{
+				Table: "tsdb_data", Source: "tsdb_data_pre_cluster", Rename: true, Create: true,
+				Partitions: []string{"a", "b"}, Bytes: 2048, Rows: 1000,
+			},
+			{
+				Table: "tsdb_tags", Source: "tsdb_tags_pre_cluster", Rename: true, Create: true,
+				Partitions: []string{"all"}, Bytes: 1024, Rows: 42, Copy: true,
+			},
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	writePlan(rec, plan, "main_cluster")
+
+	out := rec.Body.String()
+
+	for _, want := range []string{
+		"tsdb_data: rename to tsdb_data_pre_cluster, create replicated, attach 2 partition(s) (2.0 KiB): a, b\n",
+		"tsdb_tags: rename to tsdb_tags_pre_cluster, create replicated, copy 42 row(s) (1.0 KiB)",
+		"from 1 partition(s): all\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan does not contain %q:\n%s", want, out)
 		}
 	}
 }

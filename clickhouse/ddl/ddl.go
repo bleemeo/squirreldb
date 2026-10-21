@@ -57,6 +57,11 @@ import (
 // degraded/recovering node, not a fresh bootstrap.
 const codeReplicaAlreadyExists = 253
 
+// codeMetadataMismatch is the ClickHouse error code (METADATA_MISMATCH) returned
+// when a replicated table is created with a definition that differs from the one
+// its existing replicas registered in Keeper (e.g. another sorting key).
+const codeMetadataMismatch = 342
+
 // replicatedPrefix is the prefix ClickHouse gives the replicated variant of every
 // MergeTree-family engine.
 const replicatedPrefix = "Replicated"
@@ -82,6 +87,25 @@ func (e *ReplicaExistsError) Error() string {
 	return fmt.Sprintf(
 		"table %s already exists on another replica in Keeper but not on this node "+
 			"(lost/rebuilt replica — SYSTEM DROP REPLICA needed)", e.Table)
+}
+
+// MetadataMismatchError is returned by CreateTables and EnsureTables when a
+// replicated table cannot be created because Keeper already holds it with another
+// definition (METADATA_MISMATCH): its existing replicas were created from an older
+// schema. Err is the ClickHouse error. The caller turns it into an actionable hint.
+type MetadataMismatchError struct {
+	Table string
+	Err   error
+}
+
+func (e *MetadataMismatchError) Error() string {
+	return fmt.Sprintf(
+		"create %s: its definition differs from the one its existing replicas registered in Keeper: %v",
+		e.Table, e.Err)
+}
+
+func (e *MetadataMismatchError) Unwrap() error {
+	return e.Err
 }
 
 // createObjectRe captures the created object's name in a CREATE TABLE / CREATE
@@ -198,6 +222,7 @@ func EngineMatchesMode(engine string, clustered bool) bool {
 //     error means the object's data already lives in Keeper but not on the node
 //     that ran the CREATE (a degraded/recovering node, not a bootstrap): it is
 //     logged and tolerated so startup proceeds.
+//   - A METADATA_MISMATCH is returned as *MetadataMismatchError.
 //   - Any other creation error is returned (a real bootstrap failure the operator
 //     must see, e.g. a timed-out ON CLUSTER DDL on a fresh cluster).
 //
@@ -283,7 +308,7 @@ func logEngineMismatch(logger zerolog.Logger, objects []Object, engines map[stri
 // the table on the rebuilt one. It STOPS at the first REPLICA_ALREADY_EXISTS
 // (returning *ReplicaExistsError), so the caller can tell the operator to run
 // SYSTEM DROP REPLICA rather than letting a dependent object fail with a confusing
-// UNKNOWN_TABLE.
+// UNKNOWN_TABLE. A METADATA_MISMATCH is returned as *MetadataMismatchError.
 func CreateTables(ctx context.Context, conn driver.Conn, logger zerolog.Logger, objects []Object) error {
 	return createObjects(ctx, conn, logger, objects, false)
 }
@@ -293,7 +318,13 @@ func createObjects(
 ) error {
 	for _, o := range objects {
 		if err := conn.Exec(ctx, o.DDL); err != nil {
-			if ex, ok := errors.AsType[*proto.Exception](err); ok && ex.Code == codeReplicaAlreadyExists {
+			ex, isException := errors.AsType[*proto.Exception](err)
+
+			if isException && ex.Code == codeMetadataMismatch {
+				return &MetadataMismatchError{Table: o.Name, Err: err}
+			}
+
+			if isException && ex.Code == codeReplicaAlreadyExists {
 				if !tolerateReplicaExists {
 					return &ReplicaExistsError{Table: o.Name}
 				}
@@ -339,6 +370,65 @@ func TableEngines(ctx context.Context, conn driver.Conn, names []string) (map[st
 	}
 
 	return engines, rows.Err()
+}
+
+// orderByRe captures a DDL template's ORDER BY expression, up to the end of its
+// line. Anchored at a line start like mergeTreeEngineRe. Only meant for a table
+// (Object.Replicated): the SELECT of a materialized view could hold another one.
+var orderByRe = regexp.MustCompile(`(?m)^\s*ORDER BY\s+(.+)$`)
+
+// SortingKey returns the sorting key a CREATE TABLE statement declares,
+// normalized by NormalizeSortingKey so it compares with the system.tables one
+// (TableSortingKeys). Empty when the statement has no ORDER BY at a line start (a
+// Null table).
+func SortingKey(createDDL string) string {
+	m := orderByRe.FindStringSubmatch(createDDL)
+	if m == nil {
+		return ""
+	}
+
+	return NormalizeSortingKey(m[1])
+}
+
+// NormalizeSortingKey makes a DDL sorting key and a system.tables one comparable:
+// whitespace is dropped and a column tuple loses its parentheses (ClickHouse
+// reports ORDER BY (a, b) as "a, b"), so both give "a,b". It only has to be exact
+// for the plain column lists the schemas use: a key it fails to normalize
+// compares unequal, which callers must treat as the safe case.
+func NormalizeSortingKey(key string) string {
+	key = strings.Join(strings.Fields(key), "")
+
+	if strings.HasPrefix(key, "(") && strings.HasSuffix(key, ")") && strings.Count(key, "(") == 1 {
+		key = key[1 : len(key)-1]
+	}
+
+	return key
+}
+
+// TableSortingKeys returns the sorting key (system.tables sorting_key, normalized
+// by NormalizeSortingKey) of each of names that exists in the current database. A
+// table without one (Null, MaterializedView) maps to "".
+func TableSortingKeys(ctx context.Context, conn driver.Conn, names []string) (map[string]string, error) {
+	rows, err := conn.Query(ctx,
+		"SELECT name, sorting_key FROM system.tables WHERE database = currentDatabase() AND name IN (?)", names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make(map[string]string, len(names))
+
+	for rows.Next() {
+		var name, key string
+
+		if err := rows.Scan(&name, &key); err != nil {
+			return nil, err
+		}
+
+		keys[name] = NormalizeSortingKey(key)
+	}
+
+	return keys, rows.Err()
 }
 
 // OnCluster returns the " ON CLUSTER <name>" clause (empty for a single node),
