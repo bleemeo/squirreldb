@@ -49,7 +49,7 @@ func Load(files dataset.Files, open OpenFunc) (Store, []error, error) {
 	result := Store{}
 
 	for _, m := range files.Metrics {
-		matchingLabels := append(slices.Clone(m.MatchingLabels), labels.MetricName)
+		matchingLabels := append(slices.Clone(m.MatchingLabels), labels.MetricName) //nolint:staticcheck
 		slices.Sort(matchingLabels)
 		matchingLabels = slices.Compact(matchingLabels)
 
@@ -103,13 +103,15 @@ func ParseMetrics(r io.Reader, matchingLabels []string) ([]Metric, error) {
 	var result []Metric
 
 	scanner := bufio.NewScanner(r)
+	parserInstance := parser.NewParser(parser.Options{})
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
 
-		lbls, err := parser.ParseMetric(line)
+		lbls, err := parserInstance.ParseMetric(line)
 		if err != nil {
 			return result, fmt.Errorf("parse metric: %w", err)
 		}

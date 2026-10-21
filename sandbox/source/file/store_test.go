@@ -109,7 +109,7 @@ func TestValueDeterminism(t *testing.T) {
 		defer q.Close()
 
 		result := make(map[string]map[int64]float64)
-		set := q.Select(t.Context(), true, nil, labels.MustNewMatcher(labels.MatchRegexp, labels.MetricName, ".+"))
+		set := q.Select(t.Context(), true, nil, labels.MustNewMatcher(labels.MatchRegexp, labels.MetricName, ".+")) //nolint:staticcheck,lll
 
 		for set.Next() {
 			points := make(map[int64]float64)
@@ -203,7 +203,7 @@ func TestLoadEmbeddedDataset(t *testing.T) {
 	found := false
 
 	for _, m := range store.Metrics {
-		if m.Labels.Get(labels.MetricName) == "agent_status" {
+		if m.Labels.Get(labels.MetricName) == "agent_status" { //nolint:staticcheck
 			found = true
 		}
 	}

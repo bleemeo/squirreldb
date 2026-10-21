@@ -98,7 +98,7 @@ func TestSandboxBackend(t *testing.T) {
 
 			apiClient := v1.NewAPI(client)
 
-			response, _, err := apiClient.QueryRange(
+			response, _, _, err := apiClient.QueryRange(
 				t.Context(),
 				"agent_status",
 				v1.Range{Start: start, End: end, Step: time.Minute},
@@ -122,7 +122,7 @@ func TestSandboxBackend(t *testing.T) {
 				}
 			}
 
-			names, _, err := apiClient.LabelValues(t.Context(), model.MetricNameLabel, nil, start, end)
+			names, _, _, err := apiClient.LabelValues(t.Context(), model.MetricNameLabel, nil, start, end)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,7 +135,7 @@ func TestSandboxBackend(t *testing.T) {
 				t.Errorf("label values of __name__ must be sorted and deduplicated, got %v", names)
 			}
 
-			tenants, _, err := apiClient.LabelValues(t.Context(), tenantLabel, nil, start, end)
+			tenants, _, _, err := apiClient.LabelValues(t.Context(), tenantLabel, nil, start, end)
 			if err != nil {
 				t.Fatal(err)
 			}

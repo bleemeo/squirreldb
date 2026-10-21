@@ -125,7 +125,7 @@ func ParseForcedMatcher(value string) ([]*labels.Matcher, error) {
 		selector = "{" + selector + "}"
 	}
 
-	matchers, err := parser.ParseMetricSelector(selector)
+	matchers, err := parser.NewParser(parser.Options{}).ParseMetricSelector(selector)
 	if err == nil {
 		return matchers, nil
 	}

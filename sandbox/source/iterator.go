@@ -115,6 +115,10 @@ func (it *iterator) AtT() int64 {
 	return it.current
 }
 
+func (it *iterator) AtST() int64 {
+	return 0
+}
+
 func (it *iterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
 	return it.current, nil
 }
