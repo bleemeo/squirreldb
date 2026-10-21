@@ -510,7 +510,7 @@ func TestWriteHandler(t *testing.T) {
 			})
 
 			sLogger := slog.New(slog.NewTextHandler(logger.TestWriter(t), nil))
-			writeHandler := remote.NewWriteHandler(sLogger, reg, requestScopedStore, allowedProtoMsgs, false)
+			writeHandler := remote.NewWriteHandler(sLogger, reg, requestScopedStore, allowedProtoMsgs, false, false, false)
 
 			now := time.Now()
 			wr := &prompb.WriteRequest{

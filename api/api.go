@@ -41,6 +41,7 @@ import (
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/grafana/regexp"
+	"github.com/prometheus/client_golang/exp/api/remote"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/route"
@@ -61,9 +62,9 @@ const (
 	remoteReadMaxBytesInFrame = 1048576 // 1 MiB (Prometheus default)
 )
 
-var allowedProtoMsgs = []config.RemoteWriteProtoMsg{ //nolint:gochecknoglobals
-	config.RemoteWriteProtoMsgV1,
-	config.RemoteWriteProtoMsgV2,
+var allowedProtoMsgs = remote.MessageTypes{ //nolint:gochecknoglobals
+	remote.WriteV1MessageType,
+	remote.WriteV2MessageType,
 }
 
 var (
@@ -152,12 +153,14 @@ type MutableLabelInterface interface {
 // NewPrometheus returns a new initialized Prometheus web API.
 // Only remote read/write and PromQL endpoints are implemented.
 // appendable can be empty if remote write is not used.
+// Remote write points more than 10 minutes in the future are backdated by backdateOffset.
 func NewPrometheus(
 	queryable storage.SampleAndChunkQueryable,
 	appendable storage.Appendable,
 	maxConcurrent int,
 	metricRegistry prometheus.Registerer,
 	apiLogger zerolog.Logger,
+	backdateOffset time.Duration,
 ) *v1.API {
 	queryLogger := apiLogger.With().Str("component", "query_engine").Logger()
 
@@ -187,19 +190,30 @@ func NewPrometheus(
 	// Admin endpoints are not implemented.
 	enableAdmin := false
 
+	// Search endpoint are not implemented.
+	enableSearch := false
+	searchLimit := 0
+
 	// SquirrelDB is assumed to run on a private network, therefore CORS don't apply.
 	CORSOrigin := regexp.MustCompile(".*")
 
 	// We enable both remote-write and OTLP-write handlers, even if we don't explicitly support OTLP.
-	rwEnabled, otlpEnabled := true, true
+	// The remote-write handler is replaced by our own after the API creation, see setRemoteWriteHandler.
+	rwEnabled, otlpEnabled := false, true
 
 	otlpDeltaToCumulative := false
 	ctZeroIngestionEnabled := false
+
+	var appendableV2 storage.AppendableV2
+	if appendable != nil {
+		appendableV2 = newAppendableV2(appendable)
+	}
 
 	api := v1.NewAPI(
 		queryEngine,
 		queryable,
 		appendable,
+		appendableV2,
 		mockExemplarQueryable{},
 		scrapePoolRetrieverFunc,
 		targetRetrieverFunc,
@@ -211,6 +225,8 @@ func NewPrometheus(
 		mockTSDBAdminStat{},
 		dbDir,
 		enableAdmin,
+		enableSearch,
+		searchLimit,
 		logger.NewSLogger(apiLogger),
 		rulesRetrieverFunc,
 		remoteReadSampleLimit,
@@ -229,12 +245,20 @@ func NewPrometheus(
 		allowedProtoMsgs,
 		otlpEnabled,
 		otlpDeltaToCumulative,
+		false, // otlpNativeDeltaIngestion
 		ctZeroIngestionEnabled,
-		false, // ctZeroIngestionEnabled
 		time.Duration(time.Duration(5).Minutes()), // lookbackDelta
-		false, // enableTypeAndUnitLabels
-		nil,   // OverrideErrorCode
+		false,               // enableTypeAndUnitLabels
+		false,               // appendMetadata
+		nil,                 // OverrideErrorCode
+		nil,                 // featureRegistry
+		v1.OpenAPIOptions{}, // openAPIOptions
+		nil,                 // promqlParser
 	)
+
+	if appendable != nil {
+		setRemoteWriteHandler(api, logger.NewSLogger(apiLogger), metricRegistry, appendable, backdateOffset)
+	}
 
 	return api
 }
@@ -325,9 +349,8 @@ func (a *API) init(ctx context.Context) error {
 		maxConcurrent,
 		a.MetricRegistry,
 		a.Logger,
+		a.FuturePointsBackdateOffset,
 	)
-
-	patchRemoteWriteHandler(api, a.FuturePointsBackdateOffset)
 
 	// Wrap the router to add the http request to the context so the querier can access the HTTP headers.
 	routerWrapper := router.WithInstrumentation(func(handlerName string, handler http.HandlerFunc) http.HandlerFunc {
@@ -799,7 +822,7 @@ func (a *API) indexDumpByLabelsHandler(w http.ResponseWriter, req *http.Request)
 		}
 	}
 
-	matchers, err := parser.ParseMetricSelector(req.URL.Query().Get("query"))
+	matchers, err := parser.NewParser(parser.Options{}).ParseMetricSelector(req.URL.Query().Get("query"))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("fail to parse query: %v", err), http.StatusBadRequest)
 

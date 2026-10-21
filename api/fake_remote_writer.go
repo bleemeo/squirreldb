@@ -19,52 +19,75 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
-	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/bleemeo/squirreldb/types"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
+	remoteapi "github.com/prometheus/client_golang/exp/api/remote"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/prompb"
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
-	"github.com/prometheus/prometheus/storage/remote"
-	"github.com/prometheus/prometheus/util/compression"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 )
 
-const appProtoContentType = "application/x-protobuf"
-
-// patchRemoteWriteHandler replaces the given api's remoteWriteHandler field
-// by a fake one that makes the ServeHTTP method backdate the timestamps
-// of the points that are in the future by the given backdateOffset.
+// setRemoteWriteHandler sets the given api's remoteWriteHandler field
+// to a handler that backdates the timestamps of the points that are
+// in the future by the given backdateOffset.
 // The purpose of this operation is to avoid the points that are produced by
 // bleemeo-forecast getting blocked by Prometheus' 10-minute barrier.
-func patchRemoteWriteHandler(api *v1.API, backdateOffset time.Duration) {
-	writeHandlerField := reflect.ValueOf(api).Elem().FieldByName("remoteWriteHandler")
-	ourWriteHandler := &fakeWriteHandler{
-		futurePointsBackdateOffset: backdateOffset,
-		// Unsafely casting the original write handler in our own type that mimics the original one,
-		// to be able to access its private fields and methods.
-		originalWriteHandler: (*writeHandler)(unsafe.Pointer(writeHandlerField.Elem().Pointer())),
+// The api must be created with remote write disabled, otherwise the
+// Prometheus handler metrics would be registered twice.
+func setRemoteWriteHandler(
+	api *v1.API,
+	logger *slog.Logger,
+	reg prometheus.Registerer,
+	appendable storage.Appendable,
+	backdateOffset time.Duration,
+) {
+	store := &backdatingWriteStore{
+		backdateOffset: backdateOffset,
+		promHandler: &writeHandler{
+			logger:     logger,
+			appendable: appendable,
+			samplesWithInvalidLabelsTotal: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+				Namespace: "prometheus",
+				Subsystem: "api",
+				Name:      "remote_write_invalid_labels_samples_total",
+				Help:      "The total number of received remote write samples and histogram samples which were rejected due to invalid labels.", //nolint:lll
+			}),
+			samplesAppendedWithoutMetadata: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+				Namespace: "prometheus",
+				Subsystem: "api",
+				Name:      "remote_write_without_metadata_appended_samples_total",
+				Help:      "The total number of received remote write samples (and histogram samples) which were ingested without corresponding metadata.", //nolint:lll
+			}),
+		},
 	}
 
+	handler := remoteapi.NewWriteHandler(
+		store,
+		allowedProtoMsgs,
+		remoteapi.WithWriteHandlerLogger(logger),
+		remoteapi.WithWriteHandlerMiddlewares(remoteapi.SnappyDecodeMiddleware(logger)),
+	)
+
+	writeHandlerField := reflect.ValueOf(api).Elem().FieldByName("remoteWriteHandler")
 	// Making the API's remoteWriteHandler field writable
 	writableWriteHandler := reflect.NewAt(writeHandlerField.Type(), unsafe.Pointer(writeHandlerField.UnsafeAddr())).Elem()
-	// Setting our own write-handler in the API's remoteWriteHandler field
-	writableWriteHandler.Set(reflect.ValueOf(ourWriteHandler))
+	writableWriteHandler.Set(reflect.ValueOf(handler))
 }
 
-// writeHandler is a copy of github.com/prometheus/prometheus/storage/remote.writeHandler.
+// writeHandler is a copy of github.com/prometheus/prometheus/storage/remote.writeHandler,
+// used to call its private methods.
 // It must be updated each time it is modified on the Prometheus side.
 type writeHandler struct {
 	logger     *slog.Logger
@@ -73,164 +96,93 @@ type writeHandler struct {
 	samplesWithInvalidLabelsTotal  prometheus.Counter
 	samplesAppendedWithoutMetadata prometheus.Counter
 
-	acceptedProtoMsgs map[config.RemoteWriteProtoMsg]struct{}
-
-	ingestCTZeroSample bool
+	ingestSTZeroSample      bool
+	enableTypeAndUnitLabels bool
+	appendMetadata          bool
 }
-
-//go:linkname parseProtoMsg github.com/prometheus/prometheus/storage/remote.(*writeHandler).parseProtoMsg
-func parseProtoMsg(h *writeHandler, contentType string) (config.RemoteWriteProtoMsg, error)
 
 //go:linkname write github.com/prometheus/prometheus/storage/remote.(*writeHandler).write
 func write(h *writeHandler, ctx context.Context, req *prompb.WriteRequest) error
 
 //go:linkname writeV2 github.com/prometheus/prometheus/storage/remote.(*writeHandler).writeV2
-func writeV2(h *writeHandler, ctx context.Context, req *writev2.Request) (remote.WriteResponseStats, int, error) //nolint: lll
+func writeV2(h *writeHandler, ctx context.Context, req *writev2.Request) (remoteapi.WriteResponseStats, int, error) //nolint: lll
 
-type fakeWriteHandler struct {
-	futurePointsBackdateOffset time.Duration
-	originalWriteHandler       *writeHandler
+type backdatingWriteStore struct {
+	backdateOffset time.Duration
+	promHandler    *writeHandler
 }
 
-// ServeHTTP is a copy of github.com/prometheus/prometheus/storage/remote.(*writeHandler).ServeHTTP,
-// but slightly modified to be able to access private fields and methods,
-// and mainly to backdate points that are more than 10 minutes in the future.
-func (fwh *fakeWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	contentType := r.Header.Get("Content-Type")
-	if contentType == "" {
-		// Don't break yolo 1.0 clients if not needed. This is similar to what we did before 2.0.
-		// We could give http.StatusUnsupportedMediaType, but let's assume 1.0 message by default.
-		contentType = appProtoContentType
-	}
+// Store is a copy of github.com/prometheus/prometheus/storage/remote.(*writeHandler).Store,
+// modified to backdate points that are more than 10 minutes in the future.
+func (s *backdatingWriteStore) Store(
+	r *http.Request,
+	msgType remoteapi.WriteMessageType,
+) (*remoteapi.WriteResponse, error) {
+	logger := s.promHandler.logger
 
-	msgType, err := parseProtoMsg(fwh.originalWriteHandler, contentType)
-	if err != nil {
-		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
-		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
-
-		return
-	}
-
-	if _, ok := fwh.originalWriteHandler.acceptedProtoMsgs[msgType]; !ok {
-		err := fmt.Errorf("%v protobuf message is not accepted by this server; accepted %v", msgType, func() (ret []string) {
-			for k := range fwh.originalWriteHandler.acceptedProtoMsgs {
-				ret = append(ret, string(k))
-			}
-
-			return ret
-		}())
-
-		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
-		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
-	}
-
-	enc := r.Header.Get("Content-Encoding")
-	if enc == "" {
-		//nolint:lll
-		// Don't break yolo 1.0 clients if not needed. This is similar to what we did before 2.0:
-		// https://github.com/prometheus/prometheus/blob/d78253319daa62c8f28ed47e40bafcad2dd8b586/storage/remote/write_handler.go#L62
-		// We could give http.StatusUnsupportedMediaType, but let's assume snappy by default.
-	} else if strings.ToLower(enc) != compression.Snappy {
-		err := fmt.Errorf(
-			"%v encoding (compression) is not accepted by this server; only %v is acceptable",
-			enc, compression.Snappy,
-		)
-		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err)
-		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
-	}
-
-	// Read the request body.
+	// Store receives request with decompressed content in body.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		fwh.originalWriteHandler.logger.ErrorContext(r.Context(), "Error decoding remote write request", "err", err.Error())
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		logger.ErrorContext(r.Context(), "Error reading remote write request body", "err", err.Error())
 
-		return
+		return nil, err
 	}
 
-	decompressed, err := snappy.Decode(nil, body)
-	if err != nil {
-		fwh.originalWriteHandler.logger.
-			ErrorContext(r.Context(), "Error decompressing remote write request", "err", err.Error())
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	wr := remoteapi.NewWriteResponse()
 
-		return
-	}
-
-	// Now we have a decompressed buffer we can unmarshal it.
-
-	if msgType == config.RemoteWriteProtoMsgV1 {
+	if msgType == remoteapi.WriteV1MessageType {
 		// PRW 1.0 flow has different proto message and no partial write handling.
 		var req prompb.WriteRequest
-		if err := proto.Unmarshal(decompressed, &req); err != nil {
-			fwh.originalWriteHandler.logger.
-				ErrorContext(r.Context(), "Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if err := proto.Unmarshal(body, &req); err != nil {
+			logger.ErrorContext(r.Context(), "Error decoding v1 remote write request", "protobuf_message", msgType, "err", err.Error())
+			wr.SetStatusCode(http.StatusBadRequest)
 
-			return
+			return wr, err
 		}
 
-		ctx := fwh.backdatePointsV1(r.Context(), &req)
-		if err = write(fwh.originalWriteHandler, ctx, &req); err != nil {
+		ctx := backdateSeries(r.Context(), req.Timeseries, s.backdateOffset.Milliseconds())
+		if err = write(s.promHandler, ctx, &req); err != nil {
+			var histogramErr histogram.Error
+
 			switch {
 			case errors.Is(err, storage.ErrOutOfOrderSample),
 				errors.Is(err, storage.ErrOutOfBounds),
 				errors.Is(err, storage.ErrDuplicateSampleForTimestamp),
-				errors.Is(err, storage.ErrTooOldSample):
+				errors.Is(err, storage.ErrTooOldSample),
+				errors.As(err, &histogramErr):
 				// Indicated an out-of-order sample is a bad request to prevent retries.
-				http.Error(w, err.Error(), http.StatusBadRequest)
-
-				return
+				wr.SetStatusCode(http.StatusBadRequest)
 			default:
-				fwh.originalWriteHandler.logger.
-					ErrorContext(r.Context(), "Error while remote writing the v1 request", "err", err.Error())
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-
-				return
+				wr.SetStatusCode(http.StatusInternalServerError)
 			}
+
+			return wr, err
 		}
 
-		w.WriteHeader(http.StatusNoContent)
-
-		return
+		return wr, nil
 	}
 
 	// Remote Write 2.x proto message handling.
 	var req writev2.Request
-	if err := proto.Unmarshal(decompressed, &req); err != nil {
-		fwh.originalWriteHandler.logger.
-			ErrorContext(r.Context(), "Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := proto.Unmarshal(body, &req); err != nil {
+		logger.ErrorContext(r.Context(), "Error decoding v2 remote write request", "protobuf_message", msgType, "err", err.Error())
+		wr.SetStatusCode(http.StatusBadRequest)
 
-		return
+		return wr, err
 	}
 
-	ctx := fwh.backdatePointsV2(r.Context(), &req)
-	respStats, errHTTPCode, err := writeV2(fwh.originalWriteHandler, ctx, &req)
-
-	// Set required X-Prometheus-Remote-Write-Written-* response headers, in all cases.
-	respStats.SetHeaders(w)
+	ctx := backdateSeries(r.Context(), req.Timeseries, s.backdateOffset.Milliseconds())
+	respStats, errHTTPCode, err := writeV2(s.promHandler, ctx, &req)
+	// Add stats required X-Prometheus-Remote-Write-Written-* response headers.
+	wr.Add(respStats)
 
 	if err != nil {
-		if errHTTPCode/5 == 100 { // 5xx
-			fwh.originalWriteHandler.logger.
-				ErrorContext(r.Context(), "Error while remote writing the v2 request", "err", err.Error())
-		}
+		wr.SetStatusCode(errHTTPCode)
 
-		http.Error(w, err.Error(), errHTTPCode)
-
-		return
+		return wr, err
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (fwh *fakeWriteHandler) backdatePointsV1(ctx context.Context, req *prompb.WriteRequest) context.Context {
-	return backdateSeries(ctx, req.Timeseries, fwh.futurePointsBackdateOffset.Milliseconds())
-}
-
-func (fwh *fakeWriteHandler) backdatePointsV2(ctx context.Context, req *writev2.Request) context.Context {
-	return backdateSeries(ctx, req.Timeseries, fwh.futurePointsBackdateOffset.Milliseconds())
+	return wr, nil
 }
 
 // backdateSeries modifies in place the given series (only if necessary),

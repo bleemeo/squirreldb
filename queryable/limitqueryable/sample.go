@@ -182,6 +182,10 @@ func (i sampleIterator) AtT() int64 {
 	return i.inner.AtT()
 }
 
+func (i sampleIterator) AtST() int64 {
+	return i.inner.AtST()
+}
+
 func (i sampleIterator) Err() error {
 	if i.parent.opts.MaxEvaluatedPoints != 0 && i.parent.returnedPoints.Load() > i.parent.opts.MaxEvaluatedPoints {
 		return ErrTooManyPoints

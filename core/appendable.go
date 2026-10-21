@@ -169,7 +169,7 @@ func (a *compositeAppender) AppendHistogram(
 	return ref, nil
 }
 
-func (a *compositeAppender) AppendHistogramCTZeroSample(
+func (a *compositeAppender) AppendHistogramSTZeroSample(
 	_ storage.SeriesRef,
 	l labels.Labels,
 	t int64,
@@ -177,13 +177,13 @@ func (a *compositeAppender) AppendHistogramCTZeroSample(
 	h *histogram.Histogram,
 	fh *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
-	ref, err := a.primary.AppendHistogramCTZeroSample(0, l, t, ct, h, fh)
+	ref, err := a.primary.AppendHistogramSTZeroSample(0, l, t, ct, h, fh)
 	if err != nil {
 		return 0, err
 	}
 
 	for _, e := range a.extras {
-		_, _ = e.AppendHistogramCTZeroSample(0, l, t, ct, h, fh)
+		_, _ = e.AppendHistogramSTZeroSample(0, l, t, ct, h, fh)
 	}
 
 	return ref, nil
@@ -206,19 +206,19 @@ func (a *compositeAppender) UpdateMetadata(
 	return ref, nil
 }
 
-func (a *compositeAppender) AppendCTZeroSample(
+func (a *compositeAppender) AppendSTZeroSample(
 	_ storage.SeriesRef,
 	l labels.Labels,
 	t int64,
 	ct int64,
 ) (storage.SeriesRef, error) {
-	ref, err := a.primary.AppendCTZeroSample(0, l, t, ct)
+	ref, err := a.primary.AppendSTZeroSample(0, l, t, ct)
 	if err != nil {
 		return 0, err
 	}
 
 	for _, e := range a.extras {
-		_, _ = e.AppendCTZeroSample(0, l, t, ct)
+		_, _ = e.AppendSTZeroSample(0, l, t, ct)
 	}
 
 	return ref, nil

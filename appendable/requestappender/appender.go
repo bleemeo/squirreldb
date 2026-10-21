@@ -169,15 +169,15 @@ func (app appender) AppendHistogram(
 	return app.inner.AppendHistogram(ref, l, t, h, fh)
 }
 
-func (app appender) AppendHistogramCTZeroSample(
+func (app appender) AppendHistogramSTZeroSample(
 	ref storage.SeriesRef,
 	l labels.Labels,
 	t int64,
-	ct int64,
+	st int64,
 	h *histogram.Histogram,
 	fh *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
-	return app.inner.AppendHistogramCTZeroSample(ref, l, t, ct, h, fh)
+	return app.inner.AppendHistogramSTZeroSample(ref, l, t, st, h, fh)
 }
 
 func (app appender) UpdateMetadata(
@@ -188,8 +188,8 @@ func (app appender) UpdateMetadata(
 	return app.inner.UpdateMetadata(ref, l, m)
 }
 
-func (app appender) AppendCTZeroSample(ref storage.SeriesRef, l labels.Labels, t, ct int64) (storage.SeriesRef, error) {
-	return app.inner.AppendCTZeroSample(ref, l, t, ct)
+func (app appender) AppendSTZeroSample(ref storage.SeriesRef, l labels.Labels, t, st int64) (storage.SeriesRef, error) {
+	return app.inner.AppendSTZeroSample(ref, l, t, st)
 }
 
 // validateLabels checks if the metric name and labels are valid utf-8 strings,

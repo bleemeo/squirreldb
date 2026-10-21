@@ -22,6 +22,7 @@ import (
 	"net/url"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/rules"
@@ -60,6 +61,10 @@ func (mockTargetRetriever) TargetsDroppedCounts() map[string]int { return nil }
 func (mockTargetRetriever) TargetsActive() map[string][]*scrape.Target { return nil }
 
 func (mockTargetRetriever) TargetsDropped() map[string][]*scrape.Target { return nil }
+
+func (mockTargetRetriever) ScrapePoolConfig(string) (*config.ScrapeConfig, error) {
+	return nil, errNotImplemented
+}
 
 // mockAlertmanagerRetriever implements v1.AlertmanagerRetriever.
 type mockAlertmanagerRetriever struct{}

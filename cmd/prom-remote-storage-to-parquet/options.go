@@ -225,7 +225,7 @@ func parseOptions(args []string) (options, error) {
 	}
 
 	if opts.metricSelector != "" {
-		opts.labelMatchers, err = parser.ParseMetricSelector(opts.metricSelector)
+		opts.labelMatchers, err = parser.NewParser(parser.Options{}).ParseMetricSelector(opts.metricSelector)
 		if err != nil {
 			return options{}, fmt.Errorf("%w: %w", errInvalidMetricSelector, err)
 		}

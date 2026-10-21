@@ -1090,6 +1090,10 @@ func (c *Conn) Close() error {
 		c.registerer.Unregister(c.collector)
 	}
 
+	if c.registerer != nil && c.queryWait != nil {
+		c.registerer.Unregister(c.queryWait)
+	}
+
 	var firstErr error
 
 	for _, h := range c.hosts {

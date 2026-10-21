@@ -447,7 +447,7 @@ func (c *CassandraTSDB) xorChunkEncode(points []types.MetricPoint, buffer []byte
 	}
 
 	for _, p := range points {
-		app.Append(p.Timestamp, p.Value)
+		app.Append(0, p.Timestamp, p.Value)
 	}
 
 	chunk.Compact()

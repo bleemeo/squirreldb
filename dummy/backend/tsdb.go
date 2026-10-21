@@ -256,7 +256,7 @@ func (app *batchingAppender) AppendHistogram(
 	return 0, errNotImplemented
 }
 
-func (app *batchingAppender) AppendHistogramCTZeroSample(
+func (app *batchingAppender) AppendHistogramSTZeroSample(
 	storage.SeriesRef, labels.Labels, int64, int64, *histogram.Histogram, *histogram.FloatHistogram,
 ) (storage.SeriesRef, error) {
 	return 0, errNotImplemented
@@ -268,7 +268,7 @@ func (app *batchingAppender) UpdateMetadata(
 	return 0, errNotImplemented
 }
 
-func (app *batchingAppender) AppendCTZeroSample(
+func (app *batchingAppender) AppendSTZeroSample(
 	storage.SeriesRef, labels.Labels, int64, int64,
 ) (storage.SeriesRef, error) {
 	return 0, errNotImplemented

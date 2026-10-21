@@ -41,8 +41,8 @@ linters:
       replace-allow-list:
         - github.com/getsentry/sentry-go
         - github.com/gobwas/glob
-        - github.com/prometheus/prometheus
-        - github.com/redis/go-redis/v9
+        - github.com/pb33f/jsonpath
+        - github.com/pb33f/libopenapi
     goconst:
       min-occurrences: 6
     nolintlint:

@@ -151,7 +151,7 @@ COLUMNS:
 
 		colName := col.GetName()
 
-		seriesMatchers, err := parser.ParseMetricSelector("{" + colName + "}")
+		seriesMatchers, err := parser.NewParser(parser.Options{}).ParseMetricSelector("{" + colName + "}")
 		if err != nil {
 			return nil, fmt.Errorf("bad column name %s: %w", colName, err)
 		}
