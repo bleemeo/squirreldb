@@ -1,15 +1,18 @@
 version: '3'
 
 services:
-  cassandra:
-    image: cassandra
+  clickhouse:
+    # Pinned to a tested release, see docs/clickhouse-cluster.md.
+    image: clickhouse/clickhouse-server:26.8.15.10
     restart: unless-stopped
-    cap_add:
-      - CAP_SYS_NICE # Cassandra use mbind on NUMA system
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
-      # Limit memory usage of Cassandra. On developper machine Cassandra don't need lots of RAM.
-      - MAX_HEAP_SIZE=128M
-      - HEAP_NEWSIZE=24M
+      - CLICKHOUSE_DB=squirreldb
+      - CLICKHOUSE_USER=squirreldb
+      - CLICKHOUSE_PASSWORD=password
     labels:
       # Glouton is the monitoring agent made by Bleemeo.
       # On real setup of SquirrelDB, you probably want to monitor this component, but
@@ -17,7 +20,7 @@ services:
       # monitoring is disabled to avoid false notifications.
       glouton.enable: "false"
     volumes:
-      - cassandra-data:/var/lib/cassandra
+      - clickhouse-data:/var/lib/clickhouse
   squirreldb:
     image: bleemeo/squirreldb
     restart: unless-stopped
@@ -26,7 +29,11 @@ services:
     ports:
       - 127.0.0.1:9201:9201
     environment:
-      - SQUIRRELDB_CASSANDRA_ADDRESSES=cassandra:9042
+      - SQUIRRELDB_BACKEND=clickhouse
+      - SQUIRRELDB_CLICKHOUSE_ADDRESSES=clickhouse:9000
+      - SQUIRRELDB_CLICKHOUSE_DATABASE=squirreldb
+      - SQUIRRELDB_CLICKHOUSE_USERNAME=squirreldb
+      - SQUIRRELDB_CLICKHOUSE_PASSWORD=password
 
   prometheus:
     image: prom/prometheus
@@ -59,5 +66,5 @@ services:
       - 127.0.0.1:3000:3000
 
 volumes:
-  cassandra-data: {}
+  clickhouse-data: {}
   grafana-data: {}
