@@ -3,7 +3,7 @@
 set -eu
 
 # Should be the same as build.sh
-GORELEASER_VERSION="v2.18.0"
+GORELEASER_VERSION="v2.19.0"
 
 # ClickHouse server image of the single-node "clickhouse" mode (the cluster mode
 # uses the one of examples/squirreldb_ha_clickhouse). Pinned to a tested release
