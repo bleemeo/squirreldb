@@ -164,6 +164,7 @@ func New(
 			),
 			options.BatchSize,
 			temporaryStore,
+			options.ReadOnly,
 			logger.With().Str("component", "batch").Logger(),
 		),
 		pointsBufferPool: sync.Pool{

@@ -84,6 +84,7 @@ func newBatchingTSDB(
 			),
 			batchSize.Size,
 			store,
+			false,
 			logger.With().Str("component", "batch").Logger(),
 		),
 	}
