@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://goreportcard.com/report/github.com/bleemeo/squirreldb"><img src="https://goreportcard.com/badge/github.com/bleemeo/squirreldb" alt="Go Report Card"></a>
+  <a href="https://hub.docker.com/r/bleemeo/squirreldb"><img src="https://img.shields.io/docker/pulls/bleemeo/squirreldb" alt="Docker Pulls"></a>
   <a href="https://github.com/bleemeo/squirreldb/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://hub.docker.com/r/bleemeo/squirreldb/tags"><img src="https://img.shields.io/docker/v/bleemeo/squirreldb" alt="Docker Image Version"></a>
   <a href="https://hub.docker.com/r/bleemeo/squirreldb"><img src="https://img.shields.io/docker/image-size/bleemeo/squirreldb" alt="Docker Image Size"></a>
