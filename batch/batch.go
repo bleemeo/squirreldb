@@ -71,7 +71,10 @@ const (
 
 const flushMetricLimit = 1000 // Maximum number of metrics to send in one time
 
-var ErrNoData = errors.New("no data")
+var (
+	ErrNoData   = errors.New("no data")
+	ErrReadOnly = errors.New("trying to write but read-only mode is enabled")
+)
 
 // TemporaryStore is an interface to the temporary points associated to metrics.
 type TemporaryStore interface {
@@ -120,6 +123,7 @@ type stateData struct {
 // It also allow to read points merging value from the persistent store (reader) and the memory store.
 type Batch struct {
 	batchSize time.Duration
+	readOnly  bool
 
 	states map[types.MetricID]stateData
 	mutex  sync.Mutex
@@ -130,14 +134,18 @@ type Batch struct {
 }
 
 // New creates a new Batch object. The memoryStore is owned by the batcher and will be closed when no longer needed.
+// A read-only batcher only serves reads of the temporary points: writes fail and it never flushes nor
+// takes ownership of metrics.
 func New(
 	reg prometheus.Registerer,
 	batchSize time.Duration,
 	memoryStore TemporaryStore,
+	readOnly bool,
 	logger zerolog.Logger,
 ) *Batch {
 	batch := &Batch{
 		batchSize:   batchSize,
+		readOnly:    readOnly,
 		states:      make(map[types.MetricID]stateData),
 		memoryStore: memoryStore,
 		metrics:     newMetrics(reg),
@@ -149,15 +157,26 @@ func New(
 
 // Write implements MetricWriter.
 func (b *Batch) Write(ctx context.Context, writer types.MetricWriter, metrics []types.MetricData) error {
+	if b.readOnly {
+		return ErrReadOnly
+	}
+
 	return b.write(ctx, writer, metrics, time.Now())
 }
 
 // Run starts Batch service (e.g. flushing points after a deadline).
 func (b *Batch) Run(ctx context.Context, writer types.MetricWriter) {
+	defer b.memoryStore.Close()
+
+	if b.readOnly {
+		<-ctx.Done()
+
+		return
+	}
+
 	tickerBackground := time.NewTicker(backgroundTaskInterval)
 	tickerTakeover := time.NewTicker(takeoverInterval)
 
-	defer b.memoryStore.Close()
 	defer tickerBackground.Stop()
 	defer tickerTakeover.Stop()
 
@@ -186,6 +205,10 @@ func (b *Batch) Run(ctx context.Context, writer types.MetricWriter) {
 // Flush force writing all in-memory (or in Redis) metrics from this SquirrelDB instance to TSDB.
 // The batcher must be running for this call to works.
 func (b *Batch) Flush(ctx context.Context, writer types.MetricWriter) error {
+	if b.readOnly {
+		return nil
+	}
+
 	return b.check(ctx, time.Now(), writer, true, false)
 }
 

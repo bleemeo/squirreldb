@@ -107,6 +107,7 @@ func newBatch(memoryStore TemporaryStore) *Batch {
 		prometheus.NewRegistry(),
 		300*time.Second,
 		memoryStore,
+		false,
 		log.With().Str("component", "batch").Logger(),
 	)
 }
@@ -536,11 +537,11 @@ func Test_takeover(t *testing.T) {
 	logger1 := log.With().Str("component", "batch1").Logger()
 	logger2 := log.With().Str("component", "batch2").Logger()
 	writer1 := &batchingTSDB{
-		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger1),
+		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, false, logger1),
 		writer:  &recordingWriter{},
 	}
 	writer2 := &batchingTSDB{
-		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger2),
+		batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, false, logger2),
 		writer:  &recordingWriter{},
 	}
 	ctx := t.Context()
@@ -738,7 +739,7 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 
 	newBatch := func(writer *recordingWriter, logger zerolog.Logger) *batchingTSDB {
 		return &batchingTSDB{
-			batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, logger),
+			batcher: New(prometheus.NewRegistry(), batchSize, memoryStore, false, logger),
 			writer:  writer,
 		}
 	}
@@ -1163,5 +1164,76 @@ func TestBatch_write(t *testing.T) { //nolint:maintidx
 		if !ok {
 			break
 		}
+	}
+}
+
+// Test_readOnly checks that a read-only batcher serves temporary points but never
+// writes nor takes ownership of metrics.
+func Test_readOnly(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	data := types.MetricData{
+		ID:         metricIDTest1,
+		Points:     []types.MetricPoint{{Timestamp: 50000, Value: 60}},
+		TimeToLive: 300,
+	}
+
+	memoryStore := newMemoryStore([]types.MetricData{data})
+	if err := memoryStore.AddToTransfert(ctx, []types.MetricID{metricIDTest1}); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(prometheus.NewRegistry(), 300*time.Second, memoryStore, true, log.Logger)
+	writer := &recordingWriter{}
+
+	if err := b.Write(ctx, writer, []types.MetricData{data}); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("Write() error = %v, want %v", err, ErrReadOnly)
+	}
+
+	if err := b.Flush(ctx, writer); err != nil {
+		t.Errorf("Flush() error = %v", err)
+	}
+
+	got, err := b.ReadTemporary(ctx, metricIDTest1, 0, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !dataEqual(true, []types.MetricData{got}, []types.MetricData{data}) {
+		t.Errorf("ReadTemporary() = %v, want %v", got, data)
+	}
+
+	if len(writer.Data) != 0 {
+		t.Errorf("writer received %d metrics, want 0", len(writer.Data))
+	}
+
+	transfert, err := memoryStore.GetTransfert(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(transfert) != 1 {
+		t.Errorf("transfert list has %d metrics, want 1 (read-only batcher must not take ownership)", len(transfert))
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		b.Run(runCtx, writer)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after its context was canceled")
+	}
+
+	if len(writer.Data) != 0 {
+		t.Errorf("writer received %d metrics on shutdown, want 0", len(writer.Data))
 	}
 }
