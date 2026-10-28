@@ -145,12 +145,11 @@ func toWebTLSConfig(opts TLSOptions) (*web.TLSConfig, error) {
 	}
 
 	return &web.TLSConfig{
-		TLSCertPath:              opts.CertFile,
-		TLSKeyPath:               opts.KeyFile,
-		ClientCAs:                opts.ClientCAFile,
-		ClientAuth:               opts.ClientAuthType,
-		MinVersion:               web.TLSVersion(minVersion),
-		MaxVersion:               web.TLSVersion(tls.VersionTLS13),
-		PreferServerCipherSuites: true,
+		TLSCertPath: opts.CertFile,
+		TLSKeyPath:  opts.KeyFile,
+		ClientCAs:   opts.ClientCAFile,
+		ClientAuth:  opts.ClientAuthType,
+		MinVersion:  web.TLSVersion(minVersion),
+		MaxVersion:  web.TLSVersion(tls.VersionTLS13),
 	}, nil
 }
